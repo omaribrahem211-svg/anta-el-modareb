@@ -8,6 +8,7 @@ import {
   RewardAdOptions,
   AdmobConsentStatus,
   RewardAdPluginEvents,
+  BannerAdPluginEvents,
   AdMobRewardItem,
 } from '@capacitor-community/admob';
 import { ADMOB_CONFIG } from '../config/admobConfig';
@@ -20,6 +21,7 @@ const MIN_INTERSTITIAL_COOLDOWN_MS = 180 * 1000; // 3 minutes minimum interval b
 class AdManagerService {
   private isInitialized = false;
   private isInitializing = false;
+  private initPromise: Promise<boolean> | null = null;
   private isNative = false;
   private isBannerVisible = false;
   private isInterstitialLoaded = false;
@@ -96,38 +98,60 @@ class AdManagerService {
    */
   public async initialize(): Promise<boolean> {
     if (this.isInitialized) return true;
-    if (this.isInitializing) return false;
+    if (this.initPromise) return this.initPromise;
 
-    this.isInitializing = true;
-    this.log('Initializing AdMob SDK... (Test Mode:', ADMOB_CONFIG.IS_TEST_MODE, ')');
+    this.initPromise = (async () => {
+      this.isInitializing = true;
+      this.log('Initializing AdMob SDK... (Test Mode:', ADMOB_CONFIG.IS_TEST_MODE, ')');
 
-    try {
-      if (this.isNative) {
-        await AdMob.initialize({
-          testingDevices: ADMOB_CONFIG.IS_TEST_MODE ? ['EMULATOR'] : undefined,
-          initializeForTesting: ADMOB_CONFIG.IS_TEST_MODE,
-        });
+      try {
+        if (this.isNative) {
+          await AdMob.initialize({
+            testingDevices: ADMOB_CONFIG.IS_TEST_MODE ? ['EMULATOR'] : undefined,
+            initializeForTesting: ADMOB_CONFIG.IS_TEST_MODE,
+          });
 
-        this.log('Native AdMob SDK initialized successfully');
-      } else {
-        this.log('Web/Preview Mode: AdMob running in web simulation mode');
+          // Setup Banner listeners for diagnostics and lifecycle state
+          try {
+            await AdMob.addListener(BannerAdPluginEvents.Loaded, () => {
+              this.log('Native Banner Ad Loaded successfully');
+              this.isBannerVisible = true;
+            });
+            await AdMob.addListener(BannerAdPluginEvents.FailedToLoad, (error: any) => {
+              this.log('Native Banner Ad Failed to Load:', error);
+              this.isBannerVisible = false;
+            });
+            await AdMob.addListener(BannerAdPluginEvents.SizeChanged, (info: any) => {
+              this.log('Native Banner Ad Size Changed:', info);
+            });
+          } catch (listenerErr) {
+            this.log('Banner listener registration notice:', listenerErr);
+          }
+
+          this.log('Native AdMob SDK initialized successfully');
+        } else {
+          this.log('Web/Preview Mode: AdMob running in web simulation mode');
+        }
+
+        this.isInitialized = true;
+        this.isInitializing = false;
+
+        // Preload ads in background without blocking gameplay
+        if (!this.state.isPremium) {
+          this.loadInterstitial();
+        }
+
+        return true;
+      } catch (error) {
+        this.log('AdMob initialization error:', error);
+        this.isInitializing = false;
+        return false;
+      } finally {
+        this.initPromise = null;
       }
+    })();
 
-      this.isInitialized = true;
-      this.isInitializing = false;
-
-      // Preload ads in background without blocking gameplay
-      if (!this.state.isPremium) {
-        this.loadInterstitial();
-        this.loadRewarded();
-      }
-
-      return true;
-    } catch (error) {
-      this.log('AdMob initialization error:', error);
-      this.isInitializing = false;
-      return false;
-    }
+    return this.initPromise;
   }
 
   public init(): Promise<boolean> {
@@ -143,24 +167,26 @@ class AdManagerService {
       return false;
     }
 
-    if (this.isBannerVisible) return true;
+    if (this.isBannerVisible && this.isNative) return true;
 
     try {
-      if (!this.isInitialized) {
-        await this.initialize();
+      const initialized = await this.initialize();
+      if (!initialized && this.isNative) {
+        this.log('Banner deferred: AdMob not ready yet');
+        return false;
       }
 
       if (this.isNative) {
         const options: BannerAdOptions = {
           adId: ADMOB_CONFIG.BANNER_ID,
-          adSize: BannerAdSize.BANNER,
+          adSize: BannerAdSize.ADAPTIVE_BANNER,
           position: BannerAdPosition.BOTTOM_CENTER,
-          margin: 60, // Keep above the bottom navigation bar
+          margin: 0,
           isTesting: ADMOB_CONFIG.IS_TEST_MODE,
         };
 
         await AdMob.showBanner(options);
-        this.log('Banner Loaded & Shown natively');
+        this.log('Banner Loaded & Shown natively (Adaptive Banner at BOTTOM_CENTER, margin: 0)');
       } else {
         this.log('Banner Loaded (Web Simulation)');
       }
@@ -168,7 +194,8 @@ class AdManagerService {
       this.isBannerVisible = true;
       return true;
     } catch (error) {
-      this.log('Banner Failed:', error);
+      this.log('Banner Failed to show:', error);
+      this.isBannerVisible = false;
       return false;
     }
   }
@@ -177,12 +204,16 @@ class AdManagerService {
    * Hides the Banner Ad (e.g. during Live Match or Match Day simulation)
    */
   public async hideBanner(): Promise<boolean> {
-    if (!this.isBannerVisible) return true;
+    if (!this.isBannerVisible && !this.isNative) return true;
 
     try {
       if (this.isNative) {
-        await AdMob.hideBanner();
-        await AdMob.removeBanner();
+        try {
+          await AdMob.hideBanner();
+        } catch {}
+        try {
+          await AdMob.removeBanner();
+        } catch {}
       }
       this.isBannerVisible = false;
       this.log('Banner Hidden');

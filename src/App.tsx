@@ -161,7 +161,7 @@ function GameApp() {
       />
 
       {/* Main Content Stage */}
-      <main className="flex-1 max-w-5xl w-full mx-auto p-3 sm:p-4">
+      <main className="flex-1 max-w-5xl w-full mx-auto p-3 sm:p-4 pb-36">
         {/* Facebook Community Banner (Dismissible) */}
         <FacebookBanner />
 

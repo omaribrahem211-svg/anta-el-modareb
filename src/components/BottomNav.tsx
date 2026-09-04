@@ -1,7 +1,9 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import { Capacitor } from '@capacitor/core';
 import { ActiveTab } from '../types/game';
 import { useGame } from '../context/GameContext';
 import { useLanguage } from '../utils/i18n';
+import { AdManager } from '../services/adManager';
 import {
   LayoutDashboard,
   Users,
@@ -27,6 +29,16 @@ export const BottomNav: React.FC<BottomNavProps> = ({ activeTab, setActiveTab })
   const { unreadMessagesCount, liveMatch } = useGame();
   const { t } = useLanguage();
   const [showMoreMenu, setShowMoreMenu] = useState(false);
+  const [isPremium, setIsPremium] = useState(AdManager.isPremium());
+
+  useEffect(() => {
+    const unsub = AdManager.subscribe((s) => setIsPremium(s.isPremium));
+    return () => unsub();
+  }, []);
+
+  // Check if native Android banner ad is currently shown at the bottom
+  const isMatchScreen = activeTab === 'matches' || activeTab === 'online_pvp' || Boolean(liveMatch && liveMatch.isPlaying);
+  const isNativeBannerActive = Capacitor.isNativePlatform() && !isPremium && !isMatchScreen;
 
   const mainTabs: { id: ActiveTab; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
     { id: 'dashboard', label: t('tab_dashboard', 'الرئيسية'), icon: LayoutDashboard },
@@ -51,7 +63,9 @@ export const BottomNav: React.FC<BottomNavProps> = ({ activeTab, setActiveTab })
       {/* More Options Modal Sheet for Mobile */}
       {showMoreMenu && (
         <div 
-          className="fixed inset-0 z-40 bg-black/70 backdrop-blur-sm flex items-end justify-center animate-fade-in"
+          className={`fixed inset-0 z-40 bg-black/70 backdrop-blur-sm flex items-end justify-center animate-fade-in ${
+            isNativeBannerActive ? 'pb-[50px]' : ''
+          }`}
           onClick={() => setShowMoreMenu(false)}
         >
           <div 
@@ -118,7 +132,9 @@ export const BottomNav: React.FC<BottomNavProps> = ({ activeTab, setActiveTab })
       )}
 
       {/* Persistent Bottom Nav Bar */}
-      <nav className="fixed bottom-0 left-0 right-0 z-30 bg-slate-900/95 backdrop-blur-lg border-t border-slate-800/90 pb-safe">
+      <nav className={`fixed left-0 right-0 z-30 bg-slate-900/95 backdrop-blur-lg border-t border-slate-800/90 pb-safe transition-all duration-200 ${
+        isNativeBannerActive ? 'bottom-[50px]' : 'bottom-0'
+      }`}>
         <div className="max-w-lg mx-auto flex items-center justify-around px-2 py-1.5">
           {mainTabs.map((tab) => {
             const Icon = tab.icon;

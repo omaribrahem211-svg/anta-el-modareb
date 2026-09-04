@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { Capacitor } from '@capacitor/core';
 import { AdManager } from '../../services/adManager';
 import { ADMOB_CONFIG } from '../../config/admobConfig';
 import { ActiveTab } from '../../types/game';
@@ -24,14 +25,32 @@ export const BannerAdContainer: React.FC<BannerAdContainerProps> = ({ activeTab,
   const shouldShow = !isPremium && !isMatchScreen;
 
   useEffect(() => {
+    let retryTimer: NodeJS.Timeout | null = null;
+
     if (shouldShow) {
-      AdManager.showBanner();
+      AdManager.showBanner().then((shown) => {
+        if (!shown && Capacitor.isNativePlatform()) {
+          // If AdMob SDK was still cold-starting, retry once after 1.5 seconds
+          retryTimer = setTimeout(() => {
+            AdManager.showBanner();
+          }, 1500);
+        }
+      });
     } else {
       AdManager.hideBanner();
     }
+
+    return () => {
+      if (retryTimer) clearTimeout(retryTimer);
+    };
   }, [shouldShow]);
 
   if (!shouldShow) {
+    return null;
+  }
+
+  // On native platform (Android), AdMob renders the native banner at the bottom of the device screen
+  if (Capacitor.isNativePlatform()) {
     return null;
   }
 

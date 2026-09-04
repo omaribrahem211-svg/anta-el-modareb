@@ -1,9 +1,13 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import { Capacitor } from '@capacitor/core';
+import { FirebaseAuthentication } from '@capacitor-firebase/authentication';
 import { 
   onAuthStateChanged, 
   signInWithEmailAndPassword, 
   createUserWithEmailAndPassword, 
   signInWithPopup, 
+  signInWithCredential,
+  GoogleAuthProvider,
   signOut as firebaseSignOut,
   User as FirebaseUser,
   updateProfile
@@ -245,26 +249,115 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     try {
       setError(null);
       setLoading(true);
-      const cred = await signInWithPopup(auth, googleProvider);
 
-      // Immediately set user from Auth credentials
-      const immediateProfile = buildUserProfileFromAuth(cred.user);
-      setUser(immediateProfile);
-      setIsGuest(false);
-      try {
-        localStorage.removeItem(GUEST_FLAG_KEY);
-      } catch {}
-      setLoading(false);
+      let targetUser: FirebaseUser | null = null;
 
-      // Trigger background sync without awaiting
-      enrichProfileFromFirestore(cred.user).catch(() => {});
+      if (Capacitor.isNativePlatform()) {
+        // Native Android: Use native Google Sign-In with Play Services & credentials
+        try {
+          const result = await FirebaseAuthentication.signInWithGoogle();
+
+          if (result.credential?.idToken) {
+            const credential = GoogleAuthProvider.credential(result.credential.idToken);
+            const userCred = await signInWithCredential(auth, credential);
+            targetUser = userCred.user;
+          } else if (result.user) {
+            // Direct native user profile fallback
+            const isSuperAdmin = result.user.email?.toLowerCase() === SUPER_ADMIN_EMAIL.toLowerCase();
+            const immediateProfile: UserProfile = {
+              uid: result.user.uid,
+              email: result.user.email,
+              displayName: result.user.displayName || 'مدرب الفريق',
+              role: isSuperAdmin ? 'admin' : 'player',
+              createdAt: Date.now(),
+              lastLoginAt: Date.now(),
+              status: 'active',
+              isPremium: false,
+              premiumExpiresAt: null,
+              photoURL: result.user.photoUrl || null,
+              hasCloudSave: false
+            };
+            setUser(immediateProfile);
+            setIsGuest(false);
+            try {
+              localStorage.removeItem(GUEST_FLAG_KEY);
+            } catch {}
+            setLoading(false);
+            enrichProfileFromFirestore({
+              uid: result.user.uid,
+              email: result.user.email,
+              displayName: result.user.displayName,
+              photoURL: result.user.photoUrl
+            } as any).catch(() => {});
+            return;
+          }
+        } catch (nativeErr: any) {
+          console.error('[AuthContext] Native Google Sign-In error:', nativeErr);
+
+          const errMsg = nativeErr?.message || String(nativeErr || '');
+
+          // 1. User dismissed or cancelled the Google Account Picker dialog
+          if (
+            errMsg.includes('cancel') || 
+            errMsg.includes('16') || // 16 = GoogleSignInStatusCodes.CANCELED
+            errMsg.includes('12501') // 12501 = SIGN_IN_CANCELLED
+          ) {
+            setLoading(false);
+            return;
+          }
+
+          // 2. Missing SHA-1 / SHA-256 fingerprint in Firebase Console
+          if (
+            errMsg.includes('10') || // 10 = DEVELOPER_ERROR
+            errMsg.includes('DEVELOPER_ERROR')
+          ) {
+            throw new Error(
+              'خطأ في تكوين بصمة التطبيق (SHA-1 / SHA-256). يرجى التأكد من إضافة بصمة SHA-1 الخاصة بالتطبيق داخل Firebase Console -> Project Settings -> Your Apps.'
+            );
+          }
+
+          // 3. Play Services Sign-in failure
+          if (
+            errMsg.includes('12500') || // 12500 = SIGN_IN_FAILED
+            errMsg.includes('SIGN_IN_FAILED')
+          ) {
+            throw new Error(
+              'تعذر إتمام تسجيل الدخول عبر خدمات Google Play. يرجى التأكد من اتصال الإنترنت وتحديث خدمات Google Play.'
+            );
+          }
+
+          throw nativeErr;
+        }
+      } else {
+        // Web / Preview: Use signInWithPopup
+        const cred = await signInWithPopup(auth, googleProvider);
+        targetUser = cred.user;
+      }
+
+      if (targetUser) {
+        // Immediately set user from Auth credentials
+        const immediateProfile = buildUserProfileFromAuth(targetUser);
+        setUser(immediateProfile);
+        setIsGuest(false);
+        try {
+          localStorage.removeItem(GUEST_FLAG_KEY);
+        } catch {}
+        setLoading(false);
+
+        // Trigger background sync without awaiting
+        enrichProfileFromFirestore(targetUser).catch(() => {});
+      } else {
+        setLoading(false);
+      }
     } catch (err: any) {
       console.error('Google sign in error:', err);
-      let msg = 'تعذر تسجيل الدخول بواسطة Google.';
+      let msg = err?.message || 'تعذر تسجيل الدخول بواسطة Google.';
       if (err.code === 'auth/popup-closed-by-user') {
         msg = 'تم إغلاق نافذة تسجيل الدخول قبل إتمام العملية.';
       } else if (err.code === 'auth/operation-not-allowed') {
         msg = 'طريقة الدخول عبر Google غير مفعّلة في لوحة Firebase Console. يرجى تفعيل موفر Google في مشروع Firebase.';
+      } else if (err.code === 'auth/network-request-failed') {
+        msg = 'تعذر الاتصال بالشبكة. يرجى التحقق من اتصال الإنترنت والمحاولة مجدداً.';
       }
       setError(msg);
       setLoading(false);
@@ -286,6 +379,15 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       try {
         localStorage.removeItem(GUEST_FLAG_KEY);
       } catch {}
+
+      if (Capacitor.isNativePlatform()) {
+        try {
+          await FirebaseAuthentication.signOut();
+        } catch (nativeOutErr) {
+          console.warn('[AuthContext] Native signOut notice:', nativeOutErr);
+        }
+      }
+
       await firebaseSignOut(auth);
     } catch (err: any) {
       console.error('Logout notice:', err);
