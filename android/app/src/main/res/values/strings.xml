@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">أنت المدرب</string>
+    <string name="title_activity_main">أنت المدرب</string>
+    <string name="package_name">com.modareb.game</string>
+    <string name="custom_url_scheme">com.modareb.game</string>
+</resources>

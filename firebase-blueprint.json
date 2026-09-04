@@ -1,0 +1,135 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "User account profile, ranking, virtual wallet and metadata",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "maxLength": 128 },
+        "email": { "type": "string", "maxLength": 256 },
+        "displayName": { "type": "string", "maxLength": 128 },
+        "role": { "type": "string", "enum": ["player", "admin", "moderator"] },
+        "createdAt": { "type": "number" },
+        "lastLoginAt": { "type": "number" },
+        "status": { "type": "string", "enum": ["active", "suspended", "banned"] },
+        "isPremium": { "type": "boolean" },
+        "premiumExpiresAt": { "type": "number" },
+        "photoURL": { "type": "string", "maxLength": 1024 },
+        "hasCloudSave": { "type": "boolean" },
+        "virtualCoins": { "type": "number" },
+        "eloRating": { "type": "number" },
+        "isOnline": { "type": "boolean" },
+        "lastSeenAt": { "type": "number" },
+        "pvpStats": { "type": "object" }
+      },
+      "required": ["uid", "role", "status", "isPremium", "createdAt", "lastLoginAt"]
+    },
+    "AdminAuditLog": {
+      "title": "AdminAuditLog",
+      "description": "Immutable security log of administrative actions",
+      "type": "object",
+      "properties": {
+        "adminUserId": { "type": "string", "maxLength": 128 },
+        "adminEmail": { "type": "string", "maxLength": 256 },
+        "action": { "type": "string", "enum": ["suspend_user", "unsuspend_user", "ban_user", "unban_user", "grant_admin", "revoke_admin", "update_system_settings", "cancel_pvp_match", "refund_pvp_match"] },
+        "targetUserId": { "type": "string", "maxLength": 128 },
+        "targetUserEmail": { "type": "string", "maxLength": 256 },
+        "timestamp": { "type": "number" },
+        "reason": { "type": "string", "maxLength": 500 },
+        "metadata": { "type": "object" }
+      },
+      "required": ["adminUserId", "adminEmail", "action", "targetUserId", "timestamp"]
+    },
+    "PvPMatch": {
+      "title": "PvPMatch",
+      "description": "Real-time online simulated PvP match between two managers",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "matchType": { "type": "string", "enum": ["friendly", "virtual_stake"] },
+        "status": { "type": "string", "enum": ["created", "waiting_for_opponent", "waiting_for_lineup", "ready", "locked", "simulating", "completed", "cancelled", "expired", "refunded"] },
+        "stakeAmount": { "type": "number" },
+        "totalPrizePool": { "type": "number" },
+        "winnerReward": { "type": "number" },
+        "systemFee": { "type": "number" },
+        "player1Id": { "type": "string", "maxLength": 128 },
+        "player1": { "type": "object" },
+        "player2Id": { "type": "string", "maxLength": 128 },
+        "player2Email": { "type": "string", "maxLength": 256 },
+        "player2": { "type": "object" },
+        "score": { "type": "object" },
+        "events": { "type": "array" },
+        "stats": { "type": "object" },
+        "winnerId": { "type": "string", "maxLength": 128 },
+        "isDraw": { "type": "boolean" },
+        "player1EloDelta": { "type": "number" },
+        "player2EloDelta": { "type": "number" },
+        "createdAt": { "type": "number" },
+        "expiresAt": { "type": "number" },
+        "completedAt": { "type": "number" },
+        "cancelledAt": { "type": "number" },
+        "cancelReason": { "type": "string", "maxLength": 500 }
+      },
+      "required": ["id", "matchType", "status", "stakeAmount", "player1Id", "player1", "createdAt", "expiresAt"]
+    },
+    "PvPTransaction": {
+      "title": "PvPTransaction",
+      "description": "Immutable ledger record of virtual coin stakes, rewards, and refunds",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "userId": { "type": "string", "maxLength": 128 },
+        "userEmail": { "type": "string", "maxLength": 256 },
+        "matchId": { "type": "string", "maxLength": 128 },
+        "type": { "type": "string", "enum": ["stake_reserved", "stake_won", "stake_refunded", "system_fee_deducted", "initial_grant"] },
+        "amount": { "type": "number" },
+        "balanceAfter": { "type": "number" },
+        "timestamp": { "type": "number" },
+        "note": { "type": "string", "maxLength": 500 }
+      },
+      "required": ["id", "userId", "matchId", "type", "amount", "balanceAfter", "timestamp"]
+    },
+    "SystemSettings": {
+      "title": "SystemSettings",
+      "description": "Global game balance, realism and matchmaking settings",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 64 },
+        "jobOfferDifficulty": { "type": "string", "enum": ["easy", "realistic", "hardcore"] },
+        "promotionDifficultyModifier": { "type": "number" },
+        "relegationDifficultyModifier": { "type": "number" },
+        "pvpMatchmakingEloTolerance": { "type": "number" },
+        "pvpMinStakeCoins": { "type": "number" },
+        "pvpMaxStakeCoins": { "type": "number" },
+        "minManagerLevelForStake": { "type": "number" },
+        "eloKFactor": { "type": "number" },
+        "systemFeePercentage": { "type": "number" },
+        "updatedAt": { "type": "number" },
+        "updatedBy": { "type": "string", "maxLength": 128 }
+      },
+      "required": ["id", "jobOfferDifficulty", "pvpMinStakeCoins", "pvpMaxStakeCoins", "updatedAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "UserProfile",
+      "description": "Users profile collection"
+    },
+    "/admin_audit_logs/{logId}": {
+      "schema": "AdminAuditLog",
+      "description": "Admin audit trail logs"
+    },
+    "/pvp_matches/{matchId}": {
+      "schema": "PvPMatch",
+      "description": "Online PvP match simulations"
+    },
+    "/pvp_transactions/{txId}": {
+      "schema": "PvPTransaction",
+      "description": "Virtual coin transaction ledger"
+    },
+    "/system_settings/{settingId}": {
+      "schema": "SystemSettings",
+      "description": "System realism & PvP configurations"
+    }
+  }
+}

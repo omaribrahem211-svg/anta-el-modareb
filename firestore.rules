@@ -1,0 +1,113 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Helper functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() && (
+        request.auth.token.role == 'admin' || 
+        request.auth.token.admin == true || 
+        request.auth.token.email == 'omar.ibrahem211@gmail.com'
+      );
+    }
+
+    // Rules for Users Collection
+    match /users/{userId} {
+      // Allow reading user public manager profiles/online presence for PvP
+      allow read: if isAuthenticated();
+      allow list: if isAuthenticated();
+
+      // Create: Only the owner during initial sign up with forced player defaults
+      allow create: if isOwner(userId) 
+        && request.resource.data.uid == userId
+        && request.resource.data.role == 'player'
+        && request.resource.data.status == 'active'
+        && request.resource.data.isPremium == false;
+
+      // Update: Owner can update profile details, role/status/isPremium cannot be altered by normal client
+      allow update: if (
+        isOwner(userId) 
+        && (!('role' in request.resource.data) || request.resource.data.role == resource.data.role)
+        && (!('status' in request.resource.data) || request.resource.data.status == resource.data.status)
+        && (!('isPremium' in request.resource.data) || request.resource.data.isPremium == resource.data.isPremium)
+      ) || isAdmin();
+
+      // Delete: Admin only
+      allow delete: if isAdmin();
+
+      // Subcollection for complete cloud career save data
+      match /career_save/{saveId} {
+        allow read, write: if isOwner(userId) || isAdmin();
+      }
+    }
+
+    // Rules for Online PvP Matches
+    match /pvp_matches/{matchId} {
+      allow read, list: if isAuthenticated();
+
+      // Create: Host manager initiates match
+      allow create: if isAuthenticated() 
+        && request.resource.data.player1Id == request.auth.uid
+        && request.resource.data.status in ['created', 'waiting_for_opponent'];
+
+      // Update: Participants can join, update tactics, or finalize simulation
+      allow update: if isAuthenticated() && (
+        request.auth.uid == resource.data.player1Id ||
+        request.auth.uid == resource.data.player2Id ||
+        resource.data.player2Id == null ||
+        resource.data.player2Id == request.auth.uid ||
+        isAdmin()
+      );
+
+      allow delete: if isAdmin();
+    }
+
+    // Rules for PvP Virtual Coin Transactions Ledger
+    match /pvp_transactions/{txId} {
+      allow read: if isAuthenticated() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow list: if isAuthenticated();
+
+      // Immutable create by owner or admin
+      allow create: if isAuthenticated() 
+        && (request.resource.data.userId == request.auth.uid || isAdmin())
+        && request.resource.data.timestamp is number;
+
+      // Ledger is strictly immutable
+      allow update, delete: if false;
+    }
+
+    // Rules for Game Realism & System Settings
+    match /system_settings/{settingId} {
+      allow read: if isAuthenticated();
+      allow create, update, delete: if isAdmin();
+    }
+
+    // Rules for Admin Audit Logs
+    match /admin_audit_logs/{logId} {
+      // Only authorized admins can read the audit log
+      allow read, list: if isAdmin();
+
+      // Only authorized admins can write an audit log entry
+      allow create: if isAdmin() 
+        && request.resource.data.adminUserId == request.auth.uid
+        && request.resource.data.timestamp is number;
+
+      // Audit logs are completely immutable (cannot be edited or deleted by anyone)
+      allow update, delete: if false;
+    }
+
+    // Rules for Broadcast Messages (Phase 2)
+    match /broadcast_messages/{broadcastId} {
+      allow read, list: if isAuthenticated();
+      allow create, update, delete: if isAdmin();
+    }
+  }
+}
