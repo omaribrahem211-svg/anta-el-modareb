@@ -368,7 +368,7 @@ class SmartSyncManager {
     }
 
     if (isRecentQuotaExceeded()) {
-      this.pendingSync = false;
+      this.pendingSync = true;
       this.notify();
       return { success: false, message: 'الحصة السحابية اليومية مكتملة. حفظك المحلي نشط ومؤمن على جهازك.' };
     }
@@ -392,13 +392,19 @@ class SmartSyncManager {
       const minimalPayload = buildMinimalCloudSavePayload(input, this.currentSaveVersion);
       const fullPayload = buildFullCloudSavePayload(input, this.currentSaveVersion);
 
-      // 1. Save full career data to user career_save subcollection
+      // 1. Save full career data to user career_save subcollection with safety timeout
       const fullSaveRef = doc(db, 'users', input.user.uid, 'career_save', 'current');
-      await setDoc(fullSaveRef, fullPayload);
+      const writeFullPromise = setDoc(fullSaveRef, fullPayload);
+      const writeTimeoutPromise = new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('Firestore write timeout')), 6000)
+      );
+      await Promise.race([writeFullPromise, writeTimeoutPromise]);
 
-      // 2. Save public summary to user document for PvP, rankings, and presence
+      // 2. Save public summary to user document for PvP, rankings, and presence (non-blocking)
       const userRef = doc(db, 'users', input.user.uid);
-      await setDoc(userRef, minimalPayload, { merge: true });
+      setDoc(userRef, minimalPayload, { merge: true }).catch((subErr) => {
+        if (isQuotaExceededError(subErr)) markQuotaExceeded();
+      });
 
       this.lastSavedHash = overallHash;
       this.lastSyncTimestamp = Date.now();
@@ -409,27 +415,35 @@ class SmartSyncManager {
       return { success: true, message: 'تم حفظ وتحديث مسيرتك سحابياً بنجاح لحسابك! ☁️' };
     } catch (err) {
       this.isSyncing = false;
+      this.pendingSync = true; // Retain pending state for next automatic retry
       if (isQuotaExceededError(err)) {
         markQuotaExceeded();
-        this.pendingSync = false;
         this.notify();
-        return { success: false, message: 'تم الوصول للحد اليومي المجاني. الحفظ المحلي نشط.' };
+        return { success: false, message: 'تم الوصول للحد اليومي المجاني. الحفظ المحلي نشط ومؤمن على جهازك.' };
       }
-      this.pendingSync = true;
       this.notify();
       return { success: false, message: 'تعذر الاتصال بالسحابة حالياً، تم الحفظ محلياً بأمان.' };
     }
   }
 
   /**
-   * Loads the saved game state from Firestore for an authenticated user
+   * Loads the saved game state from Firestore for an authenticated user (Non-blocking & timeout protected)
    */
   public async loadCloudSave(userId: string): Promise<any | null> {
     if (!userId) return null;
+    if (isRecentQuotaExceeded()) {
+      return null;
+    }
+
     try {
       const fullSaveRef = doc(db, 'users', userId, 'career_save', 'current');
-      const snap = await getDoc(fullSaveRef);
-      if (snap.exists()) {
+      const readPromise = getDoc(fullSaveRef);
+      const timeoutPromise = new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('Firestore read timeout')), 4500)
+      );
+
+      const snap = await Promise.race([readPromise, timeoutPromise]);
+      if (snap && snap.exists()) {
         const data = snap.data();
         if (data && data.manager && (data.teams?.length > 0 || data.season)) {
           return data;
@@ -438,8 +452,11 @@ class SmartSyncManager {
 
       // Check legacy backup field in user document
       const userRef = doc(db, 'users', userId);
-      const userSnap = await getDoc(userRef);
-      if (userSnap.exists()) {
+      const userSnap = await Promise.race([
+        getDoc(userRef),
+        new Promise<never>((_, reject) => setTimeout(() => reject(new Error('Legacy read timeout')), 3000))
+      ]);
+      if (userSnap && userSnap.exists()) {
         const uData = userSnap.data();
         if (uData && uData.fullGameSave && uData.fullGameSave.manager) {
           return uData.fullGameSave;
@@ -447,7 +464,10 @@ class SmartSyncManager {
       }
       return null;
     } catch (err) {
-      console.warn('[SmartSyncManager] Error loading cloud save from Firestore:', err);
+      if (isQuotaExceededError(err)) {
+        markQuotaExceeded();
+      }
+      console.warn('[SmartSyncManager] Cloud save fetch notice (falling back safely to local IndexedDB):', err);
       return null;
     }
   }

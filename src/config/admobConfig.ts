@@ -10,6 +10,7 @@
 export interface AdMobConfigType {
   IS_TEST_MODE: boolean;
   ENABLE_LOGS: boolean;
+  ENABLE_REWARDS: boolean; // Master toggle to disable/enable all rewards
   INTERSTITIAL_FREQUENCY_MATCHES: number; // Show interstitial every N matches
   REWARDED_COOLDOWN_SECONDS: number;     // Cooldown between rewarded ad claims
   APP_ID: string;
@@ -26,20 +27,21 @@ const TEST_AD_IDS = {
   REWARDED_ID: 'ca-app-pub-3940256099942544/5224354917',
 };
 
-// PLACEHOLDER FOR REAL PRODUCTION ADMOB IDS (Replace before Google Play Release)
-const PRODUCTION_AD_IDS = {
-  APP_ID: 'ca-app-pub-XXXXXXXXXXXXXXXX~XXXXXXXXXX',
-  BANNER_ID: 'ca-app-pub-XXXXXXXXXXXXXXXX/XXXXXXXXXX',
-  INTERSTITIAL_ID: 'ca-app-pub-XXXXXXXXXXXXXXXX/XXXXXXXXXX',
-  REWARDED_ID: 'ca-app-pub-XXXXXXXXXXXXXXXX/XXXXXXXXXX',
+// Official Production AdMob IDs for "أنت المدرب"
+export const PRODUCTION_AD_IDS = {
+  APP_ID: 'ca-app-pub-5272866425919152~1232269694',
+  BANNER_ID: 'ca-app-pub-5272866425919152/4077924883',
+  INTERSTITIAL_ID: 'ca-app-pub-5272866425919152/5931052283',
+  REWARDED_ID: 'ca-app-pub-5272866425919152/6122623978',
 };
 
-// Set to false when publishing to Google Play Store!
-export const IS_TEST_MODE = true;
+// Set to false for Production Google Play release with provided AdMob IDs
+export const IS_TEST_MODE = false;
 
 export const ADMOB_CONFIG: AdMobConfigType = {
   IS_TEST_MODE,
   ENABLE_LOGS: true,
+  ENABLE_REWARDS: false, // Temporarily disabled per user request
   INTERSTITIAL_FREQUENCY_MATCHES: 3, // Frequency cap: every 3 matches
   REWARDED_COOLDOWN_SECONDS: 60,     // 1 minute cooldown between training boosts
   APP_ID: IS_TEST_MODE ? TEST_AD_IDS.APP_ID : PRODUCTION_AD_IDS.APP_ID,

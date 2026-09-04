@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { AdManager } from '../../services/adManager';
+import { ADMOB_CONFIG } from '../../config/admobConfig';
 import { ActiveTrainingBoost, TrainingBoostType } from '../../types/game';
 import { useGame } from '../../context/GameContext';
 import { 
@@ -18,6 +19,8 @@ import {
 import confetti from 'canvas-confetti';
 
 export const TrainingBoostCard: React.FC = () => {
+  if (!ADMOB_CONFIG.ENABLE_REWARDS) return null;
+
   const { currentRound, calendarDate } = useGame();
   const [activeBoost, setActiveBoost] = useState<ActiveTrainingBoost | null>(AdManager.getActiveTrainingBoost());
   const [selectedType, setSelectedType] = useState<TrainingBoostType>('fitness');
@@ -105,6 +108,7 @@ export const TrainingBoostCard: React.FC = () => {
     setSuccessMessage(null);
 
     const success = await AdManager.showRewardedAd(
+      'training_boost',
       // 1. On Reward Earned Callback
       () => {
         const newBoost = AdManager.activateTrainingBoost(

@@ -24,16 +24,22 @@ import { DaySummaryModal } from './components/DaySummaryModal';
 import { MatchDayBlockerModal } from './components/MatchDayBlockerModal';
 import { WelcomeModalHandler } from './components/WelcomeModalHandler';
 import { FacebookBanner } from './components/FacebookBanner';
+import { BannerAdContainer } from './components/ads/BannerAdContainer';
+import { RewardedAdCenterModal } from './components/ads/RewardedAdCenterModal';
 import { AdManager } from './services/adManager';
+import { ADMOB_CONFIG } from './config/admobConfig';
+import { AdRewardType } from './services/adRewardService';
 import { ActiveTab, Player } from './types/game';
 import { AdminLayout } from './components/admin/AdminLayout';
 import { AdminAccessDenied } from './components/admin/AdminAccessDenied';
 
 function GameApp() {
   const { isAdmin } = useAuth();
-  const { dayAdvanceSummary, showDaySummaryModal, closeDaySummaryModal, isMatchDay } = useGame();
+  const { dayAdvanceSummary, showDaySummaryModal, closeDaySummaryModal, isMatchDay, liveMatch } = useGame();
   const [activeTab, setActiveTab] = useState<ActiveTab>('dashboard');
   const [selectedPlayer, setSelectedPlayer] = useState<Player | null>(null);
+  const [isRewardedModalOpen, setIsRewardedModalOpen] = useState<boolean>(false);
+  const [rewardedModalDefaultType, setRewardedModalDefaultType] = useState<AdRewardType>('coins');
   const [isAdminMode, setIsAdminMode] = useState<boolean>(() => {
     return (
       window.location.pathname === '/admin' ||
@@ -46,6 +52,23 @@ function GameApp() {
   // Initialize AdMob on startup
   useEffect(() => {
     AdManager.init();
+  }, []);
+
+  // Listen for global open-admob-rewards event (disabled when rewards are turned off)
+  useEffect(() => {
+    if (!ADMOB_CONFIG.ENABLE_REWARDS) return;
+
+    const handleOpenAdRewards = (e: any) => {
+      if (e.detail?.type) {
+        setRewardedModalDefaultType(e.detail.type);
+      }
+      setIsRewardedModalOpen(true);
+    };
+
+    window.addEventListener('open-admob-rewards', handleOpenAdRewards);
+    return () => {
+      window.removeEventListener('open-admob-rewards', handleOpenAdRewards);
+    };
   }, []);
 
   // Android Hardware Back Button Listener (Capacitor)
@@ -233,6 +256,18 @@ function GameApp() {
 
       {/* Auth / Guest Check Welcome Modal */}
       <WelcomeModalHandler />
+
+      {/* Google AdMob Persistent Smart Banner (Android & Safe Preview) */}
+      <BannerAdContainer activeTab={activeTab} isMatchActive={!!liveMatch} />
+
+      {/* Google AdMob Rewarded Video Center Modal (Temporarily Disabled) */}
+      {ADMOB_CONFIG.ENABLE_REWARDS && (
+        <RewardedAdCenterModal
+          isOpen={isRewardedModalOpen}
+          onClose={() => setIsRewardedModalOpen(false)}
+          defaultRewardType={rewardedModalDefaultType}
+        />
+      )}
     </div>
   );
 }

@@ -564,7 +564,8 @@ export function generateDailyWorldNews(
   currentRound: number
 ): DailyNewsItem[] {
   const news: DailyNewsItem[] = [];
-  const dateStr = currentDateObj.rawDateStr;
+  const dateStr = currentDateObj?.rawDateStr || new Date().toISOString().split('T')[0];
+  const safeTeams = (Array.isArray(allTeams) ? allTeams : []).filter(t => t && t.id);
 
   // 1. League Focus News
   if (currentRound === 1) {
@@ -593,10 +594,10 @@ export function generateDailyWorldNews(
   }
 
   // 2. Transfer Market Rumors
-  if (Math.random() < 0.35) {
-    const teamA = allTeams[Math.floor(Math.random() * allTeams.length)];
-    const teamB = allTeams[Math.floor(Math.random() * allTeams.length)];
-    if (teamA && teamB && teamA.id !== teamB.id && Array.isArray(teamA.players) && teamA.players.length > 0) {
+  if (Math.random() < 0.35 && safeTeams.length > 1) {
+    const teamA = safeTeams[Math.floor(Math.random() * safeTeams.length)];
+    const teamB = safeTeams[Math.floor(Math.random() * safeTeams.length)];
+    if (teamA && teamB && teamA.id && teamB.id && teamA.id !== teamB.id && Array.isArray(teamA.players) && teamA.players.length > 0) {
       const p = teamA.players[Math.floor(Math.random() * teamA.players.length)];
       if (p) {
         news.push({

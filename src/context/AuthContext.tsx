@@ -51,12 +51,11 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
   }, []);
 
-  // Sync or create user profile in Firestore
-  const fetchOrCreateUserProfile = async (fbUser: FirebaseUser): Promise<UserProfile> => {
+  // Build instant client-side UserProfile directly from Firebase Auth user
+  const buildUserProfileFromAuth = (fbUser: FirebaseUser): UserProfile => {
     const isSuperAdmin = fbUser.email?.toLowerCase() === SUPER_ADMIN_EMAIL.toLowerCase();
     const now = Date.now();
-
-    const fallbackProfile: UserProfile = {
+    return {
       uid: fbUser.uid,
       email: fbUser.email,
       displayName: fbUser.displayName || 'مدرب الفريق',
@@ -69,103 +68,117 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       photoURL: fbUser.photoURL || null,
       hasCloudSave: false
     };
+  };
 
+  // Background non-blocking profile enrichment from Firestore
+  const enrichProfileFromFirestore = async (fbUser: FirebaseUser): Promise<void> => {
     if (isRecentQuotaExceeded()) {
-      return fallbackProfile;
+      return;
     }
 
+    const isSuperAdmin = fbUser.email?.toLowerCase() === SUPER_ADMIN_EMAIL.toLowerCase();
     const userRef = doc(db, 'users', fbUser.uid);
 
     try {
-      const userDoc = await getDoc(userRef);
+      // 4-second safety timeout so background sync never hangs
+      const userDocPromise = getDoc(userRef);
+      const timeoutPromise = new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('Firestore profile fetch timeout')), 4000)
+      );
 
-      if (userDoc.exists()) {
-        const data = userDoc.data() as UserProfile;
-        const role = isSuperAdmin ? 'admin' : (data.role || 'player');
+      const userDoc = await Promise.race([userDocPromise, timeoutPromise]);
 
-        return {
-          ...data,
-          displayName: fbUser.displayName || data.displayName || 'مدرب الفريق',
-          photoURL: fbUser.photoURL || data.photoURL || null,
-          role
-        };
+      if (userDoc && userDoc.exists()) {
+        const cloudData = userDoc.data() as UserProfile;
+        const role = isSuperAdmin ? 'admin' : (cloudData.role || 'player');
+
+        setUser(prev => {
+          if (!prev || prev.uid !== fbUser.uid) return prev;
+          return {
+            ...prev,
+            ...cloudData,
+            displayName: fbUser.displayName || cloudData.displayName || prev.displayName,
+            photoURL: fbUser.photoURL || cloudData.photoURL || prev.photoURL,
+            role,
+          };
+        });
       } else {
-        // First-time user profile creation
-        try {
-          await setDoc(userRef, fallbackProfile);
-        } catch (setErr) {
-          if (isQuotaExceededError(setErr)) {
-            markQuotaExceeded();
-          }
-        }
-        return fallbackProfile;
+        // First-time cloud registration (non-blocking)
+        const initialProfile = buildUserProfileFromAuth(fbUser);
+        setDoc(userRef, initialProfile).catch((err) => {
+          if (isQuotaExceededError(err)) markQuotaExceeded();
+        });
       }
-    } catch (firestoreErr: any) {
-      if (isQuotaExceededError(firestoreErr)) {
+
+      // Non-blocking presence update
+      updateDoc(userRef, {
+        isOnline: true,
+        lastLoginAt: Date.now(),
+        lastSeenAt: Date.now(),
+      }).catch((err) => {
+        if (isQuotaExceededError(err)) markQuotaExceeded();
+      });
+    } catch (err: any) {
+      if (isQuotaExceededError(err)) {
         markQuotaExceeded();
       }
-      return fallbackProfile;
+      console.warn('[AuthContext] Background Firestore enrichment notice (non-fatal):', err?.message || err);
     }
   };
 
-  // Listen to Auth State
+  // Listen to Auth State - completely independent from Firestore
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (fbUser) => {
-      setLoading(true);
+    const unsubscribe = onAuthStateChanged(auth, (fbUser) => {
       if (fbUser) {
+        // Authenticate immediately via Firebase Auth without waiting for Firestore
+        const immediateProfile = buildUserProfileFromAuth(fbUser);
+        setUser(prev => {
+          if (prev && prev.uid === fbUser.uid) {
+            return {
+              ...immediateProfile,
+              ...prev,
+              displayName: fbUser.displayName || prev.displayName,
+              photoURL: fbUser.photoURL || prev.photoURL,
+            };
+          }
+          return immediateProfile;
+        });
+        setIsGuest(false);
         try {
-          const profile = await fetchOrCreateUserProfile(fbUser);
-          setUser(profile);
-          setIsGuest(false);
           localStorage.removeItem(GUEST_FLAG_KEY);
-          
-          // Update online status in Firestore
-          try {
-            const userDocRef = doc(db, 'users', fbUser.uid);
-            await updateDoc(userDocRef, {
-              isOnline: true,
-              lastLoginAt: Date.now(),
-              lastSeenAt: Date.now()
-            });
-          } catch {}
-        } catch (err: any) {
-          console.error('Error in auth state change:', err);
-          const isSuperAdmin = fbUser.email?.toLowerCase() === SUPER_ADMIN_EMAIL.toLowerCase();
-          setUser({
-            uid: fbUser.uid,
-            email: fbUser.email,
-            displayName: fbUser.displayName || 'مدرب الفريق',
-            role: isSuperAdmin ? 'admin' : 'player',
-            createdAt: Date.now(),
-            lastLoginAt: Date.now(),
-            status: 'active',
-            isPremium: false,
-            premiumExpiresAt: null,
-            photoURL: fbUser.photoURL || null,
-            hasCloudSave: false
-          });
-        }
+        } catch {}
+        setLoading(false);
+
+        // Enrich in background without blocking Auth state or UI
+        enrichProfileFromFirestore(fbUser).catch(() => {});
       } else {
         setUser(null);
+        setLoading(false);
       }
-      setLoading(false);
     });
 
     return () => unsubscribe();
   }, []);
 
   // Eco-mode: No periodic interval heartbeat to conserve Firestore Spark tier writes.
-  // Last seen timestamp is updated once on login or milestone sync.
 
   const signInWithEmail = async (email: string, pass: string) => {
     try {
       setError(null);
       setLoading(true);
       const cred = await signInWithEmailAndPassword(auth, email, pass);
-      const profile = await fetchOrCreateUserProfile(cred.user);
-      setUser(profile);
+      
+      // Immediately set user from Auth credentials
+      const immediateProfile = buildUserProfileFromAuth(cred.user);
+      setUser(immediateProfile);
       setIsGuest(false);
-      localStorage.removeItem(GUEST_FLAG_KEY);
+      try {
+        localStorage.removeItem(GUEST_FLAG_KEY);
+      } catch {}
+      setLoading(false);
+
+      // Trigger background sync without awaiting
+      enrichProfileFromFirestore(cred.user).catch(() => {});
     } catch (err: any) {
       console.error('Sign in error:', err);
       let msg = 'حدث خطأ أثناء تسجيل الدخول.';
@@ -177,9 +190,8 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         msg = 'صيغة البريد الإلكتروني غير صحيحة.';
       }
       setError(msg);
-      throw err;
-    } finally {
       setLoading(false);
+      throw err;
     }
   };
 
@@ -188,17 +200,29 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       setError(null);
       setLoading(true);
       const cred = await createUserWithEmailAndPassword(auth, email, pass);
-      if (displayName.trim()) {
+      const trimmedName = displayName.trim();
+      if (trimmedName) {
         try {
-          await updateProfile(cred.user, { displayName: displayName.trim() });
+          await updateProfile(cred.user, { displayName: trimmedName });
         } catch {
-          // ignore
+          // Non-fatal
         }
       }
-      const profile = await fetchOrCreateUserProfile(cred.user);
-      setUser(profile);
+
+      // Immediately set user from Auth credentials
+      const immediateProfile = buildUserProfileFromAuth(cred.user);
+      if (trimmedName) {
+        immediateProfile.displayName = trimmedName;
+      }
+      setUser(immediateProfile);
       setIsGuest(false);
-      localStorage.removeItem(GUEST_FLAG_KEY);
+      try {
+        localStorage.removeItem(GUEST_FLAG_KEY);
+      } catch {}
+      setLoading(false);
+
+      // Trigger background sync without awaiting
+      enrichProfileFromFirestore(cred.user).catch(() => {});
     } catch (err: any) {
       console.error('Sign up error:', err);
       let msg = 'حدث خطأ أثناء إنشاء الحساب.';
@@ -212,9 +236,8 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         msg = 'صيغة البريد الإلكتروني غير صحيحة.';
       }
       setError(msg);
-      throw err;
-    } finally {
       setLoading(false);
+      throw err;
     }
   };
 
@@ -223,10 +246,18 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       setError(null);
       setLoading(true);
       const cred = await signInWithPopup(auth, googleProvider);
-      const profile = await fetchOrCreateUserProfile(cred.user);
-      setUser(profile);
+
+      // Immediately set user from Auth credentials
+      const immediateProfile = buildUserProfileFromAuth(cred.user);
+      setUser(immediateProfile);
       setIsGuest(false);
-      localStorage.removeItem(GUEST_FLAG_KEY);
+      try {
+        localStorage.removeItem(GUEST_FLAG_KEY);
+      } catch {}
+      setLoading(false);
+
+      // Trigger background sync without awaiting
+      enrichProfileFromFirestore(cred.user).catch(() => {});
     } catch (err: any) {
       console.error('Google sign in error:', err);
       let msg = 'تعذر تسجيل الدخول بواسطة Google.';
@@ -236,9 +267,8 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         msg = 'طريقة الدخول عبر Google غير مفعّلة في لوحة Firebase Console. يرجى تفعيل موفر Google في مشروع Firebase.';
       }
       setError(msg);
-      throw err;
-    } finally {
       setLoading(false);
+      throw err;
     }
   };
 
@@ -248,16 +278,21 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   const logout = async () => {
+    // Pure Auth logout - zero dependency or awaiting on Cloud Firestore
     try {
       setLoading(true);
-      await firebaseSignOut(auth);
       setUser(null);
       setIsGuest(false);
-      localStorage.removeItem(GUEST_FLAG_KEY);
+      try {
+        localStorage.removeItem(GUEST_FLAG_KEY);
+      } catch {}
+      await firebaseSignOut(auth);
     } catch (err: any) {
-      console.error('Logout error:', err);
+      console.error('Logout notice:', err);
       setError(err.message || 'فشل في تسجيل الخروج.');
     } finally {
+      setUser(null);
+      setIsGuest(false);
       setLoading(false);
     }
   };

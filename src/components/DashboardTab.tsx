@@ -1,6 +1,7 @@
 import React from 'react';
 import { useGame } from '../context/GameContext';
 import { ActiveTab, Club, Player } from '../types/game';
+import { FootballNewsFeed } from './news/FootballNewsFeed';
 import {
   Play,
   Zap,
@@ -56,6 +57,7 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({ setActiveTab, onSele
     boardSystem,
     activeNegotiations,
     dailyNews,
+    addDailyNews,
     daysUntilNextMatch,
     isMatchDay,
     advanceToNextDay,
@@ -221,27 +223,47 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({ setActiveTab, onSele
             <div className="text-[10px] text-slate-500 mt-0.5">من {totalRounds} جولة</div>
           </div>
         </div>
+
+        {/* Dynamic Football News Feed for Free Agent Manager */}
+        <div className="pt-2">
+          <FootballNewsFeed
+            news={dailyNews}
+            onAddNews={addDailyNews}
+            userClub={null}
+            manager={manager}
+            teams={teams}
+            standings={standings}
+            currentRound={currentRound}
+            calendarDate={calendarDate}
+          />
+        </div>
       </div>
     );
   }
 
   // Find next match
-  const roundFixtures = fixtures.filter(f => f.round === currentRound);
-  const nextFixture = roundFixtures.find(f => f.homeTeamId === userClub.id || f.awayTeamId === userClub.id);
+  const safeFixtures = Array.isArray(fixtures) ? fixtures.filter(Boolean) : [];
+  const safeTeams = Array.isArray(teams) ? teams.filter(Boolean) : [];
+  const safeStandings = Array.isArray(standings) ? standings.filter(Boolean) : [];
+
+  const roundFixtures = safeFixtures.filter(f => f && f.round === currentRound);
+  const nextFixture = userClub?.id 
+    ? roundFixtures.find(f => f && (f.homeTeamId === userClub.id || f.awayTeamId === userClub.id))
+    : undefined;
   
-  const isHome = nextFixture?.homeTeamId === userClub.id;
+  const isHome = userClub?.id ? nextFixture?.homeTeamId === userClub.id : false;
   const oppTeamId = isHome ? nextFixture?.awayTeamId : nextFixture?.homeTeamId;
-  const oppTeam = teams.find(t => t.id === oppTeamId);
+  const oppTeam = oppTeamId ? safeTeams.find(t => t && t.id === oppTeamId) : undefined;
 
   // User Standing
-  const userRankIndex = standings.findIndex(s => s.teamId === userClub.id);
-  const userStanding = standings[userRankIndex] || standings[0];
+  const userRankIndex = userClub?.id ? safeStandings.findIndex(s => s && s.teamId === userClub.id) : -1;
+  const userStanding = userRankIndex !== -1 ? safeStandings[userRankIndex] : safeStandings[0];
   const userRank = userRankIndex !== -1 ? userRankIndex + 1 : 1;
 
   // Starters stats
   const startingIds = userClub?.tactics?.startingPlayerIds || [];
-  const squadPlayers = Array.isArray(userClub?.players) ? userClub.players : [];
-  const starters = squadPlayers.filter(p => startingIds.includes(p.id));
+  const squadPlayers = Array.isArray(userClub?.players) ? userClub.players.filter(Boolean) : [];
+  const starters = squadPlayers.filter(p => p && p.id && startingIds.includes(p.id));
   const avgFitness = starters.length > 0 
     ? Math.round(starters.reduce((sum, p) => sum + p.fitness, 0) / starters.length) 
     : 100;
@@ -493,7 +515,7 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({ setActiveTab, onSele
       {/* Board & Fan Confidence Widget */}
       {boardSystem && userClub && (
         (() => {
-          const userRank = standings.findIndex(s => s.teamId === userClub.id) + 1 || 1;
+          const userRank = (userClub.id ? (Array.isArray(standings) ? standings : []).findIndex(s => s && s.teamId === userClub.id) + 1 : 1) || 1;
           const targetRank = boardSystem.targetLeaguePosition || 1;
           const rankMargin = targetRank - userRank;
           const isAhead = rankMargin >= 0;
@@ -767,7 +789,7 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({ setActiveTab, onSele
           <div className="text-left">
             <div className="text-[10px] text-slate-400">مركزك التدريبي عالمياً</div>
             <div className="text-xl font-black text-amber-400 font-mono">
-              #{manager.worldRank || (worldRankings?.managers.find(m => m.id === 'user_manager')?.worldRank) || 850}
+              #{manager.worldRank || ((worldRankings?.managers || []).find(m => m && m.id === 'user_manager')?.worldRank) || 850}
             </div>
           </div>
         </div>
@@ -857,43 +879,18 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({ setActiveTab, onSele
 
       </div>
 
-      {/* Dynamic Simulated World News Feed */}
-      <div className="bg-slate-900/70 border border-slate-800 p-4 rounded-2xl space-y-2.5">
-        <h4 className="text-xs font-bold text-slate-300 flex items-center justify-between">
-          <span className="flex items-center gap-1.5">
-            <TrendingUp className="w-3.5 h-3.5 text-emerald-400" />
-            <span>نشرة أخبار الكرة والمسيرة التدريبية</span>
-          </span>
-          <span className="text-[10px] text-slate-500">محدثة يومياً</span>
-        </h4>
-        <div className="space-y-2 text-xs">
-          {dailyNews.length > 0 ? (
-            dailyNews.slice(0, 3).map(item => (
-              <div key={item.id} className="bg-slate-950/60 p-2.5 rounded-xl border border-slate-800/80 text-slate-300 flex items-start gap-2.5">
-                <span className="text-base shrink-0">{item.icon || '📰'}</span>
-                <div>
-                  <strong className="text-white font-bold block mb-0.5">{item.title}</strong>
-                  <p className="text-[11px] text-slate-400 leading-relaxed">{item.content}</p>
-                </div>
-              </div>
-            ))
-          ) : (
-            <>
-              <div className="bg-slate-950/50 p-2.5 rounded-xl border border-slate-800/80 text-slate-300 flex items-start gap-2">
-                <span className="text-amber-400 font-bold">📢</span>
-                <p>
-                  اتحاد الكرة المصري يؤكد نظام الصعود والتتويج: المتصدر يصعد مباشرة للدرجة الأعلى في ختام الجولة 14!
-                </p>
-              </div>
-              <div className="bg-slate-950/50 p-2.5 rounded-xl border border-slate-800/80 text-slate-300 flex items-start gap-2">
-                <span className="text-emerald-400 font-bold">⚽</span>
-                <p>
-                  كشافو الأندية يتابعون مباريات الدوري بحثاً عن المواهب الشابة والصفقات الرابحة خلال فترات الانتقالات.
-                </p>
-              </div>
-            </>
-          )}
-        </div>
+      {/* Dynamic Simulated League & Football News Feed */}
+      <div className="pt-2">
+        <FootballNewsFeed
+          news={dailyNews}
+          onAddNews={addDailyNews}
+          userClub={userClub}
+          manager={manager}
+          teams={teams}
+          standings={standings}
+          currentRound={currentRound}
+          calendarDate={calendarDate}
+        />
       </div>
 
     </div>

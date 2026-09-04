@@ -34,6 +34,7 @@ import {
   ClubSquadStrength,
   OpponentScoutingReport,
   PlayerAttributes,
+  TrainingBoostType,
 } from '../types/game';
 import {
   applyAttributeUpgrade,
@@ -79,9 +80,12 @@ import {
   simulateDailyNegotiations,
   simulateDailySquadTraining,
 } from '../utils/calendarEngine';
+import { generateImmersiveNewsBatch, getInitialFootballNews } from '../services/footballNewsEngine';
 import { evaluateMatchImpactOnConfidence, updateDailyBoardConfidence, getClubLeagueTarget } from '../utils/boardEngine';
 import { EGYPT_TIER_4_LEAGUE, getLeagueById, GLOBAL_LEAGUES, findClubInWorld, getClubDisplayName } from '../data/leaguesData';
 import { AdManager } from '../services/adManager';
+import { ADMOB_CONFIG } from '../config/admobConfig';
+import { AdRewardType, AdRewardClaimResult } from '../services/adRewardService';
 import { MIGRATION_STORAGE_KEY, runOneTimeWorldMigration, inferClubCountry } from '../utils/worldMigration';
 import { validateWorldDatabase, sanitizeWorldPlayerOwnership } from '../utils/worldValidation';
 import { isRealClub, loadRealClubSquad } from '../data/realPlayersData';
@@ -157,6 +161,7 @@ interface GameContextType {
   boardSystem: BoardSystem;
   activeNegotiations: ActiveNegotiation[];
   dailyNews: DailyNewsItem[];
+  addDailyNews: (newItems: DailyNewsItem[]) => void;
   retiredPlayers: RetiredPlayer[];
   dayAdvanceSummary: DayAdvanceSummary | null;
   showDaySummaryModal: boolean;
@@ -279,6 +284,9 @@ interface GameContextType {
   boostPlayerPotential: (playerId: string) => { success: boolean; message: string };
   boostPlayerCondition: (playerId: string) => { success: boolean; message: string };
   grantDevelopmentPoints: (amount: number, reason?: string) => void;
+
+  // AdMob Rewarded Economy System (نظام مكافآت الإعلانات الآمن)
+  claimAdReward: (rewardType: AdRewardType, boostSubtype?: TrainingBoostType) => { success: boolean; message: string };
 }
 
 const STORAGE_KEY = 'anta_el_modareb_save_v1';
@@ -323,7 +331,11 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const [activeLeague, setActiveLeague] = useState<LeagueDefinition>(() => {
     try {
       const saved = localStorage.getItem(`${STORAGE_KEY}_activeLeague`);
-      return saved ? JSON.parse(saved) : EGYPT_TIER_4_LEAGUE;
+      const parsed = saved ? JSON.parse(saved) : null;
+      if (parsed && typeof parsed === 'object' && parsed.id) {
+        return parsed;
+      }
+      return EGYPT_TIER_4_LEAGUE;
     } catch {
       return EGYPT_TIER_4_LEAGUE;
     }
@@ -506,7 +518,8 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       }
 
       // Execute one-time world migration to upgrade any old schema
-      const migrationResult = runOneTimeWorldMigration(rawTeams, savedMarket, activeLeague.id);
+      const activeLeagueId = activeLeague?.id || 'egy_tier_4';
+      const migrationResult = runOneTimeWorldMigration(rawTeams, savedMarket, activeLeagueId);
       const normalizedTeams = migrationResult.teams.map(normalizeClub);
       const overriddenTeams = applyWorldOverridesToClubs(normalizedTeams);
 
@@ -514,7 +527,8 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       const validated = validateCareerState(manager, overriddenTeams, GLOBAL_LEAGUES);
       return validated.teams;
     } catch {
-      const migrationResult = runOneTimeWorldMigration(INITIAL_TEAMS, INITIAL_TRANSFER_MARKET, activeLeague.id);
+      const activeLeagueId = activeLeague?.id || 'egy_tier_4';
+      const migrationResult = runOneTimeWorldMigration(INITIAL_TEAMS, INITIAL_TRANSFER_MARKET, activeLeagueId);
       const normalizedTeams = migrationResult.teams.map(normalizeClub);
       const overriddenTeams = applyWorldOverridesToClubs(normalizedTeams);
       const validated = validateCareerState(manager, overriddenTeams, GLOBAL_LEAGUES);
@@ -569,7 +583,8 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     try {
       const saved = localStorage.getItem(`${STORAGE_KEY}_transferMarket`);
       const rawMarket = saved ? JSON.parse(saved) : INITIAL_TRANSFER_MARKET;
-      const migrationResult = runOneTimeWorldMigration(teams || INITIAL_TEAMS, rawMarket, activeLeague.id);
+      const activeLeagueId = activeLeague?.id || 'egy_tier_4';
+      const migrationResult = runOneTimeWorldMigration(teams || INITIAL_TEAMS, rawMarket, activeLeagueId);
       return applyWorldOverridesToMarket(migrationResult.transferMarket);
     } catch {
       return applyWorldOverridesToMarket(INITIAL_TRANSFER_MARKET);
@@ -740,11 +755,21 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const [dailyNews, setDailyNews] = useState<DailyNewsItem[]>(() => {
     try {
       const saved = localStorage.getItem(`${STORAGE_KEY}_dailyNews`);
-      return saved ? JSON.parse(saved) : [];
+      const parsed = saved ? JSON.parse(saved) : [];
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        const validNews = parsed.filter(item => item && item.id && item.title);
+        if (validNews.length > 0) return validNews;
+      }
+      return getInitialFootballNews();
     } catch {
-      return [];
+      return getInitialFootballNews();
     }
   });
+
+  const addDailyNews = useCallback((newItems: DailyNewsItem[]) => {
+    const validItems = (Array.isArray(newItems) ? newItems : []).filter(item => item && item.id);
+    setDailyNews(prev => [...validItems, ...prev].slice(0, 40));
+  }, []);
 
   const [retiredPlayers, setRetiredPlayers] = useState<RetiredPlayer[]>(() => {
     try {
@@ -770,23 +795,24 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   const isUnemployed = false;
   const userClub: Club = useMemo(() => {
+    const validTeams = (Array.isArray(teams) ? teams : []).filter(t => t && t.id);
     if (manager?.currentClubId) {
-      const byId = teams.find(t => t.id === manager.currentClubId);
+      const byId = validTeams.find(t => t.id === manager.currentClubId);
       if (byId) return byId;
     }
-    const found = teams.find(t => t.isUserClub);
+    const found = validTeams.find(t => t.isUserClub);
     if (found) return found;
-    return teams[0] || INITIAL_TEAMS[0];
+    return validTeams[0] || INITIAL_TEAMS[0];
   }, [teams, manager?.currentClubId]);
 
   const allFixturesPlayed = useMemo(() => {
-    return fixtures.length > 0 && fixtures.every(f => f.played);
+    return fixtures.length > 0 && fixtures.every(f => f && f.played);
   }, [fixtures]);
 
   const allUserFixturesPlayed = useMemo(() => {
-    if (!userClub || fixtures.length === 0) return false;
-    const userFixtures = fixtures.filter(f => f.homeTeamId === userClub.id || f.awayTeamId === userClub.id);
-    return userFixtures.length > 0 && userFixtures.every(f => f.played);
+    if (!userClub?.id || fixtures.length === 0) return false;
+    const userFixtures = fixtures.filter(f => f && (f.homeTeamId === userClub.id || f.awayTeamId === userClub.id));
+    return userFixtures.length > 0 && userFixtures.every(f => f && f.played);
   }, [userClub, fixtures]);
 
   const seasonFinished = season.status === 'completed' || currentRound > totalRounds || allFixturesPlayed || allUserFixturesPlayed;
@@ -821,7 +847,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const recalculateWorldRankings = (monthStr?: string) => {
     const updated = generateMonthlyWorldRankings(manager, userClub, monthStr || calendarDate.rawDateStr.slice(0, 7));
     setWorldRankings(updated);
-    const userEntry = updated.managers.find(m => m.id === 'user_manager' || m.name.includes('(أنت)'));
+    const userEntry = (updated?.managers || []).find(m => m && (m.id === 'user_manager' || (m.name && m.name.includes('(أنت)'))));
     if (userEntry) {
       setManager(prev => ({
         ...prev,
@@ -838,7 +864,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     if (
       manager.isUnemployed !== validated.manager.isUnemployed ||
       manager.currentClubId !== validated.manager.currentClubId ||
-      !teams.some(t => t.isUserClub && t.id === validated.manager.currentClubId)
+      !(Array.isArray(teams) ? teams : []).some(t => t && t.isUserClub && t.id === validated.manager.currentClubId)
     ) {
       setManager(validated.manager);
       setTeams(validated.teams);
@@ -957,18 +983,24 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         const cloudSave = await smartSyncManager.loadCloudSave(user.uid);
         if (isCancelled || !cloudSave || !cloudSave.manager) return;
 
+        // Compare against true local storage on disk to prevent overwriting existing local career
+        const localSaveOnDisk = await gameStateRepository.loadLocalGameState();
+        const effectiveManager = localSaveOnDisk?.manager || manager;
+        const effectiveSeason = localSaveOnDisk?.season || season;
+        const effectiveRound = localSaveOnDisk?.currentRound ?? currentRound;
+
         const cloudXp = cloudSave.manager?.xp || 0;
         const cloudSeason = cloudSave.season?.seasonNumber || 1;
         const cloudRound = cloudSave.currentRound || 1;
-        const localXp = manager?.xp || 0;
-        const localSeason = season?.seasonNumber || 1;
-        const localRound = currentRound || 1;
+        const localXp = effectiveManager?.xp || 0;
+        const localSeason = effectiveSeason?.seasonNumber || 1;
+        const localRound = effectiveRound || 1;
 
-        const isLocalDefault = localSeason === 1 && localRound === 1 && localXp === 0;
+        const isLocalDefault = !localSaveOnDisk || (localSeason === 1 && localRound === 1 && localXp === 0);
         const isCloudAhead = cloudSeason > localSeason ||
           (cloudSeason === localSeason && cloudRound > localRound) ||
           cloudXp > localXp ||
-          (cloudSave.savedAt && cloudSave.savedAt > (manager as any).lastLocalSaveAt);
+          (cloudSave.savedAt && localSaveOnDisk?.lastLocalSaveAt && cloudSave.savedAt > localSaveOnDisk.lastLocalSaveAt);
 
         if (isCloudAhead || isLocalDefault) {
           applyLoadedSave(cloudSave);
@@ -978,11 +1010,11 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             lastLocalSaveAt: Date.now(),
           });
         } else {
-          // Local state is more advanced, push it to cloud so user's Gmail gets the newest data
+          // Local state is more advanced, queue it for cloud sync when connection is active
           smartSyncManager.queueDebouncedSync(getSyncInput());
         }
       } catch (err) {
-        console.warn('[GameContext] Cloud hydration check notice:', err);
+        console.warn('[GameContext] Cloud hydration check notice (safely retaining local save):', err);
       }
     };
 
@@ -2617,6 +2649,21 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     setTeams(updatedAllTeams);
     setCurrentRound(nextRoundNumber);
     setLiveMatch(null);
+
+    // Generate fresh matchday headlines for the football world
+    try {
+      const matchdayNews = generateImmersiveNewsBatch({
+        calendarDate,
+        userClub,
+        manager: updatedManager,
+        teams: updatedAllTeams,
+        standings: updatedStandings,
+        currentRound,
+      }, 3);
+      setDailyNews(prev => [...matchdayNews, ...prev].slice(0, 40));
+    } catch (e) {
+      console.warn('Matchday news simulation notice:', e);
+    }
 
     // AdMob Interstitial & Boost Consumption
     AdManager.consumeTrainingBoost();
@@ -4333,8 +4380,20 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
 
     // 3. Generate Daily World News
-    const newsItems = generateDailyWorldNews(newDate, teams, standings, activeNegotiations);
-    setDailyNews(prev => [...newsItems, ...prev].slice(0, 30));
+    let dailyNewsBatch: DailyNewsItem[] = [];
+    try {
+      dailyNewsBatch = generateImmersiveNewsBatch({
+        calendarDate: newDate,
+        userClub,
+        manager,
+        teams,
+        standings,
+        currentRound,
+      }, 4);
+      setDailyNews(prev => [...dailyNewsBatch, ...prev].slice(0, 40));
+    } catch (e) {
+      console.warn('Daily news generation error:', e);
+    }
 
     // 4. Update Board System Confidence & Feedback
     let dailyBoardFeedback: string | undefined = undefined;
@@ -4400,7 +4459,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       trainingReports: updatedTrainingReports,
       injuryUpdates: updatedInjuryReports,
       negotiationUpdates: negResult.negotiationReports,
-      newsItems: newsItems.slice(0, 3),
+      newsItems: dailyNewsBatch.slice(0, 3),
       boardFeedback: dailyBoardFeedback || undefined,
     };
 
@@ -5217,6 +5276,116 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     };
   };
 
+  // ----------------------------------------------------
+  // ADMOB REWARD SYSTEM (المنظومة المركزية لمكافآت الإعلانات)
+  // ----------------------------------------------------
+  const claimAdReward = (
+    rewardType: AdRewardType,
+    boostSubtype: TrainingBoostType = 'fitness'
+  ): { success: boolean; message: string } => {
+    if (!ADMOB_CONFIG.ENABLE_REWARDS) {
+      return {
+        success: false,
+        message: 'تم إيقاف نظام المكافآت مؤقتاً',
+      };
+    }
+
+    if (rewardType === 'coins') {
+      const coinAmount = 50;
+      setManager(prev => ({
+        ...prev,
+        personalWallet: (prev.personalWallet || 0) + (coinAmount * 100),
+      }));
+
+      try {
+        const authData = localStorage.getItem('anta_el_modareb_auth_user');
+        if (authData) {
+          const parsed = JSON.parse(authData);
+          parsed.virtualCoins = (parsed.virtualCoins || 0) + coinAmount;
+          localStorage.setItem('anta_el_modareb_auth_user', JSON.stringify(parsed));
+        }
+      } catch (_) {}
+
+      return {
+        success: true,
+        message: `تم إضافة ${coinAmount} كوينز بنجاح إلى رصيدك! 🪙`,
+      };
+    }
+
+    if (rewardType === 'club_funds') {
+      const fundAmount = 100000;
+      if (!userClub) {
+        return { success: false, message: 'يجب أن تدرب نادياً لاستلام الدعم المالي!' };
+      }
+
+      setTeams(prev => prev.map(t => {
+        if (!t.isUserClub) return t;
+        return {
+          ...t,
+          budget: t.budget + fundAmount,
+          transferBudget: (t.transferBudget || 0) + fundAmount,
+        };
+      }));
+
+      setClubEconomy(prev => ({
+        ...prev,
+        clubBudget: prev.clubBudget + fundAmount,
+      }));
+
+      const sponsorMsg: InboxMessage = {
+        id: `msg_ad_sponsor_${Date.now()}`,
+        title: 'منحة رعاية مالية فورية من الشريك الإعلاني 💵✨',
+        sender: 'مدير التسويق والرعاية',
+        date: `الجولة ${currentRound}`,
+        type: 'finance',
+        content: `تم تحويل دفعة تمويل إعلاني قدرها ${fundAmount.toLocaleString()} ج.م مباشرة إلى خزينة نادي ${userClub.name} وميزانية التعاقدات.`,
+        read: false,
+      };
+      setInbox(prev => [sponsorMsg, ...prev]);
+
+      return {
+        success: true,
+        message: `تم إيداع ${fundAmount.toLocaleString()} ج.م في خزينة النادي! 💵`,
+      };
+    }
+
+    if (rewardType === 'team_energy') {
+      if (!userClub) {
+        return { success: false, message: 'لا يوجد فريق حالياً لإنعاش اللياقة!' };
+      }
+
+      setTeams(prev => prev.map(t => {
+        if (!t.isUserClub) return t;
+        return {
+          ...t,
+          players: t.players.map(p => ({
+            ...p,
+            fitness: Math.min(100, (p.fitness || 90) + 15),
+          })),
+        };
+      }));
+
+      return {
+        success: true,
+        message: 'تم إنعاش اللياقة البدنية لجميع لاعبي الفريق بنسبة +15%! ⚡',
+      };
+    }
+
+    if (rewardType === 'training_boost') {
+      const boost = AdManager.activateTrainingBoost(
+        boostSubtype,
+        currentRound,
+        calendarDate?.formattedDate || `الجولة ${currentRound}`
+      );
+      return {
+        success: true,
+        message: `تم تفعيل (${boost.title}) للمباراة القادمة بنجاح! 🏋️`,
+      };
+    }
+
+    return { success: false, message: 'نوع المكافأة غير معروف' };
+  };
+
   return (
     <GameContext.Provider
       value={{
@@ -5245,6 +5414,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         boardSystem,
         activeNegotiations,
         dailyNews,
+        addDailyNews,
         retiredPlayers,
         worldRankings,
         userSquadStrength,
@@ -5329,6 +5499,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         boostPlayerPotential,
         boostPlayerCondition,
         grantDevelopmentPoints,
+        claimAdReward,
       }}
     >
       {children}

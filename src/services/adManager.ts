@@ -12,8 +12,10 @@ import {
 } from '@capacitor-community/admob';
 import { ADMOB_CONFIG } from '../config/admobConfig';
 import { AdManagerState, ActiveTrainingBoost, TrainingBoostType } from '../types/game';
+import { AdRewardManager, AdRewardType, AdRewardClaimResult } from './adRewardService';
 
 const ADMOB_STORAGE_KEY = 'modareb_admob_state_v1';
+const MIN_INTERSTITIAL_COOLDOWN_MS = 180 * 1000; // 3 minutes minimum interval between interstitials
 
 class AdManagerService {
   private isInitialized = false;
@@ -24,11 +26,12 @@ class AdManagerService {
   private isRewardedLoaded = false;
   private isInterstitialShowing = false;
   private isRewardedShowing = false;
+  private activeRewardSessionId: string | null = null;
 
   private state: AdManagerState = {
     isPremium: false,
     matchesPlayedSinceLastInterstitial: 0,
-    lastInterstitialTimestamp: 0,
+    lastInterstitialTimestamp: Date.now(), // Prevent ad right after opening the app
     activeBoost: null,
     lastRewardedAdTimestamp: 0,
   };
@@ -38,6 +41,10 @@ class AdManagerService {
   constructor() {
     this.loadState();
     this.isNative = Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'android';
+    // If state had 0 for lastInterstitialTimestamp, set it to now to avoid ad on immediate open
+    if (!this.state.lastInterstitialTimestamp || this.state.lastInterstitialTimestamp === 0) {
+      this.state.lastInterstitialTimestamp = Date.now();
+    }
   }
 
   private log(message: string, ...args: any[]) {
@@ -217,12 +224,23 @@ class AdManagerService {
   }
 
   /**
-   * Checks if frequency capping condition is met for Interstitial Ads
+   * Checks if frequency capping and cooldown conditions are met for Interstitial Ads
    */
   public shouldShowInterstitial(): boolean {
     if (this.state.isPremium) return false;
-    // Frequency cap: every 3 matches (or as configured in ADMOB_CONFIG)
-    return this.state.matchesPlayedSinceLastInterstitial >= ADMOB_CONFIG.INTERSTITIAL_FREQUENCY_MATCHES;
+
+    // 1. Frequency cap: matches played threshold
+    const matchesReached = this.state.matchesPlayedSinceLastInterstitial >= ADMOB_CONFIG.INTERSTITIAL_FREQUENCY_MATCHES;
+    if (!matchesReached) return false;
+
+    // 2. Cooldown cap: minimum interval between interstitials (3 minutes)
+    const timeSinceLast = Date.now() - (this.state.lastInterstitialTimestamp || 0);
+    if (timeSinceLast < MIN_INTERSTITIAL_COOLDOWN_MS) {
+      this.log(`Interstitial blocked by cooldown: ${Math.round((MIN_INTERSTITIAL_COOLDOWN_MS - timeSinceLast) / 1000)}s remaining`);
+      return false;
+    }
+
+    return true;
   }
 
   /**
@@ -300,47 +318,93 @@ class AdManagerService {
   }
 
   /**
-   * Shows a Rewarded Video Ad.
-   * STRICT SECURITY RULE:
-   * Reward callback is ONLY executed when the native SDK confirms onRewardEarned.
-   * Never grant reward on click or ad start.
+   * Shows a Rewarded Video Ad with strict reward validation and anti-double-claim tokens.
+   * STRICT SECURITY RULES:
+   * 1. Reward callback is ONLY executed when the native SDK confirms RewardAdPluginEvents.Rewarded.
+   * 2. If user dismisses or skips before reward callback, NO reward is granted.
+   * 3. Prevents duplicate claims for the same ad view via secure transaction tokens.
    */
   public async showRewardedAd(
-    onRewardEarned: (rewardItem?: AdMobRewardItem) => void,
-    onDismiss?: () => void,
-    onFailure?: (error: any) => void
+    rewardTypeOrOnRewardEarned: AdRewardType | ((rewardItem?: AdMobRewardItem) => void),
+    onRewardOrDismiss?: ((res: any) => void) | (() => void),
+    onDismissOrFailure?: (() => void) | ((error: any) => void),
+    onFailureCallback?: (error: any) => void
   ): Promise<boolean> {
-    if (this.isRewardedShowing) {
-      if (onFailure) onFailure(new Error('Rewarded ad already in progress'));
+    if (!ADMOB_CONFIG.ENABLE_REWARDS) {
+      this.log('Rewarded ad cancelled: Rewards are temporarily disabled');
+      const err = new Error('تم إيقاف نظام المكافآت مؤقتاً');
+      if (typeof onDismissOrFailure === 'function') {
+        (onDismissOrFailure as any)(err);
+      } else if (typeof onFailureCallback === 'function') {
+        onFailureCallback(err);
+      }
       return false;
     }
 
+    if (this.isRewardedShowing) {
+      this.log('Rewarded ad already in progress');
+      if (typeof onDismissOrFailure === 'function') {
+        (onDismissOrFailure as any)(new Error('Rewarded ad already in progress'));
+      }
+      return false;
+    }
+
+    // Distinguish between new signature with rewardType vs legacy signature
+    let rewardType: AdRewardType = 'training_boost';
+    let onRewardEarnedCallback: (res: any) => void;
+    let onDismissCallback: (() => void) | undefined;
+    let onFailureHandler: ((error: any) => void) | undefined;
+
+    if (typeof rewardTypeOrOnRewardEarned === 'string') {
+      rewardType = rewardTypeOrOnRewardEarned;
+      onRewardEarnedCallback = onRewardOrDismiss as (res: any) => void;
+      onDismissCallback = onDismissOrFailure as () => void;
+      onFailureHandler = onFailureCallback;
+    } else {
+      // Legacy signature: showRewardedAd(onRewardEarned, onDismiss, onFailure)
+      onRewardEarnedCallback = rewardTypeOrOnRewardEarned;
+      onDismissCallback = onRewardOrDismiss as () => void;
+      onFailureHandler = onDismissOrFailure as (err: any) => void;
+    }
+
+    // Generate unique ad session transaction ID
+    const sessionId = AdRewardManager.createAdSession(rewardType);
+    this.activeRewardSessionId = sessionId;
+
     try {
       this.isRewardedShowing = true;
-      this.log('Rewarded Showing...');
+      this.log(`Rewarded Showing for ${rewardType} (Session: ${sessionId})...`);
 
-      let rewardGiven = false;
+      let rewardEarnedNatively = false;
 
       if (this.isNative) {
         // Native Android Bridge listener for Reward
         const rewardListener = await AdMob.addListener(RewardAdPluginEvents.Rewarded, (reward: AdMobRewardItem) => {
-          this.log('Reward Earned natively:', reward);
-          rewardGiven = true;
+          this.log('Reward Earned natively from AdMob SDK:', reward);
+          rewardEarnedNatively = true;
           this.recordRewardedAdSuccess();
-          onRewardEarned(reward);
+
+          // Validate and prevent duplicate claim
+          const claimResult = AdRewardManager.verifyAndConsumeReward(sessionId, rewardType);
+          if (claimResult.success && onRewardEarnedCallback) {
+            onRewardEarnedCallback(claimResult);
+          }
         });
 
         const dismissListener = await AdMob.addListener(RewardAdPluginEvents.Dismissed, () => {
           this.log('Rewarded dismissed');
           this.isRewardedShowing = false;
           this.isRewardedLoaded = false;
+          this.activeRewardSessionId = null;
           rewardListener.remove();
           dismissListener.remove();
-          if (!rewardGiven) {
-            this.log('Rewarded closed before earning reward');
+
+          if (!rewardEarnedNatively) {
+            this.log('Rewarded closed before earning reward — no reward granted');
           }
-          if (onDismiss) onDismiss();
-          // Preload next rewarded
+          if (onDismissCallback) onDismissCallback();
+
+          // Preload next rewarded ad in background
           setTimeout(() => this.loadRewarded(), 3000);
         });
 
@@ -348,10 +412,11 @@ class AdManagerService {
           this.log('Rewarded Failed to show natively:', err);
           this.isRewardedShowing = false;
           this.isRewardedLoaded = false;
+          this.activeRewardSessionId = null;
           rewardListener.remove();
           dismissListener.remove();
           failListener.remove();
-          if (onFailure) onFailure(err);
+          if (onFailureHandler) onFailureHandler(err);
         });
 
         if (!this.isRewardedLoaded) {
@@ -360,22 +425,21 @@ class AdManagerService {
 
         await AdMob.showRewardVideoAd();
       } else {
-        // Web Simulation Mode with interactive mock modal / simulated video delay
+        // Web Simulation Mode for browser preview
         this.log('Rewarded Showing (Web Simulation)...');
-        // Simulated completion after user watches in web test
-        const simulatedReward: AdMobRewardItem = {
-          type: 'training_boost',
-          amount: 1,
-        };
-
-        // We simulate a 2-second playback before granting reward in browser test
         await new Promise(resolve => setTimeout(resolve, 1500));
-        rewardGiven = true;
+        rewardEarnedNatively = true;
         this.log('Reward Earned (Web Simulation)');
         this.recordRewardedAdSuccess();
-        onRewardEarned(simulatedReward);
+
+        const claimResult = AdRewardManager.verifyAndConsumeReward(sessionId, rewardType);
+        if (claimResult.success && onRewardEarnedCallback) {
+          onRewardEarnedCallback(claimResult);
+        }
+
         this.isRewardedShowing = false;
-        if (onDismiss) onDismiss();
+        this.activeRewardSessionId = null;
+        if (onDismissCallback) onDismissCallback();
       }
 
       return true;
@@ -383,7 +447,8 @@ class AdManagerService {
       this.log('Reward Failed:', error);
       this.isRewardedShowing = false;
       this.isRewardedLoaded = false;
-      if (onFailure) onFailure(error);
+      this.activeRewardSessionId = null;
+      if (onFailureHandler) onFailureHandler(error);
       return false;
     }
   }

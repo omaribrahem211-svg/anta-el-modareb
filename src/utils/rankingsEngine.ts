@@ -274,15 +274,15 @@ export function generateMonthlyWorldRankings(
   const allClubsMap = new Map<string, Club>();
 
   Object.values(GLOBAL_LEAGUES).forEach(league => {
-    (league.teams || []).forEach(club => {
-      if (!allClubsMap.has(club.id)) {
+    (league?.teams || []).forEach(club => {
+      if (club && club.id && !allClubsMap.has(club.id)) {
         allClubsMap.set(club.id, club);
       }
     });
   });
 
   // Ensure user club is correctly updated
-  if (userClub && allClubsMap.has(userClub.id)) {
+  if (userClub && userClub.id && allClubsMap.has(userClub.id)) {
     allClubsMap.set(userClub.id, {
       ...allClubsMap.get(userClub.id)!,
       ...userClub,

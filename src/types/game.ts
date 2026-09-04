@@ -901,6 +901,15 @@ export interface DailyNewsItem {
   category: 'transfer' | 'injury' | 'match' | 'board' | 'youth' | 'crisis' | 'scout' | 'milestone';
   importance: 'high' | 'medium' | 'normal';
   icon?: string;
+  source?: string;
+  author?: string;
+  tags?: string[];
+  clubName?: string;
+  likes?: number;
+  timeAgo?: string;
+  fullStory?: string;
+  commentsCount?: number;
+  isBreaking?: boolean;
 }
 
 export interface RetiredPlayer {

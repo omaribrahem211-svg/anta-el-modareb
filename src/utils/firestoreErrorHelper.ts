@@ -1,22 +1,45 @@
-// Helper to detect and handle Firestore Quota and Network limits gracefully
+// Helper to detect and handle Firestore Quota, Network, and Availability limits gracefully
 
 const QUOTA_KEY = 'anta_elmodareb_firestore_quota_exceeded_timestamp';
 let inMemoryQuotaExceeded = false; // Default to normal active operation; only set to true if a quota error actually occurs
 
-export const PVP_QUOTA_USER_MESSAGE = 'الخدمة الأونلاين مشغولة حاليًا، حاول مرة تانية بعد شوية.';
+export const PVP_QUOTA_USER_MESSAGE = 'الخدمة الأونلاين مشغولة حاليًا، حفظك ومسيرتك مؤمنة محليًا بالكامل.';
 
 export function isQuotaExceededError(error: any): boolean {
   if (!error) return false;
-  const code = typeof error === 'object' && error.code ? String(error.code) : '';
-  const msg = typeof error === 'object' && error.message ? String(error.message) : String(error);
+  const code = typeof error === 'object' && error.code ? String(error.code).toLowerCase() : '';
+  const msg = typeof error === 'object' && error.message ? String(error.message).toLowerCase() : String(error).toLowerCase();
   return (
-    code === 'resource-exhausted' ||
     code.includes('resource-exhausted') ||
+    code.includes('quota-exceeded') ||
     msg.includes('resource-exhausted') ||
-    msg.includes('Quota limit exceeded') ||
-    msg.includes('Quota exceeded') ||
-    msg.includes('Free daily write units') ||
-    msg.includes('Free daily read units')
+    msg.includes('quota limit exceeded') ||
+    msg.includes('quota exceeded') ||
+    msg.includes('free daily write units') ||
+    msg.includes('free daily read units') ||
+    msg.includes('rate limit') ||
+    msg.includes('too many requests')
+  );
+}
+
+export function isFirestoreUnavailableError(error: any): boolean {
+  if (!error) return false;
+  if (isQuotaExceededError(error)) return true;
+  const code = typeof error === 'object' && error.code ? String(error.code).toLowerCase() : '';
+  const msg = typeof error === 'object' && error.message ? String(error.message).toLowerCase() : String(error).toLowerCase();
+  return (
+    code.includes('unavailable') ||
+    code.includes('deadline-exceeded') ||
+    code.includes('failed-precondition') ||
+    code.includes('network-request-failed') ||
+    code.includes('client-offline') ||
+    code.includes('permission-denied') ||
+    code.includes('timeout') ||
+    msg.includes('unavailable') ||
+    msg.includes('offline') ||
+    msg.includes('network') ||
+    msg.includes('client is offline') ||
+    msg.includes('timeout')
   );
 }
 
@@ -55,5 +78,6 @@ export function clearQuotaExceeded(): void {
     // ignore
   }
 }
+
 
 

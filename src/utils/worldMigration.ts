@@ -139,7 +139,8 @@ export function migrateWorldData(
   let internationalClubsRegenerated = 0;
   let userClubPreserved = false;
 
-  const migratedTeams: Club[] = savedTeams.map(club => {
+  const validSavedTeams = (Array.isArray(savedTeams) ? savedTeams : []).filter(t => t && t.id);
+  const migratedTeams: Club[] = validSavedTeams.map(club => {
     clubsMigratedCount++;
     const { countryCode, countryName } = inferClubCountry(club);
     const leagueId = club.leagueId || (countryCode === 'EGY' ? activeLeagueId : `${countryCode.toLowerCase()}_tier_${club.division || 1}`);
@@ -297,25 +298,27 @@ export function runOneTimeWorldMigration(
   try {
     const isAlreadyMigrated = localStorage.getItem(MIGRATION_STORAGE_KEY) === 'true';
 
+    const safeTeamsList = (Array.isArray(savedTeams) ? savedTeams : []).filter(t => t && t.id);
+
     // Check if any real club has generated/fake squad
-    const hasRealClubWithFakeSquad = savedTeams.some(t => {
+    const hasRealClubWithFakeSquad = safeTeamsList.some(t => {
       if (isRealClub(t.id)) {
-        return !Array.isArray(t.players) || t.players.length === 0 || t.players.some(p => p.id.startsWith('player_'));
+        return !Array.isArray(t.players) || t.players.length === 0 || t.players.some(p => p && p.id && p.id.startsWith('player_'));
       }
       return false;
     });
 
-    const hasSpanishWithEgyptian = savedTeams.some(t => {
+    const hasSpanishWithEgyptian = safeTeamsList.some(t => {
       const { countryCode } = inferClubCountry(t);
-      return (countryCode === 'ESP' || countryCode === 'ENG') && Array.isArray(t.players) && t.players.length > 0 && t.players.every(p => p.nationalityCode === 'EGY' || p.nationality === 'مصر');
+      return (countryCode === 'ESP' || countryCode === 'ENG') && Array.isArray(t.players) && t.players.length > 0 && t.players.every(p => p && (p.nationalityCode === 'EGY' || p.nationality === 'مصر'));
     });
 
     if (isAlreadyMigrated && !hasRealClubWithFakeSquad && !hasSpanishWithEgyptian) {
-      return { teams: savedTeams, transferMarket: savedTransferMarket, wasMigratedNow: false };
+      return { teams: safeTeamsList, transferMarket: savedTransferMarket, wasMigratedNow: false };
     }
 
     // Run migration
-    const result = migrateWorldData(savedTeams, savedTransferMarket, activeLeagueId);
+    const result = migrateWorldData(safeTeamsList, savedTransferMarket, activeLeagueId);
     
     // Set migration flag in localStorage
     localStorage.setItem(MIGRATION_STORAGE_KEY, 'true');

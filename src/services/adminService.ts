@@ -759,7 +759,11 @@ export async function fetchActiveBroadcasts(): Promise<BroadcastMessage[]> {
       orderBy('createdAt', 'desc'),
       limit(20)
     );
-    const snapshot = await getDocs(q);
+    const getDocsPromise = getDocs(q);
+    const timeoutPromise = new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error('Broadcast fetch timeout')), 3500)
+    );
+    const snapshot = await Promise.race([getDocsPromise, timeoutPromise]);
 
     const broadcasts: BroadcastMessage[] = [];
     snapshot.forEach(docSnap => {
