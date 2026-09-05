@@ -12,6 +12,7 @@ import {
   SeasonEndSummary,
   SeasonHistoryEntry,
   SeasonInfo,
+  RetiredPlayer,
 } from '../types/game';
 import { getLeagueByCountryAndTier, getLeagueById, GLOBAL_LEAGUES, updateLeagueRosterInWorld, getCustomLeagues, getAllClubsForCountry, findClubInWorld, createClub } from '../data/leaguesData';
 import { generateLeagueSchedule, generateInitialStandings } from '../data/initialData';
@@ -19,6 +20,7 @@ import { simulateMatch } from './engine';
 import { simulateKnockoutMatch } from './continentalEngine';
 import { generateYouthAcademyBatch } from './youthAcademyEngine';
 import { checkCupStageAdvancementRewards, StageRewardInfo } from './rewardsEngine';
+import { isRealClub, loadRealClubSquad } from '../data/realPlayersData';
 
 // ----------------------------------------------------
 // 1. END OF SEASON RESULT CALCULATION
@@ -1719,6 +1721,7 @@ export function processNewSeasonAdvancement(
   updatedManager: ManagerProfile;
   nextCup: CupTournament;
   historyEntry: SeasonHistoryEntry;
+  newRetiredPlayers: RetiredPlayer[];
 } {
   const nextSeasonNumber = currentSeason.seasonNumber + 1;
 
@@ -1808,78 +1811,200 @@ export function processNewSeasonAdvancement(
       }
     }
   } else if (acceptedJobOffer) {
-    // Manager joined a new club with its OWN independent budget
-    const newClubFound = leagueTeams.find(t => t.id === acceptedJobOffer.clubId);
-    if (newClubFound) {
-      const initialClubBudget = acceptedJobOffer.transferBudget || newClubFound.budget || 250000;
-      leagueTeams = leagueTeams.map(t => {
-        if (t.id === acceptedJobOffer.clubId) {
-          return {
-            ...t,
-            isUserClub: true,
-            leagueId: nextActiveLeague.id,
-            division: targetTier,
-            budget: initialClubBudget,
-          };
+    // Manager joined a new club with its OWN independent budget & authentic roster
+    const normOfferId = (acceptedJobOffer.clubId || '').toLowerCase().trim();
+    const normOfferName = (acceptedJobOffer.clubName || '').trim();
+
+    let newClubFound = leagueTeams.find(t => 
+      t.id.toLowerCase() === normOfferId ||
+      t.name.trim() === normOfferName ||
+      t.shortName?.trim() === normOfferName ||
+      (normOfferId.includes('madrid') && t.id.toLowerCase().includes('madrid') && 
+        (normOfferName.includes('أتلتيكو') ? t.name.includes('أتلتيكو') : !t.name.includes('أتلتيكو')))
+    );
+
+    // If not found in current leagueTeams, find in world clubs
+    if (!newClubFound) {
+      newClubFound = findClubInWorld(acceptedJobOffer.clubId);
+      if (!newClubFound) {
+        for (const l of Object.values(GLOBAL_LEAGUES)) {
+          const m = (l.teams || []).find(t => 
+            t.id.toLowerCase() === normOfferId ||
+            t.name.trim() === normOfferName ||
+            t.shortName?.trim() === normOfferName
+          );
+          if (m) {
+            newClubFound = m;
+            break;
+          }
         }
-        return { ...t, isUserClub: false };
-      });
+      }
+    }
+
+    if (newClubFound) {
+      // Ensure authentic real roster is loaded if this is a known real club
+      let clubPlayers = Array.isArray(newClubFound.players) ? [...newClubFound.players] : [];
+      if (isRealClub(newClubFound.id) && clubPlayers.length < 11) {
+        try {
+          clubPlayers = loadRealClubSquad(newClubFound.id);
+        } catch {
+          // keep existing
+        }
+      }
+
+      const initialClubBudget = acceptedJobOffer.transferBudget || newClubFound.budget || 250000;
       nextUserClub = {
         ...newClubFound,
+        players: clubPlayers,
         isUserClub: true,
         leagueId: nextActiveLeague.id,
         division: targetTier,
         budget: initialClubBudget,
       };
+
+      // Ensure new user club is properly placed in leagueTeams and marked as user club
+      const existsIdx = leagueTeams.findIndex(t => t.id === nextUserClub.id);
+      if (existsIdx >= 0) {
+        leagueTeams = leagueTeams.map((t, idx) => {
+          if (idx === existsIdx) return nextUserClub;
+          return { ...t, isUserClub: false };
+        });
+      } else {
+        leagueTeams = [nextUserClub, ...leagueTeams.map(t => ({ ...t, isUserClub: false }))];
+      }
     }
   }
 
-  // 3. Age players, decrement contracts, restore fitness to 100%
+  // 3. Flexible Retirement System (strictly between age 35 and 40) + Player Age & Contract Updates
+  const newRetiredPlayers: RetiredPlayer[] = [];
+
   const updatedLeagueTeams = leagueTeams.map(team => {
     const squad = Array.isArray(team.players) ? team.players : [];
-    const updatedPlayers = squad.map(p => {
+    const survivingPlayers: Player[] = [];
+
+    squad.forEach(p => {
       const newAge = p.age + 1;
       const newContractYears = Math.max(0, p.contractYears - 1);
-      
-      // Reset player seasonal stats while preserving overall attributes & experience
-      const resetStats: PlayerStats = {
-        appearances: 0,
-        starts: 0,
-        minutes: 0,
-        goals: 0,
-        assists: 0,
-        cleanSheets: 0,
-        yellowCards: 0,
-        redCards: 0,
-        shots: 0,
-        shotsOnTarget: 0,
-        passes: 0,
-        tackles: 0,
-        saves: 0,
-        averageRating: 7.0,
-        motm: 0,
-      };
 
-      // Slight natural attribute growth for young players or decay for older players
-      let overallDelta = 0;
-      if (p.age < 23 && p.overallRating < p.potentialRating) {
-        overallDelta = Math.floor(Math.random() * 3 + 1);
-      } else if (p.age > 32) {
-        overallDelta = -Math.floor(Math.random() * 2);
+      // Flexible Retirement Age Rules:
+      // - Under 35: NEVER retires (strictly 0% chance).
+      // - 40 and above: 100% MANDATORY retirement (no player plays beyond 40).
+      // - Between 35 and 39: progressive probability based on age, rating, and physical stamina.
+      let shouldRetire = false;
+
+      if (newAge >= 40) {
+        shouldRetire = true;
+      } else if (newAge >= 35) {
+        let retireProbability = 0.18; // Age 35: ~18%
+        if (newAge === 36) retireProbability = 0.30;
+        else if (newAge === 37) retireProbability = 0.48;
+        else if (newAge === 38) retireProbability = 0.70;
+        else if (newAge === 39) retireProbability = 0.88;
+
+        if (p.overallRating < 72) retireProbability += 0.12;
+        if ((p.fitness || 100) < 70) retireProbability += 0.10;
+
+        shouldRetire = Math.random() < retireProbability;
       }
 
-      const newOverall = Math.min(99, Math.max(35, p.overallRating + overallDelta));
+      if (shouldRetire) {
+        const retiredRecord: RetiredPlayer = {
+          id: p.id,
+          name: p.name,
+          age: newAge,
+          nationality: p.nationality || team.country || 'مصر',
+          position: p.position,
+          lastClubName: team.name,
+          clubName: team.name,
+          clubId: team.id,
+          finalRating: p.overallRating,
+          careerGoals: p.stats?.goals || 0,
+          careerAssists: p.stats?.assists || 0,
+          careerAppearances: (p.stats?.appearances || 0) + (p.stats?.starts || 0),
+          trophiesWon: team.isUserClub ? (manager.trophies || []) : ['بطولة الدوري'],
+          retirementSeason: currentSeason.seasonNumber,
+          retirementYear: `${new Date().getFullYear()}`,
+          legacyNote: newAge >= 38 ? 'أسطورة معتزلة أثرت الملاعب بعطائها' : 'نجم مخضرم قرر إنهاء مسيرته في القمة',
+        };
+        newRetiredPlayers.push(retiredRecord);
+        // Player is removed from team!
+      } else {
+        // Reset player seasonal stats while preserving overall attributes & experience
+        const resetStats: PlayerStats = {
+          appearances: 0,
+          starts: 0,
+          minutes: 0,
+          goals: 0,
+          assists: 0,
+          cleanSheets: 0,
+          yellowCards: 0,
+          redCards: 0,
+          shots: 0,
+          shotsOnTarget: 0,
+          passes: 0,
+          tackles: 0,
+          saves: 0,
+          averageRating: 7.0,
+          motm: 0,
+        };
 
-      return {
-        ...p,
-        age: newAge,
-        contractYears: newContractYears,
-        overallRating: newOverall,
-        fitness: 100,
-        morale: Math.min(100, Math.max(70, p.morale + 10)),
-        stats: resetStats,
-      };
+        // Slight natural attribute growth for young players or decay for older players
+        let overallDelta = 0;
+        if (p.age < 23 && p.overallRating < p.potentialRating) {
+          overallDelta = Math.floor(Math.random() * 3 + 1);
+        } else if (p.age > 32) {
+          overallDelta = -Math.floor(Math.random() * 2);
+        }
+
+        const newOverall = Math.min(99, Math.max(35, p.overallRating + overallDelta));
+
+        survivingPlayers.push({
+          ...p,
+          age: newAge,
+          contractYears: newContractYears,
+          overallRating: newOverall,
+          fitness: 100,
+          morale: Math.min(100, Math.max(70, p.morale + 10)),
+          stats: resetStats,
+          unhappyMatchesCount: 0,
+          transferRequestSubmitted: false,
+        });
+      }
     });
+
+    // If squad size drops below 16 due to retirements, promote a promising youth
+    if (survivingPlayers.length < 16) {
+      const positionsNeeded: Player['position'][] = ['ST', 'CM', 'CB', 'GK'];
+      const pos = positionsNeeded[Math.floor(Math.random() * positionsNeeded.length)];
+      const freshYouth: Player = {
+        id: `youth_replenish_${team.id}_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
+        name: `صاعد جديد (${pos})`,
+        age: 18,
+        position: pos,
+        positionCategory: pos === 'GK' ? 'GK' : pos === 'CB' ? 'DEF' : pos === 'CM' ? 'MID' : 'FWD',
+        overallRating: Math.floor(Math.random() * 6 + 65),
+        potentialRating: Math.floor(Math.random() * 10 + 78),
+        attributes: {
+          pace: 68,
+          shooting: pos === 'ST' ? 70 : 58,
+          passing: pos === 'CM' ? 70 : 60,
+          dribbling: 65,
+          defending: pos === 'CB' ? 70 : 50,
+          physical: 66,
+          goalkeeping: pos === 'GK' ? 68 : 20,
+        },
+        nationality: team.country || 'مصر',
+        marketValue: 350000,
+        salary: 3000,
+        contractYears: 3,
+        fitness: 100,
+        morale: 90,
+        form: 7,
+        number: Math.floor(Math.random() * 40 + 50),
+        stats: { appearances: 0, starts: 0, minutes: 0, goals: 0, assists: 0, cleanSheets: 0, yellowCards: 0, redCards: 0, shots: 0, shotsOnTarget: 0, passes: 0, tackles: 0, saves: 0, averageRating: 7.0, motm: 0 },
+      };
+      survivingPlayers.push(freshYouth);
+    }
 
     let teamBudget = team.budget;
     let youthProspects = team.youthAcademyProspects;
@@ -1896,9 +2021,30 @@ export function processNewSeasonAdvancement(
       youthProspects = generateYouthAcademyBatch(team, currentSeason.seasonNumber + 1);
     }
 
+    // Clean up tactics from any retired player IDs
+    const survivingIds = new Set(survivingPlayers.map(p => p.id));
+    const cleanStartingIds = (team.tactics?.startingPlayerIds || []).filter(id => survivingIds.has(id));
+    const cleanBenchIds = (team.tactics?.benchPlayerIds || []).filter(id => survivingIds.has(id));
+
+    // Fill missing starting slots if any retired
+    survivingPlayers.forEach(p => {
+      if (cleanStartingIds.length < 11 && !cleanStartingIds.includes(p.id) && !cleanBenchIds.includes(p.id)) {
+        cleanStartingIds.push(p.id);
+      }
+    });
+
+    const cleanTactics = team.tactics ? {
+      ...team.tactics,
+      startingPlayerIds: cleanStartingIds.slice(0, 11),
+      benchPlayerIds: cleanBenchIds.slice(0, 7),
+      captainId: survivingIds.has(team.tactics.captainId) ? team.tactics.captainId : (survivingPlayers[0]?.id || ''),
+      penaltyTakerId: survivingIds.has(team.tactics.penaltyTakerId) ? team.tactics.penaltyTakerId : (survivingPlayers[0]?.id || ''),
+    } : undefined;
+
     return {
       ...team,
-      players: updatedPlayers,
+      players: survivingPlayers,
+      tactics: cleanTactics,
       budget: teamBudget,
       developmentPoints: teamDevPoints,
       youthAcademyProspects: youthProspects,
@@ -1908,7 +2054,6 @@ export function processNewSeasonAdvancement(
 
   // Also persist this active league roster to world
   updateLeagueRosterInWorld(nextActiveLeague.id, updatedLeagueTeams);
-
 
   // 6. Setup Next Season Info & Cup
   const nextCup = initNationalCupTournament(nextSeasonNumber, nextActiveLeague.country, updatedLeagueTeams, nextUserClub);
@@ -1929,7 +2074,7 @@ export function processNewSeasonAdvancement(
   if (summary.leagueTrophyAwarded) trophiesWonThisSeason.push(summary.leagueTrophyAwarded);
   if (summary.cupTrophyAwarded) trophiesWonThisSeason.push(summary.cupTrophyAwarded);
 
-  const effectiveUserClub = userClub || allTeams.find(t => t.isUserClub) || allTeams[0];
+  const effectiveUserClub = nextUserClub || userClub || allTeams.find(t => t.isUserClub) || allTeams[0];
 
   const historyEntry: SeasonHistoryEntry = {
     seasonNumber: currentSeason.seasonNumber,
@@ -1963,6 +2108,10 @@ export function processNewSeasonAdvancement(
 
   const updatedManager: ManagerProfile = {
     ...manager,
+    currentClubId: nextUserClub.id,
+    currentClubName: nextUserClub.name,
+    employmentStatus: 'employed',
+    isUnemployed: false,
     age: manager.age + 1,
     reputation: Math.min(100, Math.max(1, manager.reputation + summary.reputationChange)),
     totalSeasons: manager.totalSeasons + 1,
@@ -1991,7 +2140,6 @@ export function processNewSeasonAdvancement(
       ...(manager.financialTransactions || []),
     ].slice(0, 30),
     history: [historyEntry, ...(manager.history || [])],
-    isUnemployed: false,
   };
 
   // Setup Next Season Info
@@ -2017,5 +2165,6 @@ export function processNewSeasonAdvancement(
     updatedManager,
     nextCup,
     historyEntry,
+    newRetiredPlayers,
   };
 }

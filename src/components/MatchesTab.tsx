@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState, useMemo } from 'react';
 import { useGame } from '../context/GameContext';
 import { TacticalPitch2D } from './TacticalPitch2D';
+import { StadiumSponsorBanner } from './StadiumSponsorBanner';
 import { FormationType, TacticalMentality, PressingIntensity, Club } from '../types/game';
 import { useLanguage } from '../utils/i18n';
 import { calculateSquadStrength, calculateMatchProbabilities, calculateDynamicManagerRating } from '../utils/rankingsEngine';
@@ -75,6 +76,7 @@ export const MatchesTab: React.FC = () => {
     openSeasonModal,
     season,
     instantSimulateCurrentRound,
+    toggleLiveAutoSubs,
     userSquadStrength,
     userDynamicManagerRating,
     isMatchDay,
@@ -412,25 +414,47 @@ export const MatchesTab: React.FC = () => {
             isHalfTime={liveMatch.isHalfTime}
             userTactics={userClub?.tactics}
           />
+
+          {/* Stadium Pitch-side LED Sponsor Board */}
+          <StadiumSponsorBanner
+            currentMinute={liveMatch.currentMinute}
+            isMatchPlaying={liveMatch.isPlaying}
+          />
         </div>
 
         {/* Live In-Match Tactical Quick Bar (Available during active play) */}
         {!liveMatch.isFinished && !liveMatch.isHalfTime && userClub?.tactics && (
           <div className="bg-slate-900 border border-slate-800 rounded-3xl p-3.5 space-y-3 shadow-lg">
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between flex-wrap gap-2">
               <span className="text-xs font-bold text-white flex items-center gap-1.5">
                 <Sliders className="w-3.5 h-3.5 text-amber-400" />
                 <span>التعليمات التكتيكية المباشرة من دكة البدلاء</span>
               </span>
               
-              <button
-                onClick={() => setShowSubModal(!showSubModal)}
-                disabled={(liveMatch.substitutionsCount || 0) >= 5}
-                className="px-2.5 py-1 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-amber-400 font-bold text-[11px] flex items-center gap-1 cursor-pointer disabled:opacity-50"
-              >
-                <Users className="w-3.5 h-3.5" />
-                <span>إجراء تبديل ({5 - (liveMatch.substitutionsCount || 0)} متبقي)</span>
-              </button>
+              <div className="flex items-center gap-1.5">
+                <button
+                  id="toggle_live_auto_subs_btn"
+                  onClick={toggleLiveAutoSubs}
+                  className={`px-2.5 py-1 rounded-xl border text-[11px] font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
+                    liveMatch.autoSubsEnabled
+                      ? 'bg-emerald-500/20 border-emerald-500 text-emerald-300 ring-1 ring-emerald-500/40'
+                      : 'bg-slate-800 hover:bg-slate-700 border-slate-700 text-slate-400'
+                  }`}
+                  title="الذكاء الاصطناعي يستبدل اللاعبين المجهدين والمصابين تلقائياً"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${liveMatch.autoSubsEnabled ? 'animate-spin text-emerald-400' : ''}`} />
+                  <span>تبديل تلقائي: {liveMatch.autoSubsEnabled ? 'مفعل 🟢' : 'معطل ⚪'}</span>
+                </button>
+
+                <button
+                  onClick={() => setShowSubModal(!showSubModal)}
+                  disabled={(liveMatch.substitutionsCount || 0) >= 5}
+                  className="px-2.5 py-1 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-amber-400 font-bold text-[11px] flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                >
+                  <Users className="w-3.5 h-3.5" />
+                  <span>تبديل يدوي ({5 - (liveMatch.substitutionsCount || 0)} متبقي)</span>
+                </button>
+              </div>
             </div>
 
             {/* Quick Mentality Selectors */}
@@ -906,7 +930,7 @@ export const MatchesTab: React.FC = () => {
               <button
                 id="instant_simulate_round_btn"
                 onClick={() => instantSimulateCurrentRound()}
-                className="w-full flex items-center justify-center gap-2 bg-slate-800 hover:bg-slate-700 text-amber-300 border border-slate-700 font-bold text-xs sm:text-sm py-3.5 px-4 rounded-2xl shadow transition-all active:scale-95 cursor-pointer"
+                className="w-full flex items-center justify-center gap-2 bg-slate-800 hover:bg-slate-700 text-amber-300 border border-slate-700 font-bold text-xs sm:text-sm py-3 px-4 rounded-2xl shadow transition-all active:scale-95 cursor-pointer"
               >
                 <FastForward className="w-4 h-4 text-amber-400" />
                 <span>محاكاة نتائج مباريات الجولة {currentRound}</span>

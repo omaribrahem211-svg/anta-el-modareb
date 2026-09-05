@@ -3060,6 +3060,20 @@ import {
   AL_AHLI_SAUDI_SQUAD,
   PYRAMIDS_SQUAD,
 } from './realSquadsExtended2';
+import {
+  CHELSEA_SQUAD,
+  MAN_UNITED_SQUAD,
+  JUVENTUS_SQUAD,
+  DORTMUND_SQUAD,
+  AL_QADSIAH_SQUAD,
+} from './realSquadsExtended3';
+import {
+  AC_MILAN_SQUAD,
+  TOTTENHAM_SQUAD,
+  LEVERKUSEN_SQUAD,
+  AL_SHABAB_SQUAD,
+  AL_MASRY_SQUAD,
+} from './realSquadsExtended4';
 
 // =========================================================================
 // 7. REAL SQUADS REGISTRY MAP
@@ -3089,9 +3103,29 @@ export const REAL_SQUADS_BY_CLUB_ID: Record<string, RealPlayerTemplate[]> = {
   'arsenal': ARSENAL_SQUAD,
   'eng1_arsenal': ARSENAL_SQUAD,
 
+  // Chelsea
+  'chelsea': CHELSEA_SQUAD,
+  'eng1_chelsea': CHELSEA_SQUAD,
+
+  // Manchester United
+  'man_united': MAN_UNITED_SQUAD,
+  'eng1_united': MAN_UNITED_SQUAD,
+
+  // Tottenham Hotspur
+  'tottenham': TOTTENHAM_SQUAD,
+  'eng1_spurs': TOTTENHAM_SQUAD,
+
   // Bayern Munich
   'bayern_munich': BAYERN_SQUAD,
   'ger_bayern': BAYERN_SQUAD,
+
+  // Borussia Dortmund
+  'dortmund': DORTMUND_SQUAD,
+  'ger_dortmund': DORTMUND_SQUAD,
+
+  // Bayer Leverkusen
+  'leverkusen': LEVERKUSEN_SQUAD,
+  'ger_leverkusen': LEVERKUSEN_SQUAD,
 
   // Paris Saint-Germain
   'psg': PSG_SQUAD,
@@ -3100,6 +3134,14 @@ export const REAL_SQUADS_BY_CLUB_ID: Record<string, RealPlayerTemplate[]> = {
   // Inter Milan
   'inter_milan': INTER_MILAN_SQUAD,
   'ita_inter': INTER_MILAN_SQUAD,
+
+  // AC Milan
+  'ac_milan': AC_MILAN_SQUAD,
+  'ita_milan': AC_MILAN_SQUAD,
+
+  // Juventus
+  'juventus': JUVENTUS_SQUAD,
+  'ita_juve': JUVENTUS_SQUAD,
 
   // Al Hilal
   'al_hilal': AL_HILAL_SQUAD,
@@ -3117,6 +3159,14 @@ export const REAL_SQUADS_BY_CLUB_ID: Record<string, RealPlayerTemplate[]> = {
   'al_ahli_sau': AL_AHLI_SAUDI_SQUAD,
   'sau1_ahli': AL_AHLI_SAUDI_SQUAD,
 
+  // Al Shabab
+  'al_shabab': AL_SHABAB_SQUAD,
+  'sau1_shabab': AL_SHABAB_SQUAD,
+
+  // Al Qadsiah
+  'al_qadsiah': AL_QADSIAH_SQUAD,
+  'sau1_qadsiah': AL_QADSIAH_SQUAD,
+
   // Al Ahly (Egypt)
   'al_ahly': AL_AHLY_SQUAD,
   'eg1_ahly': AL_AHLY_SQUAD,
@@ -3128,6 +3178,10 @@ export const REAL_SQUADS_BY_CLUB_ID: Record<string, RealPlayerTemplate[]> = {
   // Pyramids FC (Egypt)
   'pyramids': PYRAMIDS_SQUAD,
   'eg1_pyramids': PYRAMIDS_SQUAD,
+
+  // Al Masry (Egypt)
+  'al_masry': AL_MASRY_SQUAD,
+  'eg1_masry': AL_MASRY_SQUAD,
 };
 
 /**

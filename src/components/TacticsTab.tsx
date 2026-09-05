@@ -413,49 +413,80 @@ export const TacticsTab: React.FC<TacticsTabProps> = ({ onSelectPlayer }) => {
 
   const handleAutoPickBest11 = () => {
     const squad = Array.isArray(userClub?.players) ? userClub.players : [];
-    // Filter available players first (not injured, not suspended, fitness >= 50)
+    // Filter available players first (not injured, not suspended)
     const availablePlayers = squad.filter(p => !p.isInjured && (!p.suspensionMatches || p.suspensionMatches <= 0) && !p.isSuspended);
     const pool = availablePlayers.length >= 11 ? availablePlayers : squad;
 
-    const gks = [...pool].filter(p => p.positionCategory === 'GK').sort((a, b) => b.overallRating - a.overallRating);
-    const defs = [...pool].filter(p => p.positionCategory === 'DEF').sort((a, b) => b.overallRating - a.overallRating);
-    const mids = [...pool].filter(p => p.positionCategory === 'MID').sort((a, b) => b.overallRating - a.overallRating);
-    const fwds = [...pool].filter(p => p.positionCategory === 'FWD').sort((a, b) => b.overallRating - a.overallRating);
-
+    const slots = FORMATION_SLOTS[tactics.formation] || FORMATION_SLOTS['4-3-3'];
+    const chosenPlayerIds: string[] = [];
     const best11: Player[] = [];
-    if (gks[0]) best11.push(gks[0]);
 
-    // Based on formation
-    if (tactics.formation === '4-3-3') {
-      best11.push(...defs.slice(0, 4), ...mids.slice(0, 3), ...fwds.slice(0, 3));
-    } else if (tactics.formation === '4-4-2') {
-      best11.push(...defs.slice(0, 4), ...mids.slice(0, 4), ...fwds.slice(0, 2));
-    } else if (tactics.formation === '3-5-2') {
-      best11.push(...defs.slice(0, 3), ...mids.slice(0, 5), ...fwds.slice(0, 2));
-    } else {
-      best11.push(...defs.slice(0, 4), ...mids.slice(0, 4), ...fwds.slice(0, 2));
-    }
+    // Slot-by-slot smart placement prioritizing fitness, energy and exact positional fit
+    slots.forEach(slot => {
+      const remainingCandidates = pool.filter(p => !chosenPlayerIds.includes(p.id));
+      if (remainingCandidates.length === 0) return;
 
-    // Fallback if counts mismatch
-    const remaining = pool.filter(p => !best11.includes(p)).sort((a, b) => b.overallRating - a.overallRating);
-    while (best11.length < 11 && remaining.length > 0) {
-      best11.push(remaining.shift()!);
-    }
+      const scored = remainingCandidates.map(player => {
+        const fitness = player.fitness ?? 100;
+        const morale = player.morale ?? 75;
+        
+        // 1. Fitness & Energy weight (50%) + Overall Rating (40%) + Morale (10%)
+        let score = (player.overallRating * 0.40) + (fitness * 0.50) + (morale * 0.10);
 
-    // If still less than 11, take from full squad
+        // 2. Penalize severe fatigue heavily so tired stars sit on the bench
+        if (fitness < 65) {
+          score -= (65 - fitness) * 2.0;
+        }
+
+        // 3. Exact position match bonus
+        if (player.position.toUpperCase() === slot.pos.toUpperCase()) {
+          score += 35;
+        } else {
+          // Category match
+          const slotCategory = (slot.pos === 'GK') ? 'GK'
+            : ['CB', 'RB', 'LB', 'RWB', 'LWB'].includes(slot.pos) ? 'DEF'
+            : ['CDM', 'CM', 'CAM', 'RM', 'LM', 'RAM', 'LAM'].includes(slot.pos) ? 'MID'
+            : 'FWD';
+
+          if (player.positionCategory === slotCategory) {
+            score += 15;
+          } else {
+            // Out of position severe penalty
+            score -= 45;
+          }
+        }
+
+        return { player, score };
+      });
+
+      scored.sort((a, b) => b.score - a.score);
+      const topPick = scored[0]?.player;
+      if (topPick) {
+        chosenPlayerIds.push(topPick.id);
+        best11.push(topPick);
+      }
+    });
+
+    // Fallback if any slots couldn't be filled
     if (best11.length < 11) {
-      const fullRemaining = squad.filter(p => !best11.includes(p)).sort((a, b) => b.overallRating - a.overallRating);
-      while (best11.length < 11 && fullRemaining.length > 0) {
-        best11.push(fullRemaining.shift()!);
+      const fallbackRemaining = squad.filter(p => !chosenPlayerIds.includes(p.id))
+        .sort((a, b) => ((b.fitness || 100) * 0.6 + b.overallRating * 0.4) - ((a.fitness || 100) * 0.6 + a.overallRating * 0.4));
+      while (best11.length < 11 && fallbackRemaining.length > 0) {
+        const p = fallbackRemaining.shift()!;
+        chosenPlayerIds.push(p.id);
+        best11.push(p);
       }
     }
 
-    const startingIds = best11.slice(0, 11).map(p => p.id);
-    const benchIds = squad.filter(p => !startingIds.includes(p.id)).slice(0, 7).map(p => p.id);
+    const startingIds = best11.map(p => p.id);
+    // Bench: select highest energy/fitness bench players covering positions
+    const benchPool = squad.filter(p => !startingIds.includes(p.id))
+      .sort((a, b) => ((b.fitness || 100) * 0.55 + b.overallRating * 0.45) - ((a.fitness || 100) * 0.55 + a.overallRating * 0.45));
+    const benchIds = benchPool.slice(0, 7).map(p => p.id);
 
     updateStartingLineup(startingIds, benchIds);
-    setNotification('تم تسوية واختيار التشكيلة الأساسية الأفضل والجاهزة بنجاح! ⚡');
-    setTimeout(() => setNotification(null), 3000);
+    setNotification(`⚡ تم اختيار التشكيلة بذكاء: إعطاء الأولوية للجاهزية واللياقة البدنية والمراكز المتوافقة مع خطة ${tactics.formation}!`);
+    setTimeout(() => setNotification(null), 4000);
   };
 
   return (

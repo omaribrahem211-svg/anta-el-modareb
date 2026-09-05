@@ -124,6 +124,30 @@ export interface Player {
   trainingFocus?: 'general' | 'fitness' | 'shooting' | 'defending' | 'passing' | 'dribbling' | 'goalkeeping';
   careerStage?: 'young' | 'developing' | 'peak' | 'veteran' | 'legend';
   announcedRetirement?: boolean;
+  unhappyMatchesCount?: number;
+  transferRequestSubmitted?: boolean;
+  injuryWeeks?: number;
+  disgruntled?: boolean;
+}
+
+export type StaffRole = 
+  | 'assistant_manager'     // مدرب مساعد أول
+  | 'fitness_coach'         // مدرب لياقة وأحمال
+  | 'psychologist'          // طبيب نفسي رياضي
+  | 'medical_doctor'        // رئيس الجهاز الطبي
+  | 'performance_analyst';   // محلل أداء تكتيكي
+
+export interface StaffMember {
+  id: string;
+  name: string;
+  role: StaffRole;
+  roleTitleArabic: string;
+  rating: number;          // 1 - 5 نجوم
+  salaryMonthly: number;   // راتب شهري
+  specialty: string;       // التخصص الدقيق
+  description: string;     // الوصف والتأثير
+  bonusEffectArabic: string; // نص التأثير التكتيكي/البدني المباشر
+  avatar?: string;
 }
 
 export type FootballPlayer = Player;
@@ -284,6 +308,7 @@ export interface Club {
   isUserClub: boolean;
   players: Player[];
   tactics?: TeamTactics;
+  staff?: StaffMember[];
   manager?: ClubManager;
   squadStrength?: ClubSquadStrength;
   youthAcademyProspects?: YouthProspect[];
@@ -636,6 +661,7 @@ export interface ManagerProfile {
   developmentPoints?: number; // نقاط تطوير اللاعبين المتاحة للمدرب
   isUnemployed?: boolean;
   currentClubId?: string | null;
+  currentClubName?: string;
   employmentStatus?: 'employed' | 'unemployed';
   totalSeasonsCompleted?: number;
   history: SeasonHistoryEntry[];
@@ -920,6 +946,8 @@ export interface RetiredPlayer {
   position: Position;
   finalRating: number;
   lastClubName: string;
+  clubId?: string;
+  clubName?: string;
   careerGoals: number;
   careerAssists: number;
   careerAppearances: number;
@@ -932,6 +960,7 @@ export interface RetiredPlayer {
 export interface DayAdvanceSummary {
   currentDateStr: string;
   formattedArabicDate: string;
+  daysAdvanced?: number;
   matchPlayed?: boolean;
   matchFixtureId?: string;
   matchSummaryText?: string;

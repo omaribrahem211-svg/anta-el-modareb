@@ -1,5 +1,6 @@
 import { Club, Fixture, LeagueStanding, MatchEvent, MatchStats, Player, TeamTactics, ClubManager, ManagerProfile, ActiveTrainingBoost } from '../types/game';
 import { AdManager } from '../services/adManager';
+import { getClubStaffBonuses, executeSmartAutoSub } from './staffEngine';
 
 // Egyptian football commentary phrases pool
 const GOAL_COMMENTARIES = [
@@ -79,6 +80,7 @@ export interface LiveSimulationState {
   homeFatigueMap: Record<string, number>; // remaining stamina (0-100)
   awayFatigueMap: Record<string, number>;
   aiSubstitutionsCount: number;
+  autoSubsEnabled?: boolean;
 }
 
 export function calculateTeamStrength(
@@ -163,6 +165,10 @@ export function calculateTeamStrength(
   // Tactical Manager Influence Factor (+- 15% influence on raw pitch execution)
   // Higher rated managers organize better transitions, defense and set pieces
   let managerBoost = (mgrRating - 65) * 0.18;
+  const staffBonuses = getClubStaffBonuses(team);
+  if (staffBonuses.tacticalSynergyBonus > 0) {
+    managerBoost += staffBonuses.tacticalSynergyBonus * 25; // Technical staff tactical bonus
+  }
   if (trainingBoost?.type === 'tactical') {
     managerBoost += 3; // +5% tactical implementation efficiency
   }
@@ -377,6 +383,7 @@ export function createInitialLiveMatchState(
     homeFatigueMap: homeFatigue,
     awayFatigueMap: awayFatigue,
     aiSubstitutionsCount: 0,
+    autoSubsEnabled: true,
   };
 }
 
@@ -525,19 +532,88 @@ export function simulateMatchStep(
   const homeBoost = prevState.homeTeam?.isUserClub ? activeBoost : undefined;
   const awayBoost = prevState.awayTeam?.isUserClub ? activeBoost : undefined;
 
+  // Technical staff bonuses
+  const homeStaffBonuses = getClubStaffBonuses(prevState.homeTeam);
+  const awayStaffBonuses = getClubStaffBonuses(prevState.awayTeam);
+
   const homeStrength = calculateTeamStrength(prevState.homeTeam, currentHomeTactics, undefined, homeBoost);
   const awayStrength = calculateTeamStrength(prevState.awayTeam, currentAwayTactics, undefined, awayBoost);
 
   const matchup = calculateTacticalMatchup(currentHomeTactics, currentAwayTactics);
 
-  // Home advantage (+5% boost)
-  const effHomeAtk = homeStrength.attack * matchup.homeAttackMod * 1.05;
-  const effHomeMid = homeStrength.midfield * matchup.homeMidfieldMod * 1.05;
+  // Home advantage (+5% boost) and staff tactical bonuses
+  const effHomeAtk = homeStrength.attack * matchup.homeAttackMod * 1.05 * (1 + homeStaffBonuses.tacticalScoutingAdvantage);
+  const effHomeMid = homeStrength.midfield * matchup.homeMidfieldMod * 1.05 * (1 + homeStaffBonuses.tacticalSynergyBonus);
   const effHomeDef = homeStrength.defense * matchup.homeDefenseMod * 1.05;
 
-  const effAwayAtk = awayStrength.attack * matchup.awayAttackMod;
-  const effAwayMid = awayStrength.midfield * matchup.awayMidfieldMod;
+  const effAwayAtk = awayStrength.attack * matchup.awayAttackMod * (1 + awayStaffBonuses.tacticalScoutingAdvantage);
+  const effAwayMid = awayStrength.midfield * matchup.awayMidfieldMod * (1 + awayStaffBonuses.tacticalSynergyBonus);
   const effAwayDef = awayStrength.defense * matchup.awayDefenseMod;
+
+  // USER SMART AUTO-SUBSTITUTION (Enabled by default unless explicitly disabled)
+  let userSubsCount = prevState.substitutionsCount;
+  const isUserTeamHome = Boolean(prevState.homeTeam?.isUserClub);
+  const isUserTeamAway = Boolean(prevState.awayTeam?.isUserClub);
+  const userTeam = isUserTeamHome ? prevState.homeTeam : (isUserTeamAway ? prevState.awayTeam : undefined);
+
+  if (userTeam && prevState.autoSubsEnabled !== false && userSubsCount < 5) {
+    const userLineup = isUserTeamHome ? activeHomeLineup : activeAwayLineup;
+    const userFatigue = isUserTeamHome ? prevState.homeFatigueMap : prevState.awayFatigueMap;
+    const userPitchPlayers = (userTeam?.players || []).filter(p => userLineup.includes(p.id));
+    const userBenchPlayers = (userTeam?.players || []).filter(p => !userLineup.includes(p.id));
+
+    // Check if there is an injured player needing an urgent sub immediately
+    const hasInjuredPitchPlayer = userPitchPlayers.some(p => Boolean(p.injury || p.isInjured));
+
+    // Substitution windows:
+    // Window 1 (Sub 1): min 59-66
+    // Window 2 (Sub 2): min 67-73
+    // Window 3 (Sub 3): min 74-80
+    // Window 4 (Sub 4 & 5): min 81-88
+    const isWindow1 = userSubsCount === 0 && nextMinute >= 59 && nextMinute <= 66;
+    const isWindow2 = userSubsCount === 1 && nextMinute >= 67 && nextMinute <= 73;
+    const isWindow3 = userSubsCount === 2 && nextMinute >= 74 && nextMinute <= 80;
+    const isWindow4 = userSubsCount >= 3 && nextMinute >= 81 && nextMinute <= 88;
+
+    if (hasInjuredPitchPlayer || isWindow1 || isWindow2 || isWindow3 || isWindow4) {
+      const userScore = isUserTeamHome ? prevState.homeScore : prevState.awayScore;
+      const oppScore = isUserTeamHome ? prevState.awayScore : prevState.homeScore;
+      const yellowedIds = isUserTeamHome ? prevState.homeYellowedPlayerIds : prevState.awayYellowedPlayerIds;
+
+      const smartSub = executeSmartAutoSub(
+        userPitchPlayers,
+        userBenchPlayers,
+        userFatigue,
+        5 - userSubsCount,
+        {
+          minute: nextMinute,
+          userScore,
+          oppScore,
+          yellowCardedIds: yellowedIds,
+        }
+      );
+
+      if (smartSub) {
+        if (isUserTeamHome) {
+          activeHomeLineup = activeHomeLineup.map(id => id === smartSub.outPlayer.id ? smartSub.inPlayer.id : id);
+        } else {
+          activeAwayLineup = activeAwayLineup.map(id => id === smartSub.outPlayer.id ? smartSub.inPlayer.id : id);
+        }
+        userSubsCount++;
+
+        newEvents.push({
+          minute: nextMinute,
+          type: 'substitution',
+          teamId: userTeam.id,
+          playerId: smartSub.outPlayer.id,
+          playerName: smartSub.outPlayer.name,
+          inPlayerName: smartSub.inPlayer.name,
+          outPlayerName: smartSub.outPlayer.name,
+          description: `🔄 تبديل تكتيكي ذكي (${userTeam.shortName}): خروج (${smartSub.outPlayer.name}) ودخول (${smartSub.inPlayer.name}) - [${smartSub.reason}].`
+        });
+      }
+    }
+  }
 
   // Possession calculation for this phase
   const totalMid = effHomeMid + effAwayMid;
@@ -566,27 +642,36 @@ export function simulateMatchStep(
 
   const roll = Math.random();
 
-  // Attack generation probability based on midfield + possession
-  const homeAttackProb = (effHomeMid / totalMid) * 0.32;
-  const awayAttackProb = (effAwayMid / totalMid) * 0.30;
+  // Attack generation probability based on midfield supremacy + tactical attacking mentality
+  const homeAttackProb = Math.min(0.48, Math.max(0.12, (effHomeMid / totalMid) * 0.42));
+  const awayAttackProb = Math.min(0.48, Math.max(0.12, (effAwayMid / totalMid) * 0.38));
 
   if (roll < homeAttackProb) {
     // HOME ATTACK SEQUENCE
     homeDangerousAttacks++;
     const shotRoll = Math.random();
 
-    if (shotRoll < 0.60) {
+    if (shotRoll < 0.65) {
       homeShots++;
-      const isTarget = Math.random() < 0.52;
-      const shotXg = isTarget ? (Math.random() * 0.35 + 0.15) : (Math.random() * 0.10 + 0.02);
+      const topHomeAttacker = pickPlayerByPosition(homeActivePlayers, 'FWD', 'MID');
+      const shootingSkill = topHomeAttacker?.attributes?.shooting || effHomeAtk;
+      const onTargetProb = Math.min(0.68, Math.max(0.38, 0.42 + ((shootingSkill - 50) * 0.004)));
+      const isTarget = Math.random() < onTargetProb;
+
+      const shotXg = isTarget ? (Math.random() * 0.32 + 0.18) : (Math.random() * 0.08 + 0.02);
       homeXg += Number(shotXg.toFixed(2));
 
       if (isTarget) {
         homeShotsOnTarget++;
         // Goal chance vs Away GK
         const awayGk = awayActivePlayers.find(p => p.positionCategory === 'GK') || awayActivePlayers[0];
-        const awayGkPower = (awayGk?.attributes.goalkeeping || 50) * 0.012;
-        const goalProb = Math.max(0.15, Math.min(0.85, (effHomeAtk / (effHomeAtk + effAwayDef * 1.5)) - awayGkPower + 0.25));
+        const awayGkPower = (awayGk?.attributes?.goalkeeping || awayGk?.overallRating || 60);
+        
+        // Ratio of Home Attack to Away Defense
+        const atkVsDefRatio = effHomeAtk / Math.max(35, effAwayDef);
+        // Realistic goal probability on target: 20% to 58%
+        let goalProb = (0.28 * atkVsDefRatio) + ((effHomeAtk - awayGkPower) * 0.0035);
+        goalProb = Math.max(0.18, Math.min(0.70, goalProb));
 
         if (Math.random() < goalProb) {
           homeScore++;
@@ -628,17 +713,24 @@ export function simulateMatchStep(
     awayDangerousAttacks++;
     const shotRoll = Math.random();
 
-    if (shotRoll < 0.60) {
+    if (shotRoll < 0.65) {
       awayShots++;
-      const isTarget = Math.random() < 0.52;
-      const shotXg = isTarget ? (Math.random() * 0.35 + 0.15) : (Math.random() * 0.10 + 0.02);
+      const topAwayAttacker = pickPlayerByPosition(awayActivePlayers, 'FWD', 'MID');
+      const shootingSkill = topAwayAttacker?.attributes?.shooting || effAwayAtk;
+      const onTargetProb = Math.min(0.68, Math.max(0.38, 0.42 + ((shootingSkill - 50) * 0.004)));
+      const isTarget = Math.random() < onTargetProb;
+
+      const shotXg = isTarget ? (Math.random() * 0.32 + 0.18) : (Math.random() * 0.08 + 0.02);
       awayXg += Number(shotXg.toFixed(2));
 
       if (isTarget) {
         awayShotsOnTarget++;
         const homeGk = homeActivePlayers.find(p => p.positionCategory === 'GK') || homeActivePlayers[0];
-        const homeGkPower = (homeGk?.attributes.goalkeeping || 50) * 0.012;
-        const goalProb = Math.max(0.15, Math.min(0.85, (effAwayAtk / (effAwayAtk + effHomeDef * 1.5)) - homeGkPower + 0.25));
+        const homeGkPower = (homeGk?.attributes?.goalkeeping || homeGk?.overallRating || 60);
+        
+        const atkVsDefRatio = effAwayAtk / Math.max(35, effHomeDef);
+        let goalProb = (0.28 * atkVsDefRatio) + ((effAwayAtk - homeGkPower) * 0.0035);
+        goalProb = Math.max(0.18, Math.min(0.70, goalProb));
 
         if (Math.random() < goalProb) {
           awayScore++;
@@ -689,7 +781,7 @@ export function simulateMatchStep(
             teamId: prevState.homeTeam.id,
             playerId: p.id,
             playerName: p.name,
-            description: `🟨 بطاقة صفراء على اللاعب (${p.name}) من ${prevState.homeTeam.shortName} بعد تدخل عنيف لمنع هجمة مرتدة.`
+            description: `🟨 بطاقة صفراء على اللاعب (${p.name}) من ${prevState.homeTeam.shortName} بعد تدخل قوي لمنع هجمة.`
           });
         }
       } else {
@@ -720,18 +812,27 @@ export function simulateMatchStep(
     }
   }
 
-  // Fatigue accumulation for active players
+  // Fatigue accumulation for active players (reduced by Fitness Coach staff)
   const updatedHomeFatigue = { ...prevState.homeFatigueMap };
   const updatedAwayFatigue = { ...prevState.awayFatigueMap };
   
-  const homePressingDrain = currentHomeTactics.pressingIntensity === 'high' ? 0.22 : 0.14;
-  const awayPressingDrain = currentAwayTactics.pressingIntensity === 'high' ? 0.22 : 0.14;
+  const baseHomeDrain = currentHomeTactics.pressingIntensity === 'high' ? 0.38 : 0.26;
+  const baseAwayDrain = currentAwayTactics.pressingIntensity === 'high' ? 0.38 : 0.26;
+
+  const homePressingDrain = baseHomeDrain * (1 - homeStaffBonuses.staminaDrainReduction);
+  const awayPressingDrain = baseAwayDrain * (1 - awayStaffBonuses.staminaDrainReduction);
 
   activeHomeLineup.forEach(id => {
-    updatedHomeFatigue[id] = Math.max(30, (updatedHomeFatigue[id] || 100) - homePressingDrain);
+    const isGK = prevState.homeTeam?.players?.find(p => p.id === id)?.positionCategory === 'GK';
+    const drain = isGK ? 0.05 : homePressingDrain;
+    const currentVal = updatedHomeFatigue[id] ?? 95;
+    updatedHomeFatigue[id] = Math.max(30, Number((currentVal - drain).toFixed(1)));
   });
   activeAwayLineup.forEach(id => {
-    updatedAwayFatigue[id] = Math.max(30, (updatedAwayFatigue[id] || 100) - awayPressingDrain);
+    const isGK = prevState.awayTeam?.players?.find(p => p.id === id)?.positionCategory === 'GK';
+    const drain = isGK ? 0.05 : awayPressingDrain;
+    const currentVal = updatedAwayFatigue[id] ?? 95;
+    updatedAwayFatigue[id] = Math.max(30, Number((currentVal - drain).toFixed(1)));
   });
 
   return {
@@ -767,6 +868,7 @@ export function simulateMatchStep(
     homeFatigueMap: updatedHomeFatigue,
     awayFatigueMap: updatedAwayFatigue,
     aiSubstitutionsCount: aiSubsCount,
+    substitutionsCount: userSubsCount,
   };
 }
 

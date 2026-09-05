@@ -47,7 +47,11 @@ export const DaySummaryModal: React.FC<DaySummaryModalProps> = ({
               <Calendar className="w-5 h-5" />
             </div>
             <div>
-              <h3 className="font-black text-base text-white">ملخص أحداث اليوم</h3>
+              <h3 className="font-black text-base text-white">
+                {summary.daysAdvanced && summary.daysAdvanced > 1
+                  ? `ملخص التقدم لموعد المباراة (${summary.daysAdvanced} أيام)`
+                  : 'ملخص أحداث اليوم'}
+              </h3>
               <p className="text-xs text-emerald-400 font-bold">{summary.formattedArabicDate}</p>
             </div>
           </div>

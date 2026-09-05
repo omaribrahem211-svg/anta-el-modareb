@@ -53,6 +53,7 @@ export const PlayerModal: React.FC<PlayerModalProps> = ({ player, onClose, onSta
     boostPlayerPotential,
     boostPlayerCondition,
     addBonusToPlayer,
+    dayAdvanceSummary,
   } = useGame();
   const [talkCooldown, setTalkCooldown] = useState(false);
   const [notification, setNotification] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
@@ -135,21 +136,25 @@ export const PlayerModal: React.FC<PlayerModalProps> = ({ player, onClose, onSta
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header Bar */}
-        <div className="flex items-start justify-between border-b border-slate-800 pb-3">
-          <div className="flex items-center gap-3">
-            <div className={`w-14 h-14 rounded-2xl border-2 flex flex-col items-center justify-center font-black ${getRatingColor(player.overallRating)}`}>
+        <div className="flex items-start justify-between border-b border-slate-800 pb-3 gap-3">
+          <div className="flex items-start gap-3 min-w-0 flex-1">
+            <div className={`w-14 h-14 rounded-2xl border-2 flex flex-col items-center justify-center font-black shrink-0 ${getRatingColor(player.overallRating)}`}>
               <span className="text-xl leading-none">{player.overallRating}</span>
               <span className="text-[10px] uppercase font-bold tracking-wider">{player.position}</span>
             </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <h3 className="font-bold text-lg text-white">{player.name}</h3>
-                {player.number && <span className="text-xs text-slate-400 font-mono">#{player.number}</span>}
+            <div className="min-w-0 flex-1">
+              <div className="flex flex-wrap items-center gap-2">
+                <h3 className="font-black text-lg sm:text-xl text-white break-words leading-tight">{player.name}</h3>
+                {player.number && (
+                  <span className="text-xs text-slate-400 font-mono bg-slate-850 border border-slate-700 px-1.5 py-0.5 rounded-md">
+                    #{player.number}
+                  </span>
+                )}
               </div>
               {player.nickname && (
-                <div className="text-xs text-amber-400 font-medium">"{player.nickname}"</div>
+                <div className="text-xs text-amber-400 font-bold mt-0.5">"{player.nickname}"</div>
               )}
-              <div className="flex flex-wrap items-center gap-1.5 mt-1">
+              <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
                 <span className={`text-[11px] px-2.5 py-0.5 rounded-full border font-bold ${getPositionBadgeClass(player.position)}`}>
                   {getPositionArabic(player.position)} ({player.position})
                 </span>
@@ -167,14 +172,14 @@ export const PlayerModal: React.FC<PlayerModalProps> = ({ player, onClose, onSta
                   </span>
                 )}
                 <span className="text-xs text-slate-400">{player.age} سنة</span>
-                <span className="text-xs text-slate-400">• القدرة المحتملة: <strong className="text-emerald-400">{player.potentialRating || player.overallRating}</strong></span>
+                <span className="text-xs text-slate-400">• القدرة المحتملة: <strong className="text-emerald-400 font-bold">{player.potentialRating || player.overallRating}</strong></span>
               </div>
             </div>
           </div>
 
           <button 
             onClick={onClose}
-            className="p-2 rounded-xl bg-slate-800 text-slate-400 hover:text-white hover:bg-slate-700"
+            className="p-2 rounded-xl bg-slate-800 text-slate-400 hover:text-white hover:bg-slate-700 shrink-0 cursor-pointer"
           >
             <X className="w-5 h-5" />
           </button>
@@ -470,21 +475,100 @@ export const PlayerModal: React.FC<PlayerModalProps> = ({ player, onClose, onSta
         {/* Action Buttons */}
         {isSquadPlayer ? (
           <>
-            {/* Training Focus Selector */}
-            <div className="space-y-1.5">
-              <label className="text-[11px] font-bold text-slate-300">التركيز التدريبي الفردي للاعب:</label>
-              <select 
-                value={player.trainingFocus || 'general'} 
-                onChange={(e) => setPlayerTrainingFocus(player.id, e.target.value as Player['trainingFocus'])}
-                className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500"
-              >
-                <option value="general">تدريب شامل عام</option>
-                <option value="fitness">لياقة بدنية وقوة التحمل</option>
-                <option value="shooting">التسديد وإنهاء الهجمات</option>
-                <option value="passing">التمرير وبناء اللعب</option>
-                <option value="dribbling">المراوغة والسرعة الفردية</option>
-                <option value="defending">التمركز الدفاعي والافتكاك</option>
-              </select>
+            {/* Individual Daily Training Focus & Progression Hub */}
+            <div className="bg-slate-950/80 border border-slate-800 p-4 rounded-2xl space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Target className="w-4 h-4 text-emerald-400" />
+                  <span className="text-xs font-bold text-white">التخصص والتركيز التدريبي اليومي:</span>
+                </div>
+                <span className="text-[11px] text-emerald-400 bg-emerald-950/80 px-2 py-0.5 rounded-lg border border-emerald-800/60 font-bold">
+                  تطوير مستمر 📈
+                </span>
+              </div>
+
+              {/* Progress towards natural rating increase */}
+              <div className="bg-slate-900/90 p-3 rounded-xl border border-slate-800 space-y-1.5">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="text-slate-300 flex items-center gap-1.5 text-[11px]">
+                    <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+                    <span>معدل التقدم الطبيعي نحو الترقية (+1):</span>
+                  </span>
+                  <span className="font-mono font-black text-emerald-400 text-xs">
+                    {Math.min(100, Math.round(player.trainingProgress || 0))}%
+                  </span>
+                </div>
+                <div className="w-full bg-slate-800 h-2 rounded-full overflow-hidden">
+                  <div 
+                    className="h-full bg-gradient-to-r from-emerald-500 to-teal-400 rounded-full transition-all duration-300"
+                    style={{ width: `${Math.min(100, Math.round(player.trainingProgress || 0))}%` }}
+                  />
+                </div>
+                <p className="text-[10px] text-slate-400 mt-1">
+                  يكتسب اللاعب نقاط نمو مع كل حصة تدريبية يومية حتى يصل لـ 100% ليترقى تلقائياً.
+                </p>
+              </div>
+
+              {/* Focus Selector Dropdown */}
+              <div className="space-y-1">
+                <label className="text-[11px] font-bold text-slate-300">اختر مهارة التركيز الأساسية:</label>
+                <select 
+                  value={player.trainingFocus || 'general'} 
+                  onChange={(e) => setPlayerTrainingFocus(player.id, e.target.value as Player['trainingFocus'])}
+                  className="w-full bg-slate-900 border border-slate-700 hover:border-slate-600 rounded-xl px-3 py-2 text-xs text-emerald-300 font-bold focus:outline-none focus:border-emerald-500 cursor-pointer"
+                >
+                  <option value="general">🔄 تدريب شامل عام (تطوير متوازن لكافة المراكز)</option>
+                  <option value="fitness">🏃‍♂️ لياقة بدنية وسرعة (استرجاع الجاهزية ورفع التحمل)</option>
+                  <option value="shooting">🎯 التسديد وإنهاء الهجمات (رفع الفعالية التهديفية)</option>
+                  <option value="passing">⚽ التمرير ورؤية اللعب (صناعة اللعب والكرات الحاسمة)</option>
+                  <option value="dribbling">🎨 المراوغة والمهارة الفردية (التحكم بالكرة والمراوغة)</option>
+                  <option value="defending">🛡️ التمركز الدفاعي والافتكاك (قطع الكرات والرقابة)</option>
+                  {player.position === 'GK' && (
+                    <option value="goalkeeping">🧤 حراسة المرمى والتصدي (ردة الفعل والتقاط الكرات)</option>
+                  )}
+                </select>
+              </div>
+
+              {/* Daily Training Report for this player */}
+              {(() => {
+                const playerDailyReport = dayAdvanceSummary?.trainingReports?.find(r => r.playerId === player.id);
+                const playerInjuryReport = dayAdvanceSummary?.injuryUpdates?.find(r => r.playerId === player.id);
+
+                if (playerDailyReport) {
+                  return (
+                    <div className="bg-emerald-950/60 border border-emerald-600/70 p-3 rounded-xl flex items-start gap-2 text-xs text-emerald-200 animate-fade-in">
+                      <Sparkles className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+                      <div>
+                        <strong className="block text-emerald-300 text-[11px]">تقرير الحصة التدريبية لليوم:</strong>
+                        <span>{playerDailyReport.changeText}</span>
+                      </div>
+                    </div>
+                  );
+                }
+
+                if (playerInjuryReport) {
+                  return (
+                    <div className={`p-3 rounded-xl border flex items-start gap-2 text-xs animate-fade-in ${
+                      playerInjuryReport.recovered
+                        ? 'bg-emerald-950/60 border-emerald-600 text-emerald-200'
+                        : 'bg-rose-950/60 border-rose-600 text-rose-200'
+                    }`}>
+                      <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                      <div>
+                        <strong className="block text-[11px]">تقرير العيادة الطبية اليومي:</strong>
+                        <span>{playerInjuryReport.text}</span>
+                      </div>
+                    </div>
+                  );
+                }
+
+                return (
+                  <div className="bg-slate-900/60 border border-slate-800/80 p-2.5 rounded-xl text-[11px] text-slate-400 flex items-center gap-2">
+                    <Activity className="w-3.5 h-3.5 text-blue-400 shrink-0" />
+                    <span>يتدرب اللاعب يومياً وفق هذا البرنامج؛ اضغط على "إجراء الحصة التدريبية" في تبويب التدريب لتسجيل تقرير اليوم.</span>
+                  </div>
+                );
+              })()}
             </div>
 
             {/* Development Points Upgrade Panel (مكافآت الكأس والبطولات) */}

@@ -35,7 +35,12 @@ import {
   OpponentScoutingReport,
   PlayerAttributes,
   TrainingBoostType,
+  StaffMember,
+  StaffRole,
 } from '../types/game';
+import { hireStaffMember, getClubStaffBonuses } from '../utils/staffEngine';
+import { processPostMatchPlayerUpdates } from '../utils/playerFatigueEngine';
+import { simulateMultipleLeagueRounds } from '../utils/batchSimulationEngine';
 import {
   applyAttributeUpgrade,
   applyOverallBoost,
@@ -196,10 +201,16 @@ interface GameContextType {
   skipLiveMatchToEnd: () => void;
   finishLiveMatchAndAdvance: () => void;
   instantSimulateCurrentRound: () => void;
+  simulateMultipleRounds: (roundsCount?: number) => { success: boolean; simulatedCount: number; message: string };
   resumeSecondHalf: (teamTalkMoraleBoost?: boolean) => void;
   makeLiveSubstitution: (outPlayerId: string, inPlayerId: string) => { success: boolean; message: string };
+  toggleLiveAutoSubs: () => void;
   changeLiveMentality: (mentality: TeamTactics['mentality']) => void;
   changeLivePressing: (pressing: TeamTactics['pressingIntensity']) => void;
+
+  // Staff Management
+  hireClubStaff: (staffMember: StaffMember) => void;
+  fireClubStaff: (role: StaffRole) => void;
 
   // Transfers & Contracts
   buyPlayer: (player: Player) => { success: boolean; message: string };
@@ -272,6 +283,9 @@ interface GameContextType {
   saveToCloud: (isManual?: boolean) => Promise<{ success: boolean; message: string }>;
   resetGame: () => void;
   updateManagerName: (name: string) => void;
+  updateTrainerProfile: (name: string, age: number, nationality: string) => void;
+  exportCurrentSavePayload: () => any;
+  applyLoadedSave: (save: any) => void;
 
   // Scouting & Opponent Spy System
   scoutedOpponents: Record<string, OpponentScoutingReport>;
@@ -805,17 +819,16 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     return validTeams[0] || INITIAL_TEAMS[0];
   }, [teams, manager?.currentClubId]);
 
-  const allFixturesPlayed = useMemo(() => {
-    return fixtures.length > 0 && fixtures.every(f => f && f.played);
+  const leagueFixtures = useMemo(() => {
+    return fixtures.filter(f => f && (!f.competitionType || f.competitionType === 'league'));
   }, [fixtures]);
 
-  const allUserFixturesPlayed = useMemo(() => {
-    if (!userClub?.id || fixtures.length === 0) return false;
-    const userFixtures = fixtures.filter(f => f && (f.homeTeamId === userClub.id || f.awayTeamId === userClub.id));
-    return userFixtures.length > 0 && userFixtures.every(f => f && f.played);
-  }, [userClub, fixtures]);
+  const allLeagueFixturesPlayed = useMemo(() => {
+    return leagueFixtures.length > 0 && leagueFixtures.every(f => f && (f.isPlayed || (f as any).played));
+  }, [leagueFixtures]);
 
-  const seasonFinished = season.status === 'completed' || currentRound > totalRounds || allFixturesPlayed || allUserFixturesPlayed;
+  // Season is ONLY finished when status is completed, currentRound > totalRounds, or all league fixtures are played AND round reached total
+  const seasonFinished = season.status === 'completed' || currentRound > totalRounds || (allLeagueFixturesPlayed && currentRound >= totalRounds);
   const unreadMessagesCount = inbox.filter(m => !m.read).length;
 
   // World Rankings & Squad Strength Computation
@@ -1472,6 +1485,32 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     };
   };
 
+  const toggleLiveAutoSubs = () => {
+    setLiveMatch(prev => {
+      if (!prev) return null;
+      return {
+        ...prev,
+        autoSubsEnabled: !prev.autoSubsEnabled,
+      };
+    });
+  };
+
+  const hireClubStaff = (staffMember: StaffMember) => {
+    if (!userClub) return;
+    const updatedClub = hireStaffMember(userClub, staffMember);
+    setTeams(prev => prev.map(t => t.id === userClub.id ? updatedClub : t));
+  };
+
+  const fireClubStaff = (role: StaffRole) => {
+    if (!userClub) return;
+    const updatedStaff = (userClub.staff || []).filter(s => s.role !== role);
+    const updatedClub = {
+      ...userClub,
+      staff: updatedStaff,
+    };
+    setTeams(prev => prev.map(t => t.id === userClub.id ? updatedClub : t));
+  };
+
   const changeLiveMentality = (mentality: TeamTactics['mentality']) => {
     if (!userClub?.tactics) return;
     updateTactics({ ...userClub.tactics, mentality });
@@ -1812,12 +1851,26 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         ? (userClub.tactics?.startingPlayerIds || teamPlayers.slice(0, 11).map(p => p.id))
         : (t.tactics?.startingPlayerIds || teamPlayers.slice(0, 11).map(p => p.id));
 
-      const updatedPlayers = teamPlayers.map(p => {
+      const { updatedPlayers: fatigueUpdatedPlayers, transferMessages, departedPlayers } = processPostMatchPlayerUpdates(
+        t,
+        startingIds,
+        matchPlayed,
+        isTeamWin,
+        isTeamDraw,
+        t.isUserClub
+      );
+
+      if (transferMessages.length > 0) {
+        setInbox(prev => [...transferMessages, ...prev]);
+      }
+
+      let extraTransferIncome = 0;
+      if (departedPlayers.length > 0) {
+        extraTransferIncome = departedPlayers.reduce((sum, dp) => sum + dp.fee, 0);
+      }
+
+      const updatedPlayers = fatigueUpdatedPlayers.map(p => {
         const isStarter = startingIds.includes(p.id);
-        const staminaLoss = isStarter ? Math.floor(Math.random() * 12 + 10) : -15;
-        const newFitness = Math.min(100, Math.max(40, p.fitness - staminaLoss));
-        const moraleChange = isTeamWin ? +5 : isTeamDraw ? +1 : -3;
-        const newMorale = Math.min(100, Math.max(30, p.morale + moraleChange));
 
         const playerGoals = matchPlayed.events.filter(e => e.type === 'goal' && (e.playerId === p.id || e.playerName === p.name)).length;
         const playerAssists = matchPlayed.events.filter(e => e.type === 'goal' && (e.assistPlayerId === p.id || e.assistPlayerName === p.name)).length;
@@ -1861,8 +1914,6 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           ...p,
           savings: playerSavings,
           totalBonusesReceived: p.totalBonusesReceived ?? 0,
-          fitness: newFitness,
-          morale: newMorale,
           isSuspended: newIsSuspended,
           suspensionMatches: newSuspensionMatches,
           suspensionReason: newSuspensionReason,
@@ -1881,7 +1932,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
       return {
         ...t,
-        budget: t.isUserClub ? t.budget + totalMatchRevenue + cupBonusPrize : t.budget,
+        budget: t.isUserClub ? t.budget + totalMatchRevenue + cupBonusPrize + extraTransferIncome : t.budget,
         developmentPoints: t.isUserClub ? (t.developmentPoints || 0) + cupBonusDevPoints : t.developmentPoints,
         players: updatedPlayers,
       };
@@ -2052,7 +2103,9 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
 
     const nextRoundNumber = currentRound + 1;
-    const isNowFinished = nextRoundNumber > totalRounds || updatedFixtures.every(f => f.played) || !updatedFixtures.some(f => f.round >= nextRoundNumber);
+    const remainingLeagueFixtures = updatedFixtures.filter(f => (!f.competitionType || f.competitionType === 'league') && !f.isPlayed);
+    const hasRemainingRounds = nextRoundNumber <= totalRounds && updatedFixtures.some(f => f.round >= nextRoundNumber);
+    const isNowFinished = !hasRemainingRounds && remainingLeagueFixtures.length === 0;
 
     // 7. Check if Season Concluded
     if (isNowFinished) {
@@ -2130,8 +2183,11 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       return;
     }
 
-    // Lineup validity check for user's club before instant simulation
-    if (userClub) {
+    const roundFixtures = fixtures.filter(f => f.round === currentRound && !f.isPlayed);
+    const userPlaysThisRound = userClub && roundFixtures.some(f => f.homeTeamId === userClub.id || f.awayTeamId === userClub.id);
+
+    // Lineup validity check for user's club before instant simulation (only if user club is playing)
+    if (userPlaysThisRound && userClub) {
       const val = validateSquadLineup(userClub);
       if (!val.isValid) {
         setMatchBlocker({
@@ -2150,8 +2206,6 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     let updatedStandings = [...standings];
     let updatedCupTournament = cupTournament;
     const allRoundMatches: { homeTeamId: string; awayTeamId: string; homeScore: number; awayScore: number; events: MatchEvent[] }[] = [];
-
-    const roundFixtures = fixtures.filter(f => f.round === currentRound && !f.isPlayed);
 
     roundFixtures.forEach(fix => {
       const homeTeam = teams.find(t => t.id === fix.homeTeamId) || (fix.homeTeamId ? findClubInWorld(fix.homeTeamId) : undefined) || teams[0];
@@ -2325,12 +2379,26 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       const teamPlayers = Array.isArray(t.players) ? t.players : [];
       const startingIds = t.tactics?.startingPlayerIds || teamPlayers.slice(0, 11).map(p => p.id);
 
-      const updatedPlayers = teamPlayers.map(p => {
+      const { updatedPlayers: fatigueUpdatedPlayers, transferMessages, departedPlayers } = processPostMatchPlayerUpdates(
+        t,
+        startingIds,
+        matchPlayed,
+        isTeamWin,
+        isTeamDraw,
+        t.isUserClub
+      );
+
+      if (transferMessages.length > 0) {
+        setInbox(prev => [...transferMessages, ...prev]);
+      }
+
+      let extraTransferIncome = 0;
+      if (departedPlayers.length > 0) {
+        extraTransferIncome = departedPlayers.reduce((sum, dp) => sum + dp.fee, 0);
+      }
+
+      const updatedPlayers = fatigueUpdatedPlayers.map(p => {
         const isStarter = startingIds.includes(p.id);
-        const staminaLoss = isStarter ? Math.floor(Math.random() * 12 + 10) : -15;
-        const newFitness = Math.min(100, Math.max(40, p.fitness - staminaLoss));
-        const moraleChange = isTeamWin ? +4 : isTeamDraw ? +1 : -3;
-        const newMorale = Math.min(100, Math.max(30, p.morale + moraleChange));
 
         const playerGoals = matchPlayed.events.filter(e => e.type === 'goal' && (e.playerId === p.id || e.playerName === p.name)).length;
         const playerAssists = matchPlayed.events.filter(e => e.type === 'goal' && (e.assistPlayerId === p.id || e.assistPlayerName === p.name)).length;
@@ -2373,8 +2441,6 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           ...p,
           savings: simPlayerSavings,
           totalBonusesReceived: p.totalBonusesReceived ?? 0,
-          fitness: newFitness,
-          morale: newMorale,
           isSuspended: newIsSuspended,
           suspensionMatches: newSuspensionMatches,
           suspensionReason: newSuspensionReason,
@@ -2393,7 +2459,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
       return {
         ...t,
-        budget: t.isUserClub ? t.budget + simCupBonusPrize : t.budget,
+        budget: t.isUserClub ? t.budget + simCupBonusPrize + extraTransferIncome : t.budget,
         developmentPoints: t.isUserClub ? (t.developmentPoints || 0) + simCupBonusDevPoints : t.developmentPoints,
         players: updatedPlayers,
       };
@@ -2602,7 +2668,9 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
 
     const nextRoundNumber = currentRound + 1;
-    const isNowFinished = nextRoundNumber > totalRounds || updatedFixtures.every(f => f.played) || !updatedFixtures.some(f => f.round >= nextRoundNumber);
+    const remainingLeagueFixtures = updatedFixtures.filter(f => (!f.competitionType || f.competitionType === 'league') && !f.isPlayed);
+    const hasRemainingRounds = nextRoundNumber <= totalRounds && updatedFixtures.some(f => f.round >= nextRoundNumber);
+    const isNowFinished = !hasRemainingRounds && remainingLeagueFixtures.length === 0;
 
     // 6. Check if Season Concluded
     if (isNowFinished) {
@@ -2673,6 +2741,74 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         AdManager.showInterstitial();
       }, 500);
     }
+  };
+
+  const simulateMultipleRounds = (roundsCount: number = 10): { success: boolean; simulatedCount: number; message: string } => {
+    if (seasonFinished) {
+      return { success: false, simulatedCount: 0, message: 'الموسم منتهٍ بالفعل!' };
+    }
+
+    const res = simulateMultipleLeagueRounds(
+      roundsCount,
+      currentRound,
+      totalRounds,
+      teams,
+      standings,
+      fixtures,
+      activeLeague,
+      userClub?.id
+    );
+
+    if (res.simulatedRoundsCount === 0) {
+      return { success: false, simulatedCount: 0, message: 'لم يتم العثور على جولات متبقية للمحاكاة.' };
+    }
+
+    setFixtures(res.nextFixtures);
+    setStandings(res.nextStandings);
+    setTeams(res.nextTeams);
+    setCurrentRound(res.nextRound);
+
+    if (res.seasonFinished) {
+      const summaryClub = userClub || res.nextTeams.find(t => t.isUserClub) || res.nextTeams[0];
+      const summary = calculateSeasonEndSummary(
+        { ...season, status: 'completed', totalRounds },
+        res.nextStandings,
+        summaryClub,
+        activeLeague,
+        cupTournament,
+        manager
+      );
+      const generatedOffers = generateSeasonJobOffers(
+        manager,
+        summaryClub,
+        activeLeague,
+        summary.finalPosition
+      );
+      setSeasonEndSummary(summary);
+      setJobOffers(generatedOffers);
+      setShowSeasonTransitionModal(true);
+      setSeason(prev => ({ ...prev, status: 'completed' }));
+    }
+
+    const batchMsg: InboxMessage = {
+      id: `msg_batch_sim_${Date.now()}`,
+      title: `⚡ تقرير المحاكاة السريعة لـ ${res.simulatedRoundsCount} جولات`,
+      sender: 'المحلل الفني والإحصائي',
+      date: `الجولة ${res.nextRound}`,
+      type: 'news',
+      read: false,
+      content: `تمت محاكاة ${res.simulatedRoundsCount} جولات بنجاح.\n` +
+        (userClub
+          ? `حصيلة فريقك (${userClub.name}): ${res.userClubStatsDelta.wins} فوز، ${res.userClubStatsDelta.draws} تعادل، ${res.userClubStatsDelta.losses} هزيمة. حصدت ${res.userClubStatsDelta.points} نقطة، وسجلت ${res.userClubStatsDelta.goalsFor} هدفاً واستقبلت ${res.userClubStatsDelta.goalsAgainst}.`
+          : `تم تحديث جدول الترتيب وإحصائيات الفرق واللاعبين لجميع الأندية.`),
+    };
+    setInbox(prev => [batchMsg, ...prev]);
+
+    return {
+      success: true,
+      simulatedCount: res.simulatedRoundsCount,
+      message: `تمت محاكاة ${res.simulatedRoundsCount} جولات بنجاح!`,
+    };
   };
 
   // ----------------------------------------------------
@@ -4145,6 +4281,23 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         });
         return [startMsg, ...filtered];
       });
+
+      if (Array.isArray(result.newRetiredPlayers) && result.newRetiredPlayers.length > 0) {
+        setRetiredPlayers(prev => [...result.newRetiredPlayers, ...prev].slice(0, 150));
+        const userClubRetired = result.newRetiredPlayers.filter(rp => rp.clubId === nextUserClubObj?.id || rp.clubName === nextUserClubObj?.name);
+        if (userClubRetired.length > 0) {
+          const retireMsg: InboxMessage = {
+            id: `msg_retire_${Date.now()}`,
+            title: `تكريم ووداع: اعتزال ${userClubRetired.length} من نجوم الفريق رسمياً 🏅`,
+            sender: 'إدارة النادي وجماهيره',
+            date: 'بداية الموسم',
+            type: 'news',
+            read: false,
+            content: `أعلن النادي رسمياً اعتزال اللاعبين المخضرمين: ${userClubRetired.map(p => `${p.name} (${p.age} عاماً)`).join('، ')}. تم توجيه الشكر لهم على عطائهم وإخلاصهم طوال مسيرتهم الكروية الحافلة.`,
+          };
+          setInbox(prev => [retireMsg, ...prev]);
+        }
+      }
     } catch (err) {
       console.error('Error starting next season:', err);
       // Failsafe recovery: bump season number, reset round and regenerate fresh fixtures and standings so game never locks
@@ -4231,50 +4384,74 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       }
     }
 
-    let newDate = addDaysToDate(calendarDate.rawDateStr, 1);
     let daysAdvanced = 1;
 
-    // If skipToMatch requested, advance days until next match day or max 7 days
-    if (skipToMatch && userClub) {
-      while (daysAdvanced < 7) {
-        const info = calculateDaysUntilNextMatch(
-          newDate.rawDateStr,
-          currentRound,
-          getInitialSeasonDate(season.seasonNumber).rawDateStr
-        );
-        if (info.isMatchDay || info.daysRemaining <= 0) break;
-        newDate = addDaysToDate(newDate.rawDateStr, 1);
-        daysAdvanced++;
+    // If skipToMatch requested, skip directly to the exact match day
+    if (skipToMatch && userClub && !seasonFinished) {
+      const matchInfo = calculateDaysUntilNextMatch(
+        calendarDate.rawDateStr,
+        currentRound,
+        getInitialSeasonDate(season.seasonNumber).rawDateStr,
+        totalRounds
+      );
+
+      if (matchInfo.daysRemaining > 0) {
+        // Jump directly to the exact match day!
+        daysAdvanced = matchInfo.daysRemaining;
       }
     }
 
-    // 1. Simulate Daily Squad Training & Recovery
+    const newDate = addDaysToDate(calendarDate.rawDateStr, daysAdvanced, calendarDate.dayIndexInSeason || 1);
+
+    // 1. Simulate Daily Squad Training & Recovery across the days advanced
     let updatedTrainingReports: DayAdvanceSummary['trainingReports'] = [];
     let updatedInjuryReports: DayAdvanceSummary['injuryUpdates'] = [];
-    let updatedSquadPlayers: Player[] | undefined;
+    let updatedSquadPlayers: Player[] | undefined = userClub && userClub.players ? [...userClub.players] : undefined;
 
-    if (userClub && userClub.players) {
-      const trainingResult = simulateDailySquadTraining(
-        userClub.players,
-        trainingIntensity,
-        userClub.facilities?.trainingGroundLevel || 1
-      );
-
-      updatedTrainingReports = trainingResult.trainingReports;
-      updatedInjuryReports = trainingResult.injuryUpdates;
-      updatedSquadPlayers = trainingResult.updatedPlayers;
+    if (updatedSquadPlayers) {
+      for (let dayStep = 0; dayStep < daysAdvanced; dayStep++) {
+        const trainingResult = simulateDailySquadTraining(
+          updatedSquadPlayers,
+          trainingIntensity,
+          userClub?.facilities?.trainingGroundLevel || 1
+        );
+        updatedSquadPlayers = trainingResult.updatedPlayers;
+        if (trainingResult.injuryUpdates.length > 0) {
+          updatedInjuryReports.push(...trainingResult.injuryUpdates);
+        }
+        if (dayStep === daysAdvanced - 1 || trainingResult.trainingReports.some(r => r.type === 'growth')) {
+          updatedTrainingReports.push(...trainingResult.trainingReports);
+        }
+      }
     }
 
-    // 2. Simulate Active Negotiations Progression
-    const negResult = simulateDailyNegotiations(
-      activeNegotiations,
-      userClub,
-      teams,
-      transferMarket
-    );
+    // 2. Simulate Active Negotiations Progression across the days advanced
+    let currentActiveNegs = [...activeNegotiations];
+    let allCompletedTransfers: { negotiation: ActiveNegotiation; player: Player }[] = [];
+    let allNegReports: DayAdvanceSummary['negotiationUpdates'] = [];
+
+    for (let dayStep = 0; dayStep < daysAdvanced; dayStep++) {
+      if (currentActiveNegs.length === 0) break;
+      const negResult = simulateDailyNegotiations(
+        currentActiveNegs,
+        userClub,
+        teams,
+        transferMarket
+      );
+      currentActiveNegs = negResult.updatedNegotiations.filter(n => n.stage !== 'completed');
+      if (negResult.completedTransfers.length > 0) {
+        allCompletedTransfers.push(...negResult.completedTransfers);
+      }
+      if (negResult.negotiationReports.length > 0) {
+        allNegReports.push(...negResult.negotiationReports);
+      }
+      if (currentActiveNegs.some(n => n.actionRequired)) {
+        break;
+      }
+    }
 
     // Filter out completed deals so they do not linger on the active negotiations tab
-    setActiveNegotiations(negResult.updatedNegotiations.filter(n => n.stage !== 'completed'));
+    setActiveNegotiations(currentActiveNegs);
 
     // Atomically execute squad updates and completed transfers
     setTeams(prevTeams => {
@@ -4288,8 +4465,8 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         return t;
       });
 
-      if (negResult.completedTransfers.length > 0 && userClub) {
-        negResult.completedTransfers.forEach(({ negotiation: deal, player: targetPlayer }) => {
+      if (allCompletedTransfers.length > 0 && userClub) {
+        allCompletedTransfers.forEach(({ negotiation: deal, player: targetPlayer }) => {
           if (targetPlayer) {
             const newPlayer: Player = {
               ...targetPlayer,
@@ -4333,8 +4510,8 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       return nextTeams;
     });
 
-    if (negResult.completedTransfers.length > 0 && userClub) {
-      negResult.completedTransfers.forEach(({ negotiation: deal, player: targetPlayer }) => {
+    if (allCompletedTransfers.length > 0 && userClub) {
+      allCompletedTransfers.forEach(({ negotiation: deal, player: targetPlayer }) => {
         if (targetPlayer) {
           // Remove from market
           setTransferMarket(prev => prev.filter(p => p.id !== targetPlayer.id));
@@ -4456,9 +4633,10 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const summary: DayAdvanceSummary = {
       currentDateStr: newDate.rawDateStr,
       formattedArabicDate: newDate.formattedArabic,
+      daysAdvanced,
       trainingReports: updatedTrainingReports,
       injuryUpdates: updatedInjuryReports,
-      negotiationUpdates: negResult.negotiationReports,
+      negotiationUpdates: allNegReports,
       newsItems: dailyNewsBatch.slice(0, 3),
       boardFeedback: dailyBoardFeedback || undefined,
     };
@@ -5209,6 +5387,51 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     setManager(prev => ({ ...prev, name }));
   };
 
+  const updateTrainerProfile = (name: string, age: number, nationality: string) => {
+    setManager(prev => ({
+      ...prev,
+      name: name.trim() || prev.name,
+      age: age || prev.age,
+      nationality: nationality.trim() || prev.nationality,
+    }));
+  };
+
+  const exportCurrentSavePayload = useCallback(() => {
+    return {
+      schemaVersion: 2,
+      saveVersion: 1,
+      lastLocalSaveAt: Date.now(),
+      season,
+      activeLeague,
+      teams,
+      standings,
+      fixtures,
+      currentRound,
+      manager,
+      transferMarket,
+      incomingBids,
+      inbox,
+      cupTournament,
+      jobOffers,
+      seasonEndSummary,
+      transferHistory,
+      clubEconomy,
+      calendarDate,
+      activeNegotiations,
+      boardSystem,
+      dailyNews,
+      retiredPlayers,
+      worldRankings,
+      scoutedOpponents,
+      deletedMessageIds,
+    };
+  }, [
+    season, activeLeague, teams, standings, fixtures, currentRound, manager,
+    transferMarket, incomingBids, inbox, cupTournament, jobOffers, seasonEndSummary,
+    transferHistory, clubEconomy, calendarDate, activeNegotiations, boardSystem,
+    dailyNews, retiredPlayers, worldRankings, scoutedOpponents, deletedMessageIds
+  ]);
+
   // ----------------------------------------------------
   // SCOUTING & OPPONENT SPY METHOD
   // ----------------------------------------------------
@@ -5445,10 +5668,14 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         skipLiveMatchToEnd,
         finishLiveMatchAndAdvance,
         instantSimulateCurrentRound,
+        simulateMultipleRounds,
         resumeSecondHalf,
         makeLiveSubstitution,
+        toggleLiveAutoSubs,
         changeLiveMentality,
         changeLivePressing,
+        hireClubStaff,
+        fireClubStaff,
         buyPlayer,
         negotiatePlayerTransfer,
         startPlayerNegotiation,
@@ -5491,6 +5718,9 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         saveToCloud,
         resetGame,
         updateManagerName,
+        updateTrainerProfile,
+        exportCurrentSavePayload,
+        applyLoadedSave,
         scoutedOpponents,
         scoutOpponent,
         developmentPoints: currentDevPoints,

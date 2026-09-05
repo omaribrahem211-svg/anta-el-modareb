@@ -12,10 +12,6 @@ const config: CapacitorConfig = {
     AdMob: {
       appId: 'ca-app-pub-5272866425919152~1232269694', // Official AdMob Android App ID
     },
-    FirebaseAuthentication: {
-      skipNativeAuth: false,
-      providers: ['google.com'],
-    },
   },
   android: {
     allowMixedContent: false,

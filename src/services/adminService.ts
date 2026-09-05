@@ -1240,8 +1240,10 @@ export function applyWorldOverridesToClubs(clubs: Club[]): Club[] {
   });
 
   return clubs.map(club => {
-    // 1. Apply club-level override if exists
-    let activeClub: Club = overrides.clubs[club.id] ? { ...club, ...overrides.clubs[club.id] } : { ...club };
+    // 1. Apply club-level override if exists, preserving user club status
+    let activeClub: Club = overrides.clubs[club.id] 
+      ? { ...club, ...overrides.clubs[club.id], isUserClub: club.isUserClub } 
+      : { ...club };
 
     // 2. Filter out deleted players
     let currentPlayers = (activeClub.players || []).filter(p => !deletedPlayerIds.has(p.id));
