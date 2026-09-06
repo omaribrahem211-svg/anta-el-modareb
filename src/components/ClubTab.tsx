@@ -566,9 +566,9 @@ export const ClubTab: React.FC = () => {
       })()}
 
       {/* Board Objectives & Confidence Card */}
-      {boardSystem && (
+      {boardSystem && userClub && (
         (() => {
-          const userRank = standings.findIndex(s => s.teamId === userClub.id) + 1 || 1;
+          const userRank = (userClub?.id ? (standings || []).findIndex(s => s && s.teamId === userClub.id) + 1 : 1) || 1;
           const targetRank = boardSystem.targetLeaguePosition || 1;
           const rankMargin = targetRank - userRank;
           const isAhead = rankMargin >= 0;

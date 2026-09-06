@@ -316,13 +316,13 @@ export const TacticsTab: React.FC<TacticsTabProps> = ({ onSelectPlayer }) => {
   }
 
   const rawTactics = userClub.tactics || ({} as any);
-  const allPlayers = userClub.players || [];
+  const allPlayers = (userClub.players || []).filter(Boolean);
   const safeStartingIds = Array.isArray(rawTactics.startingPlayerIds) && rawTactics.startingPlayerIds.length > 0
     ? rawTactics.startingPlayerIds
-    : allPlayers.slice(0, 11).map(p => p.id);
+    : allPlayers.slice(0, 11).map(p => p?.id).filter(Boolean);
   const safeBenchIds = Array.isArray(rawTactics.benchPlayerIds)
     ? rawTactics.benchPlayerIds
-    : allPlayers.slice(11, 18).map(p => p.id);
+    : allPlayers.slice(11, 18).map(p => p?.id).filter(Boolean);
 
   const tactics: TeamTactics = {
     formation: rawTactics.formation || '4-3-3',
@@ -338,9 +338,9 @@ export const TacticsTab: React.FC<TacticsTabProps> = ({ onSelectPlayer }) => {
     cornerTakerId: rawTactics.cornerTakerId || allPlayers[0]?.id || '',
   };
 
-  const startingPlayers = (tactics.startingPlayerIds || []).map(id => allPlayers.find(p => p.id === id)).filter(Boolean) as Player[];
-  const benchPlayers = (tactics.benchPlayerIds || []).map(id => allPlayers.find(p => p.id === id)).filter(Boolean) as Player[];
-  const reservePlayers = allPlayers.filter(p => !tactics.startingPlayerIds.includes(p.id) && !tactics.benchPlayerIds.includes(p.id));
+  const startingPlayers = (tactics.startingPlayerIds || []).map(id => allPlayers.find(p => p && p.id === id)).filter(Boolean) as Player[];
+  const benchPlayers = (tactics.benchPlayerIds || []).map(id => allPlayers.find(p => p && p.id === id)).filter(Boolean) as Player[];
+  const reservePlayers = allPlayers.filter(p => p && p.id && !tactics.startingPlayerIds.includes(p.id) && !tactics.benchPlayerIds.includes(p.id));
 
   const currentSlots = FORMATION_SLOTS[tactics.formation] || FORMATION_SLOTS['4-3-3'];
   const validationResult = validateSquadLineup(userClub);
@@ -1064,6 +1064,53 @@ export const TacticsTab: React.FC<TacticsTabProps> = ({ onSelectPlayer }) => {
                   {opt.label}
                 </button>
               ))}
+            </div>
+          </div>
+
+          {/* Tactical Advice & Synergy Insight for the Manager */}
+          <div className="bg-slate-900/90 border border-amber-500/30 p-4 rounded-3xl space-y-3 shadow-lg">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold text-amber-300 flex items-center gap-1.5">
+                <Sparkles className="w-4 h-4 text-amber-400" />
+                <span>التقرير التكتيكي الفني للمدرب (Tactical Briefing):</span>
+              </span>
+              <span className="text-[10px] bg-slate-800 text-slate-300 px-2 py-0.5 rounded-full border border-slate-700">
+                مؤشرات تفصيلية
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 text-[11px]">
+              <div className="bg-slate-950/80 p-3 rounded-2xl border border-slate-800 space-y-1">
+                <div className="font-bold text-white flex items-center gap-1.5">
+                  <span>🎯 نقطة القوة الأساسية:</span>
+                </div>
+                <div className="text-slate-300 leading-relaxed">
+                  {(tactics.tacticalStyle as any) === 'counter_attack' || (tactics as any).style === 'counter_attack' || (tactics.tacticalStyle as any) === 'direct_counter'
+                    ? 'المرتدات الخاطفة تباغت المنافسين الضاغطين وتصنع مساحات في الثلث الأخير خلف دفاعاتهم.'
+                    : tactics.tacticalStyle === 'catenaccio' || (tactics as any).style === 'park_the_bus'
+                    ? 'تكتل دفاعي حديدي يمنع تسديدات الخصم داخل المنطقة ويقلل تحويل الفرص لأهداف بنسبة كبيرة.'
+                    : tactics.tacticalStyle === 'tiki_taka'
+                    ? 'استحواذ مكثف على دائرة الوسط، يحد من خطورة هجمات الخصم ويصنع فرصاً نوعية بالصبر.'
+                    : tactics.tacticalStyle === 'wing_play'
+                    ? 'استغلال الأروقة والأطراف لإرسال عرضيات متقنة للمهاجمين، فعال جداً ضد الخطط الضيقة.'
+                    : 'توازن منضبط يوزع الجهد على كافة خطوط الملعب ويمنع المفاجآت التكتيكية.'}
+                </div>
+              </div>
+
+              <div className="bg-slate-950/80 p-3 rounded-2xl border border-slate-800 space-y-1">
+                <div className="font-bold text-white flex items-center gap-1.5">
+                  <span>⚠️ التنبيه والجانب البدني:</span>
+                </div>
+                <div className="text-slate-300 leading-relaxed">
+                  {tactics.pressingIntensity === 'high' || tactics.pressingIntensity === 'gegenpress'
+                    ? 'الضغط العالي يستنزف اللياقة بسرعة! احرص على إراحة اللاعبين المتعبين بين الدقيقتين 60 و75.'
+                    : tactics.mentality === 'ultra_attacking'
+                    ? 'الاندفاع الهجومي الكاسح يترك مساحات شاسعة خلف الدفاع، احذر من مرتدات الخصم السريعة.'
+                    : tactics.mentality === 'defensive' || tactics.mentality === 'ultra_defensive'
+                    ? 'التراجع الدفاعي يقلل محاولاتك الهجومية، ستحتاج لاستغلال الكرات الثابتة أو انفراد حاسم.'
+                    : 'حالة بدنية وتكتيكية متزنة تساعدك على قراءة أحداث المباراة والتدخل في الوقت المناسب.'}
+                </div>
+              </div>
             </div>
           </div>
 

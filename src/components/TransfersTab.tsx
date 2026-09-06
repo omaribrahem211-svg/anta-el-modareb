@@ -154,8 +154,8 @@ export const TransfersTab: React.FC<TransfersTabProps> = ({ onSelectPlayer }) =>
       if (!p) return false;
 
       // Never show user's own players in the buy market
-      if (userClub) {
-        if (item.isUserClubPlayer || item.club?.id === userClub.id || (userClub.players || []).some(myP => myP.id === p.id)) {
+      if (userClub?.id) {
+        if (item.isUserClubPlayer || item.club?.id === userClub.id || (userClub.players || []).some(myP => myP && p && myP.id === p.id)) {
           return false;
         }
       }

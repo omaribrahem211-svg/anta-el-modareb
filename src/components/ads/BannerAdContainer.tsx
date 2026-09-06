@@ -1,9 +1,9 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { Capacitor } from '@capacitor/core';
 import { AdManager } from '../../services/adManager';
 import { ADMOB_CONFIG } from '../../config/admobConfig';
 import { ActiveTab } from '../../types/game';
-import { ShieldCheck, Sparkles } from 'lucide-react';
+import { Sparkles } from 'lucide-react';
 
 interface BannerAdContainerProps {
   activeTab: ActiveTab;
@@ -12,6 +12,7 @@ interface BannerAdContainerProps {
 
 export const BannerAdContainer: React.FC<BannerAdContainerProps> = ({ activeTab, isMatchActive = false }) => {
   const [isPremium, setIsPremium] = useState(AdManager.isPremium());
+  const debounceTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
     const unsubscribe = AdManager.subscribe((state) => {
@@ -25,23 +26,27 @@ export const BannerAdContainer: React.FC<BannerAdContainerProps> = ({ activeTab,
   const shouldShow = !isPremium && !isMatchScreen;
 
   useEffect(() => {
-    let retryTimer: NodeJS.Timeout | null = null;
-
-    if (shouldShow) {
-      AdManager.showBanner().then((shown) => {
-        if (!shown && Capacitor.isNativePlatform()) {
-          // If AdMob SDK was still cold-starting, retry once after 1.5 seconds
-          retryTimer = setTimeout(() => {
-            AdManager.showBanner();
-          }, 1500);
-        }
-      });
-    } else {
-      AdManager.hideBanner();
+    // Clear any previous debounce timer
+    if (debounceTimerRef.current) {
+      clearTimeout(debounceTimerRef.current);
+      debounceTimerRef.current = null;
     }
 
+    // Debounce the native AdMob call by 250ms during page navigation
+    // This gives React and the WebView full CPU/GPU priority to render the new page first!
+    debounceTimerRef.current = setTimeout(() => {
+      if (shouldShow) {
+        AdManager.showBanner();
+      } else {
+        AdManager.hideBanner();
+      }
+    }, 250);
+
     return () => {
-      if (retryTimer) clearTimeout(retryTimer);
+      if (debounceTimerRef.current) {
+        clearTimeout(debounceTimerRef.current);
+        debounceTimerRef.current = null;
+      }
     };
   }, [shouldShow]);
 

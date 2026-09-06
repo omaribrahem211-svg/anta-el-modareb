@@ -69,7 +69,8 @@ export const LeagueTab: React.FC = () => {
 
   // Helper to find player club name
   const getPlayerClubName = (player: any) => {
-    const club = teams.find(t => t.id === player.currentClubId || (t.players || []).some((p: any) => p.id === player.id));
+    if (!player) return userClub?.name || 'النادي';
+    const club = teams.find(t => t && (t.id === player.currentClubId || (t.players || []).some((p: any) => p && p.id === player.id)));
     return club?.name || userClub?.name || 'النادي';
   };
 
@@ -79,7 +80,7 @@ export const LeagueTab: React.FC = () => {
   };
 
   // Aggregate players across all league clubs for statistics
-  const allPlayers = teams.flatMap(t => Array.isArray(t.players) ? t.players : []);
+  const allPlayers = (teams || []).filter(Boolean).flatMap(t => Array.isArray(t.players) ? t.players.filter(Boolean) : []);
 
   const topScorers = [...allPlayers].sort((a, b) => (b.stats?.goals || 0) - (a.stats?.goals || 0)).filter(p => (p.stats?.goals || 0) > 0);
   const topAssisters = [...allPlayers].sort((a, b) => (b.stats?.assists || 0) - (a.stats?.assists || 0)).filter(p => (p.stats?.assists || 0) > 0);
@@ -213,7 +214,8 @@ export const LeagueTab: React.FC = () => {
               </thead>
               <tbody className="divide-y divide-slate-800/60">
                 {standings.map((team, idx) => {
-                  const isUser = userClub ? team.teamId === userClub.id : false;
+                  if (!team) return null;
+                  const isUser = userClub?.id ? team.teamId === userClub.id : false;
                   const isLeader = idx === 0;
                   const isPromotionZone = idx < promotionSpots;
                   const isRelegationZone = relegationSpots > 0 && idx >= totalTeams - relegationSpots;

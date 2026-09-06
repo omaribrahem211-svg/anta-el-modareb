@@ -88,6 +88,7 @@ export function normalizeManagerProfile(parsed: any): ManagerProfile {
     personalWallet: parsed?.personalWallet !== undefined ? parsed.personalWallet : 65000,
     financialTransactions: Array.isArray(parsed?.financialTransactions) ? parsed.financialTransactions : [],
     completedCourses: Array.isArray(parsed?.completedCourses) ? parsed.completedCourses : [],
+    license: (parsed?.license && ['D', 'C', 'B', 'A', 'PRO'].includes(parsed.license)) ? parsed.license : 'D',
     favoriteFormation: parsed?.favoriteFormation || INITIAL_MANAGER.favoriteFormation || '4-3-3',
   };
 }

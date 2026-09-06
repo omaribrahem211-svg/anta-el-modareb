@@ -66,10 +66,10 @@ export const PlayerModal: React.FC<PlayerModalProps> = ({ player, onClose, onSta
   if (!player) return null;
 
   const isSquadPlayer = Boolean(
-    userClub && (player.currentClubId === userClub.id || (userClub.players || []).some(p => p.id === player.id))
+    userClub?.id && (player.currentClubId === userClub.id || (userClub.players || []).some(p => p && p.id === player.id))
   );
 
-  const rawClub = teams.find(t => t.id === player.currentClubId || (t.players || []).some(p => p.id === player.id));
+  const rawClub = teams.find(t => t && (t.id === player.currentClubId || (t.players || []).some(p => p && p.id === player.id)));
   const safeClubInfo = resolveClubInfo(player.currentClubId || rawClub?.id, (player as any).currentClubName || rawClub?.name, teams);
   const playerClub = rawClub || safeClubInfo.club;
   const { askingPrice, loanFee } = calculateAskingPrice(player, playerClub);

@@ -835,11 +835,11 @@ export function generateMasterSeasonAgenda(
   userClub?: Club | null
 ): Fixture[] {
   const masterFixtures: Fixture[] = [];
-  const teamIds = leagueTeams.map(t => t.id);
+  const teamIds = (leagueTeams || []).map(t => t?.id).filter(Boolean) as string[];
   const n = teamIds.length;
 
   // 1. Generate 14 League Matchdays (7 first leg + 7 second leg)
-  const halfRounds = n - 1; // 7
+  const halfRounds = n > 1 ? n - 1 : 1; // 7
   const leagueRounds: { homeId: string; awayId: string }[][] = [];
 
   // First leg (7 rounds)
@@ -871,12 +871,13 @@ export function generateMasterSeasonAgenda(
   }
 
   const isContinentalActive = !!continentalTournament;
+  const cupMatches = cupTournament?.matches || [];
   const startStage: 'round_of_64' | 'round_of_32' | 'round_of_16' | 'quarter' =
-    (cupTournament.matches || []).some(m => m.stage === 'round_of_64')
+    cupMatches.some(m => m?.stage === 'round_of_64')
       ? 'round_of_64'
-      : (cupTournament.matches || []).some(m => m.stage === 'round_of_32')
+      : cupMatches.some(m => m?.stage === 'round_of_32')
       ? 'round_of_32'
-      : (cupTournament.matches || []).some(m => m.stage === 'round_of_16')
+      : cupMatches.some(m => m?.stage === 'round_of_16')
       ? 'round_of_16'
       : 'quarter';
 
@@ -892,25 +893,25 @@ export function generateMasterSeasonAgenda(
           homeTeamId: m.homeId,
           awayTeamId: m.awayId,
           competitionType: 'league',
-          competitionName: activeLeague.name,
+          competitionName: activeLeague?.name || 'الدوري العام',
           stageName: rm.stageName,
           isPlayed: false,
         });
       });
     } else if (rm.type === 'cup' && rm.cupStage) {
-      const stageMatches = (cupTournament.matches || []).filter(m => m.stage === rm.cupStage);
+      const stageMatches = cupMatches.filter(m => m?.stage === rm.cupStage);
       if (stageMatches.length > 0) {
         stageMatches.forEach((qm, idx) => {
           masterFixtures.push({
-            id: qm.id || `fix_cup_${rm.cupStage}_${idx + 1}_s${seasonNumber}`,
+            id: qm?.id || `fix_cup_${rm.cupStage}_${idx + 1}_s${seasonNumber}`,
             round: rm.round,
-            homeTeamId: qm.homeTeamId,
-            awayTeamId: qm.awayTeamId,
+            homeTeamId: qm?.homeTeamId || '',
+            awayTeamId: qm?.awayTeamId || '',
             competitionType: 'cup',
-            competitionName: cupTournament.name,
+            competitionName: cupTournament?.name || 'كأس البطولة',
             cupStage: rm.cupStage,
             stageName: rm.stageName,
-            isPlayed: qm.isPlayed || false,
+            isPlayed: qm?.isPlayed || false,
           });
         });
       } else {
@@ -923,7 +924,7 @@ export function generateMasterSeasonAgenda(
             homeTeamId: '',
             awayTeamId: '',
             competitionType: 'cup',
-            competitionName: cupTournament.name,
+            competitionName: cupTournament?.name || 'كأس البطولة',
             cupStage: rm.cupStage,
             stageName: rm.stageName,
             isPlayed: false,
@@ -1778,7 +1779,7 @@ export function processNewSeasonAdvancement(
         previousDivision: oldDivisionTier,
       };
 
-      const existingIdx = targetLeagueSquads.findIndex(t => t.id === userClub.id);
+      const existingIdx = targetLeagueSquads.findIndex(t => t && userClub && t.id === userClub.id);
       if (existingIdx >= 0) {
         targetLeagueSquads[existingIdx] = promotedClubData;
       } else {
@@ -1794,7 +1795,7 @@ export function processNewSeasonAdvancement(
     } else {
       // User stayed in current league
       const updatedUserClub: Club = {
-        ...userClub,
+        ...(userClub || {} as Club),
         division: targetTier,
         country: currentCountry,
         leagueId: nextActiveLeague.id,
@@ -1803,7 +1804,7 @@ export function processNewSeasonAdvancement(
       };
       nextUserClub = updatedUserClub;
 
-      const existingIndex = leagueTeams.findIndex(t => t.id === userClub.id);
+      const existingIndex = leagueTeams.findIndex(t => t && userClub && t.id === userClub.id);
       if (existingIndex >= 0) {
         leagueTeams[existingIndex] = updatedUserClub;
       } else {
@@ -1816,22 +1817,26 @@ export function processNewSeasonAdvancement(
     const normOfferName = (acceptedJobOffer.clubName || '').trim();
 
     let newClubFound = leagueTeams.find(t => 
-      t.id.toLowerCase() === normOfferId ||
-      t.name.trim() === normOfferName ||
-      t.shortName?.trim() === normOfferName ||
-      (normOfferId.includes('madrid') && t.id.toLowerCase().includes('madrid') && 
-        (normOfferName.includes('أتلتيكو') ? t.name.includes('أتلتيكو') : !t.name.includes('أتلتيكو')))
+      t && t.id && (
+        t.id.toLowerCase() === normOfferId ||
+        t.name?.trim() === normOfferName ||
+        t.shortName?.trim() === normOfferName ||
+        (normOfferId.includes('madrid') && t.id.toLowerCase().includes('madrid') && 
+          (normOfferName.includes('أتلتيكو') ? t.name?.includes('أتلتيكو') : !t.name?.includes('أتلتيكو')))
+      )
     );
 
     // If not found in current leagueTeams, find in world clubs
     if (!newClubFound) {
       newClubFound = findClubInWorld(acceptedJobOffer.clubId);
       if (!newClubFound) {
-        for (const l of Object.values(GLOBAL_LEAGUES)) {
-          const m = (l.teams || []).find(t => 
-            t.id.toLowerCase() === normOfferId ||
-            t.name.trim() === normOfferName ||
-            t.shortName?.trim() === normOfferName
+        for (const l of Object.values(GLOBAL_LEAGUES || {})) {
+          const m = (l?.teams || []).find(t => 
+            t && t.id && (
+              t.id.toLowerCase() === normOfferId ||
+              t.name?.trim() === normOfferName ||
+              t.shortName?.trim() === normOfferName
+            )
           );
           if (m) {
             newClubFound = m;

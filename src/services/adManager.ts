@@ -25,6 +25,8 @@ class AdManagerService {
   private initPromise: Promise<boolean> | null = null;
   private isNative = false;
   private isBannerVisible = false;
+  private isBannerCreated = false;
+  private bannerOperationLock = false;
   private isInterstitialLoaded = false;
   private isRewardedLoaded = false;
   private isInterstitialShowing = false;
@@ -82,6 +84,7 @@ class AdManagerService {
 
   private loadState() {
     try {
+      if (typeof window === 'undefined' || !window.localStorage) return;
       const saved = localStorage.getItem(ADMOB_STORAGE_KEY);
       if (saved) {
         const parsed = JSON.parse(saved);
@@ -97,6 +100,7 @@ class AdManagerService {
 
   private saveState() {
     try {
+      if (typeof window === 'undefined' || !window.localStorage) return;
       localStorage.setItem(ADMOB_STORAGE_KEY, JSON.stringify(this.state));
       this.notifyListeners();
     } catch (e) {
@@ -188,6 +192,8 @@ class AdManagerService {
 
   /**
    * Shows a Banner Ad at the bottom of the screen (on non-match screens)
+   * High performance: Uses resumeBanner to instantly restore an existing native banner
+   * without destroying or re-allocating the Android AdView or triggering layout lag!
    */
   public async showBanner(): Promise<boolean> {
     if (this.state.isPremium) {
@@ -203,7 +209,11 @@ class AdManagerService {
 
     this.lastBannerRequestedState = true;
 
-    if (this.isBannerVisible && this.isNative) return true;
+    // If already visible or operation currently in-flight, skip redundant native bridge call
+    if (this.isBannerVisible) return true;
+    if (this.bannerOperationLock) return false;
+
+    this.bannerOperationLock = true;
 
     try {
       const initialized = await this.initialize();
@@ -213,53 +223,98 @@ class AdManagerService {
       }
 
       if (this.isNative) {
-        const options: BannerAdOptions = {
-          adId: ADMOB_CONFIG.BANNER_ID,
-          adSize: BannerAdSize.ADAPTIVE_BANNER,
-          position: BannerAdPosition.BOTTOM_CENTER,
-          margin: 0,
-          isTesting: ADMOB_CONFIG.IS_TEST_MODE,
-        };
+        if (this.isBannerCreated) {
+          // Instant resume: preserves existing View in memory, 0 network delay, 0 layout thrashing!
+          try {
+            await AdMob.resumeBanner();
+            this.isBannerVisible = true;
+            this.log('Native Banner Resumed smoothly');
+          } catch (resumeErr) {
+            this.log('Banner resume notice, re-creating view:', resumeErr);
+            const options: BannerAdOptions = {
+              adId: ADMOB_CONFIG.BANNER_ID,
+              adSize: BannerAdSize.BANNER,
+              position: BannerAdPosition.BOTTOM_CENTER,
+              margin: 0,
+              isTesting: ADMOB_CONFIG.IS_TEST_MODE,
+            };
+            await AdMob.showBanner(options);
+            this.isBannerCreated = true;
+            this.isBannerVisible = true;
+          }
+        } else {
+          // First time creation - use standard 320x50 BANNER to prevent dynamic layout shifts
+          const options: BannerAdOptions = {
+            adId: ADMOB_CONFIG.BANNER_ID,
+            adSize: BannerAdSize.BANNER,
+            position: BannerAdPosition.BOTTOM_CENTER,
+            margin: 0,
+            isTesting: ADMOB_CONFIG.IS_TEST_MODE,
+          };
 
-        await AdMob.showBanner(options);
-        this.log('Banner Loaded & Shown natively (Adaptive Banner at BOTTOM_CENTER)');
+          await AdMob.showBanner(options);
+          this.isBannerCreated = true;
+          this.isBannerVisible = true;
+          this.log('Native Banner Loaded & Shown natively (Fixed BANNER at BOTTOM_CENTER)');
+        }
       } else {
+        this.isBannerVisible = true;
         this.log('Banner Loaded (Web Simulation)');
       }
 
-      this.isBannerVisible = true;
       return true;
     } catch (error) {
       this.log('Banner Failed to show:', error);
       this.isBannerVisible = false;
       return false;
+    } finally {
+      this.bannerOperationLock = false;
     }
   }
 
   /**
-   * Hides the Banner Ad (e.g. during Live Match or before full-screen Interstitials)
+   * Hides the Banner Ad smoothly without destroying the native Android view.
+   * This allows immediate smooth tab switching without Android UI thread lag!
    */
   public async hideBanner(): Promise<boolean> {
     this.lastBannerRequestedState = false;
 
-    if (!this.isBannerVisible && !this.isNative) return true;
+    if (!this.isBannerVisible) return true;
+    if (this.bannerOperationLock) return false;
+
+    this.bannerOperationLock = true;
 
     try {
-      if (this.isNative) {
+      if (this.isNative && this.isBannerCreated) {
         try {
           await AdMob.hideBanner();
-        } catch {}
-        try {
-          await AdMob.removeBanner();
-        } catch {}
+        } catch (hideErr) {
+          this.log('Banner hide error:', hideErr);
+        }
       }
       this.isBannerVisible = false;
-      this.log('Banner safely hidden and detached');
+      this.log('Banner smoothly hidden (view cached in memory)');
       return true;
     } catch (error) {
       this.log('Banner hide notice:', error);
       this.isBannerVisible = false;
       return false;
+    } finally {
+      this.bannerOperationLock = false;
+    }
+  }
+
+  /**
+   * Completely removes the native banner view (used when user purchases Premium)
+   */
+  public async destroyBanner(): Promise<void> {
+    this.lastBannerRequestedState = false;
+    this.isBannerVisible = false;
+    this.isBannerCreated = false;
+    if (this.isNative) {
+      try {
+        await AdMob.removeBanner();
+      } catch {}
     }
   }
 
@@ -390,17 +445,17 @@ class AdManagerService {
       this.state.lastInterstitialTimestamp = Date.now();
       this.saveState();
 
-      // 4. Android Activity resume stabilization tick (400ms) to ensure smooth WebView rendering
+      // 4. Android Activity resume stabilization tick (600ms) to ensure smooth WebView rendering
       setTimeout(() => {
-        if (hadBannerBeforeInterstitial && !this.state.isPremium) {
+        if (hadBannerBeforeInterstitial && !this.state.isPremium && this.lastBannerRequestedState) {
           this.showBanner();
         }
-      }, 400);
+      }, 600);
 
-      // 5. Preload next interstitial with 25s safe cooldown (never immediate)
+      // 5. Preload next interstitial with 35s safe cooldown (never immediate)
       setTimeout(() => {
         this.loadInterstitial();
-      }, 25000);
+      }, 35000);
 
       return true;
     } catch (error) {
@@ -410,10 +465,10 @@ class AdManagerService {
       
       // Attempt restoring banner on failure after stabilization
       setTimeout(() => {
-        if (hadBannerBeforeInterstitial && !this.state.isPremium) {
+        if (hadBannerBeforeInterstitial && !this.state.isPremium && this.lastBannerRequestedState) {
           this.showBanner();
         }
-      }, 400);
+      }, 600);
 
       return false;
     }
@@ -633,7 +688,7 @@ class AdManagerService {
   public setPremium(premium: boolean): void {
     this.state.isPremium = premium;
     if (premium) {
-      this.hideBanner();
+      this.destroyBanner();
     }
     this.saveState();
     this.log(`Premium status updated: ${premium}`);

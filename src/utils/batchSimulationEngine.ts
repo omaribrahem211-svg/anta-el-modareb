@@ -59,8 +59,10 @@ export function simulateMultipleLeagueRounds(
 
     // Simulate each fixture of this round
     currentRoundFixtures.forEach(fix => {
-      const homeTeam = simTeams.find(t => t.id === fix.homeTeamId) || simTeams[0];
-      const awayTeam = simTeams.find(t => t.id === fix.awayTeamId) || simTeams[1];
+      const homeTeam = simTeams.find(t => t && t.id === fix.homeTeamId) || simTeams[0];
+      const awayTeam = simTeams.find(t => t && t.id === fix.awayTeamId) || simTeams[1];
+
+      if (!homeTeam || !awayTeam) return;
 
       const matchRes = simulateMatch(homeTeam, awayTeam, homeTeam.tactics, awayTeam.tactics);
 
@@ -121,7 +123,7 @@ export function simulateMultipleLeagueRounds(
       const isWin = tScore > oppScore;
       const isDraw = tScore === oppScore;
 
-      const startingIds = club.tactics?.startingPlayerIds || (club.players || []).slice(0, 11).map(p => p.id);
+      const startingIds = club.tactics?.startingPlayerIds || (club.players || []).slice(0, 11).map(p => p?.id).filter(Boolean) as string[];
 
       const updateRes = processPostMatchPlayerUpdates(
         club,
@@ -133,8 +135,8 @@ export function simulateMultipleLeagueRounds(
       );
 
       // Update basic appearances for starters
-      const finalPlayers = updateRes.updatedPlayers.map(p => {
-        const isStarter = startingIds.includes(p.id);
+      const finalPlayers = (updateRes.updatedPlayers || []).filter(Boolean).map(p => {
+        const isStarter = p?.id ? startingIds.includes(p.id) : false;
         const currentApps = p.stats?.appearances || 0;
         return {
           ...p,

@@ -14,7 +14,7 @@ export function validateSquadLineup(club: Club | null): SquadValidationResult {
     };
   }
 
-  const squad = Array.isArray(club.players) ? club.players : [];
+  const squad = (Array.isArray(club.players) ? club.players : []).filter(Boolean);
   const starterIds = club.tactics.startingPlayerIds || [];
   const invalidStarters: { player: Player; reason: 'injured' | 'suspended' | 'missing'; description: string }[] = [];
 
@@ -24,7 +24,7 @@ export function validateSquadLineup(club: Club | null): SquadValidationResult {
 
   // Check each player in the starting XI
   starterIds.forEach((id, index) => {
-    const player = squad.find(p => p.id === id);
+    const player = squad.find(p => p && p.id === id);
 
     if (!player) {
       hasMissing = true;
@@ -117,8 +117,8 @@ export function autoFixSquadLineup(club: Club): {
     passingStyle: 'short',
     pressingIntensity: 'balanced',
     tempo: 'balanced',
-    startingPlayerIds: squad.slice(0, 11).map(p => p.id),
-    benchPlayerIds: squad.slice(11, 18).map(p => p.id),
+    startingPlayerIds: squad.slice(0, 11).map(p => p?.id).filter(Boolean) as string[],
+    benchPlayerIds: squad.slice(11, 18).map(p => p?.id).filter(Boolean) as string[],
     captainId: squad[0]?.id || '',
     penaltyTakerId: squad[0]?.id || '',
     freeKickTakerId: squad[0]?.id || '',
@@ -126,6 +126,7 @@ export function autoFixSquadLineup(club: Club): {
   };
 
   const isEligible = (p: Player) => {
+    if (!p) return false;
     const isInjured = p.injury && p.injury.daysRemaining > 0;
     const isSusp = p.isSuspended || (p.suspensionMatches && p.suspensionMatches > 0);
     return !isInjured && !isSusp;
@@ -138,7 +139,7 @@ export function autoFixSquadLineup(club: Club): {
 
   // Pass 1: Keep valid starters
   currentStarters.forEach((id) => {
-    const p = squad.find(player => player.id === id);
+    const p = squad.find(player => player && player.id === id);
     if (p && isEligible(p) && !usedPlayerIds.has(p.id)) {
       newStarters.push(p.id);
       usedPlayerIds.add(p.id);
@@ -147,7 +148,7 @@ export function autoFixSquadLineup(club: Club): {
 
   // Pass 2: For slots that were invalid or missing, find best fit replacements
   currentStarters.forEach((id, index) => {
-    const p = squad.find(player => player.id === id);
+    const p = squad.find(player => player && player.id === id);
     const needsReplacement = !p || !isEligible(p);
 
     if (needsReplacement && newStarters.length < 11) {
@@ -155,7 +156,7 @@ export function autoFixSquadLineup(club: Club): {
       
       // Find eligible squad members not yet in starting XI
       const candidates = squad
-        .filter(cand => !usedPlayerIds.has(cand.id) && isEligible(cand))
+        .filter(cand => cand && cand.id && !usedPlayerIds.has(cand.id) && isEligible(cand))
         .sort((a, b) => {
           // Category match boost
           const aMatch = a.positionCategory === targetCategory ? 50 : 0;
@@ -194,14 +195,15 @@ export function autoFixSquadLineup(club: Club): {
 
   // Bench: Pick next 7 available players (or all remaining)
   const newBench = squad
-    .filter(p => !usedPlayerIds.has(p.id))
+    .filter(p => p && p.id && !usedPlayerIds.has(p.id))
     .sort((a, b) => {
       const aElig = isEligible(a) ? 20 : 0;
       const bElig = isEligible(b) ? 20 : 0;
-      return (bElig + b.overallRating) - (aElig + a.overallRating);
+      return (bElig + (b?.overallRating || 50)) - (aElig + (a?.overallRating || 50));
     })
     .slice(0, 7)
-    .map(p => p.id);
+    .map(p => p?.id)
+    .filter(Boolean) as string[];
 
   return {
     updatedStartingPlayerIds: newStarters,

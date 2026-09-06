@@ -352,8 +352,8 @@ export function initUefaChampionsLeague(
 // ----------------------------------------------------
 
 export function simulateKnockoutMatch(
-  homeTeam: Club,
-  awayTeam: Club
+  homeTeam?: Club,
+  awayTeam?: Club
 ): {
   homeScore: number;
   awayScore: number;
@@ -363,7 +363,9 @@ export function simulateKnockoutMatch(
   events: MatchEvent[];
   stats: MatchStats;
 } {
-  const baseResult = simulateMatch(homeTeam, awayTeam);
+  const safeHome = homeTeam || ({ id: 'home_dummy', name: 'الفريق المضيف', shortName: 'مض', reputation: 50, players: [] } as any);
+  const safeAway = awayTeam || ({ id: 'away_dummy', name: 'الفريق الضيف', shortName: 'ضف', reputation: 50, players: [] } as any);
+  const baseResult = simulateMatch(safeHome, safeAway);
   let homeScore = baseResult.homeScore;
   let awayScore = baseResult.awayScore;
   let homePenalties: number | undefined = undefined;
@@ -371,13 +373,13 @@ export function simulateKnockoutMatch(
   let winnerTeamId = '';
 
   if (homeScore > awayScore) {
-    winnerTeamId = homeTeam.id;
+    winnerTeamId = safeHome.id;
   } else if (awayScore > homeScore) {
-    winnerTeamId = awayTeam.id;
+    winnerTeamId = safeAway.id;
   } else {
     // Scores are tied -> Penalty shootout!
-    const homeRep = homeTeam.reputation || 50;
-    const awayRep = awayTeam.reputation || 50;
+    const homeRep = safeHome.reputation || 50;
+    const awayRep = safeAway.reputation || 50;
     const repDiff = homeRep - awayRep;
 
     // Simulate 5 penalties each
@@ -400,9 +402,9 @@ export function simulateKnockoutMatch(
 
     homePenalties = homeP;
     awayPenalties = awayP;
-    winnerTeamId = homeP > awayP ? homeTeam.id : awayTeam.id;
+    winnerTeamId = homeP > awayP ? safeHome.id : safeAway.id;
 
-    const winnerClub = winnerTeamId === homeTeam.id ? homeTeam : awayTeam;
+    const winnerClub = winnerTeamId === safeHome.id ? safeHome : safeAway;
     baseResult.events.push({
       minute: 120,
       type: 'commentary',

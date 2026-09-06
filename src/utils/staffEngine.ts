@@ -219,7 +219,7 @@ export function executeSmartAutoSub(
     !p.injury && 
     !p.isInjured && 
     !p.isSuspended && 
-    (currentStaminas[p.id] ?? p.fitness ?? 100) >= 55
+    (currentStaminas[p.id] ?? p.fitness ?? 100) >= 30
   );
 
   if (validBench.length === 0) return null;
@@ -239,104 +239,136 @@ export function executeSmartAutoSub(
     let reason = '';
 
     if (isPlayerInjured) {
-      needScore += 180;
+      needScore += 350;
       reason = 'إصابة عضلية طارئة وعدم قدرة على إكمال المباراة';
-    } else if (stamina < 60) {
-      needScore += 90;
-      reason = 'هبوط حاد في طاقة اللياقة والسرعة البدنية';
-    } else if (stamina < 75) {
-      needScore += 60;
-      reason = 'تراجع منسوب النشاط البدني وتفادي الإجهاد';
-    } else if ((player.stats?.averageRating || 6.5) < 5.8) {
-      needScore += 35;
-      reason = 'تنشيط تكتيكي لرفع نسق وفاعلية الخط';
-    }
-
-    // Yellow card caution risk for Defenders / Midfielders
-    if (yellowCardedIds.includes(player.id) && (player.positionCategory === 'DEF' || player.positionCategory === 'MID')) {
-      needScore += 40;
-      if (!reason) reason = 'تبديل احترازي بعد نيل بطاقة صفراء تجنباً للطرد';
-    }
-
-    // Tactical context adjustments
-    if (minute >= 70) {
-      if (isTrailing) {
-        // When trailing: We need goals! Don't sub out fresh attackers; sub out tired defenders/mids for attackers
-        if (player.positionCategory === 'DEF' && stamina < 78) {
-          needScore += 35;
-          reason = 'تبديل هجومي شجاع لتكثيف الضغط وإدراك التعادل';
-        } else if (player.positionCategory === 'FWD' && !isPlayerInjured && stamina >= 70) {
-          needScore -= 40; // keep goal threats on pitch
-        }
-      } else if (isLeading && minute >= 75) {
-        // When leading: Preserve the win! Sub out tired attackers for defensive stability
-        if (player.positionCategory === 'FWD' && stamina < 78) {
-          needScore += 35;
-          reason = 'تبديل تكتيكي استراتيجي لتأمين التقدم وحماية النتيجة';
-        }
-      } else if (stamina < 75) {
-        // Tied: Fresh legs to push for the winner
-        needScore += 25;
-        if (!reason) reason = 'ضخ دماء جديدة لكسر التعادل وحسم النقاط الثلاث';
+    } else {
+      // Natural minute accumulation fatigue (players tire as match progresses)
+      if (minute >= 50) {
+        needScore += (minute - 50) * 1.8;
       }
-    }
 
-    // High natural fatigue based on position (Wingers and Box-to-Box midfielders run the most)
-    if (['LM', 'RM', 'LW', 'RW', 'CAM', 'CM'].includes(player.position) && minute >= 60) {
-      needScore += 15;
+      if (stamina < 60) {
+        needScore += 95;
+        reason = 'هبوط حاد في طاقة اللياقة والسرعة البدنية';
+      } else if (stamina < 75) {
+        needScore += 65;
+        reason = 'تراجع منسوب النشاط البدني وتفادي الإجهاد';
+      } else if (stamina < 88) {
+        needScore += 40;
+        reason = 'تنشيط دماء جديدة وتجديد الحيوية البدنية';
+      }
+
+      // Performance rating check
+      if ((player.stats?.averageRating || 6.5) < 6.0) {
+        needScore += 35;
+        if (!reason) reason = 'تنشيط تكتيكي لرفع نسق وفاعلية الخط';
+      }
+
+      // Yellow card caution risk for Defenders / Midfielders
+      if (yellowCardedIds.includes(player.id) && (player.positionCategory === 'DEF' || player.positionCategory === 'MID')) {
+        needScore += 45;
+        if (!reason) reason = 'تبديل احترازي بعد نيل بطاقة صفراء تجنباً للطرد';
+      }
+
+      // High natural running load positions (Wingers and central midfielders)
+      if (['LM', 'RM', 'LW', 'RW', 'CAM', 'CM'].includes(player.position) && minute >= 55) {
+        needScore += 25;
+        if (!reason) reason = 'ضخ سرعات جديدة في الأجنحة ووسط الميدان';
+      }
+
+      // Tactical context adjustments
+      if (minute >= 65) {
+        if (isTrailing) {
+          // Chasing game: Keep fresh attackers on pitch, sub off tired defenders/defensive mids
+          if (player.positionCategory === 'DEF' && stamina < 85) {
+            needScore += 35;
+            reason = 'تبديل هجومي شجاع لزيادة الكثافة العددية وإدراك التعادل';
+          } else if (player.positionCategory === 'FWD' && stamina >= 75) {
+            needScore -= 25; // Protect top attacking goal threat
+          }
+        } else if (isLeading && minute >= 70) {
+          // Protecting lead: Refresh attackers with fresh legs who can press, or bring defensive stability
+          if (player.positionCategory === 'FWD' && stamina < 85) {
+            needScore += 35;
+            reason = 'تأمين التقدم والحفاظ على نظافة الشباك بالضغط المتقدم';
+          }
+        } else {
+          // Tied game
+          if (stamina < 85) {
+            needScore += 25;
+            if (!reason) reason = 'ضخ دماء جديدة لكسر التعادل وحسم النقاط الثلاث';
+          }
+        }
+      }
     }
 
     return { player, stamina, needScore, reason };
   });
 
-  // Sort descending by need
-  candidates.sort((a, b) => b.needScore - a.needScore);
+  // Filter candidates who have legitimate need (needScore >= 10) and sort descending
+  const viableCandidates = candidates
+    .filter(c => c.needScore >= 10)
+    .sort((a, b) => b.needScore - a.needScore);
 
-  // Minimum need score threshold
-  const targetSubOut = candidates.find(c => c.needScore >= 35);
-  if (!targetSubOut) return null;
+  if (viableCandidates.length === 0) return null;
 
-  const outPlayer = targetSubOut.player;
+  // 2. Evaluate all candidate-bench pairs to find the most effective and feasible substitution
+  interface SubPair {
+    outPlayer: Player;
+    inPlayer: Player;
+    reason: string;
+    pairScore: number;
+  }
 
-  // 2. Score bench candidates to find the most suitable replacement
-  const scoredBench = validBench.map(benchP => {
-    // Goalkeepers only come on if the outgoing player is also a goalkeeper
-    if (benchP.positionCategory === 'GK' && outPlayer.positionCategory !== 'GK') {
-      return { player: benchP, score: -999 };
+  const evaluatedPairs: SubPair[] = [];
+
+  for (const cand of viableCandidates) {
+    const outPlayer = cand.player;
+    const isOutGK = outPlayer.positionCategory === 'GK';
+
+    for (const benchP of validBench) {
+      const isInGK = benchP.positionCategory === 'GK';
+
+      // Goalkeepers only replace goalkeepers and vice-versa
+      if (isInGK !== isOutGK) continue;
+
+      const benchStamina = currentStaminas[benchP.id] ?? benchP.fitness ?? 100;
+      let fitScore = (benchP.overallRating || 60) * 0.8 + benchStamina * 0.4;
+
+      // Positional matching logic:
+      if (benchP.position === outPlayer.position) {
+        fitScore += 70; // Exact position match (e.g. ST for ST, CB for CB, CM for CM)
+      } else if (benchP.positionCategory === outPlayer.positionCategory) {
+        fitScore += 45; // Same line (e.g. RW for LW, CAM for CM, RB for LB)
+      } else if (isTrailing && minute >= 65 && (outPlayer.positionCategory === 'DEF' || outPlayer.positionCategory === 'MID') && benchP.positionCategory === 'FWD') {
+        fitScore += 50; // Offensive tactical sub
+      } else if (isLeading && minute >= 70 && outPlayer.positionCategory === 'FWD' && (benchP.positionCategory === 'MID' || benchP.positionCategory === 'DEF')) {
+        fitScore += 50; // Defensive tactical sub
+      } else if (!isOutGK && !isInGK) {
+        fitScore += 15; // Cross-line outfield sub (versatility)
+      } else {
+        fitScore -= 50;
+      }
+
+      if (fitScore > 0) {
+        evaluatedPairs.push({
+          outPlayer,
+          inPlayer: benchP,
+          reason: cand.reason || 'تنشيط تكتيكي لرفع أداء الفريق',
+          pairScore: cand.needScore * 1.5 + fitScore,
+        });
+      }
     }
-    if (benchP.positionCategory !== 'GK' && outPlayer.positionCategory === 'GK') {
-      return { player: benchP, score: -999 };
-    }
+  }
 
-    const stamina = currentStaminas[benchP.id] ?? benchP.fitness ?? 100;
-    let score = (benchP.overallRating || 60) * 0.5 + stamina * 0.3;
+  if (evaluatedPairs.length === 0) return null;
 
-    // Positional matching
-    if (benchP.position === outPlayer.position) {
-      score += 45; // Exact position match (e.g. ST for ST, CB for CB)
-    } else if (benchP.positionCategory === outPlayer.positionCategory) {
-      score += 28; // Same line (e.g. RW for LW, CAM for CM)
-    } else if (isTrailing && minute >= 70 && outPlayer.positionCategory === 'DEF' && (benchP.positionCategory === 'FWD' || benchP.positionCategory === 'MID')) {
-      // Tactical offensive sub: forward/midfielder coming on for a defender
-      score += 35;
-    } else if (isLeading && minute >= 75 && outPlayer.positionCategory === 'FWD' && (benchP.positionCategory === 'DEF' || benchP.positionCategory === 'MID')) {
-      // Tactical defensive sub: defender/midfielder coming on for a forward
-      score += 35;
-    } else {
-      score -= 30; // Unfavorable position shift
-    }
-
-    return { player: benchP, score };
-  });
-
-  scoredBench.sort((a, b) => b.score - a.score);
-
-  const bestReplacement = scoredBench[0];
-  if (!bestReplacement || bestReplacement.score < 0) return null;
+  evaluatedPairs.sort((a, b) => b.pairScore - a.pairScore);
+  const bestPair = evaluatedPairs[0];
 
   return {
-    outPlayer,
-    inPlayer: bestReplacement.player,
-    reason: targetSubOut.reason || 'تنشيط تكتيكي لرفع أداء الفريق',
+    outPlayer: bestPair.outPlayer,
+    inPlayer: bestPair.inPlayer,
+    reason: bestPair.reason,
   };
 }

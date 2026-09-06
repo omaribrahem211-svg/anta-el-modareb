@@ -217,7 +217,7 @@ export const CareerTab: React.FC = () => {
               <div className="flex flex-wrap items-center gap-2 mt-1">
                 <span className="text-xs text-slate-400">{manager.age} سنة • {manager.nationality}</span>
                 <span className="text-[10px] bg-amber-950 text-amber-300 border border-amber-700 px-2 py-0.5 rounded-full font-bold">
-                  رخصة التدريب: CAF-{manager.license}
+                  رخصة التدريب: CAF-{manager.license || 'D'}
                 </span>
                 <span className="text-[10px] bg-blue-950 text-blue-300 border border-blue-800 px-2 py-0.5 rounded-full font-bold">
                   الموسم الحالي: {season.seasonNumber}
@@ -412,13 +412,23 @@ export const CareerTab: React.FC = () => {
         {/* Courses Grid */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           {filteredCourses.map(course => {
-            const isCompleted = completedCoursesList.includes(course.id);
+            const licenseRankMap: Record<string, number> = {
+              'D': 1,
+              'C': 2,
+              'B': 3,
+              'A': 4,
+              'PRO': 5,
+            };
+            const currentLicense = (manager.license && licenseRankMap[manager.license]) ? manager.license : 'D';
+            const currentRank = licenseRankMap[currentLicense] || 1;
+
+            const courseGrantsRank = course.grantsLicense ? (licenseRankMap[course.grantsLicense] || 0) : 0;
+            const isCompleted = completedCoursesList.includes(course.id) || 
+              (course.category === 'license' && courseGrantsRank > 0 && (course.id === 'license_d' ? (completedCoursesList.includes('license_d') || currentRank > 1) : currentRank >= courseGrantsRank));
+
             const canAfford = (manager.personalWallet || 0) >= course.cost;
-            const hasPrerequisite = !course.requiredLicense || 
-              (course.requiredLicense === 'D' && ['D', 'C', 'B', 'A', 'PRO'].includes(manager.license)) ||
-              (course.requiredLicense === 'C' && ['C', 'B', 'A', 'PRO'].includes(manager.license)) ||
-              (course.requiredLicense === 'B' && ['B', 'A', 'PRO'].includes(manager.license)) ||
-              (course.requiredLicense === 'A' && ['A', 'PRO'].includes(manager.license));
+            const requiredRank = course.requiredLicense ? (licenseRankMap[course.requiredLicense] || 1) : 0;
+            const hasPrerequisite = !course.requiredLicense || (currentRank >= requiredRank);
 
             return (
               <div

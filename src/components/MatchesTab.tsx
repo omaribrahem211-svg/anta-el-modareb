@@ -2,12 +2,19 @@ import React, { useEffect, useRef, useState, useMemo } from 'react';
 import { useGame } from '../context/GameContext';
 import { TacticalPitch2D } from './TacticalPitch2D';
 import { StadiumSponsorBanner } from './StadiumSponsorBanner';
-import { FormationType, TacticalMentality, PressingIntensity, Club } from '../types/game';
+import { FormationType, TacticalMentality, PressingIntensity, Club, MatchEvent, TeamTactics } from '../types/game';
 import { useLanguage } from '../utils/i18n';
 import { calculateSquadStrength, calculateMatchProbabilities, calculateDynamicManagerRating } from '../utils/rankingsEngine';
 import { getOrCreateClubManager } from '../data/worldManagersData';
 import { getPositionArabic } from '../utils/positionHelper';
 import { findClubInWorld, getClubDisplayName } from '../data/leaguesData';
+import { LiveTacticalAlertBanner } from './LiveTacticalAlertBanner';
+import {
+  analyzeLiveMatchSituation,
+  isTacticalAdviceApplied,
+  TacticalAlert,
+  TACTICAL_ARABIC_LABELS,
+} from '../utils/tacticalAdvisor';
 import confetti from 'canvas-confetti';
 import {
   Swords,
@@ -43,6 +50,7 @@ import {
   Lock,
   Unlock,
   FileText,
+  Clock,
   BrainCircuit,
   CalendarDays,
   Coins,
@@ -72,6 +80,7 @@ export const MatchesTab: React.FC = () => {
     changeLiveMentality,
     changeLivePressing,
     setFormation,
+    updateTactics,
     seasonFinished,
     openSeasonModal,
     season,
@@ -113,8 +122,91 @@ export const MatchesTab: React.FC = () => {
     }
   };
   const [subToast, setSubToast] = useState<string | null>(null);
+  const [tacticalToast, setTacticalToast] = useState<string | null>(null);
+  const [snoozedTacticalAlerts, setSnoozedTacticalAlerts] = useState<Record<string, number>>({});
   const [teamTalkChosen, setTeamTalkChosen] = useState<string | null>(null);
   const [showCommentary, setShowCommentary] = useState<boolean>(true);
+
+  // Reset tactical alert snoozes when match starts
+  useEffect(() => {
+    if (!liveMatch || liveMatch.currentMinute <= 1) {
+      setSnoozedTacticalAlerts({});
+    }
+  }, [liveMatch?.fixtureId, liveMatch?.currentMinute]);
+
+  // Compute live smart tactical advisory alert
+  const activeTacticalAlert = useMemo(() => {
+    if (!liveMatch || !userClub || liveMatch.isFinished) return null;
+    return analyzeLiveMatchSituation(liveMatch, userClub, snoozedTacticalAlerts);
+  }, [liveMatch, userClub, snoozedTacticalAlerts]);
+
+  // Check if current tactical advice is already applied
+  const isAdviceApplied = useMemo(() => {
+    if (!activeTacticalAlert || !userClub?.tactics) return false;
+    return isTacticalAdviceApplied(activeTacticalAlert, userClub.tactics);
+  }, [activeTacticalAlert, userClub?.tactics]);
+
+  // Handler to apply tactical advice instantly with one click
+  const handleApplyTacticalAlert = (alert: TacticalAlert) => {
+    if (!userClub?.tactics) return;
+
+    const currentTactics = userClub.tactics;
+    const updatedTactics: TeamTactics = {
+      ...currentTactics,
+      formation: alert.suggestedFormation || currentTactics.formation,
+      mentality: alert.suggestedMentality || currentTactics.mentality,
+      pressingIntensity: alert.suggestedPressing || currentTactics.pressingIntensity,
+      passingStyle: alert.suggestedPassingStyle || currentTactics.passingStyle,
+      defensiveLine: alert.suggestedDefensiveLine || currentTactics.defensiveLine,
+      teamWidth: alert.suggestedTeamWidth || currentTactics.teamWidth,
+      tacticalStyle: alert.suggestedTacticalStyle || currentTactics.tacticalStyle,
+    };
+
+    updateTactics(updatedTactics);
+    if (alert.suggestedFormation) {
+      setFormation(alert.suggestedFormation);
+    }
+    if (alert.suggestedMentality) {
+      changeLiveMentality(alert.suggestedMentality);
+    }
+    if (alert.suggestedPressing) {
+      changeLivePressing(alert.suggestedPressing);
+    }
+
+    // Add immediate in-game commentary event
+    if (liveMatch && !liveMatch.isFinished) {
+      const commentaryDesc = `⚡ قرار تكتيكي عاجل من المدرب: تنفيذ توصية (${alert.badge}) بالتحول لتشكيل (${alert.suggestedFormation || currentTactics.formation}) واللعب بأسلوب (${alert.suggestedMentality ? TACTICAL_ARABIC_LABELS.mentality[alert.suggestedMentality] : 'متوازن'}) مع ضغط (${alert.suggestedPressing ? TACTICAL_ARABIC_LABELS.pressing[alert.suggestedPressing] : 'متقدم'}) لاستعادة السيطرة!`;
+      
+      const newEvent: MatchEvent = {
+        minute: Math.max(1, liveMatch.currentMinute),
+        type: 'commentary',
+        teamId: userClub.id,
+        description: commentaryDesc,
+      };
+      liveMatch.events.push(newEvent);
+    }
+
+    const formationText = alert.suggestedFormation ? `الخطة ${alert.suggestedFormation}` : '';
+    const mentalityText = alert.suggestedMentality ? `عقلية ${TACTICAL_ARABIC_LABELS.mentality[alert.suggestedMentality]}` : '';
+    setTacticalToast(`✅ تم تطبيق التعديل التكتيكي بنجاح! تم اعتماد ${formationText} و ${mentalityText} 🟢`);
+    setTimeout(() => {
+      setTacticalToast(null);
+    }, 4500);
+
+    // Snooze this specific alert category for 15 simulated minutes
+    setSnoozedTacticalAlerts(prev => ({
+      ...prev,
+      [alert.id]: (liveMatch?.currentMinute || 0) + 15,
+    }));
+  };
+
+  // Handler to dismiss or snooze alert
+  const handleDismissTacticalAlert = (alertId: string) => {
+    setSnoozedTacticalAlerts(prev => ({
+      ...prev,
+      [alertId]: (liveMatch?.currentMinute || 0) + 12,
+    }));
+  };
 
   // Auto scroll commentary container ONLY internally (never scroll whole page)
   useEffect(() => {
@@ -125,7 +217,7 @@ export const MatchesTab: React.FC = () => {
 
   // Confetti on win after match finishes
   useEffect(() => {
-    if (liveMatch && liveMatch.isFinished && userClub) {
+    if (liveMatch && liveMatch.isFinished && userClub?.id) {
       const isUserHome = liveMatch.homeTeam?.id === userClub.id;
       const userGoals = isUserHome ? liveMatch.homeScore : liveMatch.awayScore;
       const oppGoals = isUserHome ? liveMatch.awayScore : liveMatch.homeScore;
@@ -145,17 +237,17 @@ export const MatchesTab: React.FC = () => {
   }, [liveMatch?.isFinished]);
 
   // Current Round Fixtures
-  const roundFixtures = fixtures.filter(f => f.round === currentRound);
-  const userFixture = userClub && !manager.isUnemployed 
-    ? roundFixtures.find(f => f.homeTeamId === userClub.id || f.awayTeamId === userClub.id)
+  const roundFixtures = (fixtures || []).filter(f => f && f.round === currentRound);
+  const userFixture = userClub?.id && !manager.isUnemployed 
+    ? roundFixtures.find(f => f && (f.homeTeamId === userClub.id || f.awayTeamId === userClub.id))
     : undefined;
 
   // Resolve upcoming match details for user club
   const upcomingMatchAnalysis = useMemo(() => {
-    if (!userFixture || !userClub) return null;
+    if (!userFixture || !userClub?.id) return null;
     const isUserHome = userFixture.homeTeamId === userClub.id;
     const oppTeamId = isUserHome ? userFixture.awayTeamId : userFixture.homeTeamId;
-    const oppClub = (oppTeamId ? (teams.find(t => t.id === oppTeamId) || findClubInWorld(oppTeamId)) : null) || null;
+    const oppClub = (oppTeamId ? (teams.find(t => t && t.id === oppTeamId) || findClubInWorld(oppTeamId)) : null) || null;
 
     if (!oppClub) return null;
 
@@ -390,6 +482,24 @@ export const MatchesTab: React.FC = () => {
           </div>
         )}
 
+        {/* Tactical Feedback Toast */}
+        {tacticalToast && (
+          <div className="p-3 bg-emerald-950/90 border border-emerald-500 rounded-2xl text-emerald-200 text-xs font-bold flex items-center gap-2 animate-fade-in shadow-xl">
+            <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+            <span>{tacticalToast}</span>
+          </div>
+        )}
+
+        {/* Smart In-Match Tactical Advisory Alert */}
+        {!liveMatch.isFinished && activeTacticalAlert && (
+          <LiveTacticalAlertBanner
+            alert={activeTacticalAlert}
+            onApply={handleApplyTacticalAlert}
+            onDismiss={handleDismissTacticalAlert}
+            isApplied={isAdviceApplied}
+          />
+        )}
+
         {/* 2D Tactical Pitch Component */}
         <div className="bg-slate-900 border border-slate-800 rounded-3xl p-4 shadow-xl space-y-2.5">
           <div className="flex items-center justify-between">
@@ -457,12 +567,60 @@ export const MatchesTab: React.FC = () => {
               </div>
             </div>
 
-            {/* Quick Mentality Selectors */}
+            {/* Quick Formation Selectors */}
             <div className="space-y-1.5">
-              <span className="text-[10px] text-slate-400">عقلية اللعب الحالية:</span>
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] text-slate-400">تشكيل الفريق الميداني:</span>
+                {activeTacticalAlert?.suggestedFormation && (
+                  <span className="text-[10px] text-amber-400 font-bold flex items-center gap-1">
+                    <Sparkles className="w-3 h-3 text-amber-400" />
+                    <span>توصية المساعد: {activeTacticalAlert.suggestedFormation}</span>
+                  </span>
+                )}
+              </div>
+              <div className="grid grid-cols-3 sm:grid-cols-6 gap-1.5">
+                {(['4-3-3', '4-4-2', '4-2-3-1', '3-5-2', '5-3-2', '4-1-4-1'] as FormationType[]).map(form => {
+                  const isSelected = userClub.tactics?.formation === form;
+                  const isSuggested = activeTacticalAlert?.suggestedFormation === form;
+                  return (
+                    <button
+                      key={form}
+                      onClick={() => setFormation(form)}
+                      className={`py-1.5 px-1 rounded-xl text-[11px] font-mono font-bold border transition-all text-center cursor-pointer relative ${
+                        isSelected
+                          ? 'bg-emerald-500/20 border-emerald-500 text-emerald-300 font-black shadow-sm'
+                          : isSuggested
+                          ? 'bg-amber-500/20 border-amber-400 text-amber-300 ring-1 ring-amber-400/60'
+                          : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      <span>{form}</span>
+                      {isSuggested && !isSelected && (
+                        <span className="absolute -top-1 -right-1 flex h-2 w-2">
+                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
+                          <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-500"></span>
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Quick Mentality Selectors */}
+            <div className="space-y-1.5 pt-1.5 border-t border-slate-800/80">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] text-slate-400">عقلية اللعب الحالية:</span>
+                {activeTacticalAlert?.suggestedMentality && (
+                  <span className="text-[10px] text-amber-400 font-bold flex items-center gap-1">
+                    <span>موصى به: {TACTICAL_ARABIC_LABELS.mentality[activeTacticalAlert.suggestedMentality]}</span>
+                  </span>
+                )}
+              </div>
               <div className="grid grid-cols-5 gap-1.5">
                 {(['ultra_defensive', 'defensive', 'balanced', 'attacking', 'ultra_attacking'] as TacticalMentality[]).map(mentality => {
                   const isSelected = userClub.tactics?.mentality === mentality;
+                  const isSuggested = activeTacticalAlert?.suggestedMentality === mentality;
                   const labels: Record<TacticalMentality, string> = {
                     'ultra_defensive': 'دفاع حديدي',
                     'defensive': 'حذر دفاعي',
@@ -474,13 +632,18 @@ export const MatchesTab: React.FC = () => {
                     <button
                       key={mentality}
                       onClick={() => changeLiveMentality(mentality)}
-                      className={`py-1.5 px-1 rounded-xl text-[10px] font-bold border transition-all text-center cursor-pointer ${
+                      className={`py-1.5 px-1 rounded-xl text-[10px] font-bold border transition-all text-center cursor-pointer relative ${
                         isSelected
                           ? 'bg-amber-500/20 border-amber-500 text-amber-300 font-black shadow-sm'
+                          : isSuggested
+                          ? 'bg-amber-500/10 border-amber-400/70 text-amber-200'
                           : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-white'
                       }`}
                     >
-                      {labels[mentality]}
+                      <span>{labels[mentality]}</span>
+                      {isSuggested && !isSelected && (
+                        <span className="absolute -top-1 -right-0.5 text-[8px] text-amber-400 font-black">★</span>
+                      )}
                     </button>
                   );
                 })}
@@ -488,11 +651,19 @@ export const MatchesTab: React.FC = () => {
             </div>
 
             {/* Quick Pressing Intensity */}
-            <div className="space-y-1.5">
-              <span className="text-[10px] text-slate-400">حدة الضغط:</span>
+            <div className="space-y-1.5 pt-1.5 border-t border-slate-800/80">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] text-slate-400">حدة الضغط:</span>
+                {activeTacticalAlert?.suggestedPressing && (
+                  <span className="text-[10px] text-yellow-400 font-bold flex items-center gap-1">
+                    <span>موصى به: {TACTICAL_ARABIC_LABELS.pressing[activeTacticalAlert.suggestedPressing]}</span>
+                  </span>
+                )}
+              </div>
               <div className="grid grid-cols-4 gap-1.5">
                 {(['low', 'balanced', 'high', 'gegenpress'] as PressingIntensity[]).map(pressing => {
                   const isSelected = userClub.tactics?.pressingIntensity === pressing;
+                  const isSuggested = activeTacticalAlert?.suggestedPressing === pressing;
                   const labels: Record<PressingIntensity, string> = {
                     'low': 'منخفض',
                     'balanced': 'متوازن',
@@ -503,13 +674,18 @@ export const MatchesTab: React.FC = () => {
                     <button
                       key={pressing}
                       onClick={() => changeLivePressing(pressing)}
-                      className={`py-1.5 px-1 rounded-xl text-[10px] font-bold border transition-all text-center cursor-pointer ${
+                      className={`py-1.5 px-1 rounded-xl text-[10px] font-bold border transition-all text-center cursor-pointer relative ${
                         isSelected
                           ? 'bg-emerald-500/20 border-emerald-500 text-emerald-300 font-black shadow-sm'
+                          : isSuggested
+                          ? 'bg-yellow-500/10 border-yellow-400/70 text-yellow-200'
                           : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-white'
                       }`}
                     >
-                      {labels[pressing]}
+                      <span>{labels[pressing]}</span>
+                      {isSuggested && !isSelected && (
+                        <span className="absolute -top-1 -right-0.5 text-[8px] text-yellow-400 font-black">★</span>
+                      )}
                     </button>
                   );
                 })}
@@ -524,7 +700,7 @@ export const MatchesTab: React.FC = () => {
             <div className="flex items-center justify-between border-b border-slate-800 pb-2">
               <h4 className="font-bold text-sm text-white flex items-center gap-2">
                 <Users className="w-4 h-4 text-amber-400" />
-                <span>إجراء تبديل تكتيكي في الملعب ({liveMatch.userSubstitutionsUsed}/5 مستخدمة)</span>
+                <span>إجراء تبديل تكتيكي في الملعب ({liveMatch.substitutionsCount || 0}/5 مستخدمة)</span>
               </h4>
               <button
                 onClick={() => setShowSubModal(false)}
@@ -707,23 +883,79 @@ export const MatchesTab: React.FC = () => {
               </div>
             </div>
 
+            {/* Smart Halftime Tactical Advisory Box */}
+            {activeTacticalAlert && (
+              <div className="bg-slate-950/90 border border-amber-500/60 rounded-2xl p-3.5 space-y-2.5 shadow-lg">
+                <div className="flex items-center justify-between flex-wrap gap-2">
+                  <span className="text-xs font-black text-amber-400 flex items-center gap-1.5">
+                    <Sparkles className="w-4 h-4 text-amber-400" />
+                    <span>تقرير وتوصية المساعد الفني للشوط الثاني: {activeTacticalAlert.badge}</span>
+                  </span>
+                  <span className="text-[11px] font-mono text-slate-400">استراحة الشوطين</span>
+                </div>
+                <p className="text-xs text-slate-300 leading-relaxed">
+                  {activeTacticalAlert.situation}
+                </p>
+                <div className="p-2.5 bg-slate-900 border border-slate-800 rounded-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2.5 text-xs">
+                  <div className="space-y-0.5">
+                    <div className="text-slate-200">
+                      التشكيل الموصى به: <strong className="text-emerald-400 font-mono font-black">{activeTacticalAlert.suggestedFormation}</strong>
+                      {activeTacticalAlert.suggestedMentality && (
+                        <span> | العقلية: <strong className="text-amber-300">{TACTICAL_ARABIC_LABELS.mentality[activeTacticalAlert.suggestedMentality]}</strong></span>
+                      )}
+                    </div>
+                    <div className="text-[11px] text-slate-400">
+                      {activeTacticalAlert.rationale}
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => handleApplyTacticalAlert(activeTacticalAlert)}
+                    className="w-full sm:w-auto py-2 px-3.5 bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-500 hover:to-orange-500 text-white font-bold text-xs rounded-xl shadow cursor-pointer transition-all active:scale-95 flex items-center justify-center gap-1.5 shrink-0"
+                  >
+                    <Zap className="w-3.5 h-3.5 fill-white" />
+                    <span>تطبيق توصية الشوط الثاني ⚡</span>
+                  </button>
+                </div>
+              </div>
+            )}
+
             {/* Quick Formation Adjustment at Halftime */}
             <div className="space-y-2 pt-2 border-t border-slate-800">
-              <label className="text-xs font-bold text-slate-300">تغيير التشكيل للشوط الثاني (اختياري):</label>
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-bold text-slate-300">تغيير التشكيل للشوط الثاني (اختياري):</label>
+                {activeTacticalAlert?.suggestedFormation && (
+                  <span className="text-[10px] text-amber-400 font-bold flex items-center gap-1">
+                    <Sparkles className="w-3 h-3 text-amber-400" />
+                    <span>الموصى به: {activeTacticalAlert.suggestedFormation}</span>
+                  </span>
+                )}
+              </div>
               <div className="grid grid-cols-3 sm:grid-cols-6 gap-1.5">
-                {(['4-3-3', '4-4-2', '4-2-3-1', '3-5-2', '5-3-2', '4-1-4-1'] as FormationType[]).map(form => (
-                  <button
-                    key={form}
-                    onClick={() => setFormation(form)}
-                    className={`py-1.5 px-2 rounded-xl text-xs font-mono font-bold border transition-all cursor-pointer ${
-                      userClub?.tactics?.formation === form
-                        ? 'bg-emerald-500/20 border-emerald-500 text-emerald-300'
-                        : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-white'
-                    }`}
-                  >
-                    {form}
-                  </button>
-                ))}
+                {(['4-3-3', '4-4-2', '4-2-3-1', '3-5-2', '5-3-2', '4-1-4-1'] as FormationType[]).map(form => {
+                  const isSelected = userClub?.tactics?.formation === form;
+                  const isSuggested = activeTacticalAlert?.suggestedFormation === form;
+                  return (
+                    <button
+                      key={form}
+                      onClick={() => setFormation(form)}
+                      className={`py-1.5 px-2 rounded-xl text-xs font-mono font-bold border transition-all cursor-pointer relative ${
+                        isSelected
+                          ? 'bg-emerald-500/20 border-emerald-500 text-emerald-300'
+                          : isSuggested
+                          ? 'bg-amber-500/20 border-amber-400 text-amber-300 ring-1 ring-amber-400/60'
+                          : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      <span>{form}</span>
+                      {isSuggested && !isSelected && (
+                        <span className="absolute -top-1 -right-1 flex h-2 w-2">
+                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
+                          <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-500"></span>
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
               </div>
             </div>
 
@@ -900,6 +1132,42 @@ export const MatchesTab: React.FC = () => {
             <Trophy className="w-4 h-4" />
             <span>مراجعة ختام الموسم {season.seasonNumber} وبدء الموسم التالي</span>
           </button>
+        ) : !userFixture ? (
+          /* User club has no fixture in this round (e.g. knocked out of cup) */
+          <div className="space-y-3">
+            <div className="p-3.5 bg-indigo-950/50 border border-indigo-500/40 rounded-2xl flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2.5 text-xs font-bold text-indigo-300">
+                <span className="text-xl">☕</span>
+                <div>
+                  <div className="text-white font-black text-sm">راحة لفريقك في الجولة {currentRound}</div>
+                  <div className="text-indigo-300/80 text-[11px] font-normal">تُقام مباريات الكأس لباقي الفرق المتنافسة. سيستأنف فريقك الدوري في الجولة القادمة.</div>
+                </div>
+              </div>
+              <span className="text-xs bg-indigo-900/60 text-indigo-200 px-2.5 py-1 rounded-full font-mono border border-indigo-700/50 shrink-0">
+                الجولة {currentRound}
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+              <button
+                id="instant_simulate_round_rest_btn"
+                onClick={() => instantSimulateCurrentRound()}
+                className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-indigo-600 to-cyan-600 hover:from-indigo-500 hover:to-cyan-500 text-white font-black text-xs sm:text-sm py-3.5 px-4 rounded-2xl shadow-lg shadow-indigo-950/60 transition-all active:scale-95 cursor-pointer"
+              >
+                <Zap className="w-4 h-4 text-cyan-300" />
+                <span>محاكاة نتائج مباريات الجولة {currentRound} لباقي الفرق ⚡</span>
+              </button>
+
+              <button
+                id="advance_day_rest_btn"
+                onClick={() => advanceToNextDay(false)}
+                className="w-full flex items-center justify-center gap-2 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-bold text-xs sm:text-sm py-3 px-4 rounded-2xl shadow transition-all active:scale-95 cursor-pointer"
+              >
+                <Clock className="w-4 h-4 text-cyan-400" />
+                <span>التقدم بالتقويم (+1 يوم) ➔</span>
+              </button>
+            </div>
+          </div>
         ) : isMatchDay ? (
           /* MATCH DAY IS ACTIVE */
           <div className="space-y-3">
@@ -908,7 +1176,7 @@ export const MatchesTab: React.FC = () => {
                 <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-ping shrink-0" />
                 <span>
                   {userFixture?.competitionType === 'cup' 
-                    ? `اليوم موعد مباراة الكأس (${userFixture.stageName || 'الكأس الوطنية'})! 🏆` 
+                    ? `اليوم موعد مباراة الكأس (${userFixture?.stageName || 'الكأس الوطنية'})! 🏆` 
                     : 'اليوم موعد المباراة الرسمية في جدول الدوري! ⚽'}
                 </span>
               </div>
@@ -916,21 +1184,19 @@ export const MatchesTab: React.FC = () => {
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-              {userFixture ? (
-                <button
-                  id="start_live_match_btn"
-                  onClick={() => startLiveMatch(userFixture.id)}
-                  className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-black text-sm py-3.5 px-4 rounded-2xl shadow-lg shadow-emerald-950/60 transition-all active:scale-95 cursor-pointer"
-                >
-                  <Play className="w-4 h-4 fill-white" />
-                  <span>خوض مباراة الجولة {currentRound} الآن ⚽</span>
-                </button>
-              ) : null}
+              <button
+                id="start_live_match_btn"
+                onClick={() => userFixture?.id ? startLiveMatch(userFixture.id) : startLiveMatch()}
+                className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-black text-sm py-3.5 px-4 rounded-2xl shadow-lg shadow-emerald-950/60 transition-all active:scale-95 cursor-pointer"
+              >
+                <Play className="w-4 h-4 fill-white" />
+                <span>خوض مباراة الجولة {currentRound} الآن ⚽</span>
+              </button>
 
               <button
                 id="instant_simulate_round_btn"
                 onClick={() => instantSimulateCurrentRound()}
-                className="w-full flex items-center justify-center gap-2 bg-slate-800 hover:bg-slate-700 text-amber-300 border border-slate-700 font-bold text-xs sm:text-sm py-3 px-4 rounded-2xl shadow transition-all active:scale-95 cursor-pointer"
+                className="w-full flex items-center justify-center gap-2 bg-slate-800 hover:bg-slate-750 text-amber-300 border border-slate-700 font-bold text-xs sm:text-sm py-3 px-4 rounded-2xl shadow transition-all active:scale-95 cursor-pointer"
               >
                 <FastForward className="w-4 h-4 text-amber-400" />
                 <span>محاكاة نتائج مباريات الجولة {currentRound}</span>
@@ -1028,7 +1294,8 @@ export const MatchesTab: React.FC = () => {
 
           {/* 2. Opponent Scouting & Spy Hub (Cost: 100k EGP) */}
           {(() => {
-            const oppId = upcomingMatchAnalysis.oppClub.id;
+            const oppId = upcomingMatchAnalysis?.oppClub?.id;
+            if (!oppId) return null;
             const existingReport = scoutedOpponents[oppId];
             const canAfford = (userClub?.budget || 0) >= 100000;
 
@@ -1427,9 +1694,10 @@ export const MatchesTab: React.FC = () => {
         
         <div className="space-y-2">
           {roundFixtures.map(fixture => {
-            const home = teams.find(t => t.id === fixture.homeTeamId) || (fixture.homeTeamId ? findClubInWorld(fixture.homeTeamId) : undefined) || { name: getClubDisplayName(fixture.homeTeamId), shortName: 'مض', primaryColor: '#334155', isUserClub: false };
-            const away = teams.find(t => t.id === fixture.awayTeamId) || (fixture.awayTeamId ? findClubInWorld(fixture.awayTeamId) : undefined) || { name: getClubDisplayName(fixture.awayTeamId), shortName: 'ضف', primaryColor: '#334155', isUserClub: false };
-            const isUserGame = Boolean(home?.isUserClub || away?.isUserClub || (userClub && (fixture.homeTeamId === userClub.id || fixture.awayTeamId === userClub.id)));
+            if (!fixture) return null;
+            const home = (teams.find(t => t && t.id === fixture.homeTeamId) || (fixture.homeTeamId ? findClubInWorld(fixture.homeTeamId) : undefined)) || { name: getClubDisplayName(fixture.homeTeamId, teams), shortName: 'مض', primaryColor: '#334155', isUserClub: false };
+            const away = (teams.find(t => t && t.id === fixture.awayTeamId) || (fixture.awayTeamId ? findClubInWorld(fixture.awayTeamId) : undefined)) || { name: getClubDisplayName(fixture.awayTeamId, teams), shortName: 'ضف', primaryColor: '#334155', isUserClub: false };
+            const isUserGame = Boolean(home?.isUserClub || away?.isUserClub || (userClub?.id && (fixture.homeTeamId === userClub.id || fixture.awayTeamId === userClub.id)));
 
             return (
               <div

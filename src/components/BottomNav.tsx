@@ -58,12 +58,18 @@ export const BottomNav: React.FC<BottomNavProps> = ({ activeTab, setActiveTab })
     { id: 'inbox', label: t('tab_inbox', 'صندوق الوارد'), desc: 'رسائل الإدارة والجماهير والعروض', icon: Mail, badge: unreadMessagesCount },
   ];
 
+  const handleSelectTab = (tabId: ActiveTab) => {
+    React.startTransition(() => {
+      setActiveTab(tabId);
+    });
+  };
+
   return (
     <>
       {/* More Options Modal Sheet for Mobile */}
       {showMoreMenu && (
         <div 
-          className={`fixed inset-0 z-40 bg-black/70 backdrop-blur-sm flex items-end justify-center animate-fade-in ${
+          className={`fixed inset-0 z-40 bg-black/80 flex items-end justify-center animate-fade-in ${
             isNativeBannerActive ? 'pb-[50px]' : ''
           }`}
           onClick={() => setShowMoreMenu(false)}
@@ -93,10 +99,10 @@ export const BottomNav: React.FC<BottomNavProps> = ({ activeTab, setActiveTab })
                   <button
                     key={item.id}
                     onClick={() => {
-                      setActiveTab(item.id);
+                      handleSelectTab(item.id);
                       setShowMoreMenu(false);
                     }}
-                    className={`flex items-center justify-between p-3 rounded-xl border transition-all text-right ${
+                    className={`flex items-center justify-between p-3 rounded-xl border transition-colors text-right ${
                       isActive 
                         ? 'bg-emerald-950/80 border-emerald-500/80 text-emerald-300' 
                         : 'bg-slate-800/60 border-slate-700/60 hover:bg-slate-800 text-slate-200'
@@ -131,8 +137,8 @@ export const BottomNav: React.FC<BottomNavProps> = ({ activeTab, setActiveTab })
         </div>
       )}
 
-      {/* Persistent Bottom Nav Bar */}
-      <nav className={`fixed left-0 right-0 z-30 bg-slate-900/95 backdrop-blur-lg border-t border-slate-800/90 pb-safe transition-all duration-200 ${
+      {/* Persistent Bottom Nav Bar - Optimized for zero GPU composition lag on Android */}
+      <nav className={`fixed left-0 right-0 z-30 bg-slate-900 border-t border-slate-800 pb-safe gpu-layer ${
         isNativeBannerActive ? 'bottom-[50px]' : 'bottom-0'
       }`}>
         <div className="max-w-lg mx-auto flex items-center justify-around px-2 py-1.5">
@@ -144,8 +150,8 @@ export const BottomNav: React.FC<BottomNavProps> = ({ activeTab, setActiveTab })
             return (
               <button
                 key={tab.id}
-                onClick={() => setActiveTab(tab.id)}
-                className={`relative flex flex-col items-center justify-center py-1.5 px-2.5 rounded-xl transition-all select-none min-w-[58px] ${
+                onClick={() => handleSelectTab(tab.id)}
+                className={`relative flex flex-col items-center justify-center py-1.5 px-2.5 rounded-xl transition-transform select-none min-w-[58px] ${
                   isActive
                     ? 'text-emerald-400 font-bold scale-105'
                     : 'text-slate-400 hover:text-slate-200'
@@ -170,7 +176,7 @@ export const BottomNav: React.FC<BottomNavProps> = ({ activeTab, setActiveTab })
           {/* More Menu Trigger */}
           <button
             onClick={() => setShowMoreMenu(true)}
-            className={`relative flex flex-col items-center justify-center py-1.5 px-2.5 rounded-xl transition-all select-none min-w-[58px] ${
+            className={`relative flex flex-col items-center justify-center py-1.5 px-2.5 rounded-xl transition-transform select-none min-w-[58px] ${
               secondaryTabs.some(t => t.id === activeTab)
                 ? 'text-emerald-400 font-bold scale-105'
                 : 'text-slate-400 hover:text-slate-200'

@@ -399,8 +399,16 @@ export function executeAtomicTransfer(params: {
     seasonNumber,
   } = params;
 
-  const buyingClub = buyingClubId ? allTeams.find(t => t.id === buyingClubId) : undefined;
-  const sellingClub = sellingClubId ? allTeams.find(t => t.id === sellingClubId) : undefined;
+  const buyingClub = buyingClubId ? allTeams.find(t => t && t.id === buyingClubId) : undefined;
+  const sellingClub = sellingClubId ? allTeams.find(t => t && t.id === sellingClubId) : undefined;
+
+  if (!player || !player.id) {
+    return {
+      success: false,
+      message: 'بيانات اللاعب غير متوفرة لإتمام الانتقال!',
+      updatedTeams: allTeams,
+    };
+  }
 
   // Financial safety check: strictly applied for both user and AI buying clubs
   if (buyingClub) {
@@ -449,11 +457,11 @@ export function executeAtomicTransfer(params: {
   const updatedTeams = allTeams.map(t => {
     // 1. Selling Club: remove player, remove from tactics lineup/bench, add transfer fee
     if (sellingClub && t.id === sellingClub.id) {
-      const filteredPlayers = (t.players || []).filter(p => p.id !== player.id);
+      const filteredPlayers = (t.players || []).filter(p => p && p.id !== player.id);
       const updatedTactics = t.tactics ? {
         ...t.tactics,
-        startingPlayerIds: (t.tactics.startingPlayerIds || []).filter(id => id !== player.id),
-        benchPlayerIds: (t.tactics.benchPlayerIds || []).filter(id => id !== player.id),
+        startingPlayerIds: (t.tactics.startingPlayerIds || []).filter(id => id && id !== player.id),
+        benchPlayerIds: (t.tactics.benchPlayerIds || []).filter(id => id && id !== player.id),
       } : undefined;
 
       return {
@@ -466,7 +474,7 @@ export function executeAtomicTransfer(params: {
 
     // 2. Buying Club: add player and subtract transfer fee (if in league teams)
     if (buyingClub && t.id === buyingClub.id) {
-      const filteredExisting = (t.players || []).filter(p => p.id !== player.id);
+      const filteredExisting = (t.players || []).filter(p => p && p.id !== player.id);
       return {
         ...t,
         budget: Math.max(0, t.budget - transferFee),
@@ -475,14 +483,14 @@ export function executeAtomicTransfer(params: {
     }
 
     // 3. Other Clubs: ensure player is removed if they previously held this ID
-    if (t.players && t.players.some(p => p.id === player.id) && (!sellingClub || t.id !== sellingClub.id)) {
+    if (t.players && t.players.some(p => p && p.id === player.id) && (!sellingClub || t.id !== sellingClub.id)) {
       return {
         ...t,
-        players: t.players.filter(p => p.id !== player.id),
+        players: t.players.filter(p => p && p.id !== player.id),
         tactics: t.tactics ? {
           ...t.tactics,
-          startingPlayerIds: (t.tactics.startingPlayerIds || []).filter(id => id !== player.id),
-          benchPlayerIds: (t.tactics.benchPlayerIds || []).filter(id => id !== player.id),
+          startingPlayerIds: (t.tactics.startingPlayerIds || []).filter(id => id && id !== player.id),
+          benchPlayerIds: (t.tactics.benchPlayerIds || []).filter(id => id && id !== player.id),
         } : undefined,
       };
     }
@@ -496,16 +504,16 @@ export function executeAtomicTransfer(params: {
     league.teams.forEach(c => {
       if (c.id === sellingClubId && (!sellingClub || c.id !== sellingClub.id)) {
         c.budget = (c.budget || 0) + transferFee;
-        c.players = (c.players || []).filter(p => p.id !== player.id);
+        c.players = (c.players || []).filter(p => p && p.id !== player.id);
         if (c.tactics) {
-          c.tactics.startingPlayerIds = (c.tactics.startingPlayerIds || []).filter(id => id !== player.id);
-          c.tactics.benchPlayerIds = (c.tactics.benchPlayerIds || []).filter(id => id !== player.id);
+          c.tactics.startingPlayerIds = (c.tactics.startingPlayerIds || []).filter(id => id && id !== player.id);
+          c.tactics.benchPlayerIds = (c.tactics.benchPlayerIds || []).filter(id => id && id !== player.id);
         }
-      } else if (c.id !== buyingClubId && c.players && c.players.some(p => p.id === player.id)) {
-        c.players = c.players.filter(p => p.id !== player.id);
+      } else if (c.id !== buyingClubId && c.players && c.players.some(p => p && p.id === player.id)) {
+        c.players = c.players.filter(p => p && p.id !== player.id);
         if (c.tactics) {
-          c.tactics.startingPlayerIds = (c.tactics.startingPlayerIds || []).filter(id => id !== player.id);
-          c.tactics.benchPlayerIds = (c.tactics.benchPlayerIds || []).filter(id => id !== player.id);
+          c.tactics.startingPlayerIds = (c.tactics.startingPlayerIds || []).filter(id => id && id !== player.id);
+          c.tactics.benchPlayerIds = (c.tactics.benchPlayerIds || []).filter(id => id && id !== player.id);
         }
       }
     });
@@ -796,12 +804,12 @@ export function generateIncomingAiBids(
   const bids: TransferOffer[] = [];
   const inboxMessages: InboxMessage[] = [];
 
-  if (!userClub || !Array.isArray(userClub.players) || userClub.players.length <= 14) {
+  if (!userClub || !userClub.id || !Array.isArray(userClub.players) || userClub.players.length <= 14) {
     return { bids, inboxMessages };
   }
 
   // Look for listed players first, or top scorers
-  const candidatePlayers = userClub.players.filter(p => p.isListedForTransfer || p.overallRating >= 65 || (p.stats?.goals || 0) >= 3);
+  const candidatePlayers = userClub.players.filter(p => p && p.id && (p.isListedForTransfer || p.overallRating >= 65 || (p.stats?.goals || 0) >= 3));
 
   if (candidatePlayers.length === 0) return { bids, inboxMessages };
 
@@ -809,11 +817,14 @@ export function generateIncomingAiBids(
   if (Math.random() > 0.35) return { bids, inboxMessages };
 
   const targetPlayer = candidatePlayers[Math.floor(Math.random() * candidatePlayers.length)];
+  if (!targetPlayer || !targetPlayer.id) return { bids, inboxMessages };
+
   const eligibleBuyers = findEligibleBuyerClubs(targetPlayer, allTeams, userClub.id);
 
   if (eligibleBuyers.length === 0) return { bids, inboxMessages };
 
   const { club: biddingClub, maxAffordableFee } = eligibleBuyers[Math.floor(Math.random() * eligibleBuyers.length)];
+  if (!biddingClub || !biddingClub.id) return { bids, inboxMessages };
   
   // Calculate realistic bid amount (90% to 140% of market value, strictly capped by club budget)
   // Occasional big clubs or high demand results in lucrative bids!

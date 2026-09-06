@@ -478,6 +478,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       ? parsed.financialTransactions
       : INITIAL_MANAGER.financialTransactions,
     completedCourses: Array.isArray(parsed?.completedCourses) ? parsed.completedCourses : [],
+    license: (parsed?.license && ['D', 'C', 'B', 'A', 'PRO'].includes(parsed.license)) ? parsed.license : 'D',
     totalClubDonations: parsed?.totalClubDonations ?? 0,
     totalBonusesEarned: parsed?.totalBonusesEarned ?? 0,
     trophies: Array.isArray(parsed?.trophies) ? parsed.trophies : [],
@@ -1359,24 +1360,31 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const startLiveMatch = (fixtureId?: string) => {
     if (seasonFinished) return;
 
+    const roundFixtures = fixtures.filter(f => f.round === currentRound);
+    const targetFixture = fixtureId
+      ? fixtures.find(f => f.id === fixtureId)
+      : userClub ? roundFixtures.find(f => f.homeTeamId === userClub.id || f.awayTeamId === userClub.id) : roundFixtures[0];
+
+    // Prevent replaying already completed fixture or starting if no target fixture exists
+    if (!targetFixture || targetFixture.isPlayed) return;
+
     // Match Day Gating: User cannot play before reaching match date
     if (userClub && !isMatchDay && daysUntilNextMatch > 0) {
-      const roundFixtures = fixtures.filter(f => f.round === currentRound);
-      const userFix = roundFixtures.find(f => f.homeTeamId === userClub.id || f.awayTeamId === userClub.id);
-      const opp = teams.find(t => t.id === (userFix?.homeTeamId === userClub.id ? userFix?.awayTeamId : userFix?.homeTeamId));
+      const opp = teams.find(t => t.id === (targetFixture.homeTeamId === userClub.id ? targetFixture.awayTeamId : targetFixture.homeTeamId));
       setMatchBlocker({
         isOpen: true,
         reason: 'not_match_day',
         title: '⏳ اليوم ليس موعد المباراة!',
         message: `متبقي ${daysUntilNextMatch} ${daysUntilNextMatch === 1 ? 'يوم' : 'أيام'} حتى موعد مباراة الجولة ${currentRound} أمام (${opp?.name || 'المنافس'}). يمكنك استخدام زر (تخطي الأيام حتى موعد المباراة) للوصول مباشرة إلى يوم اللقاء، أو التقدم يوماً بيوم لإتمام الحصص التدريبية.`,
-        fixture: userFix,
+        fixture: targetFixture,
         opponentClub: opp,
       });
       return;
     }
 
-    // Lineup validity check for user's club before starting match
-    if (userClub) {
+    // Lineup validity check for user's club before starting match (only if user club is in this fixture)
+    const userIsInMatch = userClub && (targetFixture.homeTeamId === userClub.id || targetFixture.awayTeamId === userClub.id);
+    if (userIsInMatch && userClub) {
       const val = validateSquadLineup(userClub);
       if (!val.isValid) {
         setMatchBlocker({
@@ -1390,18 +1398,10 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       }
     }
 
-    const roundFixtures = fixtures.filter(f => f.round === currentRound);
-    const targetFixture = fixtureId
-      ? fixtures.find(f => f.id === fixtureId)
-      : userClub ? roundFixtures.find(f => f.homeTeamId === userClub.id || f.awayTeamId === userClub.id) : roundFixtures[0];
-
-    // Prevent replaying already completed fixture
-    if (!targetFixture || targetFixture.isPlayed) return;
-
     const homeTeam = teams.find(t => t.id === targetFixture.homeTeamId) || (targetFixture.homeTeamId ? findClubInWorld(targetFixture.homeTeamId) : undefined) || teams[0];
     const awayTeam = teams.find(t => t.id === targetFixture.awayTeamId) || (targetFixture.awayTeamId ? findClubInWorld(targetFixture.awayTeamId) : undefined) || teams[1];
 
-    const initialSimulationState = createInitialLiveMatchState(targetFixture, homeTeam, awayTeam, userClub?.tactics);
+    const initialSimulationState = createInitialLiveMatchState(targetFixture, homeTeam, awayTeam, userClub?.tactics, userClub?.id);
     setLiveMatch(initialSimulationState);
   };
 
@@ -1668,10 +1668,10 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const otherRoundFixtures = updatedFixtures.filter(f => f.round === currentRound && f.id !== fixture.id && !f.isPlayed);
     
     otherRoundFixtures.forEach(otherFix => {
-      const otherHome = teams.find(t => t.id === otherFix.homeTeamId) || (otherFix.homeTeamId ? findClubInWorld(otherFix.homeTeamId) : undefined) || teams[0];
-      const otherAway = teams.find(t => t.id === otherFix.awayTeamId) || (otherFix.awayTeamId ? findClubInWorld(otherFix.awayTeamId) : undefined) || teams[1];
+      const otherHome = (teams.find(t => t && t.id === otherFix.homeTeamId) || (otherFix.homeTeamId ? findClubInWorld(otherFix.homeTeamId) : undefined) || teams[0]) || ({ id: otherFix.homeTeamId || 'home_dummy', name: 'الفريق المضيف', shortName: 'مض', players: [], tactics: { startingPlayerIds: [], benchPlayerIds: [] } } as any);
+      const otherAway = (teams.find(t => t && t.id === otherFix.awayTeamId) || (otherFix.awayTeamId ? findClubInWorld(otherFix.awayTeamId) : undefined) || teams[1]) || ({ id: otherFix.awayTeamId || 'away_dummy', name: 'الفريق الضيف', shortName: 'ضف', players: [], tactics: { startingPlayerIds: [], benchPlayerIds: [] } } as any);
       const isOtherCup = otherFix.competitionType === 'cup';
-      const otherResult = isOtherCup ? simulateKnockoutMatch(otherHome, otherAway) : simulateMatch(otherHome, otherAway);
+      const otherResult = isOtherCup ? simulateKnockoutMatch(otherHome, otherAway) : simulateMatch(otherHome, otherAway, otherHome.tactics, otherAway.tactics);
 
       updatedFixtures = updatedFixtures.map(f => {
         if (f.id === otherFix.id) {
@@ -2160,17 +2160,19 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     if (adCheck1.shouldShowInterstitial) {
       setTimeout(() => {
         AdManager.showInterstitial();
-      }, 500);
+      }, 1200);
     }
   };
 
   const instantSimulateCurrentRound = () => {
     if (seasonFinished) return;
 
-    // Match Day Gating: User cannot play before reaching match date
-    if (userClub && !isMatchDay && daysUntilNextMatch > 0) {
-      const roundFixtures = fixtures.filter(f => f.round === currentRound);
-      const userFix = roundFixtures.find(f => f.homeTeamId === userClub.id || f.awayTeamId === userClub.id);
+    const roundFixtures = fixtures.filter(f => f.round === currentRound && !f.isPlayed);
+    const userPlaysThisRound = userClub && roundFixtures.some(f => f.homeTeamId === userClub.id || f.awayTeamId === userClub.id);
+    const userFix = roundFixtures.find(f => f.homeTeamId === userClub?.id || f.awayTeamId === userClub?.id);
+
+    // Match Day Gating: User cannot play before reaching match date (only if user has a match this round)
+    if (userPlaysThisRound && userClub && userFix && !isMatchDay && daysUntilNextMatch > 0) {
       const opp = teams.find(t => t.id === (userFix?.homeTeamId === userClub.id ? userFix?.awayTeamId : userFix?.homeTeamId));
       setMatchBlocker({
         isOpen: true,
@@ -2182,9 +2184,6 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       });
       return;
     }
-
-    const roundFixtures = fixtures.filter(f => f.round === currentRound && !f.isPlayed);
-    const userPlaysThisRound = userClub && roundFixtures.some(f => f.homeTeamId === userClub.id || f.awayTeamId === userClub.id);
 
     // Lineup validity check for user's club before instant simulation (only if user club is playing)
     if (userPlaysThisRound && userClub) {
@@ -2208,12 +2207,12 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const allRoundMatches: { homeTeamId: string; awayTeamId: string; homeScore: number; awayScore: number; events: MatchEvent[] }[] = [];
 
     roundFixtures.forEach(fix => {
-      const homeTeam = teams.find(t => t.id === fix.homeTeamId) || (fix.homeTeamId ? findClubInWorld(fix.homeTeamId) : undefined) || teams[0];
-      const awayTeam = teams.find(t => t.id === fix.awayTeamId) || (fix.awayTeamId ? findClubInWorld(fix.awayTeamId) : undefined) || teams[1];
+      const homeTeam = (teams.find(t => t && t.id === fix.homeTeamId) || (fix.homeTeamId ? findClubInWorld(fix.homeTeamId) : undefined) || teams[0]) || ({ id: fix.homeTeamId || 'home_dummy', name: 'الفريق المضيف', shortName: 'مض', players: [], tactics: { startingPlayerIds: [], benchPlayerIds: [] } } as any);
+      const awayTeam = (teams.find(t => t && t.id === fix.awayTeamId) || (fix.awayTeamId ? findClubInWorld(fix.awayTeamId) : undefined) || teams[1]) || ({ id: fix.awayTeamId || 'away_dummy', name: 'الفريق الضيف', shortName: 'ضف', players: [], tactics: { startingPlayerIds: [], benchPlayerIds: [] } } as any);
       const isCup = fix.competitionType === 'cup';
       const matchResult = isCup
         ? simulateKnockoutMatch(homeTeam, awayTeam)
-        : simulateMatch(homeTeam, awayTeam, homeTeam.tactics, awayTeam.tactics);
+        : simulateMatch(homeTeam, awayTeam, homeTeam?.tactics, awayTeam?.tactics);
 
       updatedFixtures = updatedFixtures.map(f => {
         if (f.id === fix.id) {
@@ -2376,8 +2375,8 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       const isTeamWin = tScore > matchOppScore;
       const isTeamDraw = tScore === matchOppScore;
 
-      const teamPlayers = Array.isArray(t.players) ? t.players : [];
-      const startingIds = t.tactics?.startingPlayerIds || teamPlayers.slice(0, 11).map(p => p.id);
+      const teamPlayers = Array.isArray(t?.players) ? t.players.filter(Boolean) : [];
+      const startingIds = t?.tactics?.startingPlayerIds || teamPlayers.slice(0, 11).map(p => p?.id).filter(Boolean);
 
       const { updatedPlayers: fatigueUpdatedPlayers, transferMessages, departedPlayers } = processPostMatchPlayerUpdates(
         t,
@@ -2397,7 +2396,8 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         extraTransferIncome = departedPlayers.reduce((sum, dp) => sum + dp.fee, 0);
       }
 
-      const updatedPlayers = fatigueUpdatedPlayers.map(p => {
+      const updatedPlayers = (fatigueUpdatedPlayers || []).filter(Boolean).map(p => {
+        if (!p || !p.id) return p;
         const isStarter = startingIds.includes(p.id);
 
         const playerGoals = matchPlayed.events.filter(e => e.type === 'goal' && (e.playerId === p.id || e.playerName === p.name)).length;
@@ -2739,7 +2739,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     if (adCheck2.shouldShowInterstitial) {
       setTimeout(() => {
         AdManager.showInterstitial();
-      }, 500);
+      }, 1200);
     }
   };
 
@@ -5204,19 +5204,37 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       };
     }
 
+    // License rank hierarchy
+    const licenseRanks: Record<string, number> = {
+      'D': 1,
+      'C': 2,
+      'B': 3,
+      'A': 4,
+      'PRO': 5,
+    };
+    const currentLicense = (manager.license && licenseRanks[manager.license]) ? manager.license : 'D';
+    const currentRank = licenseRanks[currentLicense] || 1;
+
     // Check license requirement
-    if (course.category === 'license' && course.requiredLicense) {
-      if (manager.license !== course.requiredLicense) {
+    if (course.requiredLicense) {
+      const requiredRank = licenseRanks[course.requiredLicense] || 1;
+      if (currentRank < requiredRank) {
         return {
           success: false,
-          message: `تتطلب هذه الدورة الحصول أولاً على رخصة التدريب (${course.requiredLicense}). رخصتك الحالية: ${manager.license}`,
+          message: `تتطلب هذه الدورة الحصول أولاً على رخصة التدريب (${course.requiredLicense}). رخصتك الحالية: ${currentLicense}`,
         };
       }
     }
 
-    // If already completed license
-    if (course.category === 'license' && (manager.completedCourses || []).includes(courseId)) {
-      return { success: false, message: 'أنت حاصل بالفعل على هذه الرخصة التدريبية.' };
+    // If already completed license or has higher license
+    if (course.category === 'license') {
+      const grantsRank = course.grantsLicense ? (licenseRanks[course.grantsLicense] || 0) : 0;
+      const isAlreadyCompleted = (manager.completedCourses || []).includes(courseId) || 
+        (grantsRank > 0 && (course.id === 'license_d' ? (currentRank > 1 || (manager.completedCourses || []).includes('license_d')) : currentRank >= grantsRank));
+
+      if (isAlreadyCompleted) {
+        return { success: false, message: 'أنت حاصل بالفعل على هذه الرخصة التدريبية أو مؤهل أعلى منها.' };
+      }
     }
 
     // Record transaction
@@ -5230,9 +5248,13 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     setManager(prev => {
       const newWallet = Math.max(0, (prev.personalWallet || 0) - course.cost);
-      let newLicense = prev.license;
+      let newLicense = prev.license || 'D';
       if (course.grantsLicense) {
-        newLicense = course.grantsLicense;
+        const targetRank = licenseRanks[course.grantsLicense] || 1;
+        const existingRank = licenseRanks[newLicense] || 1;
+        if (targetRank >= existingRank) {
+          newLicense = course.grantsLicense;
+        }
       }
       const newCompleted = [...(prev.completedCourses || [])];
       if (!newCompleted.includes(courseId)) {

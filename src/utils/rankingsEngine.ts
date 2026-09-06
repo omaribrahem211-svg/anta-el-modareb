@@ -14,8 +14,8 @@ import { getOrCreateClubManager } from '../data/worldManagersData';
 /**
  * Calculates accurate Starting XI Squad Strength and sub-ratings
  */
-export function calculateSquadStrength(club: Club, customTactics?: TeamTactics): ClubSquadStrength {
-  const players = Array.isArray(club?.players) ? club.players : [];
+export function calculateSquadStrength(club?: Club | null, customTactics?: TeamTactics): ClubSquadStrength {
+  const players = Array.isArray(club?.players) ? club.players.filter(Boolean) : [];
   if (players.length === 0) {
     const fallback = club?.reputation ? Math.round(club.reputation * 0.9) : 60;
     return {
@@ -28,12 +28,12 @@ export function calculateSquadStrength(club: Club, customTactics?: TeamTactics):
     };
   }
 
-  const tactics = customTactics || club.tactics;
+  const tactics = customTactics || club?.tactics;
   const startingIds = tactics?.startingPlayerIds?.length === 11 
     ? tactics.startingPlayerIds 
-    : players.slice(0, 11).map(p => p.id);
+    : players.slice(0, 11).map(p => p?.id).filter(Boolean);
 
-  const startingPlayers = players.filter(p => startingIds.includes(p.id));
+  const startingPlayers = players.filter(p => p && p.id && startingIds.includes(p.id));
   const effectiveStarters = startingPlayers.length === 11 ? startingPlayers : players.slice(0, 11);
 
   let totalStartersRating = 0;
@@ -43,9 +43,10 @@ export function calculateSquadStrength(club: Club, customTactics?: TeamTactics):
   let gkRating = 60;
 
   effectiveStarters.forEach(p => {
+    if (!p) return;
     // Fitness & morale factor (0.9 to 1.05)
-    const conditionMult = 0.85 + (p.fitness / 400) + (p.morale / 600);
-    const effRating = p.overallRating * conditionMult;
+    const conditionMult = 0.85 + ((p.fitness || 100) / 400) + ((p.morale || 70) / 600);
+    const effRating = (p.overallRating || 60) * conditionMult;
     totalStartersRating += effRating;
 
     if (p.positionCategory === 'FWD') {
@@ -62,15 +63,15 @@ export function calculateSquadStrength(club: Club, customTactics?: TeamTactics):
     }
   });
 
-  const overall = Math.round(totalStartersRating / effectiveStarters.length);
+  const overall = Math.round(totalStartersRating / (effectiveStarters.length || 1));
   const attack = Math.round(atkCount > 0 ? atkSum / atkCount : overall);
   const midfield = Math.round(midCount > 0 ? midSum / midCount : overall);
   const defense = Math.round(defCount > 0 ? defSum / defCount : overall);
 
   const benchIds = tactics?.benchPlayerIds || [];
-  const benchPlayers = players.filter(p => benchIds.includes(p.id));
+  const benchPlayers = players.filter(p => p && p.id && benchIds.includes(p.id));
   const benchTotal = benchPlayers.length > 0
-    ? benchPlayers.reduce((acc, p) => acc + p.overallRating, 0) / benchPlayers.length
+    ? benchPlayers.reduce((acc, p) => acc + (p?.overallRating || 60), 0) / benchPlayers.length
     : overall - 4;
   const benchOverall = Math.round(benchTotal);
 
@@ -266,14 +267,39 @@ export function calculateTrophyRankingPoints(
  * Builds the complete monthly World Rankings list for all clubs & managers
  */
 export function generateMonthlyWorldRankings(
-  userManager: ManagerProfile,
-  userClub: Club,
-  currentCalendarMonthStr: string // e.g. '2026-08'
+  userManager?: ManagerProfile | null,
+  userClub?: Club | null,
+  currentCalendarMonthStr: string = '2026-08'
 ): WorldRankingsData {
+  const safeUserManager = userManager || ({
+    id: 'user_manager',
+    name: 'المدرب',
+    shortName: 'المدرب',
+    nationality: 'مصر',
+    countryCode: 'EGY',
+    age: 38,
+    reputation: 20,
+    wins: 0,
+    rankingPoints: 1000,
+    worldRank: 850,
+    previousWorldRank: 850,
+    monthlyRankChange: 0,
+    trophies: [],
+  } as any);
+
+  const safeUserClub = userClub || ({
+    id: 'user_club_default',
+    name: 'النادي',
+    reputation: 50,
+    leagueId: 'egy_tier_4',
+    isUserClub: true,
+    players: [],
+  } as any);
+
   // 1. Gather all clubs from all global leagues
   const allClubsMap = new Map<string, Club>();
 
-  Object.values(GLOBAL_LEAGUES).forEach(league => {
+  Object.values(GLOBAL_LEAGUES || {}).forEach(league => {
     (league?.teams || []).forEach(club => {
       if (club && club.id && !allClubsMap.has(club.id)) {
         allClubsMap.set(club.id, club);
@@ -282,40 +308,40 @@ export function generateMonthlyWorldRankings(
   });
 
   // Ensure user club is correctly updated
-  if (userClub && userClub.id && allClubsMap.has(userClub.id)) {
-    allClubsMap.set(userClub.id, {
-      ...allClubsMap.get(userClub.id)!,
-      ...userClub,
+  if (safeUserClub?.id && allClubsMap.has(safeUserClub.id)) {
+    allClubsMap.set(safeUserClub.id, {
+      ...allClubsMap.get(safeUserClub.id)!,
+      ...safeUserClub,
       isUserClub: true,
     });
   }
 
-  const clubsList = Array.from(allClubsMap.values());
+  const clubsList = Array.from(allClubsMap.values()).filter(c => c && c.id);
 
   // 2. Compute user manager representation
-  const userMgrRating = calculateDynamicManagerRating(userManager);
-  const userMgrPoints = userManager.rankingPoints || Math.round(userMgrRating * 30 + userManager.wins * 15);
+  const userMgrRating = calculateDynamicManagerRating(safeUserManager);
+  const userMgrPoints = safeUserManager.rankingPoints || Math.round(userMgrRating * 30 + (safeUserManager.wins || 0) * 15);
 
   const userManagerEntry: ClubManager = {
     id: 'user_manager',
-    name: `${userManager.name} (أنت)`,
-    shortName: userManager.name,
-    nationality: userManager.nationality || 'مصر',
+    name: `${safeUserManager.name || 'المدرب'} (أنت)`,
+    shortName: safeUserManager.shortName || safeUserManager.name || 'المدرب',
+    nationality: safeUserManager.nationality || 'مصر',
     countryCode: 'EGY',
-    age: userManager.age || 38,
+    age: safeUserManager.age || 38,
     rating: userMgrRating,
     tacticalStyle: 'balanced',
-    preferredFormation: userManager.favoriteFormation || '4-3-3',
-    reputation: userManager.reputation || 20,
+    preferredFormation: safeUserManager.favoriteFormation || '4-3-3',
+    reputation: safeUserManager.reputation || 20,
     rankingPoints: userMgrPoints,
-    worldRank: userManager.worldRank || 850,
-    previousWorldRank: userManager.previousWorldRank || 850,
-    monthlyRankChange: userManager.monthlyRankChange || 0,
-    trophiesWonCount: userManager.trophies?.length || 0,
-    majorTrophies: userManager.trophies || [],
-    currentClubId: userClub?.id || '',
-    currentClubName: userClub?.name || 'بدون نادي',
-    currentLeagueId: userClub?.leagueId,
+    worldRank: safeUserManager.worldRank || 850,
+    previousWorldRank: safeUserManager.previousWorldRank || 850,
+    monthlyRankChange: safeUserManager.monthlyRankChange || 0,
+    trophiesWonCount: safeUserManager.trophies?.length || 0,
+    majorTrophies: safeUserManager.trophies || [],
+    currentClubId: safeUserClub?.id || '',
+    currentClubName: safeUserClub?.name || 'بدون نادي',
+    currentLeagueId: safeUserClub?.leagueId,
   };
 
   // 3. Build Managers List
@@ -323,10 +349,11 @@ export function generateMonthlyWorldRankings(
   managersList.push(userManagerEntry);
 
   clubsList.forEach(club => {
-    if (club.isUserClub) return; // User manager already added
+    if (!club || club.isUserClub) return; // User manager already added
 
     const mgr = club.manager || getOrCreateClubManager(club);
-    const existing = managersList.find(m => m.id === mgr.id || m.name === mgr.name);
+    if (!mgr) return;
+    const existing = managersList.find(m => m && (m.id === mgr.id || m.name === mgr.name));
     if (!existing) {
       managersList.push({
         ...mgr,
@@ -338,10 +365,11 @@ export function generateMonthlyWorldRankings(
   });
 
   // Sort managers by ranking points descending
-  managersList.sort((a, b) => b.rankingPoints - a.rankingPoints || b.rating - a.rating);
+  managersList.sort((a, b) => (b?.rankingPoints || 0) - (a?.rankingPoints || 0) || (b?.rating || 0) - (a?.rating || 0));
 
   // Assign world rank and rank delta
   managersList.forEach((mgr, idx) => {
+    if (!mgr) return;
     const newRank = idx + 1;
     const prevRank = mgr.previousWorldRank || newRank;
     mgr.worldRank = newRank;
@@ -353,10 +381,11 @@ export function generateMonthlyWorldRankings(
   const rankedClubs: WorldClubRankingItem[] = clubsList.map(club => {
     const strength = club.squadStrength || calculateSquadStrength(club);
     const mgr = club.isUserClub ? userManagerEntry : (club.manager || getOrCreateClubManager(club));
+    const mgrRating = mgr?.rating || 60;
     
     // Club points based on reputation, squad strength, league tier, and manager
     const tierBonus = club.division === 1 ? 8000 : club.division === 2 ? 3500 : club.division === 3 ? 1500 : 500;
-    const basePts = (club.reputation * 120) + (strength.overall * 60) + (mgr.rating * 40) + tierBonus;
+    const basePts = ((club.reputation || 30) * 120) + ((strength?.overall || 60) * 60) + (mgrRating * 40) + tierBonus;
     const clubPts = club.rankingPoints ? Math.max(club.rankingPoints, basePts) : basePts;
 
     return {

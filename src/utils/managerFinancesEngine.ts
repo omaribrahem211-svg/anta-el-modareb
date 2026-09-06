@@ -14,7 +14,7 @@ export interface CoachingCourse {
   category: 'license' | 'tactic' | 'psychology' | 'fitness' | 'fellowship';
   cost: number;
   requiredLicense?: 'D' | 'C' | 'B' | 'A';
-  grantsLicense?: 'C' | 'B' | 'A' | 'PRO';
+  grantsLicense?: 'D' | 'C' | 'B' | 'A' | 'PRO';
   description: string;
   xpReward: number;
   reputationReward: number;
@@ -24,6 +24,18 @@ export interface CoachingCourse {
 
 export const COACHING_COURSES: CoachingCourse[] = [
   // Official Licenses
+  {
+    id: 'license_d',
+    title: 'رخصة التدريب التأسيسية (CAF / الاتحاد المحلي D)',
+    category: 'license',
+    cost: 15000,
+    grantsLicense: 'D',
+    description: 'الدورة التأسيسية المعتمدة لمدربي كرة القدم لدراسة مبادئ التدريب، إدارة الحصص التدريبية، والتطوير الفني والبدني للاعبين.',
+    xpReward: 200,
+    reputationReward: 4,
+    specialBenefit: 'الاعتماد الرسمي لرخصة التدريب D، فتح مسار التراخيص القارية المتقدمة (C و B)، وزيادة رصيد تصنيفك العالمي (+20 نقطة).',
+    iconName: 'Award',
+  },
   {
     id: 'license_c',
     title: 'رخصة التدريب القارية (CAF / UEFA C)',

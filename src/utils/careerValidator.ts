@@ -17,7 +17,7 @@ export function validateCareerState(
   allLeagues?: Record<string, LeagueDefinition>
 ): ValidatedCareerState {
   const manager = { ...rawManager };
-  const teams = (Array.isArray(rawTeams) ? rawTeams : []).map(t => ({ ...t }));
+  const teams = (Array.isArray(rawTeams) ? rawTeams : []).filter(t => t && t.id).map(t => ({ ...t }));
 
   // 1. Resignation is disabled: manager is always employed
   manager.isUnemployed = false;
@@ -27,13 +27,13 @@ export function validateCareerState(
 
   // Try finding club by currentClubId
   if (manager.currentClubId) {
-    matchedClubIndex = teams.findIndex(t => t.id === manager.currentClubId);
+    matchedClubIndex = teams.findIndex(t => t && t.id === manager.currentClubId);
   }
 
   // If not found by currentClubId, check if any team in the active league has isUserClub: true
   if (matchedClubIndex === -1) {
-    matchedClubIndex = teams.findIndex(t => t.isUserClub);
-    if (matchedClubIndex !== -1) {
+    matchedClubIndex = teams.findIndex(t => t && t.isUserClub);
+    if (matchedClubIndex !== -1 && teams[matchedClubIndex]?.id) {
       manager.currentClubId = teams[matchedClubIndex].id;
     }
   }
@@ -42,8 +42,8 @@ export function validateCareerState(
   if (matchedClubIndex === -1 && Array.isArray(manager.clubsManaged) && manager.clubsManaged.length > 0) {
     for (let i = manager.clubsManaged.length - 1; i >= 0; i--) {
       const prevName = manager.clubsManaged[i];
-      const idx = teams.findIndex(t => t.name === prevName || t.shortName === prevName);
-      if (idx !== -1) {
+      const idx = teams.findIndex(t => t && (t.name === prevName || t.shortName === prevName));
+      if (idx !== -1 && teams[idx]?.id) {
         matchedClubIndex = idx;
         manager.currentClubId = teams[idx].id;
         break;
@@ -54,9 +54,9 @@ export function validateCareerState(
   // If still not matched, check allLeagues
   if (matchedClubIndex === -1 && allLeagues && manager.currentClubId) {
     for (const league of Object.values(allLeagues)) {
-      const found = (league.teams || []).find(t => t.id === manager.currentClubId);
-      if (found) {
-        const idx = teams.findIndex(t => t.id === found.id);
+      const found = (league?.teams || []).find(t => t && t.id === manager.currentClubId);
+      if (found && found.id) {
+        const idx = teams.findIndex(t => t && t.id === found.id);
         if (idx !== -1) {
           matchedClubIndex = idx;
         }
@@ -66,7 +66,7 @@ export function validateCareerState(
   }
 
   // Fallback: If still not matched, default to the first team in the active league
-  if (matchedClubIndex === -1 && teams.length > 0) {
+  if (matchedClubIndex === -1 && teams.length > 0 && teams[0]?.id) {
     matchedClubIndex = 0;
     manager.currentClubId = teams[0].id;
   }
@@ -79,9 +79,9 @@ export function validateCareerState(
 
   const userClub = matchedClubIndex !== -1 ? updatedTeams[matchedClubIndex] : updatedTeams[0];
 
-  if (userClub && userClub.name) {
+  if (userClub && userClub.id) {
     manager.currentClubId = userClub.id;
-    if (!manager.clubsManaged?.includes(userClub.name)) {
+    if (userClub.name && !manager.clubsManaged?.includes(userClub.name)) {
       manager.clubsManaged = Array.from(new Set([...(manager.clubsManaged || []), userClub.name]));
     }
   }

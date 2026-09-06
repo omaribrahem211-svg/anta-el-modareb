@@ -342,7 +342,7 @@ export function evaluateMatchImpactOnConfidence(
   }
 ): MatchEvaluationResult {
   const targetPos = currentBoardSystem.targetLeaguePosition || 1;
-  const currentRank = standings.findIndex(s => s.teamId === userClub.id) + 1 || 1;
+  const currentRank = (userClub?.id ? (standings || []).findIndex(s => s && s.teamId === userClub.id) + 1 : 1) || 1;
 
   // Rank difference (positive means ahead of target, negative means trailing target)
   const rankMargin = targetPos - currentRank;
@@ -527,10 +527,10 @@ export function evaluateMatchImpactOnConfidence(
  */
 export function updateDailyBoardConfidence(
   prev: BoardSystem,
-  userClub: Club,
+  userClub: Club | undefined,
   standings: LeagueStanding[]
 ): BoardSystem {
-  const currentPos = standings.findIndex(s => s.teamId === userClub.id) + 1 || 1;
+  const currentPos = (userClub?.id ? (standings || []).findIndex(s => s && s.teamId === userClub.id) + 1 : 1) || 1;
   const targetPos = prev.targetLeaguePosition || 1;
   const margin = targetPos - currentPos;
 

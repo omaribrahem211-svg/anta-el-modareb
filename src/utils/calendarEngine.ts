@@ -372,10 +372,10 @@ export function simulateDailyNegotiations(
     // --- SELLING NEGOTIATION PROGRESSION (type: 'sell') ---
     if (current.type === 'sell') {
       if (current.stage === 'club_counter') {
-        const squadPlayer = (userClub?.players || []).find(p => p.id === current.playerId);
+        const squadPlayer = (userClub?.players || []).find(p => p && p.id === current.playerId);
         const playerVal = squadPlayer?.marketValue || current.bidFee;
         const demanded = current.demandedFee || current.bidFee;
-        const buyerClub = allTeams.find(t => t.id === current.buyerClubId);
+        const buyerClub = allTeams.find(t => t && t.id === current.buyerClubId);
 
         if (!buyerClub) {
           current.stage = 'rejected';
@@ -438,8 +438,8 @@ export function simulateDailyNegotiations(
       
       if (isBuyingFromOtherClub) {
         // AI Club evaluates bid
-        const targetClub = allTeams.find(t => t.id === current.playerClubId);
-        const targetPlayer = (targetClub?.players || []).find(p => p.id === current.playerId);
+        const targetClub = allTeams.find(t => t && t.id === current.playerClubId);
+        const targetPlayer = (targetClub?.players || []).find(p => p && p.id === current.playerId);
         const playerVal = targetPlayer?.marketValue || current.bidFee;
 
         // If bid is >= 95% of market value: Club Approves!

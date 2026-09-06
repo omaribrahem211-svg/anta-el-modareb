@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, startTransition } from 'react';
 import { Capacitor } from '@capacitor/core';
 import { App as CapApp } from '@capacitor/app';
 import { LanguageProvider } from './utils/i18n';
@@ -37,6 +37,12 @@ function GameApp() {
   const { isAdmin } = useAuth();
   const { dayAdvanceSummary, showDaySummaryModal, closeDaySummaryModal, isMatchDay, liveMatch } = useGame();
   const [activeTab, setActiveTab] = useState<ActiveTab>('dashboard');
+
+  const handleTabChange = useCallback((newTab: ActiveTab) => {
+    startTransition(() => {
+      setActiveTab(newTab);
+    });
+  }, []);
   const [selectedPlayer, setSelectedPlayer] = useState<Player | null>(null);
   const [isRewardedModalOpen, setIsRewardedModalOpen] = useState<boolean>(false);
   const [rewardedModalDefaultType, setRewardedModalDefaultType] = useState<AdRewardType>('coins');
@@ -153,21 +159,21 @@ function GameApp() {
       {/* Top Header Bar */}
       <Header 
         activeTab={activeTab} 
-        setActiveTab={setActiveTab} 
+        setActiveTab={handleTabChange} 
         onOpenAdmin={() => {
           setIsAdminMode(true);
           window.location.hash = '#admin';
         }}
       />
 
-      {/* Main Content Stage */}
-      <main className="flex-1 max-w-5xl w-full mx-auto p-3 sm:p-4 pb-36">
+      {/* Main Content Stage - GPU accelerated for smooth page transitions */}
+      <main className="flex-1 max-w-5xl w-full mx-auto p-3 sm:p-4 pb-36 gpu-layer">
         {/* Facebook Community Banner (Dismissible) */}
         <FacebookBanner />
 
         {activeTab === 'dashboard' && (
           <DashboardTab 
-            setActiveTab={setActiveTab} 
+            setActiveTab={handleTabChange} 
             onSelectPlayer={(p) => setSelectedPlayer(p)} 
           />
         )}
@@ -226,7 +232,7 @@ function GameApp() {
       </main>
 
       {/* Persistent Mobile Bottom Navigation Bar */}
-      <BottomNav activeTab={activeTab} setActiveTab={setActiveTab} />
+      <BottomNav activeTab={activeTab} setActiveTab={handleTabChange} />
 
       {/* Detail Player Inspector Modal */}
       {selectedPlayer && (

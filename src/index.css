@@ -18,3 +18,18 @@ input, textarea, [contenteditable="true"] {
   user-select: text;
 }
 
+/* GPU Hardware acceleration layer to prevent Android WebView compositing lag */
+.gpu-layer {
+  transform: translateZ(0);
+  -webkit-transform: translateZ(0);
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+}
+
+/* Optimize smooth scrolling and render performance on mobile */
+html, body {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  overscroll-behavior-y: none;
+}
+

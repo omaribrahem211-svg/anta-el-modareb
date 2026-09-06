@@ -255,6 +255,14 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({ setActiveTab, onSele
   const oppTeamId = isHome ? nextFixture?.awayTeamId : nextFixture?.homeTeamId;
   const oppTeam = oppTeamId ? safeTeams.find(t => t && t.id === oppTeamId) : undefined;
 
+  // Next upcoming fixture for user club across future rounds (when user has no match in this current round)
+  const nextUpcomingUserFixture = userClub?.id
+    ? safeFixtures.find(f => f && !f.isPlayed && f.round >= currentRound && (f.homeTeamId === userClub.id || f.awayTeamId === userClub.id))
+    : undefined;
+  const isUpcomingHome = userClub?.id ? nextUpcomingUserFixture?.homeTeamId === userClub.id : false;
+  const upcomingOppId = isUpcomingHome ? nextUpcomingUserFixture?.awayTeamId : nextUpcomingUserFixture?.homeTeamId;
+  const upcomingOpp = upcomingOppId ? safeTeams.find(t => t && t.id === upcomingOppId) : undefined;
+
   // User Standing
   const userRankIndex = userClub?.id ? safeStandings.findIndex(s => s && s.teamId === userClub.id) : -1;
   const userStanding = userRankIndex !== -1 ? safeStandings[userRankIndex] : safeStandings[0];
@@ -382,7 +390,29 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({ setActiveTab, onSele
       </div>
 
       {/* Hero Matchday Card */}
-      {!seasonFinished && oppTeam ? (
+      {seasonFinished ? (
+        <div className="bg-gradient-to-r from-amber-950/60 to-slate-900 p-5 rounded-3xl border border-amber-800/60 text-center space-y-3">
+          <Trophy className="w-12 h-12 text-amber-400 mx-auto animate-bounce" />
+          <h2 className="text-lg font-black text-white">انتهت منافسات الموسم {season.seasonNumber} رسمياً!</h2>
+          <p className="text-xs text-slate-300">
+            {userRank === 1 ? `🎉 مبروك التتويج بلقب ${activeLeague.name}!` : `أنهيت الموسم في المركز ${userRank} في ${activeLeague.name}. يمكنك مراجعة الحصيلة وتحديد مستقبلك للموسم الجديد.`}
+          </p>
+          <div className="flex items-center justify-center gap-2 pt-1">
+            <button 
+              onClick={openSeasonModal}
+              className="bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs px-5 py-2.5 rounded-xl transition-all shadow-lg shadow-amber-500/20 active:scale-95 cursor-pointer flex items-center gap-1.5"
+            >
+              <Trophy className="w-4 h-4" /> مراجعة ختام الموسم وبدء الموسم الجديد
+            </button>
+            <button 
+              onClick={() => setActiveTab('league')}
+              className="bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs px-4 py-2.5 rounded-xl transition-all cursor-pointer"
+            >
+              جدول الترتيب
+            </button>
+          </div>
+        </div>
+      ) : oppTeam ? (
         <div className="relative overflow-hidden bg-gradient-to-br from-slate-900 via-slate-900 to-emerald-950/40 rounded-3xl border border-slate-800 p-5 shadow-2xl">
           <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-emerald-500 via-amber-500 to-emerald-500" />
           
@@ -422,12 +452,12 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({ setActiveTab, onSele
             <div className="col-span-2 flex flex-col items-center text-center">
               <div 
                 className="w-14 h-14 rounded-2xl flex items-center justify-center font-black text-xl shadow-lg border border-white/20 mb-2"
-                style={{ backgroundColor: oppTeam.primaryColor, color: '#fff' }}
+                style={{ backgroundColor: oppTeam?.primaryColor || '#334155', color: '#fff' }}
               >
-                {oppTeam.shortName.slice(0, 2)}
+                {oppTeam?.shortName ? oppTeam.shortName.slice(0, 2) : 'ضف'}
               </div>
-              <h3 className="font-bold text-sm text-white truncate max-w-full">{oppTeam.name}</h3>
-              <span className="text-[10px] text-slate-400 mt-0.5">{oppTeam.city}</span>
+              <h3 className="font-bold text-sm text-white truncate max-w-full">{oppTeam?.name || 'المنافس القادم'}</h3>
+              <span className="text-[10px] text-slate-400 mt-0.5">{oppTeam?.city || ''}</span>
             </div>
           </div>
 
@@ -489,24 +519,66 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({ setActiveTab, onSele
           </div>
         </div>
       ) : (
-        <div className="bg-gradient-to-r from-amber-950/60 to-slate-900 p-5 rounded-3xl border border-amber-800/60 text-center space-y-3">
-          <Trophy className="w-12 h-12 text-amber-400 mx-auto animate-bounce" />
-          <h2 className="text-lg font-black text-white">انتهت منافسات الموسم {season.seasonNumber} رسمياً!</h2>
-          <p className="text-xs text-slate-300">
-            {userRank === 1 ? `🎉 مبروك التتويج بلقب ${activeLeague.name}!` : `أنهيت الموسم في المركز ${userRank} في ${activeLeague.name}. يمكنك مراجعة الحصيلة وتحديد مستقبلك للموسم الجديد.`}
-          </p>
-          <div className="flex items-center justify-center gap-2 pt-1">
-            <button 
-              onClick={openSeasonModal}
-              className="bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs px-5 py-2.5 rounded-xl transition-all shadow-lg shadow-amber-500/20 active:scale-95 cursor-pointer flex items-center gap-1.5"
+        /* Rest Round / Bye Week / Cup Round for Remaining Clubs */
+        <div className="relative overflow-hidden bg-gradient-to-br from-slate-900 via-indigo-950/30 to-slate-900 rounded-3xl border border-indigo-500/30 p-5 shadow-2xl space-y-4">
+          <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-indigo-500 via-cyan-400 to-indigo-500" />
+          
+          <div className="flex items-center justify-between text-xs text-slate-400">
+            <span className="flex items-center gap-1.5 font-bold text-cyan-400">
+              <Calendar className="w-3.5 h-3.5" />
+              الجولة {currentRound} من {totalRounds}
+            </span>
+            <span className="bg-indigo-950/80 text-indigo-300 px-2.5 py-0.5 rounded-full border border-indigo-700/50 font-bold text-[11px]">
+              ☕ راحة لفريقك في هذه الجولة
+            </span>
+          </div>
+
+          <div className="flex flex-col sm:flex-row items-center gap-4 bg-slate-950/60 p-4 rounded-2xl border border-slate-800/80">
+            <div className="w-14 h-14 rounded-2xl bg-indigo-900/40 border border-indigo-500/40 flex items-center justify-center text-2xl shrink-0">
+              🏆
+            </div>
+            <div className="space-y-1 text-center sm:text-right">
+              <h3 className="font-black text-white text-sm">
+                مباريات بطولة الكأس للأندية المتأهلة
+              </h3>
+              <p className="text-xs text-slate-300 leading-relaxed">
+                فريقك لا يشارك في هذه الجولة بسبب مغادرة بطولة الكأس أو جدول الراحة. تجري حالياً مباريات بين الأندية الأخرى، وسيستأنف فريقك منافسات الدوري في الجولة القادمة!
+              </p>
+            </div>
+          </div>
+
+          {nextUpcomingUserFixture && upcomingOpp && (
+            <div className="flex items-center justify-between text-xs bg-slate-900/90 px-3.5 py-2.5 rounded-xl border border-slate-800">
+              <span className="text-slate-400 flex items-center gap-1.5">
+                <Swords className="w-3.5 h-3.5 text-amber-400" />
+                المباراة القادمة لفريقك:
+              </span>
+              <span className="text-amber-300 font-bold">
+                الجولة {nextUpcomingUserFixture.round} أمام ({upcomingOpp.name}) {isUpcomingHome ? '🏟️ بملعبنا' : '✈️ خارج الديار'}
+              </span>
+            </div>
+          )}
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1">
+            <button
+              id="dashboard_sim_rest_round_btn"
+              onClick={() => {
+                instantSimulateCurrentRound();
+                setActiveTab('matches');
+              }}
+              className="flex items-center justify-center gap-2 bg-gradient-to-r from-indigo-600 to-cyan-600 hover:from-indigo-500 hover:to-cyan-500 text-white font-black text-xs sm:text-sm py-3 px-4 rounded-xl shadow-lg shadow-indigo-950/50 transition-all active:scale-95 cursor-pointer"
             >
-              <Trophy className="w-4 h-4" /> مراجعة ختام الموسم وبدء الموسم الجديد
+              <Zap className="w-4 h-4 text-cyan-200" />
+              <span>محاكاة نتائج مباريات الجولة {currentRound} ⚡</span>
             </button>
-            <button 
-              onClick={() => setActiveTab('league')}
-              className="bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs px-4 py-2.5 rounded-xl transition-all cursor-pointer"
+
+            <button
+              id="dashboard_advance_day_rest_btn"
+              onClick={() => advanceToNextDay(false)}
+              className="flex items-center justify-center gap-2 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 font-bold text-xs sm:text-sm py-3 px-4 rounded-xl transition-all active:scale-95 cursor-pointer"
             >
-              جدول الترتيب
+              <Clock className="w-4 h-4 text-cyan-400" />
+              <span>التقدم بالتقويم (+1 يوم) ➔</span>
             </button>
           </div>
         </div>
@@ -515,7 +587,7 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({ setActiveTab, onSele
       {/* Board & Fan Confidence Widget */}
       {boardSystem && userClub && (
         (() => {
-          const userRank = (userClub.id ? (Array.isArray(standings) ? standings : []).findIndex(s => s && s.teamId === userClub.id) + 1 : 1) || 1;
+          const userRank = (userClub?.id ? (Array.isArray(standings) ? standings : []).findIndex(s => s && s.teamId === userClub.id) + 1 : 1) || 1;
           const targetRank = boardSystem.targetLeaguePosition || 1;
           const rankMargin = targetRank - userRank;
           const isAhead = rankMargin >= 0;
