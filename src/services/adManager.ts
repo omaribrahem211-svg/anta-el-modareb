@@ -30,6 +30,7 @@ class AdManagerService {
   private isInterstitialLoaded = false;
   private isRewardedLoaded = false;
   private isInterstitialShowing = false;
+  private isInterstitialTransitioning = false;
   private isRewardedShowing = false;
   private activeRewardSessionId: string | null = null;
   private bannerListenersAttached = false;
@@ -63,9 +64,11 @@ class AdManagerService {
             // When app goes to background, avoid pending actions
           } else {
             // When app resumes, gently re-evaluate and recreate banner cleanly if it was active
-            if (this.lastBannerRequestedState && !this.isInterstitialShowing && !this.isRewardedShowing && !this.state.isPremium) {
+            if (this.lastBannerRequestedState && !this.isInterstitialActive() && !this.isRewardedShowing && !this.state.isPremium) {
               setTimeout(() => {
-                this.showBanner(true);
+                if (!this.isInterstitialActive()) {
+                  this.reinitializeBanner();
+                }
               }, 500);
             }
           }
@@ -193,11 +196,40 @@ class AdManagerService {
   }
 
   /**
+   * Checks whether an Interstitial Ad is currently active, presenting on screen,
+   * or within the post-dismissal WebView stabilization window.
+   */
+  public isInterstitialActive(): boolean {
+    return this.isInterstitialShowing || this.isInterstitialTransitioning;
+  }
+
+  /**
+   * Checks whether an Interstitial Ad is actively visible on screen right now.
+   */
+  public isInterstitialShowingNow(): boolean {
+    return this.isInterstitialShowing;
+  }
+
+  /**
+   * Safely reinitializes the Banner Ad.
+   * Checks the Interstitial ad status first to prevent WebView and graphics context collisions.
+   */
+  public async reinitializeBanner(): Promise<boolean> {
+    if (this.isInterstitialActive()) {
+      this.log('reinitializeBanner deferred: Interstitial is active or in stabilization window');
+      this.lastBannerRequestedState = true;
+      return false;
+    }
+    return this.showBanner(true);
+  }
+
+  /**
    * Shows a Banner Ad at the bottom of the screen (on non-match screens)
-   * High performance & self-healing:
-   * 1. If forceRecreate or not created: cleanly removes any stale native view, then calls showBanner.
-   * 2. If existing banner: attempts smooth resume, falling back to clean recreation on failure.
-   * 3. Prevents layout lag and GL texture collisions on Android.
+   * High performance, self-healing, & WebView-safe:
+   * 1. Checks interstitial state before attempting initialization, recreation, or display.
+   * 2. If forceRecreate or not created: cleanly removes any stale native view, then calls showBanner.
+   * 3. If existing banner: attempts smooth resume, falling back to clean recreation on failure.
+   * 4. Prevents layout lag, EGL texture conflicts, and WebView freeze on Android.
    */
   public async showBanner(forceRecreate: boolean = false): Promise<boolean> {
     if (this.state.isPremium) {
@@ -205,9 +237,17 @@ class AdManagerService {
       return false;
     }
 
-    // Do NOT attempt to show banner if a fullscreen ad (interstitial or rewarded) is currently presenting
-    if (this.isInterstitialShowing || this.isRewardedShowing) {
-      this.log('Banner skipped: Fullscreen ad is active');
+    // 1. CRITICAL: Strictly verify Interstitial status before any WebView or native operation
+    if (this.isInterstitialActive()) {
+      this.log('Banner skipped/deferred: Interstitial is currently active or transitioning in WebView');
+      this.lastBannerRequestedState = true;
+      return false;
+    }
+
+    // 2. Also check if a rewarded video ad is currently presenting
+    if (this.isRewardedShowing) {
+      this.log('Banner skipped/deferred: Rewarded video is active');
+      this.lastBannerRequestedState = true;
       return false;
     }
 
@@ -220,20 +260,44 @@ class AdManagerService {
     this.bannerOperationLock = true;
 
     try {
+      // Re-verify interstitial state before async initialization
+      if (this.isInterstitialActive()) {
+        this.log('Banner aborted: Interstitial ad started before initialization');
+        return false;
+      }
+
       const initialized = await this.initialize();
       if (!initialized && this.isNative) {
         this.log('Banner deferred: AdMob not ready yet');
         return false;
       }
 
+      // Re-verify interstitial state after async initialization to prevent race conditions
+      if (this.isInterstitialActive()) {
+        this.log('Banner aborted: Interstitial ad started during initialization');
+        return false;
+      }
+
       if (this.isNative) {
         if (forceRecreate || !this.isBannerCreated) {
+          // Double check before removing and creating native view
+          if (this.isInterstitialActive()) {
+            this.log('Banner clean recreate aborted: Interstitial is active');
+            return false;
+          }
+
           try {
             await AdMob.removeBanner();
           } catch (remErr) {
             this.log('Clean remove notice before show:', remErr);
           }
           this.isBannerCreated = false;
+
+          // Final check right before AdMob bridge call to avoid any WebView overlay conflict
+          if (this.isInterstitialActive()) {
+            this.log('Banner showBanner aborted: Interstitial is active');
+            return false;
+          }
 
           const options: BannerAdOptions = {
             adId: ADMOB_CONFIG.BANNER_ID,
@@ -250,15 +314,25 @@ class AdManagerService {
         } else {
           // Attempt instant resume
           try {
+            if (this.isInterstitialActive()) {
+              return false;
+            }
             await AdMob.resumeBanner();
             this.isBannerVisible = true;
             this.log('Native Banner resumed smoothly');
           } catch (resumeErr) {
             this.log('Banner resume notice, fallback to fresh recreate:', resumeErr);
+            if (this.isInterstitialActive()) {
+              return false;
+            }
             try {
               await AdMob.removeBanner();
             } catch {}
             this.isBannerCreated = false;
+
+            if (this.isInterstitialActive()) {
+              return false;
+            }
 
             const options: BannerAdOptions = {
               adId: ADMOB_CONFIG.BANNER_ID,
@@ -434,12 +508,13 @@ class AdManagerService {
       return false;
     }
 
-    if (this.isInterstitialShowing) return false;
+    if (this.isInterstitialActive()) return false;
 
     const wasBannerActiveBefore = this.lastBannerRequestedState || this.isBannerVisible;
 
     try {
       this.isInterstitialShowing = true;
+      this.isInterstitialTransitioning = true;
       this.log('Preparing to show Interstitial...');
 
       // 1. Detach native banner view completely to prevent GL texture & layout collisions
@@ -490,7 +565,7 @@ class AdManagerService {
 
       this.isInterstitialLoaded = false;
       this.isInterstitialShowing = false;
-      this.log('Interstitial finished and closed cleanly');
+      this.log('Interstitial closed, entering WebView stabilization tick (transitioning active)');
 
       // 3. Reset frequency counter and record timestamp
       this.state.matchesPlayedSinceLastInterstitial = 0;
@@ -499,8 +574,9 @@ class AdManagerService {
 
       // 4. Android Activity resume stabilization tick (500ms) to ensure smooth WebView rendering
       setTimeout(async () => {
+        this.isInterstitialTransitioning = false;
         if (wasBannerActiveBefore && !this.state.isPremium && this.lastBannerRequestedState) {
-          this.log('Restoring native banner cleanly after interstitial...');
+          this.log('Restoring native banner cleanly after interstitial stabilization...');
           await this.showBanner(true);
         }
       }, 500);
@@ -518,6 +594,7 @@ class AdManagerService {
       
       // Attempt restoring banner on failure after stabilization
       setTimeout(async () => {
+        this.isInterstitialTransitioning = false;
         if (wasBannerActiveBefore && !this.state.isPremium && this.lastBannerRequestedState) {
           this.log('Restoring native banner cleanly after interstitial failure...');
           await this.showBanner(true);

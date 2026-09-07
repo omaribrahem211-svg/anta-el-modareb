@@ -69,9 +69,12 @@ export const CreateTrainerModal: React.FC<CreateTrainerModalProps> = ({ onProfil
         
         {/* Top Visual Emblem */}
         <div className="text-center mb-6">
-          <div className="w-16 h-16 rounded-2xl bg-gradient-to-tr from-emerald-600 to-teal-500 border border-emerald-400/40 flex items-center justify-center mx-auto mb-3 shadow-lg shadow-emerald-600/30">
-            <Trophy className="w-8 h-8 text-white" />
-          </div>
+          <img 
+            src="/anta_elmodareb_logo.png" 
+            alt="شعار أنت المدرب" 
+            className="w-20 h-20 rounded-2xl object-cover border-2 border-amber-500/50 shadow-xl shadow-emerald-950/60 mx-auto mb-3"
+            referrerPolicy="no-referrer"
+          />
           <h2 className="text-2xl sm:text-3xl font-black text-white tracking-wide">
             أنشئ بروفايل المدرب
           </h2>

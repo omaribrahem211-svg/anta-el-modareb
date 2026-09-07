@@ -48,17 +48,21 @@ export const Header: React.FC<HeaderProps> = ({ activeTab, setActiveTab, onOpenA
     <header className="sticky top-0 z-30 bg-slate-900/95 backdrop-blur-md border-b border-slate-800 px-3 sm:px-4 py-2.5 sm:py-3 shadow-lg">
       <div className="max-w-5xl mx-auto flex items-center justify-between gap-2">
         
-        {/* Club Brand Info */}
-        <div className="flex items-center gap-2.5 min-w-0">
-          <div 
-            className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl flex items-center justify-center font-black text-lg shadow-md border border-white/10 shrink-0"
-            style={{ 
-              backgroundColor: userClub ? userClub.primaryColor : '#334155',
-              color: '#ffffff'
-            }}
+        {/* Game & Club Brand Info */}
+        <div className="flex items-center gap-2 sm:gap-2.5 min-w-0">
+          <button
+            type="button"
+            onClick={() => setActiveTab('dashboard')}
+            className="flex items-center gap-1.5 focus:outline-none group shrink-0"
+            title="أنت المدرب - الشاشة الرئيسية"
           >
-            <Shield className="w-5 h-5 text-amber-300" />
-          </div>
+            <img 
+              src="/anta_elmodareb_logo.png" 
+              alt="شعار لعبة أنت المدرب" 
+              className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl object-cover shadow-md border border-amber-500/40 group-hover:scale-105 group-hover:border-amber-400 transition-all"
+              referrerPolicy="no-referrer"
+            />
+          </button>
           
           <div className="min-w-0">
             <div className="flex items-center gap-1.5">

@@ -35,8 +35,8 @@ export const PRODUCTION_AD_IDS = {
   REWARDED_ID: 'ca-app-pub-5272866425919152/6122623978',
 };
 
-// Set to true for development/testing (per AdMob guidelines), false for Production Google Play release
-export const IS_TEST_MODE = true;
+// Set to false for Production Google Play release with real live AdMob ads
+export const IS_TEST_MODE = false;
 
 export const ADMOB_CONFIG: AdMobConfigType = {
   IS_TEST_MODE,

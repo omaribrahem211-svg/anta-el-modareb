@@ -22,8 +22,9 @@ export const BannerAdContainer: React.FC<BannerAdContainerProps> = ({ activeTab,
   }, []);
 
   // Determine if banner should be visible
-  const isMatchScreen = activeTab === 'matches' || activeTab === 'online_pvp' || isMatchActive;
-  const shouldShow = !isPremium && !isMatchScreen;
+  // Banner appears on ALL app pages smoothly.
+  // Only paused when a live interactive match simulation is actively running on screen to prevent user distraction.
+  const shouldShow = !isPremium && !isMatchActive;
 
   useEffect(() => {
     // Clear any previous debounce timer
@@ -62,25 +63,25 @@ export const BannerAdContainer: React.FC<BannerAdContainerProps> = ({ activeTab,
   return (
     <div 
       id="admob-banner-container"
-      className="w-full max-w-lg mx-auto my-3 px-2 transition-all duration-300"
+      className="fixed bottom-16 left-0 right-0 z-20 flex justify-center px-2 pointer-events-none transition-all duration-300"
     >
-      <div className="bg-slate-900/80 border border-amber-500/20 rounded-xl p-2.5 flex items-center justify-between text-xs text-slate-400 shadow-sm relative overflow-hidden">
+      <div className="w-full max-w-md bg-slate-900/95 backdrop-blur-md border border-amber-500/30 rounded-xl px-3 py-1.5 flex items-center justify-between text-xs text-slate-300 shadow-xl pointer-events-auto relative overflow-hidden">
         {/* Subtle background glow */}
-        <div className="absolute top-0 right-0 w-24 h-full bg-gradient-to-l from-amber-500/5 to-transparent pointer-events-none" />
+        <div className="absolute top-0 right-0 w-24 h-full bg-gradient-to-l from-amber-500/10 to-transparent pointer-events-none" />
         
         <div className="flex items-center gap-2">
-          <span className="bg-amber-500/10 text-amber-400 text-[10px] font-bold px-1.5 py-0.5 rounded border border-amber-500/30 tracking-wider">
+          <span className="bg-amber-500/20 text-amber-300 text-[10px] font-black px-1.5 py-0.5 rounded border border-amber-500/40 tracking-wider">
             AD
           </span>
-          <span className="text-slate-300 font-medium truncate max-w-[200px] sm:max-w-[280px]">
+          <span className="text-slate-200 font-medium text-[11px] truncate max-w-[200px] sm:max-w-[280px]">
             {ADMOB_CONFIG.IS_TEST_MODE 
-              ? 'إعلان اختباري من Google AdMob (Banner)' 
+              ? 'Google AdMob Smart Banner (أنت المدرب)' 
               : 'شريك الإعلانات الرسمي'}
           </span>
         </div>
 
-        <div className="flex items-center gap-1 text-[11px] text-slate-500 font-mono">
-          <Sparkles className="w-3 h-3 text-amber-400/70" />
+        <div className="flex items-center gap-1 text-[11px] text-amber-400/80 font-mono shrink-0">
+          <Sparkles className="w-3 h-3 text-amber-400" />
           <span>320×50</span>
         </div>
       </div>

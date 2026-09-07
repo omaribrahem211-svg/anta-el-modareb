@@ -94,9 +94,12 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ onBackToGame }) => {
           
           {/* Brand & Badge */}
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400">
-              <ShieldCheck className="w-6 h-6" />
-            </div>
+            <img 
+              src="/anta_elmodareb_logo.png" 
+              alt="أنت المدرب" 
+              className="w-10 h-10 rounded-2xl object-cover border border-amber-500/40 shadow-md"
+              referrerPolicy="no-referrer"
+            />
             <div>
               <div className="flex items-center gap-2">
                 <span className="text-base font-bold text-slate-100">أنت المدرب</span>
