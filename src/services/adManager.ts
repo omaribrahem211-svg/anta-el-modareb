@@ -301,17 +301,17 @@ class AdManagerService {
           }
 
           const options: BannerAdOptions = {
-            adId: ADMOB_CONFIG.BANNER_ID,
+            adId: ADMOB_CONFIG.BOTTOM_BANNER_ID || ADMOB_CONFIG.BANNER_ID,
             adSize: BannerAdSize.BANNER,
-            position: BannerAdPosition.TOP_CENTER,
-            margin: 0,
+            position: BannerAdPosition.BOTTOM_CENTER,
+            margin: 58, // Sits cleanly directly ABOVE the bottom menu bar
             isTesting: ADMOB_CONFIG.IS_TEST_MODE,
           };
 
           await AdMob.showBanner(options);
           this.isBannerCreated = true;
           this.isBannerVisible = true;
-          this.log('Native Banner cleanly created and attached (Top Banner "بانر فوق" at TOP_CENTER)');
+          this.log('Native Banner cleanly created and attached (Fixed above bottom menu at BOTTOM_CENTER)');
         } else {
           // Attempt instant resume
           try {
@@ -336,10 +336,10 @@ class AdManagerService {
             }
 
             const options: BannerAdOptions = {
-              adId: ADMOB_CONFIG.BANNER_ID,
+              adId: ADMOB_CONFIG.BOTTOM_BANNER_ID || ADMOB_CONFIG.BANNER_ID,
               adSize: BannerAdSize.BANNER,
-              position: BannerAdPosition.TOP_CENTER,
-              margin: 0,
+              position: BannerAdPosition.BOTTOM_CENTER,
+              margin: 58, // Above bottom menu
               isTesting: ADMOB_CONFIG.IS_TEST_MODE,
             };
 
@@ -512,15 +512,12 @@ class AdManagerService {
     if (this.isInterstitialActive()) return false;
 
     // Safety guard: On native Android, if interstitial is not yet prepared in memory,
-    // try loading it with a brief await. If it still cannot load, exit cleanly without
-    // blanking screen or freezing the user!
+    // NEVER await loading on-the-fly because that freezes the user during navigation!
+    // Instead, trigger a silent background preload for next time and return false immediately.
     if (this.isNative && !this.isInterstitialLoaded) {
-      this.log('Interstitial not loaded in memory, attempting load before show...');
-      const loaded = await this.loadInterstitial();
-      if (!loaded || !this.isInterstitialLoaded) {
-        this.log('Interstitial could not be loaded, skipping ad gracefully');
-        return false;
-      }
+      this.log('Interstitial not pre-loaded in memory, triggering background preload and skipping to avoid UI lag');
+      this.loadInterstitial().catch(() => {});
+      return false;
     }
 
     const wasBannerActiveBefore = this.lastBannerRequestedState || this.isBannerVisible;
@@ -558,10 +555,10 @@ class AdManagerService {
             resolve();
           };
 
-          // 10-second hard safety timeout to guarantee the app NEVER hangs or gets stuck on white screen
+          // Fast 3.5-second safety timeout to guarantee the app NEVER hangs or gets stuck on white screen
           safetyTimer = setTimeout(() => {
             finish('Safety Timeout');
-          }, 10000);
+          }, 3500);
 
           try {
             dismissHandle = await AdMob.addListener(InterstitialAdPluginEvents.Dismissed, () => {

@@ -14,7 +14,9 @@ export interface AdMobConfigType {
   INTERSTITIAL_FREQUENCY_MATCHES: number; // Show interstitial every N matches
   REWARDED_COOLDOWN_SECONDS: number;     // Cooldown between rewarded ad claims
   APP_ID: string;
-  BANNER_ID: string;
+  TOP_BANNER_ID: string;    // بانر تحت صفحة الفيسبوك (Top In-Content Banner)
+  BOTTOM_BANNER_ID: string; // بانر فوق القائمة السفلية (Bottom Fixed Banner)
+  BANNER_ID: string;        // Native banner ad unit ID
   INTERSTITIAL_ID: string;
   REWARDED_ID: string;
 }
@@ -22,6 +24,8 @@ export interface AdMobConfigType {
 // Google Official Standard Android Test Ad Unit IDs
 const TEST_AD_IDS = {
   APP_ID: 'ca-app-pub-3940256099942544~3347511713',
+  TOP_BANNER_ID: 'ca-app-pub-3940256099942544/6300978111',
+  BOTTOM_BANNER_ID: 'ca-app-pub-3940256099942544/6300978111',
   BANNER_ID: 'ca-app-pub-3940256099942544/6300978111',
   INTERSTITIAL_ID: 'ca-app-pub-3940256099942544/1033173712',
   REWARDED_ID: 'ca-app-pub-3940256099942544/5224354917',
@@ -30,7 +34,9 @@ const TEST_AD_IDS = {
 // Official Production AdMob IDs for "أنت المدرب"
 export const PRODUCTION_AD_IDS = {
   APP_ID: 'ca-app-pub-5272866425919152~1232269694',
-  BANNER_ID: 'ca-app-pub-5272866425919152/6734203345', // بانر فوق الجديد (Top Banner)
+  TOP_BANNER_ID: 'ca-app-pub-5272866425919152/6734203345',    // بانر فوق (تحت جزء صفحة الفيسبوك)
+  BOTTOM_BANNER_ID: 'ca-app-pub-5272866425919152/4077924883', // بانر أسفل (فوق القائمة اللى تحت)
+  BANNER_ID: 'ca-app-pub-5272866425919152/4077924883',        // الاعلان التاني فوق القايمة
   INTERSTITIAL_ID: 'ca-app-pub-5272866425919152/5931052283',
   REWARDED_ID: 'ca-app-pub-5272866425919152/6122623978',
 };
@@ -45,7 +51,9 @@ export const ADMOB_CONFIG: AdMobConfigType = {
   INTERSTITIAL_FREQUENCY_MATCHES: 3, // Frequency cap: every 3 matches
   REWARDED_COOLDOWN_SECONDS: 60,     // 1 minute cooldown between training boosts
   APP_ID: IS_TEST_MODE ? TEST_AD_IDS.APP_ID : PRODUCTION_AD_IDS.APP_ID,
-  BANNER_ID: IS_TEST_MODE ? TEST_AD_IDS.BANNER_ID : PRODUCTION_AD_IDS.BANNER_ID,
+  TOP_BANNER_ID: IS_TEST_MODE ? TEST_AD_IDS.TOP_BANNER_ID : PRODUCTION_AD_IDS.TOP_BANNER_ID,
+  BOTTOM_BANNER_ID: IS_TEST_MODE ? TEST_AD_IDS.BOTTOM_BANNER_ID : PRODUCTION_AD_IDS.BOTTOM_BANNER_ID,
+  BANNER_ID: IS_TEST_MODE ? TEST_AD_IDS.BANNER_ID : PRODUCTION_AD_IDS.BOTTOM_BANNER_ID,
   INTERSTITIAL_ID: IS_TEST_MODE ? TEST_AD_IDS.INTERSTITIAL_ID : PRODUCTION_AD_IDS.INTERSTITIAL_ID,
   REWARDED_ID: IS_TEST_MODE ? TEST_AD_IDS.REWARDED_ID : PRODUCTION_AD_IDS.REWARDED_ID,
 };

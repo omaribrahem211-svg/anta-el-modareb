@@ -1,8 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { Capacitor } from '@capacitor/core';
 import { AdManager } from '../../services/adManager';
 import { ADMOB_CONFIG } from '../../config/admobConfig';
-import { Sparkles, ShieldCheck, ExternalLink } from 'lucide-react';
+import { Sparkles, ShieldCheck } from 'lucide-react';
 
 interface InContentBannerAdProps {
   className?: string;
@@ -23,11 +22,7 @@ export const InContentBannerAd: React.FC<InContentBannerAdProps> = ({ className 
     return null;
   }
 
-  // On Native Android, Google AdMob displays the real native AdView anchored at TOP_CENTER
-  if (Capacitor.isNativePlatform()) {
-    return null;
-  }
-
+  // Rendered directly beneath the Facebook Community Section on all platforms
   return (
     <div 
       id="in-content-admob-banner"
@@ -49,12 +44,12 @@ export const InContentBannerAd: React.FC<InContentBannerAdProps> = ({ className 
               <span className="text-xs font-bold text-slate-200 truncate">
                 {ADMOB_CONFIG.IS_TEST_MODE
                   ? 'إعلان تجريبي (Google AdMob)'
-                  : 'Google AdMob - بانر فوق'}
+                  : 'Google AdMob - بانر فوق (تحت الفيسبوك)'}
               </span>
               <ShieldCheck className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
             </div>
             <p className="text-[11px] text-slate-400 truncate font-mono hidden sm:block">
-              الوحدة: {ADMOB_CONFIG.BANNER_ID}
+              الوحدة: {ADMOB_CONFIG.TOP_BANNER_ID}
             </p>
           </div>
         </div>

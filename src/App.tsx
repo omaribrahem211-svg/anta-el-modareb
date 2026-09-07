@@ -65,8 +65,6 @@ function GameApp() {
     return () => unsub();
   }, []);
 
-  const isNativeBannerActive = Capacitor.isNativePlatform() && !isPremium && !liveMatch;
-
   // Initialize AdMob on startup
   useEffect(() => {
     AdManager.init();
@@ -167,12 +165,11 @@ function GameApp() {
 
   // Regular Player Game Experience
   return (
-    <div className={`min-h-screen bg-slate-950 text-slate-100 flex flex-col font-['Cairo',sans-serif] safe-area-inset ${isNativeBannerActive ? 'pt-[50px]' : ''}`}>
+    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-['Cairo',sans-serif] safe-area-inset">
       {/* Top Header Bar */}
       <Header 
         activeTab={activeTab} 
         setActiveTab={handleTabChange} 
-        isNativeBannerActive={isNativeBannerActive}
         onOpenAdmin={() => {
           setIsAdminMode(true);
           window.location.hash = '#admin';
