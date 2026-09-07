@@ -2102,6 +2102,22 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       newInboxMsgs.unshift(...cupRewardMessages);
     }
 
+    // 6.5. Generate Incoming AI Bids & Check Expiring Contracts for User Club
+    const latestUserClub = updatedAllTeams.find(t => t.isUserClub || (userClub && t.id === userClub.id)) || userClub;
+    if (latestUserClub) {
+      const aiBidsResult = generateIncomingAiBids(updatedAllTeams, latestUserClub, currentRound, season.seasonNumber);
+      if (aiBidsResult.bids.length > 0) {
+        setIncomingBids(prev => [...aiBidsResult.bids, ...prev]);
+        newInboxMsgs.unshift(...aiBidsResult.inboxMessages);
+      }
+
+      // Check expiring contracts
+      const contractAlerts = checkExpiringContracts(latestUserClub, `الجولة ${currentRound}`, inbox);
+      if (contractAlerts.length > 0) {
+        newInboxMsgs.unshift(...contractAlerts);
+      }
+    }
+
     const nextRoundNumber = currentRound + 1;
     const remainingLeagueFixtures = updatedFixtures.filter(f => (!f.competitionType || f.competitionType === 'league') && !f.isPlayed);
     const hasRemainingRounds = nextRoundNumber <= totalRounds && updatedFixtures.some(f => f.round >= nextRoundNumber);
@@ -2653,17 +2669,18 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
 
     // 5. Generate Incoming AI Bids & Check Expiring Contracts if user is managing a club
-    if (userClub) {
-      const aiBidsResult = generateIncomingAiBids(updatedAllTeams, userClub, currentRound, season.seasonNumber);
+    const latestUserClubSim = updatedAllTeams.find(t => t.isUserClub || (userClub && t.id === userClub.id)) || userClub;
+    if (latestUserClubSim) {
+      const aiBidsResult = generateIncomingAiBids(updatedAllTeams, latestUserClubSim, currentRound, season.seasonNumber);
       if (aiBidsResult.bids.length > 0) {
         setIncomingBids(prev => [...aiBidsResult.bids, ...prev]);
-        newInboxMsgs.push(...aiBidsResult.inboxMessages);
+        newInboxMsgs.unshift(...aiBidsResult.inboxMessages);
       }
 
       // Check expiring contracts
-      const contractAlerts = checkExpiringContracts(userClub, `الجولة ${currentRound}`, inbox);
+      const contractAlerts = checkExpiringContracts(latestUserClubSim, `الجولة ${currentRound}`, inbox);
       if (contractAlerts.length > 0) {
-        newInboxMsgs.push(...contractAlerts);
+        newInboxMsgs.unshift(...contractAlerts);
       }
     }
 
@@ -3312,8 +3329,9 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
 
     setTeams(transferResult.updatedTeams);
-    setIncomingBids(prev => prev.filter(b => b.id !== bidId));
+    setIncomingBids(prev => prev.filter(b => b.id !== bidId && b.playerId !== player.id));
     setActiveNegotiations(prev => prev.filter(n => n.playerId !== player.id));
+    setTransferMarket(prev => prev.filter(p => p.id !== player.id));
 
     if (transferResult.transferEntry) setTransferHistory(prev => [transferResult.transferEntry!, ...prev]);
 

@@ -62,11 +62,11 @@ class AdManagerService {
           if (!appState.isActive) {
             // When app goes to background, avoid pending actions
           } else {
-            // When app resumes, gently re-evaluate banner if it was active
-            if (this.lastBannerRequestedState && !this.isInterstitialShowing && !this.state.isPremium) {
+            // When app resumes, gently re-evaluate and recreate banner cleanly if it was active
+            if (this.lastBannerRequestedState && !this.isInterstitialShowing && !this.isRewardedShowing && !this.state.isPremium) {
               setTimeout(() => {
-                this.showBanner();
-              }, 400);
+                this.showBanner(true);
+              }, 500);
             }
           }
         });
@@ -146,10 +146,12 @@ class AdManagerService {
               const loadedHandle = await AdMob.addListener(BannerAdPluginEvents.Loaded, () => {
                 this.log('Native Banner Ad Loaded successfully');
                 this.isBannerVisible = true;
+                this.isBannerCreated = true;
               });
               const failedHandle = await AdMob.addListener(BannerAdPluginEvents.FailedToLoad, (error: any) => {
                 this.log('Native Banner Ad Failed to Load:', error);
                 this.isBannerVisible = false;
+                this.isBannerCreated = false;
               });
               this.bannerListenerHandles.push(loadedHandle, failedHandle);
               this.bannerListenersAttached = true;
@@ -192,25 +194,27 @@ class AdManagerService {
 
   /**
    * Shows a Banner Ad at the bottom of the screen (on non-match screens)
-   * High performance: Uses resumeBanner to instantly restore an existing native banner
-   * without destroying or re-allocating the Android AdView or triggering layout lag!
+   * High performance & self-healing:
+   * 1. If forceRecreate or not created: cleanly removes any stale native view, then calls showBanner.
+   * 2. If existing banner: attempts smooth resume, falling back to clean recreation on failure.
+   * 3. Prevents layout lag and GL texture collisions on Android.
    */
-  public async showBanner(): Promise<boolean> {
+  public async showBanner(forceRecreate: boolean = false): Promise<boolean> {
     if (this.state.isPremium) {
       this.log('Banner skipped: User is Premium');
       return false;
     }
 
-    // Do NOT attempt to show banner if an interstitial is currently presenting
-    if (this.isInterstitialShowing) {
-      this.log('Banner skipped: Interstitial is active');
+    // Do NOT attempt to show banner if a fullscreen ad (interstitial or rewarded) is currently presenting
+    if (this.isInterstitialShowing || this.isRewardedShowing) {
+      this.log('Banner skipped: Fullscreen ad is active');
       return false;
     }
 
     this.lastBannerRequestedState = true;
 
-    // If already visible or operation currently in-flight, skip redundant native bridge call
-    if (this.isBannerVisible) return true;
+    // If already visible and not forcing recreation, skip redundant native bridge call
+    if (this.isBannerVisible && !forceRecreate) return true;
     if (this.bannerOperationLock) return false;
 
     this.bannerOperationLock = true;
@@ -223,27 +227,14 @@ class AdManagerService {
       }
 
       if (this.isNative) {
-        if (this.isBannerCreated) {
-          // Instant resume: preserves existing View in memory, 0 network delay, 0 layout thrashing!
+        if (forceRecreate || !this.isBannerCreated) {
           try {
-            await AdMob.resumeBanner();
-            this.isBannerVisible = true;
-            this.log('Native Banner Resumed smoothly');
-          } catch (resumeErr) {
-            this.log('Banner resume notice, re-creating view:', resumeErr);
-            const options: BannerAdOptions = {
-              adId: ADMOB_CONFIG.BANNER_ID,
-              adSize: BannerAdSize.BANNER,
-              position: BannerAdPosition.BOTTOM_CENTER,
-              margin: 0,
-              isTesting: ADMOB_CONFIG.IS_TEST_MODE,
-            };
-            await AdMob.showBanner(options);
-            this.isBannerCreated = true;
-            this.isBannerVisible = true;
+            await AdMob.removeBanner();
+          } catch (remErr) {
+            this.log('Clean remove notice before show:', remErr);
           }
-        } else {
-          // First time creation - use standard 320x50 BANNER to prevent dynamic layout shifts
+          this.isBannerCreated = false;
+
           const options: BannerAdOptions = {
             adId: ADMOB_CONFIG.BANNER_ID,
             adSize: BannerAdSize.BANNER,
@@ -255,7 +246,33 @@ class AdManagerService {
           await AdMob.showBanner(options);
           this.isBannerCreated = true;
           this.isBannerVisible = true;
-          this.log('Native Banner Loaded & Shown natively (Fixed BANNER at BOTTOM_CENTER)');
+          this.log('Native Banner cleanly created and attached (Fixed BANNER at BOTTOM_CENTER)');
+        } else {
+          // Attempt instant resume
+          try {
+            await AdMob.resumeBanner();
+            this.isBannerVisible = true;
+            this.log('Native Banner resumed smoothly');
+          } catch (resumeErr) {
+            this.log('Banner resume notice, fallback to fresh recreate:', resumeErr);
+            try {
+              await AdMob.removeBanner();
+            } catch {}
+            this.isBannerCreated = false;
+
+            const options: BannerAdOptions = {
+              adId: ADMOB_CONFIG.BANNER_ID,
+              adSize: BannerAdSize.BANNER,
+              position: BannerAdPosition.BOTTOM_CENTER,
+              margin: 0,
+              isTesting: ADMOB_CONFIG.IS_TEST_MODE,
+            };
+
+            await AdMob.showBanner(options);
+            this.isBannerCreated = true;
+            this.isBannerVisible = true;
+            this.log('Native Banner freshly recreated after resume fallback');
+          }
         }
       } else {
         this.isBannerVisible = true;
@@ -266,6 +283,7 @@ class AdManagerService {
     } catch (error) {
       this.log('Banner Failed to show:', error);
       this.isBannerVisible = false;
+      this.isBannerCreated = false;
       return false;
     } finally {
       this.bannerOperationLock = false;
@@ -273,32 +291,65 @@ class AdManagerService {
   }
 
   /**
-   * Hides the Banner Ad smoothly without destroying the native Android view.
-   * This allows immediate smooth tab switching without Android UI thread lag!
+   * Hides the Banner Ad smoothly when entering match screens or modals.
    */
-  public async hideBanner(): Promise<boolean> {
+  public async hideBanner(forceCleanRemove = false): Promise<boolean> {
     this.lastBannerRequestedState = false;
 
-    if (!this.isBannerVisible) return true;
+    if (!this.isBannerVisible && !this.isBannerCreated) return true;
     if (this.bannerOperationLock) return false;
 
     this.bannerOperationLock = true;
 
     try {
-      if (this.isNative && this.isBannerCreated) {
+      if (this.isNative) {
         try {
-          await AdMob.hideBanner();
+          if (forceCleanRemove) {
+            await AdMob.removeBanner();
+            this.isBannerCreated = false;
+          } else {
+            await AdMob.hideBanner();
+          }
         } catch (hideErr) {
           this.log('Banner hide error:', hideErr);
         }
       }
       this.isBannerVisible = false;
-      this.log('Banner smoothly hidden (view cached in memory)');
+      this.log('Banner hidden');
       return true;
     } catch (error) {
       this.log('Banner hide notice:', error);
       this.isBannerVisible = false;
       return false;
+    } finally {
+      this.bannerOperationLock = false;
+    }
+  }
+
+  /**
+   * Suspends and cleanly detaches native banner view BEFORE an interstitial or rewarded ad opens.
+   * CRITICAL:
+   * 1. Does NOT reset this.lastBannerRequestedState to false! (Preserves the screen's desired banner state)
+   * 2. Uses removeBanner() to fully destroy the native AdView, preventing OpenGL surface conflicts,
+   *    zombie layout passes, and UI stutter when the fullscreen AdActivity opens.
+   */
+  private async suspendBannerForFullscreenAd(): Promise<boolean> {
+    const wasActive = this.lastBannerRequestedState || this.isBannerVisible;
+
+    this.bannerOperationLock = true;
+    try {
+      if (this.isNative) {
+        try {
+          await AdMob.removeBanner();
+          this.log('Native Banner cleanly detached before fullscreen ad');
+        } catch (e) {
+          this.log('Banner remove on suspend notice:', e);
+        }
+      }
+      this.isBannerCreated = false;
+      this.isBannerVisible = false;
+      // CRITICAL: DO NOT change this.lastBannerRequestedState to false!
+      return wasActive;
     } finally {
       this.bannerOperationLock = false;
     }
@@ -372,9 +423,10 @@ class AdManagerService {
    * 
    * CRITICAL FIX:
    * 1. Safely detaches and removes native BannerAdView before showing interstitial.
-   * 2. Registers Dismissed / FailedToShow listeners and awaits true dismissal by the user.
-   * 3. Prevents concurrent preload collisions while ad is showing.
-   * 4. Allows a 400ms stabilization tick for Android Activity & WebView to redraw before restoring banner.
+   * 2. Registers true Dismissed / FailedToShow listeners and awaits true dismissal by the user.
+   * 3. Preserves desired banner state (does not wipe lastBannerRequestedState).
+   * 4. Allows a 500ms stabilization tick for Android Activity & WebView to redraw before restoring banner.
+   * 5. Completely eliminates banner disappearance and bottom area layout lag!
    */
   public async showInterstitial(): Promise<boolean> {
     if (this.state.isPremium) {
@@ -384,7 +436,7 @@ class AdManagerService {
 
     if (this.isInterstitialShowing) return false;
 
-    const hadBannerBeforeInterstitial = this.isBannerVisible;
+    const wasBannerActiveBefore = this.lastBannerRequestedState || this.isBannerVisible;
 
     try {
       this.isInterstitialShowing = true;
@@ -392,7 +444,7 @@ class AdManagerService {
 
       // 1. Detach native banner view completely to prevent GL texture & layout collisions
       if (this.isNative) {
-        await this.hideBanner();
+        await this.suspendBannerForFullscreenAd();
       }
 
       if (this.isNative) {
@@ -445,12 +497,13 @@ class AdManagerService {
       this.state.lastInterstitialTimestamp = Date.now();
       this.saveState();
 
-      // 4. Android Activity resume stabilization tick (600ms) to ensure smooth WebView rendering
-      setTimeout(() => {
-        if (hadBannerBeforeInterstitial && !this.state.isPremium && this.lastBannerRequestedState) {
-          this.showBanner();
+      // 4. Android Activity resume stabilization tick (500ms) to ensure smooth WebView rendering
+      setTimeout(async () => {
+        if (wasBannerActiveBefore && !this.state.isPremium && this.lastBannerRequestedState) {
+          this.log('Restoring native banner cleanly after interstitial...');
+          await this.showBanner(true);
         }
-      }, 600);
+      }, 500);
 
       // 5. Preload next interstitial with 35s safe cooldown (never immediate)
       setTimeout(() => {
@@ -464,11 +517,12 @@ class AdManagerService {
       this.isInterstitialShowing = false;
       
       // Attempt restoring banner on failure after stabilization
-      setTimeout(() => {
-        if (hadBannerBeforeInterstitial && !this.state.isPremium && this.lastBannerRequestedState) {
-          this.showBanner();
+      setTimeout(async () => {
+        if (wasBannerActiveBefore && !this.state.isPremium && this.lastBannerRequestedState) {
+          this.log('Restoring native banner cleanly after interstitial failure...');
+          await this.showBanner(true);
         }
-      }, 600);
+      }, 500);
 
       return false;
     }
@@ -516,6 +570,7 @@ class AdManagerService {
     // Generate unique ad session transaction ID
     const sessionId = AdRewardManager.createAdSession(rewardType);
     this.activeRewardSessionId = sessionId;
+    const wasBannerActiveBefore = this.lastBannerRequestedState || this.isBannerVisible;
 
     try {
       this.isRewardedShowing = true;
@@ -524,6 +579,9 @@ class AdManagerService {
       let rewardEarnedNatively = false;
 
       if (this.isNative) {
+        // Cleanly suspend banner view to give fullscreen rewarded video full GPU priority
+        await this.suspendBannerForFullscreenAd();
+
         // Native Android Bridge listener for Reward
         const rewardListener = await AdMob.addListener(RewardAdPluginEvents.Rewarded, (reward: AdMobRewardItem) => {
           this.log('Reward Earned natively from AdMob SDK:', reward);
@@ -550,6 +608,13 @@ class AdManagerService {
           }
           if (onDismissCallback) onDismissCallback();
 
+          // Restore banner cleanly after stabilization
+          setTimeout(async () => {
+            if (wasBannerActiveBefore && !this.state.isPremium && this.lastBannerRequestedState) {
+              await this.showBanner(true);
+            }
+          }, 500);
+
           // Preload next rewarded ad in background
           setTimeout(() => this.loadRewarded(), 8000);
         });
@@ -563,6 +628,13 @@ class AdManagerService {
           dismissListener.remove();
           failListener.remove();
           if (onFailureHandler) onFailureHandler(err);
+
+          // Restore banner cleanly on failure
+          setTimeout(async () => {
+            if (wasBannerActiveBefore && !this.state.isPremium && this.lastBannerRequestedState) {
+              await this.showBanner(true);
+            }
+          }, 500);
         });
 
         if (!this.isRewardedLoaded) {
@@ -595,6 +667,13 @@ class AdManagerService {
       this.isRewardedLoaded = false;
       this.activeRewardSessionId = null;
       if (onFailureHandler) onFailureHandler(error);
+
+      setTimeout(async () => {
+        if (wasBannerActiveBefore && !this.state.isPremium && this.lastBannerRequestedState) {
+          await this.showBanner(true);
+        }
+      }, 500);
+
       return false;
     }
   }

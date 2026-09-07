@@ -62,6 +62,9 @@ export const TransfersTab: React.FC<TransfersTabProps> = ({ onSelectPlayer }) =>
     counterSellNegotiation,
     rejectSellNegotiation,
     listPlayerForTransfer,
+    incomingBids,
+    acceptIncomingBid,
+    rejectIncomingBid,
     calendarDate,
   } = useGame();
 
@@ -1290,13 +1293,14 @@ export const TransfersTab: React.FC<TransfersTabProps> = ({ onSelectPlayer }) =>
                 const activeSellNeg = activeNegotiations.find(
                   n => n.playerId === player.id && n.type === 'sell' && n.stage !== 'completed' && n.stage !== 'rejected'
                 );
+                const incomingBid = incomingBids.find(b => b.playerId === player.id);
                 const salePrice = Math.round(player.marketValue * 0.95);
 
                 return (
                   <div
                     key={player.id}
                     className={`bg-slate-900 border p-3.5 rounded-2xl flex items-center justify-between gap-3 flex-wrap transition-all ${
-                      isListed ? 'border-amber-500/50 bg-amber-950/10' : 'border-slate-800'
+                      incomingBid ? 'border-emerald-500/60 bg-emerald-950/15 ring-1 ring-emerald-500/30' : isListed ? 'border-amber-500/50 bg-amber-950/10' : 'border-slate-800'
                     }`}
                   >
                     <div className="flex items-center gap-2.5 min-w-0">
@@ -1306,7 +1310,12 @@ export const TransfersTab: React.FC<TransfersTabProps> = ({ onSelectPlayer }) =>
                       <div className="min-w-0">
                         <div className="flex items-center gap-2">
                           <span className="font-bold text-sm text-white truncate">{player.name}</span>
-                          {isListed && (
+                          {incomingBid && (
+                            <span className="bg-emerald-950 text-emerald-300 border border-emerald-700 text-[10px] font-bold px-2 py-0.5 rounded-full animate-pulse">
+                              عرض شراء وارد 💰
+                            </span>
+                          )}
+                          {isListed && !incomingBid && (
                             <span className="bg-amber-950 text-amber-300 border border-amber-700 text-[10px] font-bold px-2 py-0.5 rounded-full">
                               معروض للبيع 📢
                             </span>
@@ -1316,16 +1325,47 @@ export const TransfersTab: React.FC<TransfersTabProps> = ({ onSelectPlayer }) =>
                           {player.position} • {player.age} سنة • القيمة السوقية: <strong className="text-slate-200 font-mono">{player.marketValue.toLocaleString()} ج.م</strong> • راتب {player.salary.toLocaleString()} ج.م/ش
                         </div>
 
-                        {activeSellNeg && (
+                        {incomingBid && (
                           <div className="text-[11px] text-emerald-400 mt-1 flex items-center gap-1 font-bold">
-                            <span>🔥 عرض وارد من ({activeSellNeg.buyerClubName}) بمبلغ {activeSellNeg.bidFee.toLocaleString()} ج.م</span>
+                            <span>🔥 عرض شراء رسمي من ({incomingBid.toClubName}) بمبلغ {incomingBid.bidAmount.toLocaleString()} ج.م</span>
+                          </div>
+                        )}
+
+                        {activeSellNeg && !incomingBid && (
+                          <div className="text-[11px] text-emerald-400 mt-1 flex items-center gap-1 font-bold">
+                            <span>🔥 عرض مفاوضات من ({activeSellNeg.buyerClubName}) بمبلغ {activeSellNeg.bidFee.toLocaleString()} ج.م</span>
                           </div>
                         )}
                       </div>
                     </div>
 
                     <div className="flex items-center gap-2 flex-wrap">
-                      {activeSellNeg ? (
+                      {incomingBid ? (
+                        <>
+                          <button
+                            onClick={() => {
+                              const res = acceptIncomingBid(incomingBid.id);
+                              setNotification({ text: res.message, type: res.success ? 'success' : 'error' });
+                              setTimeout(() => setNotification(null), 4000);
+                            }}
+                            className="bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-2 rounded-xl text-xs font-bold flex items-center gap-1 transition-all active:scale-95 shadow cursor-pointer"
+                          >
+                            <Check className="w-3.5 h-3.5" />
+                            <span>قبول البيع ({incomingBid.bidAmount.toLocaleString()} ج.م)</span>
+                          </button>
+
+                          <button
+                            onClick={() => {
+                              const res = rejectIncomingBid(incomingBid.id);
+                              setNotification({ text: res.message, type: res.success ? 'success' : 'error' });
+                              setTimeout(() => setNotification(null), 3000);
+                            }}
+                            className="bg-red-950 hover:bg-red-900 border border-red-800 text-red-300 px-3 py-2 rounded-xl text-xs font-bold transition-all active:scale-95 cursor-pointer"
+                          >
+                            رفض العرض
+                          </button>
+                        </>
+                      ) : activeSellNeg ? (
                         <>
                           <button
                             onClick={() => {
@@ -1333,7 +1373,7 @@ export const TransfersTab: React.FC<TransfersTabProps> = ({ onSelectPlayer }) =>
                               setNotification({ text: res.message, type: res.success ? 'success' : 'error' });
                               setTimeout(() => setNotification(null), 4000);
                             }}
-                            className="bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-2 rounded-xl text-xs font-bold flex items-center gap-1 transition-all active:scale-95 shadow"
+                            className="bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-2 rounded-xl text-xs font-bold flex items-center gap-1 transition-all active:scale-95 shadow cursor-pointer"
                           >
                             <Check className="w-3.5 h-3.5" />
                             <span>قبول بيع ({activeSellNeg.bidFee.toLocaleString()} ج.م)</span>
@@ -1341,7 +1381,7 @@ export const TransfersTab: React.FC<TransfersTabProps> = ({ onSelectPlayer }) =>
 
                           <button
                             onClick={() => setActiveTabMode('negotiations')}
-                            className="bg-cyan-950 hover:bg-cyan-900 border border-cyan-700 text-cyan-300 px-3 py-2 rounded-xl text-xs font-bold transition-all"
+                            className="bg-cyan-950 hover:bg-cyan-900 border border-cyan-700 text-cyan-300 px-3 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer"
                           >
                             إدارة التفاوض ✍️
                           </button>

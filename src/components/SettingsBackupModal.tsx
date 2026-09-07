@@ -23,7 +23,8 @@ import {
   FileX,
   Calendar,
   Layers,
-  Sparkles
+  Sparkles,
+  Smartphone
 } from 'lucide-react';
 
 interface SettingsBackupModalProps {
@@ -309,6 +310,30 @@ export const SettingsBackupModal: React.FC<SettingsBackupModalProps> = ({
               className="hidden"
               onChange={handleFileChange}
             />
+          </div>
+
+          {/* Android Project Download */}
+          <div className="bg-slate-950/60 border border-emerald-900/40 rounded-2xl p-3.5 space-y-2">
+            <div className="flex items-center justify-between">
+              <h4 className="text-xs font-bold text-emerald-300 flex items-center gap-1.5">
+                <Smartphone className="w-4 h-4 text-emerald-400" />
+                <span>ملفات تطبيق الأندرويد المحدثة (Android Project)</span>
+              </h4>
+              <span className="text-[10px] bg-emerald-950 text-emerald-300 border border-emerald-800 px-2 py-0.5 rounded-full font-bold">
+                محدث بالكامل ⚡
+              </span>
+            </div>
+            <p className="text-[11px] text-slate-400 leading-relaxed">
+              تحتوي هذه الحزمة على كافة ملفات مشروع Android Studio ومكتبات Capacitor وأصول الويب المترجمة (dist) متضمنة جميع التحديثات الأخيرة (نظام بيع وشراء اللاعبين، التكتيكات المحسنة، إعلانات AdMob).
+            </p>
+            <a
+              href="/anta_elmodareb_android_project.zip"
+              download="anta_elmodareb_android_project.zip"
+              className="w-full py-2.5 px-3 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-1.5 shadow active:scale-[0.98] cursor-pointer"
+            >
+              <Download className="w-3.5 h-3.5" />
+              <span>تحميل مشروع الأندرويد المحدث (ZIP)</span>
+            </a>
           </div>
 
           {/* System Security & Architecture Note */}

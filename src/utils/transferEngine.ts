@@ -1,5 +1,5 @@
 import { ActiveNegotiation, Club, InboxMessage, Player, Position, PositionCategory, TransferHistoryEntry, TransferOffer } from '../types/game';
-import { GLOBAL_LEAGUES } from '../data/leaguesData';
+import { GLOBAL_LEAGUES, getCustomLeagues, saveCustomLeagues } from '../data/leaguesData';
 import { isRealClub, loadRealClubSquad, REAL_SQUADS_BY_CLUB_ID } from '../data/realPlayersData';
 import { VERIFIED_REAL_PLAYERS, convertVerifiedRealPlayerToPlayer } from '../data/playersData';
 import { generateClubSquad } from '../utils/playerGenerator';
@@ -440,7 +440,65 @@ export function executeAtomicTransfer(params: {
   }
 
   const fromClubName = sellingClub ? sellingClub.name : (player.currentClubId ? 'نادي آخر' : 'لاعب حر (سوق الانتقالات)');
-  const toClubName = buyingClub ? buyingClub.name : 'نادي مشتري';
+  let toClubName = buyingClub ? buyingClub.name : 'نادي مشتري';
+
+  // Synchronize across all external GLOBAL_LEAGUES and custom leagues first to resolve external club name if needed
+  const customLeagues = getCustomLeagues();
+  let customLeaguesModified = false;
+
+  Object.values(customLeagues).forEach(league => {
+    if (!league.teams) return;
+    let leagueModified = false;
+    league.teams.forEach(c => {
+      // 1. External Selling Club: remove player and credit fee
+      if (c.id === sellingClubId && (!sellingClub || c.id !== sellingClub.id)) {
+        c.budget = (c.budget || 0) + transferFee;
+        c.players = (c.players || []).filter(p => p && p.id !== player.id);
+        if (c.tactics) {
+          c.tactics.startingPlayerIds = (c.tactics.startingPlayerIds || []).filter(id => id && id !== player.id);
+          c.tactics.benchPlayerIds = (c.tactics.benchPlayerIds || []).filter(id => id && id !== player.id);
+        }
+        leagueModified = true;
+      }
+      // 2. External Buying Club: add player and debit fee
+      else if (c.id === buyingClubId && (!buyingClub || c.id !== buyingClub.id)) {
+        toClubName = c.name;
+        c.budget = Math.max(0, (c.budget || 0) - transferFee);
+        const filtered = (c.players || []).filter(p => p && p.id !== player.id);
+        c.players = [...filtered, {
+          ...player,
+          currentClubId: c.id,
+          currentLeagueId: league.id || c.leagueId || '',
+          salary,
+          contractYears,
+          isListedForTransfer: false,
+          morale: Math.min(100, (player.morale || 80) + 15),
+          fitness: 100,
+        }];
+        leagueModified = true;
+      }
+      // 3. Cleanup duplicate player instances across all external clubs
+      else if (c.id !== buyingClubId && c.players && c.players.some(p => p && p.id === player.id)) {
+        c.players = c.players.filter(p => p && p.id !== player.id);
+        if (c.tactics) {
+          c.tactics.startingPlayerIds = (c.tactics.startingPlayerIds || []).filter(id => id && id !== player.id);
+          c.tactics.benchPlayerIds = (c.tactics.benchPlayerIds || []).filter(id => id && id !== player.id);
+        }
+        leagueModified = true;
+      }
+    });
+
+    if (leagueModified) {
+      customLeaguesModified = true;
+      if (GLOBAL_LEAGUES[league.id]) {
+        GLOBAL_LEAGUES[league.id].teams = league.teams;
+      }
+    }
+  });
+
+  if (customLeaguesModified) {
+    saveCustomLeagues(customLeagues);
+  }
 
   const transferredPlayer: Player = {
     ...player,
@@ -455,13 +513,20 @@ export function executeAtomicTransfer(params: {
 
   // Update teams atomically
   const updatedTeams = allTeams.map(t => {
-    // 1. Selling Club: remove player, remove from tactics lineup/bench, add transfer fee
-    if (sellingClub && t.id === sellingClub.id) {
+    const isThisSellingClub = (sellingClub && t.id === sellingClub.id) || (sellingClubId && t.id === sellingClubId) || (sellingClub?.isUserClub && t.isUserClub);
+    const isThisBuyingClub = (buyingClub && t.id === buyingClub.id) || (buyingClubId && t.id === buyingClubId);
+
+    // 1. Selling Club: remove player, remove from tactics lineup/bench/special roles, add transfer fee
+    if (isThisSellingClub) {
       const filteredPlayers = (t.players || []).filter(p => p && p.id !== player.id);
       const updatedTactics = t.tactics ? {
         ...t.tactics,
         startingPlayerIds: (t.tactics.startingPlayerIds || []).filter(id => id && id !== player.id),
         benchPlayerIds: (t.tactics.benchPlayerIds || []).filter(id => id && id !== player.id),
+        captainId: t.tactics.captainId === player.id ? '' : t.tactics.captainId,
+        penaltyTakerId: t.tactics.penaltyTakerId === player.id ? '' : t.tactics.penaltyTakerId,
+        freeKickTakerId: t.tactics.freeKickTakerId === player.id ? '' : t.tactics.freeKickTakerId,
+        cornerTakerId: t.tactics.cornerTakerId === player.id ? '' : t.tactics.cornerTakerId,
       } : undefined;
 
       return {
@@ -473,7 +538,8 @@ export function executeAtomicTransfer(params: {
     }
 
     // 2. Buying Club: add player and subtract transfer fee (if in league teams)
-    if (buyingClub && t.id === buyingClub.id) {
+    if (isThisBuyingClub) {
+      toClubName = t.name;
       const filteredExisting = (t.players || []).filter(p => p && p.id !== player.id);
       return {
         ...t,
@@ -483,7 +549,7 @@ export function executeAtomicTransfer(params: {
     }
 
     // 3. Other Clubs: ensure player is removed if they previously held this ID
-    if (t.players && t.players.some(p => p && p.id === player.id) && (!sellingClub || t.id !== sellingClub.id)) {
+    if (t.players && t.players.some(p => p && p.id === player.id) && !isThisSellingClub) {
       return {
         ...t,
         players: t.players.filter(p => p && p.id !== player.id),
@@ -496,27 +562,6 @@ export function executeAtomicTransfer(params: {
     }
 
     return t;
-  });
-
-  // Also synchronize across all external GLOBAL_LEAGUES
-  Object.values(GLOBAL_LEAGUES).forEach(league => {
-    if (!league.teams) return;
-    league.teams.forEach(c => {
-      if (c.id === sellingClubId && (!sellingClub || c.id !== sellingClub.id)) {
-        c.budget = (c.budget || 0) + transferFee;
-        c.players = (c.players || []).filter(p => p && p.id !== player.id);
-        if (c.tactics) {
-          c.tactics.startingPlayerIds = (c.tactics.startingPlayerIds || []).filter(id => id && id !== player.id);
-          c.tactics.benchPlayerIds = (c.tactics.benchPlayerIds || []).filter(id => id && id !== player.id);
-        }
-      } else if (c.id !== buyingClubId && c.players && c.players.some(p => p && p.id === player.id)) {
-        c.players = c.players.filter(p => p && p.id !== player.id);
-        if (c.tactics) {
-          c.tactics.startingPlayerIds = (c.tactics.startingPlayerIds || []).filter(id => id && id !== player.id);
-          c.tactics.benchPlayerIds = (c.tactics.benchPlayerIds || []).filter(id => id && id !== player.id);
-        }
-      }
-    });
   });
 
   const isUserBuying = Boolean(buyingClub?.isUserClub);
@@ -689,7 +734,7 @@ export function resolveFullPlayerObject(
 }
 
 /**
- * Finds all AI clubs that can realistically afford and attract the target player.
+ * Finds all AI clubs (domestic and international) that can realistically afford and attract the target player.
  */
 export function findEligibleBuyerClubs(
   targetPlayer: Player,
@@ -697,42 +742,71 @@ export function findEligibleBuyerClubs(
   userClubId?: string
 ): { club: Club; maxAffordableFee: number }[] {
   const ovr = targetPlayer.overallRating || 60;
-  const val = targetPlayer.marketValue || 50000;
+  const val = Math.max(25000, targetPlayer.marketValue || 50000);
   const eligible: { club: Club; maxAffordableFee: number }[] = [];
+  const candidateClubs: Club[] = [];
+  const seenClubIds = new Set<string>();
 
+  // 1. Gather all clubs from the current active league
   for (const club of allTeams) {
-    if (club.isUserClub || (userClubId && club.id === userClubId)) continue;
-    
-    const budget = club.budget || 0;
+    if (club && club.id && !club.isUserClub && (!userClubId || club.id !== userClubId)) {
+      candidateClubs.push(club);
+      seenClubIds.add(club.id);
+    }
+  }
+
+  // 2. Also gather prospective buyer clubs from regional & international leagues (Saudi, Gulf, North Africa, Europe)
+  const customLeagues = getCustomLeagues();
+  for (const league of Object.values(customLeagues)) {
+    if (!league.teams) continue;
+    for (const club of league.teams) {
+      if (club && club.id && !club.isUserClub && (!userClubId || club.id !== userClubId) && !seenClubIds.has(club.id)) {
+        candidateClubs.push({
+          ...club,
+          leagueId: league.id || club.leagueId,
+        });
+        seenClubIds.add(club.id);
+      }
+    }
+  }
+
+  for (const club of candidateClubs) {
+    let budget = club.budget || 0;
     const div = club.division || 1;
-    const rep = club.reputation || 40;
+    const rep = club.reputation || 45;
 
-    // Minimum budget threshold: Club must have at least 80% of player's market value in available liquid budget
-    if (budget < val * 0.8) continue;
-
-    // Division & Reputation compatibility constraints:
-    // A weak club cannot sign a superstar regardless of budget glitches
-    if (ovr >= 85) {
-      if (div !== 1 || rep < 75 || budget < val) continue;
-    } else if (ovr >= 80) {
-      if (div !== 1 || rep < 60 || budget < val * 0.9) continue;
-    } else if (ovr >= 75) {
-      if (div > 2 || (div === 2 && rep < 50) || budget < val * 0.85) continue;
-    } else if (ovr >= 70) {
-      if (div > 3 || (div === 3 && rep < 40) || budget < val * 0.8) continue;
-    } else if (ovr >= 65) {
-      if (div > 3) continue;
+    // Provide realistic liquidity for prestigious foreign/regional clubs if initial budget is unset
+    if (budget < val * 0.8) {
+      if (rep >= 85) budget = Math.max(budget, Math.round(val * 3.5));
+      else if (rep >= 75) budget = Math.max(budget, Math.round(val * 2.2));
+      else if (rep >= 65) budget = Math.max(budget, Math.round(val * 1.5));
+      else if (rep >= 55) budget = Math.max(budget, Math.round(val * 1.1));
     }
 
-    // Maximum fee the club is willing to spend from its budget (never more than 85% of its total budget)
-    const maxBudgetFee = Math.floor(budget * 0.85);
-    // Maximum multiplier over market value based on reputation
-    const repMultiplier = rep >= 80 ? 1.15 : rep >= 60 ? 1.10 : 1.05;
+    // Minimum budget threshold: Club must have at least 75% of player's market value
+    if (budget < val * 0.75) continue;
+
+    // Caliber & Reputation compatibility:
+    // Superstars (85+) only go to elite clubs (rep >= 75)
+    if (ovr >= 85) {
+      if (div !== 1 || rep < 75) continue;
+    } else if (ovr >= 80) {
+      if (div !== 1 || rep < 60) continue;
+    } else if (ovr >= 75) {
+      if (div > 2 || (div === 2 && rep < 48)) continue;
+    } else if (ovr >= 70) {
+      if (div > 3 || (div === 3 && rep < 38)) continue;
+    }
+
+    // Maximum fee the club is willing to spend from its budget
+    const maxBudgetFee = Math.floor(budget * 0.88);
+    // Reputation bonus multiplier
+    const repMultiplier = rep >= 80 ? 1.35 : rep >= 65 ? 1.20 : rep >= 50 ? 1.10 : 1.02;
     const maxValFee = Math.round(val * repMultiplier);
     const maxAffordableFee = Math.min(maxBudgetFee, maxValFee);
 
-    if (maxAffordableFee >= val * 0.8) {
-      eligible.push({ club, maxAffordableFee });
+    if (maxAffordableFee >= val * 0.75) {
+      eligible.push({ club: { ...club, budget }, maxAffordableFee });
     }
   }
 
@@ -808,90 +882,140 @@ export function generateIncomingAiBids(
     return { bids, inboxMessages };
   }
 
-  // Look for listed players first, or top scorers
-  const candidatePlayers = userClub.players.filter(p => p && p.id && (p.isListedForTransfer || p.overallRating >= 65 || (p.stats?.goals || 0) >= 3));
+  const players = userClub.players.filter(p => p && p.id);
+  if (players.length === 0) return { bids, inboxMessages };
 
-  if (candidatePlayers.length === 0) return { bids, inboxMessages };
+  // 1. Identify candidate categories:
+  const listedPlayers = players.filter(p => p.isListedForTransfer);
+  const topPerformers = players.filter(p => 
+    (p.stats?.goals || 0) >= 2 || 
+    (p.stats?.assists || 0) >= 2 || 
+    ((p.stats?.averageRating || 0) >= 7.0 && (p.stats?.appearances || 0) >= 2) ||
+    (p.positionCategory === 'GK' && (p.stats?.cleanSheets || 0) >= 2)
+  );
+  const stars = players.filter(p => p.overallRating >= 68);
+  const youngProspects = players.filter(p => p.age <= 23 && p.overallRating >= 64);
+  const expiringContracts = players.filter(p => (p.contractYears || 1) <= 1);
 
-  // 35% chance of an incoming bid on any simulated round
-  if (Math.random() > 0.35) return { bids, inboxMessages };
+  // 2. Determine realistic probability:
+  // If player(s) are listed for transfer on the market, 75% chance of receiving an offer this round!
+  // If user has top performers or stars, 55% chance!
+  // Normal baseline chance: 40%
+  const hasListed = listedPlayers.length > 0;
+  const hasPerformers = topPerformers.length > 0;
+  const hasStars = stars.length > 0;
 
-  const targetPlayer = candidatePlayers[Math.floor(Math.random() * candidatePlayers.length)];
-  if (!targetPlayer || !targetPlayer.id) return { bids, inboxMessages };
+  const bidRollThreshold = hasListed ? 0.75 : (hasPerformers || hasStars) ? 0.55 : 0.40;
+  if (Math.random() > bidRollThreshold) {
+    return { bids, inboxMessages };
+  }
 
-  const eligibleBuyers = findEligibleBuyerClubs(targetPlayer, allTeams, userClub.id);
+  // Can generate 1 offer, or 2 offers if multiple players are listed or in high demand
+  const maxOffersToGenerate = (hasListed && players.length > 18 && Math.random() < 0.35) ? 2 : 1;
+  const selectedPlayerIds = new Set<string>();
 
-  if (eligibleBuyers.length === 0) return { bids, inboxMessages };
+  for (let i = 0; i < maxOffersToGenerate; i++) {
+    const unselectedPlayers = players.filter(p => !selectedPlayerIds.has(p.id));
+    if (unselectedPlayers.length === 0) break;
 
-  const { club: biddingClub, maxAffordableFee } = eligibleBuyers[Math.floor(Math.random() * eligibleBuyers.length)];
-  if (!biddingClub || !biddingClub.id) return { bids, inboxMessages };
-  
-  // Calculate realistic bid amount (90% to 140% of market value, strictly capped by club budget)
-  // Occasional big clubs or high demand results in lucrative bids!
-  const isLucrativeRoll = Math.random() < 0.35 || targetPlayer.overallRating >= 72 || (targetPlayer.stats?.goals || 0) >= 5;
-  const multiplier = targetPlayer.isListedForTransfer 
-    ? (0.95 + Math.random() * 0.20) 
-    : isLucrativeRoll
-    ? (1.20 + Math.random() * 0.30) // Lucrative bid 120% - 150%
-    : (1.00 + Math.random() * 0.15);
+    let targetPlayer: Player | undefined;
+    const unselectedListed = unselectedPlayers.filter(p => p.isListedForTransfer);
+    const unselectedPerformers = unselectedPlayers.filter(p => topPerformers.some(tp => tp.id === p.id));
+    const unselectedStars = unselectedPlayers.filter(p => stars.some(s => s.id === p.id));
+    const unselectedYoung = unselectedPlayers.filter(p => youngProspects.some(y => y.id === p.id));
 
-  const rawBidAmount = Math.round(targetPlayer.marketValue * multiplier);
-  const bidAmount = Math.min(rawBidAmount, maxAffordableFee, Math.floor(biddingClub.budget * 0.85));
+    if (unselectedListed.length > 0 && (Math.random() < 0.75 || unselectedPerformers.length === 0)) {
+      targetPlayer = unselectedListed[Math.floor(Math.random() * unselectedListed.length)];
+    } else if (unselectedPerformers.length > 0 && Math.random() < 0.65) {
+      targetPlayer = unselectedPerformers[Math.floor(Math.random() * unselectedPerformers.length)];
+    } else if (unselectedStars.length > 0 && Math.random() < 0.50) {
+      targetPlayer = unselectedStars[Math.floor(Math.random() * unselectedStars.length)];
+    } else if (unselectedYoung.length > 0 && Math.random() < 0.50) {
+      targetPlayer = unselectedYoung[Math.floor(Math.random() * unselectedYoung.length)];
+    } else {
+      targetPlayer = unselectedPlayers[Math.floor(Math.random() * unselectedPlayers.length)];
+    }
 
-  if (bidAmount <= 0 || bidAmount > biddingClub.budget) return { bids, inboxMessages };
+    if (!targetPlayer || !targetPlayer.id) continue;
+    selectedPlayerIds.add(targetPlayer.id);
 
-  const profitRatio = Number((bidAmount / Math.max(1, targetPlayer.marketValue)).toFixed(2));
-  const isLucrative = profitRatio >= 1.15 || (biddingClub.reputation || 50) >= 80;
+    const eligibleBuyers = findEligibleBuyerClubs(targetPlayer, allTeams, userClub.id);
+    if (eligibleBuyers.length === 0) continue;
 
-  const offerId = `bid_${Date.now()}_${targetPlayer.id}`;
-  const offer: TransferOffer = {
-    id: offerId,
-    playerId: targetPlayer.id,
-    player: targetPlayer,
-    fromClubId: userClub.id,
-    fromClubName: userClub.name,
-    toClubId: biddingClub.id,
-    toClubName: biddingClub.name,
-    bidAmount,
-    status: 'pending',
-    date: `الجولة ${round}`,
-  };
+    const { club: biddingClub, maxAffordableFee } = eligibleBuyers[Math.floor(Math.random() * eligibleBuyers.length)];
+    if (!biddingClub || !biddingClub.id) continue;
 
-  bids.push(offer);
+    // Calculate realistic bid amount:
+    // Base market value * multiplier
+    const isLucrativeRoll = Math.random() < 0.40 || targetPlayer.overallRating >= 72 || (targetPlayer.stats?.goals || 0) >= 3 || (biddingClub.reputation || 50) >= 75;
+    const multiplier = targetPlayer.isListedForTransfer
+      ? (0.95 + Math.random() * 0.22) // Listed: 95% to 117%
+      : isLucrativeRoll
+      ? (1.20 + Math.random() * 0.35) // Lucrative: 120% to 155%
+      : (1.00 + Math.random() * 0.18); // Normal inquiry: 100% to 118%
 
-  const title = isLucrative
-    ? `🔥 عرض انتقال مغرٍ جداً: نادي ${biddingClub.name} يطلب شراء ${targetPlayer.name} (${bidAmount.toLocaleString()} ج.م)!`
-    : `💰 عرض شراء رسمي: نادي ${biddingClub.name} يطلب التعاقد مع ${targetPlayer.name}`;
+    const baseMarketVal = Math.max(25000, targetPlayer.marketValue || 50000);
+    const rawBidAmount = Math.round(baseMarketVal * multiplier);
+    const bidAmount = Math.min(rawBidAmount, maxAffordableFee, Math.floor(biddingClub.budget * 0.90));
 
-  const content = isLucrative
-    ? `تلقى النادي عرضاً مالياً مغرياً ومميزاً من نادي ${biddingClub.name} لشراء اللاعب ${targetPlayer.name} (${targetPlayer.position} - تقييم ${targetPlayer.overallRating}) بمبلغ ${bidAmount.toLocaleString()} ج.م (بفارق +${Math.round((profitRatio - 1) * 100)}% عن قيمته السوقية البالغة ${targetPlayer.marketValue.toLocaleString()} ج.م).\n\nيمثل هذا العرض فرصة استثمارية ممتازة لإنعاش خزينة النادي. يمكنك قبول العرض مباشرة أو رفضه للحفاظ على اللاعب وتجديد عقده لحمايته.`
-    : `وصلنا عرض شراء رسمي من نادي ${biddingClub.name} للتعاقد مع اللاعب ${targetPlayer.name} (${targetPlayer.position} - تقييم ${targetPlayer.overallRating}) مقابل رسوم انتقال تبلغ ${bidAmount.toLocaleString()} ج.م.\n\nالقيمة السوقية الحالية: ${targetPlayer.marketValue.toLocaleString()} ج.م. يمكنك اتخاذ القرار المناسب مباشرة.`;
+    if (bidAmount <= 0) continue;
 
-  const msg: InboxMessage = {
-    id: `msg_bid_${Date.now()}_${targetPlayer.id}`,
-    title,
-    sender: `إدارة التعاقدات بنادي ${biddingClub.name}`,
-    date: `الجولة ${round}`,
-    type: 'offer',
-    read: false,
-    priority: isLucrative ? 'high' : 'normal',
-    content,
-    offerDetails: {
-      type: 'player_bid',
-      clubId: biddingClub.id,
-      clubName: biddingClub.name,
+    const profitRatio = Number((bidAmount / baseMarketVal).toFixed(2));
+    const isLucrative = profitRatio >= 1.18 || (biddingClub.reputation || 50) >= 78;
+
+    const offerId = `bid_${Date.now()}_${targetPlayer.id}_${Math.random().toString(36).substring(2, 6)}`;
+    const offer: TransferOffer = {
+      id: offerId,
       playerId: targetPlayer.id,
-      playerName: targetPlayer.name,
-      playerPosition: targetPlayer.position,
-      playerRating: targetPlayer.overallRating,
-      amount: bidAmount,
-      bidId: offerId,
-      isLucrative,
-      profitRatio,
-    },
-  };
+      player: targetPlayer,
+      fromClubId: userClub.id,
+      fromClubName: userClub.name,
+      toClubId: biddingClub.id,
+      toClubName: biddingClub.name,
+      bidAmount,
+      status: 'pending',
+      date: `الجولة ${round}`,
+    };
 
-  inboxMessages.push(msg);
+    bids.push(offer);
+
+    const isExternalLeague = !allTeams.some(t => t.id === biddingClub.id);
+    const originTag = isExternalLeague ? ' (عرض خارجي)' : ' (منافس محلي)';
+
+    const title = isLucrative
+      ? `🔥 عرض شراء مغرٍ: ${biddingClub.name}${originTag} يطلب ضم ${targetPlayer.name} (${bidAmount.toLocaleString()} ج.م)!`
+      : `💰 عرض رسمي: نادي ${biddingClub.name}${originTag} يرغب في شراء ${targetPlayer.name}`;
+
+    const content = isLucrative
+      ? `وصل إدارة نادي ${userClub.name} عرض رسمي مغرٍ من نادي ${biddingClub.name}${originTag} للتعاقد النهائي مع اللاعب ${targetPlayer.name} (${targetPlayer.position} - تقييم ${targetPlayer.overallRating}) مقابل رسوم انتقال تبلغ ${bidAmount.toLocaleString()} ج.م (بفارق ربح +${Math.round((profitRatio - 1) * 100)}% عن قيمته السوقية البالغة ${baseMarketVal.toLocaleString()} ج.م).\n\nيمثل هذا العرض فرصة مالية ممتازة لإنعاش خزينة النادي. في حال الموافقة، سينتقل اللاعب فوراً للنادي المشتري وتودع الأموال في خزينة النادي.`
+      : `تلقى النادي خطاباً رسمياً من نادي ${biddingClub.name}${originTag} يطلب فيه شراء اللاعب ${targetPlayer.name} (${targetPlayer.position} - تقييم ${targetPlayer.overallRating}) بمبلغ ${bidAmount.toLocaleString()} ج.م.\n\nالقيمة السوقية الحالية للاعب: ${baseMarketVal.toLocaleString()} ج.م. يمكنك قبول العرض مباشرة لنقل اللاعب، أو رفضه، أو تجديد عقده لحمايته.`;
+
+    const msg: InboxMessage = {
+      id: `msg_bid_${Date.now()}_${targetPlayer.id}_${i}`,
+      title,
+      sender: `إدارة التعاقدات بنادي ${biddingClub.name}`,
+      date: `الجولة ${round}`,
+      type: 'offer',
+      read: false,
+      priority: isLucrative ? 'high' : 'normal',
+      content,
+      offerDetails: {
+        type: 'player_bid',
+        clubId: biddingClub.id,
+        clubName: biddingClub.name,
+        playerId: targetPlayer.id,
+        playerName: targetPlayer.name,
+        playerPosition: targetPlayer.position,
+        playerRating: targetPlayer.overallRating,
+        amount: bidAmount,
+        bidId: offerId,
+        isLucrative,
+        profitRatio,
+      },
+    };
+
+    inboxMessages.push(msg);
+  }
 
   return { bids, inboxMessages };
 }
