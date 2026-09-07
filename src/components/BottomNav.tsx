@@ -69,9 +69,7 @@ export const BottomNav: React.FC<BottomNavProps> = ({ activeTab, setActiveTab })
       {/* More Options Modal Sheet for Mobile */}
       {showMoreMenu && (
         <div 
-          className={`fixed inset-0 z-40 bg-black/80 flex items-end justify-center animate-fade-in ${
-            isNativeBannerActive ? 'pb-[50px]' : ''
-          }`}
+          className="fixed inset-0 z-40 bg-black/80 flex items-end justify-center animate-fade-in pb-16"
           onClick={() => setShowMoreMenu(false)}
         >
           <div 
@@ -137,10 +135,8 @@ export const BottomNav: React.FC<BottomNavProps> = ({ activeTab, setActiveTab })
         </div>
       )}
 
-      {/* Persistent Bottom Nav Bar - Optimized for zero GPU composition lag on Android */}
-      <nav className={`fixed left-0 right-0 z-30 bg-slate-900 border-t border-slate-800 pb-safe gpu-layer ${
-        isNativeBannerActive ? 'bottom-[50px]' : 'bottom-0'
-      }`}>
+      {/* Persistent Bottom Nav Bar - Firmly anchored at the bottom edge */}
+      <nav className="fixed left-0 right-0 bottom-0 z-30 bg-slate-900/98 backdrop-blur-md border-t border-slate-800 pb-safe gpu-layer">
         <div className="max-w-lg mx-auto flex items-center justify-around px-2 py-1.5">
           {mainTabs.map((tab) => {
             const Icon = tab.icon;

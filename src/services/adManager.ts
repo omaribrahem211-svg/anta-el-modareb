@@ -18,6 +18,7 @@ import { AdRewardManager, AdRewardType, AdRewardClaimResult } from './adRewardSe
 
 const ADMOB_STORAGE_KEY = 'modareb_admob_state_v1';
 const MIN_INTERSTITIAL_COOLDOWN_MS = 180 * 1000; // 3 minutes minimum interval between interstitials
+const BOTTOM_NAV_MARGIN_DP = 58; // Standard Android bottom navigation bar height to place native banner solidly above it
 
 class AdManagerService {
   private isInitialized = false;
@@ -303,7 +304,7 @@ class AdManagerService {
             adId: ADMOB_CONFIG.BANNER_ID,
             adSize: BannerAdSize.BANNER,
             position: BannerAdPosition.BOTTOM_CENTER,
-            margin: 0,
+            margin: BOTTOM_NAV_MARGIN_DP,
             isTesting: ADMOB_CONFIG.IS_TEST_MODE,
           };
 
@@ -338,7 +339,7 @@ class AdManagerService {
               adId: ADMOB_CONFIG.BANNER_ID,
               adSize: BannerAdSize.BANNER,
               position: BannerAdPosition.BOTTOM_CENTER,
-              margin: 0,
+              margin: BOTTOM_NAV_MARGIN_DP,
               isTesting: ADMOB_CONFIG.IS_TEST_MODE,
             };
 
@@ -510,6 +511,18 @@ class AdManagerService {
 
     if (this.isInterstitialActive()) return false;
 
+    // Safety guard: On native Android, if interstitial is not yet prepared in memory,
+    // try loading it with a brief await. If it still cannot load, exit cleanly without
+    // blanking screen or freezing the user!
+    if (this.isNative && !this.isInterstitialLoaded) {
+      this.log('Interstitial not loaded in memory, attempting load before show...');
+      const loaded = await this.loadInterstitial();
+      if (!loaded || !this.isInterstitialLoaded) {
+        this.log('Interstitial could not be loaded, skipping ad gracefully');
+        return false;
+      }
+    }
+
     const wasBannerActiveBefore = this.lastBannerRequestedState || this.isBannerVisible;
 
     try {
@@ -523,38 +536,52 @@ class AdManagerService {
       }
 
       if (this.isNative) {
-        if (!this.isInterstitialLoaded) {
-          await this.loadInterstitial();
-        }
-
-        // 2. Setup dismissal promise so we know when the ad actually finishes
+        // 2. Setup dismissal promise with hard safety timeout so we know when the ad actually finishes
         await new Promise<void>(async (resolve) => {
           let dismissHandle: PluginListenerHandle | null = null;
           let failHandle: PluginListenerHandle | null = null;
+          let failLoadHandle: PluginListenerHandle | null = null;
+          let safetyTimer: any = null;
+          let isResolved = false;
 
-          const cleanup = () => {
+          const finish = (reason: string) => {
+            if (isResolved) return;
+            isResolved = true;
+            this.log(`Native Interstitial finished (${reason})`);
+            if (safetyTimer) {
+              clearTimeout(safetyTimer);
+              safetyTimer = null;
+            }
             if (dismissHandle) dismissHandle.remove();
             if (failHandle) failHandle.remove();
+            if (failLoadHandle) failLoadHandle.remove();
+            resolve();
           };
+
+          // 10-second hard safety timeout to guarantee the app NEVER hangs or gets stuck on white screen
+          safetyTimer = setTimeout(() => {
+            finish('Safety Timeout');
+          }, 10000);
 
           try {
             dismissHandle = await AdMob.addListener(InterstitialAdPluginEvents.Dismissed, () => {
-              this.log('Native Interstitial Dismissed by user');
-              cleanup();
-              resolve();
+              finish('Dismissed');
             });
 
             failHandle = await AdMob.addListener(InterstitialAdPluginEvents.FailedToShow, (err: any) => {
               this.log('Native Interstitial FailedToShow:', err);
-              cleanup();
-              resolve();
+              finish('FailedToShow');
+            });
+
+            failLoadHandle = await AdMob.addListener(InterstitialAdPluginEvents.FailedToLoad, (err: any) => {
+              this.log('Native Interstitial FailedToLoad:', err);
+              finish('FailedToLoad');
             });
 
             await AdMob.showInterstitial();
           } catch (showErr) {
             this.log('Error triggering AdMob.showInterstitial():', showErr);
-            cleanup();
-            resolve();
+            finish('Exception');
           }
         });
       } else {
@@ -581,20 +608,20 @@ class AdManagerService {
         }
       }, 500);
 
-      // 5. Preload next interstitial with 35s safe cooldown (never immediate)
+      // 5. Preload next interstitial with 25s safe cooldown (never immediate)
       setTimeout(() => {
         this.loadInterstitial();
-      }, 35000);
+      }, 25000);
 
       return true;
     } catch (error) {
       this.log('Interstitial failed during lifecycle:', error);
       this.isInterstitialLoaded = false;
       this.isInterstitialShowing = false;
+      this.isInterstitialTransitioning = false;
       
       // Attempt restoring banner on failure after stabilization
       setTimeout(async () => {
-        this.isInterstitialTransitioning = false;
         if (wasBannerActiveBefore && !this.state.isPremium && this.lastBannerRequestedState) {
           this.log('Restoring native banner cleanly after interstitial failure...');
           await this.showBanner(true);
