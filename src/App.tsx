@@ -47,6 +47,7 @@ function GameApp() {
   const [selectedPlayer, setSelectedPlayer] = useState<Player | null>(null);
   const [isRewardedModalOpen, setIsRewardedModalOpen] = useState<boolean>(false);
   const [rewardedModalDefaultType, setRewardedModalDefaultType] = useState<AdRewardType>('coins');
+  const [isPremium, setIsPremium] = useState<boolean>(AdManager.isPremium());
   const [isAdminMode, setIsAdminMode] = useState<boolean>(() => {
     return (
       window.location.pathname === '/admin' ||
@@ -55,6 +56,16 @@ function GameApp() {
       window.location.hash.startsWith('#/admin')
     );
   });
+
+  // Track VIP/Premium status
+  useEffect(() => {
+    const unsub = AdManager.subscribe((state) => {
+      setIsPremium(state.isPremium);
+    });
+    return () => unsub();
+  }, []);
+
+  const isNativeBannerActive = Capacitor.isNativePlatform() && !isPremium && !liveMatch;
 
   // Initialize AdMob on startup
   useEffect(() => {
@@ -156,11 +167,12 @@ function GameApp() {
 
   // Regular Player Game Experience
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-['Cairo',sans-serif] safe-area-inset">
+    <div className={`min-h-screen bg-slate-950 text-slate-100 flex flex-col font-['Cairo',sans-serif] safe-area-inset ${isNativeBannerActive ? 'pt-[50px]' : ''}`}>
       {/* Top Header Bar */}
       <Header 
         activeTab={activeTab} 
         setActiveTab={handleTabChange} 
+        isNativeBannerActive={isNativeBannerActive}
         onOpenAdmin={() => {
           setIsAdminMode(true);
           window.location.hash = '#admin';

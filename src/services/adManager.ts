@@ -303,15 +303,15 @@ class AdManagerService {
           const options: BannerAdOptions = {
             adId: ADMOB_CONFIG.BANNER_ID,
             adSize: BannerAdSize.BANNER,
-            position: BannerAdPosition.BOTTOM_CENTER,
-            margin: BOTTOM_NAV_MARGIN_DP,
+            position: BannerAdPosition.TOP_CENTER,
+            margin: 0,
             isTesting: ADMOB_CONFIG.IS_TEST_MODE,
           };
 
           await AdMob.showBanner(options);
           this.isBannerCreated = true;
           this.isBannerVisible = true;
-          this.log('Native Banner cleanly created and attached (Fixed BANNER at BOTTOM_CENTER)');
+          this.log('Native Banner cleanly created and attached (Top Banner "بانر فوق" at TOP_CENTER)');
         } else {
           // Attempt instant resume
           try {
@@ -338,8 +338,8 @@ class AdManagerService {
             const options: BannerAdOptions = {
               adId: ADMOB_CONFIG.BANNER_ID,
               adSize: BannerAdSize.BANNER,
-              position: BannerAdPosition.BOTTOM_CENTER,
-              margin: BOTTOM_NAV_MARGIN_DP,
+              position: BannerAdPosition.TOP_CENTER,
+              margin: 0,
               isTesting: ADMOB_CONFIG.IS_TEST_MODE,
             };
 

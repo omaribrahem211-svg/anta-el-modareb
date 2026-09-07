@@ -10,9 +10,15 @@ interface HeaderProps {
   activeTab: ActiveTab;
   setActiveTab: (tab: ActiveTab) => void;
   onOpenAdmin?: () => void;
+  isNativeBannerActive?: boolean;
 }
 
-export const Header: React.FC<HeaderProps> = ({ activeTab, setActiveTab, onOpenAdmin }) => {
+export const Header: React.FC<HeaderProps> = ({ 
+  activeTab, 
+  setActiveTab, 
+  onOpenAdmin,
+  isNativeBannerActive = false,
+}) => {
   const {
     userClub,
     currentRound,
@@ -45,7 +51,7 @@ export const Header: React.FC<HeaderProps> = ({ activeTab, setActiveTab, onOpenA
   };
 
   return (
-    <header className="sticky top-0 z-30 bg-slate-900/95 backdrop-blur-md border-b border-slate-800 px-3 sm:px-4 py-2.5 sm:py-3 shadow-lg">
+    <header className={`sticky ${isNativeBannerActive ? 'top-[50px]' : 'top-0'} z-30 bg-slate-900/95 backdrop-blur-md border-b border-slate-800 px-3 sm:px-4 py-2.5 sm:py-3 shadow-lg transition-all duration-200`}>
       <div className="max-w-5xl mx-auto flex items-center justify-between gap-2">
         
         {/* Game & Club Brand Info */}

@@ -30,7 +30,7 @@ const TEST_AD_IDS = {
 // Official Production AdMob IDs for "أنت المدرب"
 export const PRODUCTION_AD_IDS = {
   APP_ID: 'ca-app-pub-5272866425919152~1232269694',
-  BANNER_ID: 'ca-app-pub-5272866425919152/4077924883',
+  BANNER_ID: 'ca-app-pub-5272866425919152/6734203345', // بانر فوق الجديد (Top Banner)
   INTERSTITIAL_ID: 'ca-app-pub-5272866425919152/5931052283',
   REWARDED_ID: 'ca-app-pub-5272866425919152/6122623978',
 };

@@ -36,10 +36,6 @@ export const BottomNav: React.FC<BottomNavProps> = ({ activeTab, setActiveTab })
     return () => unsub();
   }, []);
 
-  // Check if native Android banner ad is currently shown at the bottom
-  const isMatchScreen = activeTab === 'matches' || activeTab === 'online_pvp' || Boolean(liveMatch && liveMatch.isPlaying);
-  const isNativeBannerActive = Capacitor.isNativePlatform() && !isPremium && !isMatchScreen;
-
   const mainTabs: { id: ActiveTab; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
     { id: 'dashboard', label: t('tab_dashboard', 'الرئيسية'), icon: LayoutDashboard },
     { id: 'tactics', label: t('tab_tactics', 'التكتيك'), icon: Sliders },
