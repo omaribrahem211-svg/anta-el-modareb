@@ -34,26 +34,26 @@ const TEST_AD_IDS = {
 // Official Production AdMob IDs for "أنت المدرب"
 export const PRODUCTION_AD_IDS = {
   APP_ID: 'ca-app-pub-5272866425919152~1232269694',
-  TOP_BANNER_ID: 'ca-app-pub-5272866425919152/6734203345',    // بانر فوق (تحت جزء صفحة الفيسبوك)
-  BOTTOM_BANNER_ID: 'ca-app-pub-5272866425919152/4077924883', // بانر أسفل (فوق القائمة اللى تحت)
-  BANNER_ID: 'ca-app-pub-5272866425919152/4077924883',        // الاعلان التاني فوق القايمة
-  INTERSTITIAL_ID: 'ca-app-pub-5272866425919152/5931052283',
-  REWARDED_ID: 'ca-app-pub-5272866425919152/6122623978',
+  BANNER_ID: 'ca-app-pub-5272866425919152/4077924883',        // البانر الثابت أسفل الشاشة
+  TOP_BANNER_ID: 'ca-app-pub-5272866425919152/6734203345',    // بانر تحت جزء صفحة الفيسبوك
+  BOTTOM_BANNER_ID: 'ca-app-pub-5272866425919152/4077924883', // بانر أسفل الشاشة
+  REWARDED_ID: 'ca-app-pub-5272866425919152/6872814469',      // إعلان بمكافأة حقيقي (علاج وإلغاء إيقاف)
+  INTERSTITIAL_ID: '', // تم حذف الإعلانات البينية نهائياً
 };
 
-// Set to false for Production Google Play release with real live AdMob ads
+// Real Ads only (NO Test Ads)
 export const IS_TEST_MODE = false;
 
 export const ADMOB_CONFIG: AdMobConfigType = {
-  IS_TEST_MODE,
+  IS_TEST_MODE: false,
   ENABLE_LOGS: true,
-  ENABLE_REWARDS: false, // Temporarily disabled per user request
-  INTERSTITIAL_FREQUENCY_MATCHES: 3, // Frequency cap: every 3 matches
-  REWARDED_COOLDOWN_SECONDS: 60,     // 1 minute cooldown between training boosts
-  APP_ID: IS_TEST_MODE ? TEST_AD_IDS.APP_ID : PRODUCTION_AD_IDS.APP_ID,
-  TOP_BANNER_ID: IS_TEST_MODE ? TEST_AD_IDS.TOP_BANNER_ID : PRODUCTION_AD_IDS.TOP_BANNER_ID,
-  BOTTOM_BANNER_ID: IS_TEST_MODE ? TEST_AD_IDS.BOTTOM_BANNER_ID : PRODUCTION_AD_IDS.BOTTOM_BANNER_ID,
-  BANNER_ID: IS_TEST_MODE ? TEST_AD_IDS.BANNER_ID : PRODUCTION_AD_IDS.BOTTOM_BANNER_ID,
-  INTERSTITIAL_ID: IS_TEST_MODE ? TEST_AD_IDS.INTERSTITIAL_ID : PRODUCTION_AD_IDS.INTERSTITIAL_ID,
-  REWARDED_ID: IS_TEST_MODE ? TEST_AD_IDS.REWARDED_ID : PRODUCTION_AD_IDS.REWARDED_ID,
+  ENABLE_REWARDS: true, // تفعيل إعلانات المكافأة
+  INTERSTITIAL_FREQUENCY_MATCHES: 999999, // معطل نهائياً
+  REWARDED_COOLDOWN_SECONDS: 0,           // متاح عند الحاجة لعلاج أو إلغاء إيقاف لاعب
+  APP_ID: PRODUCTION_AD_IDS.APP_ID,
+  TOP_BANNER_ID: PRODUCTION_AD_IDS.TOP_BANNER_ID,
+  BOTTOM_BANNER_ID: PRODUCTION_AD_IDS.BOTTOM_BANNER_ID,
+  BANNER_ID: PRODUCTION_AD_IDS.BANNER_ID,
+  INTERSTITIAL_ID: '',
+  REWARDED_ID: PRODUCTION_AD_IDS.REWARDED_ID,
 };

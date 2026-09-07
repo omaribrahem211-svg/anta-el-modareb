@@ -317,6 +317,13 @@ export const SquadTab: React.FC<SquadTabProps> = ({ onSelectPlayer }) => {
                     )}
 
                     {/* Financial Badge: Player Savings */}
+                    {(player.isSuspended || (player.suspensionMatches && player.suspensionMatches > 0)) && (
+                      <span className="text-[9px] bg-amber-950 text-amber-300 border border-amber-700 px-1.5 py-0.2 rounded font-bold flex items-center gap-1">
+                        <AlertCircle className="w-3 h-3 text-amber-400" />
+                        موقوف ({player.suspensionMatches || 1} مباراة)
+                      </span>
+                    )}
+
                     <span className="text-[9px] bg-emerald-950/70 text-emerald-300 border border-emerald-800/60 px-1.5 py-0.2 rounded font-bold flex items-center gap-1">
                       <PiggyBank className="w-2.5 h-2.5 text-emerald-400" />
                       رصيده: {playerSavings.toLocaleString()} ج.م

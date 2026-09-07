@@ -172,12 +172,10 @@ class AdManagerService {
         this.isInitialized = true;
         this.isInitializing = false;
 
-        // Preload interstitial after a short delay so cold start remains instantaneous
-        if (!this.state.isPremium) {
-          setTimeout(() => {
-            this.loadInterstitial();
-          }, 3000);
-        }
+        // Preload rewarded ad so it is ready when the user requests to heal or unsuspend a player
+        setTimeout(() => {
+          this.loadRewarded();
+        }, 1500);
 
         return true;
       } catch (error) {
@@ -445,186 +443,143 @@ class AdManagerService {
   }
 
   /**
-   * Pre-loads an Interstitial Ad in background
+   * Interstitial Ads are permanently removed from the application per user request.
+   * Stubbed for type-safety and backwards compatibility.
    */
   public async loadInterstitial(): Promise<boolean> {
-    if (this.state.isPremium || this.isInterstitialLoaded || this.isInterstitialShowing) return true;
-
-    try {
-      if (this.isNative) {
-        const options: AdOptions = {
-          adId: ADMOB_CONFIG.INTERSTITIAL_ID,
-          isTesting: ADMOB_CONFIG.IS_TEST_MODE,
-        };
-        await AdMob.prepareInterstitial(options);
-      }
-      this.isInterstitialLoaded = true;
-      this.log('Interstitial Loaded and Ready');
-      return true;
-    } catch (error) {
-      this.log('Interstitial Failed to Load:', error);
-      this.isInterstitialLoaded = false;
-      return false;
-    }
+    return false;
   }
 
   public isInterstitialReady(): boolean {
-    if (this.state.isPremium) return false;
-    return this.isInterstitialLoaded || !this.isNative;
+    return false;
   }
 
-  /**
-   * Checks if frequency capping and cooldown conditions are met for Interstitial Ads
-   */
   public shouldShowInterstitial(): boolean {
-    if (this.state.isPremium) return false;
+    return false;
+  }
 
-    // 1. Frequency cap: matches played threshold
-    const matchesReached = this.state.matchesPlayedSinceLastInterstitial >= ADMOB_CONFIG.INTERSTITIAL_FREQUENCY_MATCHES;
-    if (!matchesReached) return false;
-
-    // 2. Cooldown cap: minimum interval between interstitials (3 minutes)
-    const timeSinceLast = Date.now() - (this.state.lastInterstitialTimestamp || 0);
-    if (timeSinceLast < MIN_INTERSTITIAL_COOLDOWN_MS) {
-      this.log(`Interstitial blocked by cooldown: ${Math.round((MIN_INTERSTITIAL_COOLDOWN_MS - timeSinceLast) / 1000)}s remaining`);
-      return false;
-    }
-
-    return true;
+  public async showInterstitial(): Promise<boolean> {
+    return false;
   }
 
   /**
-   * Displays the Interstitial Ad between matches.
-   * 
-   * CRITICAL FIX:
-   * 1. Safely detaches and removes native BannerAdView before showing interstitial.
-   * 2. Registers true Dismissed / FailedToShow listeners and awaits true dismissal by the user.
-   * 3. Preserves desired banner state (does not wipe lastBannerRequestedState).
-   * 4. Allows a 500ms stabilization tick for Android Activity & WebView to redraw before restoring banner.
-   * 5. Completely eliminates banner disappearance and bottom area layout lag!
+   * Shows a standard Rewarded Ad for player actions:
+   * - Healing an injured player («شاهد إعلان لتسريع العلاج»)
+   * - Lifting a player suspension («شاهد إعلان لإلغاء الإيقاف»)
+   *
+   * Guaranteed Rules:
+   * 1. Only calls onUserEarnedReward if the user completely watched the ad.
+   * 2. If closed before completion, reward is NOT granted.
+   * 3. Immediately preloads a new Rewarded Ad after use.
    */
-  public async showInterstitial(): Promise<boolean> {
-    if (this.state.isPremium) {
-      this.log('Interstitial skipped: User is Premium');
-      return false;
-    }
+  public async showRewardedForAction(params: {
+    actionType: 'heal_player' | 'cancel_suspension';
+    onUserEarnedReward: () => void;
+    onDismiss?: (rewardEarned: boolean) => void;
+    onFailure?: (error: any) => void;
+  }): Promise<boolean> {
+    if (this.isRewardedShowing) return false;
 
-    if (this.isInterstitialActive()) return false;
-
-    // Safety guard: On native Android, if interstitial is not yet prepared in memory,
-    // NEVER await loading on-the-fly because that freezes the user during navigation!
-    // Instead, trigger a silent background preload for next time and return false immediately.
-    if (this.isNative && !this.isInterstitialLoaded) {
-      this.log('Interstitial not pre-loaded in memory, triggering background preload and skipping to avoid UI lag');
-      this.loadInterstitial().catch(() => {});
-      return false;
-    }
-
-    const wasBannerActiveBefore = this.lastBannerRequestedState || this.isBannerVisible;
+    this.isRewardedShowing = true;
+    let rewardEarned = false;
 
     try {
-      this.isInterstitialShowing = true;
-      this.isInterstitialTransitioning = true;
-      this.log('Preparing to show Interstitial...');
-
-      // 1. Detach native banner view completely to prevent GL texture & layout collisions
-      if (this.isNative) {
-        await this.suspendBannerForFullscreenAd();
-      }
+      this.log(`Rewarded ad started for action: ${params.actionType}`);
 
       if (this.isNative) {
-        // 2. Setup dismissal promise with hard safety timeout so we know when the ad actually finishes
-        await new Promise<void>(async (resolve) => {
-          let dismissHandle: PluginListenerHandle | null = null;
-          let failHandle: PluginListenerHandle | null = null;
-          let failLoadHandle: PluginListenerHandle | null = null;
-          let safetyTimer: any = null;
-          let isResolved = false;
-
-          const finish = (reason: string) => {
-            if (isResolved) return;
-            isResolved = true;
-            this.log(`Native Interstitial finished (${reason})`);
-            if (safetyTimer) {
-              clearTimeout(safetyTimer);
-              safetyTimer = null;
-            }
-            if (dismissHandle) dismissHandle.remove();
-            if (failHandle) failHandle.remove();
-            if (failLoadHandle) failLoadHandle.remove();
-            resolve();
-          };
-
-          // Fast 3.5-second safety timeout to guarantee the app NEVER hangs or gets stuck on white screen
-          safetyTimer = setTimeout(() => {
-            finish('Safety Timeout');
-          }, 3500);
-
-          try {
-            dismissHandle = await AdMob.addListener(InterstitialAdPluginEvents.Dismissed, () => {
-              finish('Dismissed');
-            });
-
-            failHandle = await AdMob.addListener(InterstitialAdPluginEvents.FailedToShow, (err: any) => {
-              this.log('Native Interstitial FailedToShow:', err);
-              finish('FailedToShow');
-            });
-
-            failLoadHandle = await AdMob.addListener(InterstitialAdPluginEvents.FailedToLoad, (err: any) => {
-              this.log('Native Interstitial FailedToLoad:', err);
-              finish('FailedToLoad');
-            });
-
-            await AdMob.showInterstitial();
-          } catch (showErr) {
-            this.log('Error triggering AdMob.showInterstitial():', showErr);
-            finish('Exception');
+        // Ensure ad is ready in memory
+        if (!this.isRewardedLoaded) {
+          const loaded = await this.loadRewarded();
+          if (!loaded) {
+            this.isRewardedShowing = false;
+            if (params.onFailure) params.onFailure(new Error('Failed to prepare rewarded ad'));
+            return false;
           }
-        });
-      } else {
-        // Web simulation mode
-        this.log('Interstitial Showing (Web Simulation)...');
-        await new Promise(resolve => setTimeout(resolve, 1200));
-      }
-
-      this.isInterstitialLoaded = false;
-      this.isInterstitialShowing = false;
-      this.log('Interstitial closed, entering WebView stabilization tick (transitioning active)');
-
-      // 3. Reset frequency counter and record timestamp
-      this.state.matchesPlayedSinceLastInterstitial = 0;
-      this.state.lastInterstitialTimestamp = Date.now();
-      this.saveState();
-
-      // 4. Android Activity resume stabilization tick (500ms) to ensure smooth WebView rendering
-      setTimeout(async () => {
-        this.isInterstitialTransitioning = false;
-        if (wasBannerActiveBefore && !this.state.isPremium && this.lastBannerRequestedState) {
-          this.log('Restoring native banner cleanly after interstitial stabilization...');
-          await this.showBanner(true);
         }
-      }, 500);
 
-      // 5. Preload next interstitial with 25s safe cooldown (never immediate)
-      setTimeout(() => {
-        this.loadInterstitial();
-      }, 25000);
+        let rewardListener: PluginListenerHandle | null = null;
+        let dismissListener: PluginListenerHandle | null = null;
+        let failListener: PluginListenerHandle | null = null;
+
+        const cleanup = () => {
+          if (rewardListener) rewardListener.remove();
+          if (dismissListener) dismissListener.remove();
+          if (failListener) failListener.remove();
+        };
+
+        // 1. Listen for user earned reward (onUserEarnedReward)
+        rewardListener = await AdMob.addListener(RewardAdPluginEvents.Rewarded, (reward: AdMobRewardItem) => {
+          this.log('Reward Earned natively from AdMob SDK (onUserEarnedReward):', reward);
+          rewardEarned = true;
+          this.recordRewardedAdSuccess();
+          params.onUserEarnedReward();
+        });
+
+        // 2. Listen for ad dismissal
+        dismissListener = await AdMob.addListener(RewardAdPluginEvents.Dismissed, () => {
+          this.log(`Rewarded ad dismissed. User earned reward: ${rewardEarned}`);
+          this.isRewardedShowing = false;
+          this.isRewardedLoaded = false;
+          cleanup();
+
+          if (params.onDismiss) {
+            params.onDismiss(rewardEarned);
+          }
+
+          // Immediately preload next Rewarded ad
+          setTimeout(() => {
+            this.loadRewarded();
+          }, 800);
+        });
+
+        // 3. Listen for failure
+        failListener = await AdMob.addListener(RewardAdPluginEvents.FailedToShow, (err: any) => {
+          this.log('Rewarded ad failed to show:', err);
+          this.isRewardedShowing = false;
+          this.isRewardedLoaded = false;
+          cleanup();
+
+          if (params.onFailure) {
+            params.onFailure(err);
+          }
+
+          // Preload retry
+          setTimeout(() => {
+            this.loadRewarded();
+          }, 1500);
+        });
+
+        await AdMob.showRewardVideoAd();
+      } else {
+        // Web Simulation Mode (allows testing completion vs cancellation in browser)
+        this.log('Rewarded ad Web Simulation');
+        const actionLabel = params.actionType === 'heal_player' 
+          ? 'تسريع علاج اللاعب المصاب' 
+          : 'إلغاء عقوبة إيقاف اللاعب';
+        
+        const confirmed = window.confirm(
+          `🎬 [إعلان AdMob بمكافأة - Rewarded Ad]\n\nهل ترغب في محاكاة إكمال مشاهدة إعلان الفيديو بالكامل لـ (${actionLabel})؟\n\n- موافق (OK): اكتمال الإعلان بنجاح ومنح المكافأة فوراً (onUserEarnedReward).\n- إلغاء (Cancel): إغلاق الإعلان قبل اكتماله (لن يتم تطبيق المكافأة).`
+        );
+
+        if (confirmed) {
+          rewardEarned = true;
+          this.recordRewardedAdSuccess();
+          params.onUserEarnedReward();
+        }
+
+        this.isRewardedShowing = false;
+        if (params.onDismiss) {
+          params.onDismiss(rewardEarned);
+        }
+      }
 
       return true;
     } catch (error) {
-      this.log('Interstitial failed during lifecycle:', error);
-      this.isInterstitialLoaded = false;
-      this.isInterstitialShowing = false;
-      this.isInterstitialTransitioning = false;
-      
-      // Attempt restoring banner on failure after stabilization
-      setTimeout(async () => {
-        if (wasBannerActiveBefore && !this.state.isPremium && this.lastBannerRequestedState) {
-          this.log('Restoring native banner cleanly after interstitial failure...');
-          await this.showBanner(true);
-        }
-      }, 500);
-
+      this.log('showRewardedForAction error:', error);
+      this.isRewardedShowing = false;
+      this.isRewardedLoaded = false;
+      if (params.onFailure) params.onFailure(error);
+      setTimeout(() => this.loadRewarded(), 1500);
       return false;
     }
   }

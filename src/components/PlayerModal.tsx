@@ -3,6 +3,7 @@ import { Player, PlayerAttributes } from '../types/game';
 import { useGame } from '../context/GameContext';
 import { calculateAskingPrice, getPlayerTransferStatus, resolveClubInfo } from '../utils/transferEngine';
 import { getPositionArabic, getPositionBadgeClass } from '../utils/positionHelper';
+import { AdManager } from '../services/adManager';
 import {
   X,
   Zap,
@@ -29,6 +30,7 @@ import {
   Gift,
   Wallet,
   CheckCircle2,
+  PlayCircle,
 } from 'lucide-react';
 
 interface PlayerModalProps {
@@ -54,9 +56,12 @@ export const PlayerModal: React.FC<PlayerModalProps> = ({ player, onClose, onSta
     boostPlayerCondition,
     addBonusToPlayer,
     dayAdvanceSummary,
+    healPlayerWithAd,
+    cancelPlayerSuspensionWithAd,
   } = useGame();
   const [talkCooldown, setTalkCooldown] = useState(false);
   const [notification, setNotification] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
+  const [isAdLoading, setIsAdLoading] = useState(false);
 
   // Direct Player Bonus State
   const [bonusInputAmount, setBonusInputAmount] = useState<number>(10000);
@@ -112,6 +117,70 @@ export const PlayerModal: React.FC<PlayerModalProps> = ({ player, onClose, onSta
     } else {
       setNotification({ text: res.message, type: 'error' });
       setTimeout(() => setNotification(null), 3000);
+    }
+  };
+
+  const livePlayer = (userClub?.players || []).find(p => p.id === player.id) || player;
+
+  const handleHealWithAd = async () => {
+    if (isAdLoading) return;
+    setIsAdLoading(true);
+
+    try {
+      await AdManager.showRewardedForAction({
+        actionType: 'heal_player',
+        onUserEarnedReward: () => {
+          const res = healPlayerWithAd(livePlayer.id);
+          setNotification({ text: res.message, type: 'success' });
+        },
+        onDismiss: (rewardEarned) => {
+          setIsAdLoading(false);
+          if (!rewardEarned) {
+            setNotification({ text: 'لم تكتمل مشاهدة الإعلان! لم يتم منح المكافأة.', type: 'error' });
+          }
+          setTimeout(() => setNotification(null), 4000);
+        },
+        onFailure: () => {
+          setIsAdLoading(false);
+          setNotification({ text: 'تعذر تشغيل الإعلان حالياً، يرجى المحاولة لاحقاً.', type: 'error' });
+          setTimeout(() => setNotification(null), 4000);
+        },
+      });
+    } catch {
+      setIsAdLoading(false);
+      setNotification({ text: 'حدث خطأ أثناء تشغيل الإعلان.', type: 'error' });
+      setTimeout(() => setNotification(null), 4000);
+    }
+  };
+
+  const handleCancelSuspensionWithAd = async () => {
+    if (isAdLoading) return;
+    setIsAdLoading(true);
+
+    try {
+      await AdManager.showRewardedForAction({
+        actionType: 'cancel_suspension',
+        onUserEarnedReward: () => {
+          const res = cancelPlayerSuspensionWithAd(livePlayer.id);
+          setNotification({ text: res.message, type: 'success' });
+        },
+        onDismiss: (rewardEarned) => {
+          setIsAdLoading(false);
+          if (!rewardEarned) {
+            setNotification({ text: 'لم تكتمل مشاهدة الإعلان! لم يتم منح المكافأة.', type: 'error' });
+          }
+          setTimeout(() => setNotification(null), 4000);
+        },
+        onFailure: () => {
+          setIsAdLoading(false);
+          setNotification({ text: 'تعذر تشغيل الإعلان حالياً، يرجى المحاولة لاحقاً.', type: 'error' });
+          setTimeout(() => setNotification(null), 4000);
+        },
+      });
+    } catch {
+      setIsAdLoading(false);
+      setNotification({ text: 'حدث خطأ أثناء تشغيل الإعلان.', type: 'error' });
+      setTimeout(() => setNotification(null), 4000);
     }
   };
 
@@ -228,19 +297,55 @@ export const PlayerModal: React.FC<PlayerModalProps> = ({ player, onClose, onSta
           </div>
         </div>
 
-        {/* Injury Alert if applicable */}
-        {(player.isInjured || (player.injury && player.injury.daysRemaining > 0)) && (
-          <div className="bg-red-950/80 border border-red-700/80 p-3 rounded-2xl flex items-center justify-between gap-2.5 text-xs text-red-200 shadow-lg">
-            <div className="flex items-center gap-2.5">
+        {/* Injury Alert & AdMob Rewarded Healing Button */}
+        {(livePlayer.isInjured || (livePlayer.injury && livePlayer.injury.daysRemaining > 0)) && (
+          <div className="bg-red-950/90 border border-red-700/90 p-3.5 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs text-red-200 shadow-lg">
+            <div className="flex items-center gap-2.5 min-w-0">
               <ShieldAlert className="w-5 h-5 text-red-400 shrink-0 animate-pulse" />
-              <div>
+              <div className="min-w-0">
                 <span className="font-bold text-red-300">حالة اللاعب الطبية: </span>
-                <span>{player.injury?.type || player.injuryType || 'إصابة عضلية'} (متبقي {player.injury?.daysRemaining || 3} يوم للتعافي)</span>
+                <span className="text-red-200">{livePlayer.injury?.type || livePlayer.injuryType || 'إصابة عضلية'} (متبقي {livePlayer.injury?.daysRemaining || 3} يوم للتعافي)</span>
               </div>
             </div>
-            <span className="text-[10px] bg-red-900/60 text-red-200 border border-red-700 px-2 py-0.5 rounded-full font-bold">
-              في المستشفى 🏥
-            </span>
+
+            {isSquadPlayer && (
+              <button
+                id="btn-admob-reward-heal-player"
+                type="button"
+                onClick={handleHealWithAd}
+                disabled={isAdLoading}
+                className="w-full sm:w-auto px-4 py-2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold flex items-center justify-center gap-2 shadow-md transition-all active:scale-95 shrink-0 border border-emerald-400/40 disabled:opacity-60 cursor-pointer"
+              >
+                <Sparkles className="w-4 h-4 text-amber-300 shrink-0" />
+                <span>{isAdLoading ? 'جاري تجهيز الإعلان...' : 'شاهد إعلان لتسريع العلاج'}</span>
+              </button>
+            )}
+          </div>
+        )}
+
+        {/* Suspension Alert & AdMob Rewarded Unsuspend Button */}
+        {(livePlayer.isSuspended || (livePlayer.suspensionMatches && livePlayer.suspensionMatches > 0)) && (
+          <div className="bg-amber-950/90 border border-amber-700/90 p-3.5 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs text-amber-200 shadow-lg">
+            <div className="flex items-center gap-2.5 min-w-0">
+              <AlertCircle className="w-5 h-5 text-amber-400 shrink-0" />
+              <div className="min-w-0">
+                <span className="font-bold text-amber-300">عقوبة الإيقاف: </span>
+                <span className="text-amber-200">موقوف ({livePlayer.suspensionReason || 'تراكم بطاقات / طرد مباشر'}) - متبقي {livePlayer.suspensionMatches || 1} مباراة</span>
+              </div>
+            </div>
+
+            {isSquadPlayer && (
+              <button
+                id="btn-admob-reward-unsuspend-player"
+                type="button"
+                onClick={handleCancelSuspensionWithAd}
+                disabled={isAdLoading}
+                className="w-full sm:w-auto px-4 py-2 rounded-xl bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-500 hover:to-orange-500 text-white font-bold flex items-center justify-center gap-2 shadow-md transition-all active:scale-95 shrink-0 border border-amber-400/40 disabled:opacity-60 cursor-pointer"
+              >
+                <Sparkles className="w-4 h-4 text-amber-300 shrink-0" />
+                <span>{isAdLoading ? 'جاري تجهيز الإعلان...' : 'شاهد إعلان لإلغاء الإيقاف'}</span>
+              </button>
+            )}
           </div>
         )}
 

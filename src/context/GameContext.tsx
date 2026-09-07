@@ -250,6 +250,8 @@ interface GameContextType {
   // Club & Facilities
   upgradeFacility: (facilityKey: keyof ClubFacilities, cost: number) => { success: boolean; message: string };
   treatPlayerInHospital: (playerId: string, treatmentType: 'physio' | 'specialist' | 'prp') => { success: boolean; message: string };
+  healPlayerWithAd: (playerId: string) => { success: boolean; message: string };
+  cancelPlayerSuspensionWithAd: (playerId: string) => { success: boolean; message: string };
   transferBudgetToWageBudget: (cashAmount: number) => { success: boolean; message: string };
   transferWageToCashBudget: (monthlyAmount: number) => { success: boolean; message: string };
   
@@ -2170,14 +2172,8 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     setCurrentRound(nextRoundNumber);
     setLiveMatch(null);
 
-    // AdMob Interstitial & Boost Consumption
+    // Boost Consumption
     AdManager.consumeTrainingBoost();
-    const adCheck1 = AdManager.onMatchCompleted();
-    if (adCheck1.shouldShowInterstitial) {
-      setTimeout(() => {
-        AdManager.showInterstitial();
-      }, 1200);
-    }
   };
 
   const instantSimulateCurrentRound = () => {
@@ -2750,14 +2746,8 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       console.warn('Matchday news simulation notice:', e);
     }
 
-    // AdMob Interstitial & Boost Consumption
+    // Boost Consumption
     AdManager.consumeTrainingBoost();
-    const adCheck2 = AdManager.onMatchCompleted();
-    if (adCheck2.shouldShowInterstitial) {
-      setTimeout(() => {
-        AdManager.showInterstitial();
-      }, 1200);
-    }
   };
 
   const simulateMultipleRounds = (roundsCount: number = 10): { success: boolean; simulatedCount: number; message: string } => {
@@ -3588,6 +3578,95 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     setInbox(prev => [medMsg, ...prev]);
 
     return { success: true, message: resultMessage };
+  };
+
+  // AdMob Rewarded: Fast-track recovery for injured player immediately after onUserEarnedReward
+  const healPlayerWithAd = (playerId: string): { success: boolean; message: string } => {
+    if (!userClub) {
+      return { success: false, message: 'أنت غير مرتبط بأي نادٍ حالياً!' };
+    }
+
+    const player = (userClub.players || []).find(p => p.id === playerId);
+    if (!player) {
+      return { success: false, message: 'اللاعب غير موجود في قائمة الفريق!' };
+    }
+
+    setTeams(prev => prev.map(t => {
+      if (!t.isUserClub && t.id !== userClub.id) return t;
+      return {
+        ...t,
+        players: (t.players || []).map(p => {
+          if (p.id !== playerId) return p;
+          return {
+            ...p,
+            isInjured: false,
+            injuryType: undefined,
+            injuryWeeks: undefined,
+            injuryMatches: undefined,
+            injury: null,
+            fitness: Math.min(100, Math.max(90, (p.fitness || 80) + 15)),
+          };
+        }),
+      };
+    }));
+
+    const successMessage = `تم تسريع علاج وشفا اللاعب ${player.name} بنجاح بعد مشاهدة الإعلان! أصبح اللاعب جاهزاً للمشاركة فوراً 🏥✨`;
+
+    const medMsg: InboxMessage = {
+      id: `msg_reward_heal_${Date.now()}`,
+      title: `علاج فوري للمصاب: ${player.name} 🏥`,
+      sender: 'الجهاز الطبي للنادي',
+      date: calendarDate.formattedArabic || `الجولة ${currentRound}`,
+      type: 'news',
+      read: false,
+      content: successMessage,
+    };
+    setInbox(prev => [medMsg, ...prev]);
+
+    return { success: true, message: successMessage };
+  };
+
+  // AdMob Rewarded: Cancel player match suspension immediately after onUserEarnedReward
+  const cancelPlayerSuspensionWithAd = (playerId: string): { success: boolean; message: string } => {
+    if (!userClub) {
+      return { success: false, message: 'أنت غير مرتبط بأي نادٍ حالياً!' };
+    }
+
+    const player = (userClub.players || []).find(p => p.id === playerId);
+    if (!player) {
+      return { success: false, message: 'اللاعب غير موجود في قائمة الفريق!' };
+    }
+
+    setTeams(prev => prev.map(t => {
+      if (!t.isUserClub && t.id !== userClub.id) return t;
+      return {
+        ...t,
+        players: (t.players || []).map(p => {
+          if (p.id !== playerId) return p;
+          return {
+            ...p,
+            isSuspended: false,
+            suspensionMatches: 0,
+            suspensionReason: undefined,
+          };
+        }),
+      };
+    }));
+
+    const successMessage = `تم إلغاء عقوبة الإيقاف عن اللاعب ${player.name} بنجاح بعد مشاهدة الإعلان! أصبح متاحاً للمباراة القادمة 🟨🟩`;
+
+    const suspMsg: InboxMessage = {
+      id: `msg_reward_susp_${Date.now()}`,
+      title: `إلغاء عقوبة الإيقاف: ${player.name} 🛡️`,
+      sender: 'لجنة المسابقات وشؤون اللاعبين',
+      date: calendarDate.formattedArabic || `الجولة ${currentRound}`,
+      type: 'news',
+      read: false,
+      content: successMessage,
+    };
+    setInbox(prev => [suspMsg, ...prev]);
+
+    return { success: true, message: successMessage };
   };
 
   const transferBudgetToWageBudget = (cashAmount: number): { success: boolean; message: string } => {
@@ -5739,6 +5818,8 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         enrollInCoachingCourse,
         upgradeFacility,
         treatPlayerInHospital,
+        healPlayerWithAd,
+        cancelPlayerSuspensionWithAd,
         promoteYouthProspect,
         sellYouthProspect,
         scoutNewYouthBatch,
