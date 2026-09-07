@@ -1,18 +1,14 @@
-import React, { useEffect, useState, useRef } from 'react';
-import { Capacitor } from '@capacitor/core';
+import React, { useEffect, useState } from 'react';
 import { AdManager } from '../../services/adManager';
-import { ADMOB_CONFIG } from '../../config/admobConfig';
 import { ActiveTab } from '../../types/game';
-import { Sparkles } from 'lucide-react';
 
 interface BannerAdContainerProps {
   activeTab?: ActiveTab;
   isMatchActive?: boolean;
 }
 
-export const BannerAdContainer: React.FC<BannerAdContainerProps> = () => {
+export const BannerAdContainer: React.FC<BannerAdContainerProps> = ({ activeTab, isMatchActive }) => {
   const [isPremium, setIsPremium] = useState(AdManager.isPremium());
-  const debounceTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
     const unsubscribe = AdManager.subscribe((state) => {
@@ -21,33 +17,15 @@ export const BannerAdContainer: React.FC<BannerAdContainerProps> = () => {
     return () => unsubscribe();
   }, []);
 
-  // Banner remains persistently visible at the bottom of the screen ALWAYS,
-  // including during live matches (never hidden or removed).
-  const shouldShow = !isPremium;
-
+  // Ensure banner is loaded and actively displayed at all times,
+  // including during navigation between screens and live matches.
   useEffect(() => {
-    if (debounceTimerRef.current) {
-      clearTimeout(debounceTimerRef.current);
-      debounceTimerRef.current = null;
+    if (!isPremium) {
+      AdManager.ensureBannerActive();
     }
+  }, [activeTab, isMatchActive, isPremium]);
 
-    debounceTimerRef.current = setTimeout(() => {
-      if (shouldShow) {
-        AdManager.showBanner();
-      } else {
-        AdManager.hideBanner();
-      }
-    }, 200);
-
-    return () => {
-      if (debounceTimerRef.current) {
-        clearTimeout(debounceTimerRef.current);
-        debounceTimerRef.current = null;
-      }
-    };
-  }, [shouldShow]);
-
-  // On Native Android, Google AdMob displays the real native Banner view.
-  // No fake or mock placeholder divs are rendered to prevent "إعلان AdMob" without real ad.
+  // Native AdMob attaches the real AdView directly into Android root window hierarchy.
+  // We return null to never display any placeholder text or mock boxes.
   return null;
 };

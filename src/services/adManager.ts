@@ -5,11 +5,9 @@ import {
   BannerAdOptions,
   BannerAdSize,
   BannerAdPosition,
-  AdOptions,
   RewardAdOptions,
   RewardAdPluginEvents,
   BannerAdPluginEvents,
-  InterstitialAdPluginEvents,
   AdMobRewardItem,
 } from '@capacitor-community/admob';
 import { ADMOB_CONFIG } from '../config/admobConfig';
@@ -17,8 +15,7 @@ import { AdManagerState, ActiveTrainingBoost, TrainingBoostType } from '../types
 import { AdRewardManager, AdRewardType, AdRewardClaimResult } from './adRewardService';
 
 const ADMOB_STORAGE_KEY = 'modareb_admob_state_v1';
-const MIN_INTERSTITIAL_COOLDOWN_MS = 180 * 1000; // 3 minutes minimum interval between interstitials
-const BOTTOM_NAV_MARGIN_DP = 58; // Standard Android bottom navigation bar height to place native banner solidly above it
+const BOTTOM_NAV_MARGIN_DP = 58; // Sits directly above the bottom menu bar
 
 class AdManagerService {
   private isInitialized = false;
@@ -28,20 +25,17 @@ class AdManagerService {
   private isBannerVisible = false;
   private isBannerCreated = false;
   private bannerOperationLock = false;
-  private isInterstitialLoaded = false;
+  private bannerRetryTimer: NodeJS.Timeout | null = null;
+  private bannerRetryCount = 0;
   private isRewardedLoaded = false;
-  private isInterstitialShowing = false;
-  private isInterstitialTransitioning = false;
   private isRewardedShowing = false;
-  private activeRewardSessionId: string | null = null;
   private bannerListenersAttached = false;
   private bannerListenerHandles: PluginListenerHandle[] = [];
-  private lastBannerRequestedState = false;
 
   private state: AdManagerState = {
     isPremium: false,
     matchesPlayedSinceLastInterstitial: 0,
-    lastInterstitialTimestamp: Date.now(), // Prevent ad right after opening the app
+    lastInterstitialTimestamp: Date.now(),
     activeBoost: null,
     lastRewardedAdTimestamp: 0,
   };
@@ -51,26 +45,18 @@ class AdManagerService {
   constructor() {
     this.loadState();
     this.isNative = Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'android';
-    // If state had 0 for lastInterstitialTimestamp, set it to now to avoid ad on immediate open
-    if (!this.state.lastInterstitialTimestamp || this.state.lastInterstitialTimestamp === 0) {
-      this.state.lastInterstitialTimestamp = Date.now();
-    }
 
     // Handle App Pause/Resume lifecycle safely
     if (this.isNative) {
       try {
         CapApp.addListener('appStateChange', (appState) => {
           this.log(`App State Changed: isActive = ${appState.isActive}`);
-          if (!appState.isActive) {
-            // When app goes to background, avoid pending actions
-          } else {
-            // When app resumes, gently re-evaluate and recreate banner cleanly if it was active
-            if (this.lastBannerRequestedState && !this.isInterstitialActive() && !this.isRewardedShowing && !this.state.isPremium) {
+          if (appState.isActive) {
+            // When app resumes, ensure the persistent banner is alive
+            if (!this.state.isPremium && !this.isRewardedShowing) {
               setTimeout(() => {
-                if (!this.isInterstitialActive()) {
-                  this.reinitializeBanner();
-                }
-              }, 500);
+                this.ensureBannerActive();
+              }, 400);
             }
           }
         });
@@ -144,19 +130,24 @@ class AdManagerService {
             initializeForTesting: ADMOB_CONFIG.IS_TEST_MODE,
           });
 
-          // Setup Banner listeners ONCE to prevent listener leaks and repeated initialization
+          // Setup Banner listeners ONCE to prevent listener leaks
           if (!this.bannerListenersAttached) {
             try {
               const loadedHandle = await AdMob.addListener(BannerAdPluginEvents.Loaded, () => {
                 this.log('Native Banner Ad Loaded successfully');
                 this.isBannerVisible = true;
                 this.isBannerCreated = true;
+                this.bannerRetryCount = 0;
               });
+
               const failedHandle = await AdMob.addListener(BannerAdPluginEvents.FailedToLoad, (error: any) => {
                 this.log('Native Banner Ad Failed to Load:', error);
                 this.isBannerVisible = false;
                 this.isBannerCreated = false;
+                // Auto-retry banner with backoff to recover from transient network drops
+                this.scheduleBannerRetry();
               });
+
               this.bannerListenerHandles.push(loadedHandle, failedHandle);
               this.bannerListenersAttached = true;
             } catch (listenerErr) {
@@ -172,10 +163,13 @@ class AdManagerService {
         this.isInitialized = true;
         this.isInitializing = false;
 
-        // Preload rewarded ad so it is ready when the user requests to heal or unsuspend a player
+        // Immediately start loading persistent Banner
+        this.ensureBannerActive();
+
+        // Preload rewarded ad so it is ready when needed
         setTimeout(() => {
           this.loadRewarded();
-        }, 1500);
+        }, 1200);
 
         return true;
       } catch (error) {
@@ -195,168 +189,70 @@ class AdManagerService {
   }
 
   /**
-   * Checks whether an Interstitial Ad is currently active, presenting on screen,
-   * or within the post-dismissal WebView stabilization window.
+   * Schedule automatic retry when banner fails to load (e.g. offline on launch)
    */
-  public isInterstitialActive(): boolean {
-    return this.isInterstitialShowing || this.isInterstitialTransitioning;
+  private scheduleBannerRetry() {
+    if (this.state.isPremium || this.bannerRetryTimer) return;
+
+    this.bannerRetryCount++;
+    const delay = Math.min(30000, Math.max(5000, this.bannerRetryCount * 5000));
+    this.log(`Scheduling Banner retry #${this.bannerRetryCount} in ${delay}ms...`);
+
+    this.bannerRetryTimer = setTimeout(() => {
+      this.bannerRetryTimer = null;
+      if (!this.state.isPremium) {
+        this.ensureBannerActive();
+      }
+    }, delay);
   }
 
   /**
-   * Checks whether an Interstitial Ad is actively visible on screen right now.
+   * Ensures the persistent Banner Ad is active at the bottom of the screen.
+   * - Never destroyed or hidden during matches or screen changes.
+   * - Positioned above the bottom navigation bar (margin 58 DP).
+   * - Uses real production Ad Unit ID: ca-app-pub-5272866425919152/4077924883
+   * - Calls native loadAd() properly.
    */
-  public isInterstitialShowingNow(): boolean {
-    return this.isInterstitialShowing;
-  }
-
-  /**
-   * Safely reinitializes the Banner Ad.
-   * Checks the Interstitial ad status first to prevent WebView and graphics context collisions.
-   */
-  public async reinitializeBanner(): Promise<boolean> {
-    if (this.isInterstitialActive()) {
-      this.log('reinitializeBanner deferred: Interstitial is active or in stabilization window');
-      this.lastBannerRequestedState = true;
-      return false;
-    }
-    return this.showBanner(true);
-  }
-
-  /**
-   * Shows a Banner Ad at the bottom of the screen (on non-match screens)
-   * High performance, self-healing, & WebView-safe:
-   * 1. Checks interstitial state before attempting initialization, recreation, or display.
-   * 2. If forceRecreate or not created: cleanly removes any stale native view, then calls showBanner.
-   * 3. If existing banner: attempts smooth resume, falling back to clean recreation on failure.
-   * 4. Prevents layout lag, EGL texture conflicts, and WebView freeze on Android.
-   */
-  public async showBanner(forceRecreate: boolean = false): Promise<boolean> {
+  public async ensureBannerActive(): Promise<boolean> {
     if (this.state.isPremium) {
-      this.log('Banner skipped: User is Premium');
       return false;
     }
 
-    // 1. CRITICAL: Strictly verify Interstitial status before any WebView or native operation
-    if (this.isInterstitialActive()) {
-      this.log('Banner skipped/deferred: Interstitial is currently active or transitioning in WebView');
-      this.lastBannerRequestedState = true;
+    if (this.bannerOperationLock) {
       return false;
     }
-
-    // 2. Also check if a rewarded video ad is currently presenting
-    if (this.isRewardedShowing) {
-      this.log('Banner skipped/deferred: Rewarded video is active');
-      this.lastBannerRequestedState = true;
-      return false;
-    }
-
-    this.lastBannerRequestedState = true;
-
-    // If already visible and not forcing recreation, skip redundant native bridge call
-    if (this.isBannerVisible && !forceRecreate) return true;
-    if (this.bannerOperationLock) return false;
 
     this.bannerOperationLock = true;
 
     try {
-      // Re-verify interstitial state before async initialization
-      if (this.isInterstitialActive()) {
-        this.log('Banner aborted: Interstitial ad started before initialization');
-        return false;
-      }
-
-      const initialized = await this.initialize();
-      if (!initialized && this.isNative) {
-        this.log('Banner deferred: AdMob not ready yet');
-        return false;
-      }
-
-      // Re-verify interstitial state after async initialization to prevent race conditions
-      if (this.isInterstitialActive()) {
-        this.log('Banner aborted: Interstitial ad started during initialization');
-        return false;
+      if (!this.isInitialized) {
+        await this.initialize();
       }
 
       if (this.isNative) {
-        if (forceRecreate || !this.isBannerCreated) {
-          // Double check before removing and creating native view
-          if (this.isInterstitialActive()) {
-            this.log('Banner clean recreate aborted: Interstitial is active');
-            return false;
-          }
+        const options: BannerAdOptions = {
+          adId: ADMOB_CONFIG.BANNER_ID || ADMOB_CONFIG.BOTTOM_BANNER_ID || 'ca-app-pub-5272866425919152/4077924883',
+          adSize: BannerAdSize.BANNER,
+          position: BannerAdPosition.BOTTOM_CENTER,
+          margin: BOTTOM_NAV_MARGIN_DP,
+          isTesting: false,
+        };
 
-          try {
-            await AdMob.removeBanner();
-          } catch (remErr) {
-            this.log('Clean remove notice before show:', remErr);
-          }
-          this.isBannerCreated = false;
-
-          // Final check right before AdMob bridge call to avoid any WebView overlay conflict
-          if (this.isInterstitialActive()) {
-            this.log('Banner showBanner aborted: Interstitial is active');
-            return false;
-          }
-
-          const options: BannerAdOptions = {
-            adId: ADMOB_CONFIG.BOTTOM_BANNER_ID || ADMOB_CONFIG.BANNER_ID,
-            adSize: BannerAdSize.BANNER,
-            position: BannerAdPosition.BOTTOM_CENTER,
-            margin: 58, // Sits cleanly directly ABOVE the bottom menu bar
-            isTesting: ADMOB_CONFIG.IS_TEST_MODE,
-          };
-
-          await AdMob.showBanner(options);
-          this.isBannerCreated = true;
-          this.isBannerVisible = true;
-          this.log('Native Banner cleanly created and attached (Fixed above bottom menu at BOTTOM_CENTER)');
-        } else {
-          // Attempt instant resume
-          try {
-            if (this.isInterstitialActive()) {
-              return false;
-            }
-            await AdMob.resumeBanner();
-            this.isBannerVisible = true;
-            this.log('Native Banner resumed smoothly');
-          } catch (resumeErr) {
-            this.log('Banner resume notice, fallback to fresh recreate:', resumeErr);
-            if (this.isInterstitialActive()) {
-              return false;
-            }
-            try {
-              await AdMob.removeBanner();
-            } catch {}
-            this.isBannerCreated = false;
-
-            if (this.isInterstitialActive()) {
-              return false;
-            }
-
-            const options: BannerAdOptions = {
-              adId: ADMOB_CONFIG.BOTTOM_BANNER_ID || ADMOB_CONFIG.BANNER_ID,
-              adSize: BannerAdSize.BANNER,
-              position: BannerAdPosition.BOTTOM_CENTER,
-              margin: 58, // Above bottom menu
-              isTesting: ADMOB_CONFIG.IS_TEST_MODE,
-            };
-
-            await AdMob.showBanner(options);
-            this.isBannerCreated = true;
-            this.isBannerVisible = true;
-            this.log('Native Banner freshly recreated after resume fallback');
-          }
-        }
+        // On Android, showBanner() creates the AdView and calls loadAd() if not present,
+        // or executes updateExistingAdView() -> adView.loadAd() if already created.
+        await AdMob.showBanner(options);
+        this.isBannerCreated = true;
+        this.isBannerVisible = true;
+        this.log('Native Banner Ad active (loadAd invoked)');
       } else {
         this.isBannerVisible = true;
-        this.log('Banner Loaded (Web Simulation)');
       }
 
       return true;
     } catch (error) {
-      this.log('Banner Failed to show:', error);
-      this.isBannerVisible = false;
-      this.isBannerCreated = false;
+      this.log('Banner ensureActive notice:', error);
+      // If error occurs, schedule self-healing retry
+      this.scheduleBannerRetry();
       return false;
     } finally {
       this.bannerOperationLock = false;
@@ -364,97 +260,56 @@ class AdManagerService {
   }
 
   /**
-   * Hides the Banner Ad smoothly when entering match screens or modals.
+   * Direct showBanner method
    */
-  public async hideBanner(forceCleanRemove = false): Promise<boolean> {
-    this.lastBannerRequestedState = false;
-
-    if (!this.isBannerVisible && !this.isBannerCreated) return true;
-    if (this.bannerOperationLock) return false;
-
-    this.bannerOperationLock = true;
-
-    try {
-      if (this.isNative) {
-        try {
-          if (forceCleanRemove) {
-            await AdMob.removeBanner();
-            this.isBannerCreated = false;
-          } else {
-            await AdMob.hideBanner();
-          }
-        } catch (hideErr) {
-          this.log('Banner hide error:', hideErr);
-        }
-      }
-      this.isBannerVisible = false;
-      this.log('Banner hidden');
-      return true;
-    } catch (error) {
-      this.log('Banner hide notice:', error);
-      this.isBannerVisible = false;
-      return false;
-    } finally {
-      this.bannerOperationLock = false;
-    }
+  public async showBanner(): Promise<boolean> {
+    return this.ensureBannerActive();
   }
 
   /**
-   * Suspends and cleanly detaches native banner view BEFORE an interstitial or rewarded ad opens.
-   * CRITICAL:
-   * 1. Does NOT reset this.lastBannerRequestedState to false! (Preserves the screen's desired banner state)
-   * 2. Uses removeBanner() to fully destroy the native AdView, preventing OpenGL surface conflicts,
-   *    zombie layout passes, and UI stutter when the fullscreen AdActivity opens.
+   * Hide banner is ONLY used when user explicitly becomes Premium
    */
-  private async suspendBannerForFullscreenAd(): Promise<boolean> {
-    const wasActive = this.lastBannerRequestedState || this.isBannerVisible;
-
-    this.bannerOperationLock = true;
-    try {
-      if (this.isNative) {
-        try {
-          await AdMob.removeBanner();
-          this.log('Native Banner cleanly detached before fullscreen ad');
-        } catch (e) {
-          this.log('Banner remove on suspend notice:', e);
-        }
-      }
-      this.isBannerCreated = false;
-      this.isBannerVisible = false;
-      // CRITICAL: DO NOT change this.lastBannerRequestedState to false!
-      return wasActive;
-    } finally {
-      this.bannerOperationLock = false;
+  public async hideBanner(): Promise<boolean> {
+    if (!this.state.isPremium) {
+      // User is not premium - per user request, banner MUST remain visible at all times
+      return true;
     }
+    return this.destroyBanner();
   }
 
   /**
    * Completely removes the native banner view (used when user purchases Premium)
    */
-  public async destroyBanner(): Promise<void> {
-    this.lastBannerRequestedState = false;
+  public async destroyBanner(): Promise<boolean> {
     this.isBannerVisible = false;
     this.isBannerCreated = false;
+    if (this.bannerRetryTimer) {
+      clearTimeout(this.bannerRetryTimer);
+      this.bannerRetryTimer = null;
+    }
+
     if (this.isNative) {
       try {
         await AdMob.removeBanner();
-      } catch {}
+      } catch (e) {
+        this.log('Banner destroy notice:', e);
+      }
     }
+    return true;
   }
 
   /**
    * Interstitial Ads are permanently removed from the application per user request.
-   * Stubbed for type-safety and backwards compatibility.
    */
+  public isInterstitialActive(): boolean {
+    return false;
+  }
+
+  public isInterstitialShowingNow(): boolean {
+    return false;
+  }
+
   public async loadInterstitial(): Promise<boolean> {
-    return false;
-  }
-
-  public isInterstitialReady(): boolean {
-    return false;
-  }
-
-  public shouldShowInterstitial(): boolean {
     return false;
   }
 
@@ -462,15 +317,49 @@ class AdManagerService {
     return false;
   }
 
+  public shouldShowInterstitial(): boolean {
+    return false;
+  }
+
   /**
-   * Shows a standard Rewarded Ad for player actions:
-   * - Healing an injured player («شاهد إعلان لتسريع العلاج»)
-   * - Lifting a player suspension («شاهد إعلان لإلغاء الإيقاف»)
-   *
-   * Guaranteed Rules:
-   * 1. Only calls onUserEarnedReward if the user completely watched the ad.
-   * 2. If closed before completion, reward is NOT granted.
-   * 3. Immediately preloads a new Rewarded Ad after use.
+   * Preloads a Rewarded Video Ad in the background
+   */
+  public async loadRewarded(): Promise<boolean> {
+    if (this.isRewardedLoaded) return true;
+
+    try {
+      if (this.isNative) {
+        const options: RewardAdOptions = {
+          adId: ADMOB_CONFIG.REWARDED_ID || 'ca-app-pub-5272866425919152/6872814469',
+          isTesting: false,
+        };
+        await AdMob.prepareRewardVideoAd(options);
+      }
+      this.isRewardedLoaded = true;
+      this.log('Rewarded Ad loaded & ready in memory');
+      return true;
+    } catch (error) {
+      this.log('Rewarded Failed to load in background:', error);
+      this.isRewardedLoaded = false;
+      return false;
+    }
+  }
+
+  public isRewardedReady(): boolean {
+    return this.isRewardedLoaded || !this.isNative;
+  }
+
+  /**
+   * Plays a real Rewarded Video Ad for a specific player action:
+   * 1. Injured Player: Accelerate healing -> onUserEarnedReward cures player immediately.
+   * 2. Suspended Player: Cancel suspension -> onUserEarnedReward cancels suspension immediately.
+   * 
+   * Strict Rules:
+   * - Uses real Ad Unit ID: ca-app-pub-5272866425919152/6872814469 (no test ads).
+   * - If ad is not completed, reward is strictly NOT granted.
+   * - Immediately loads a new Rewarded Ad after usage.
+   * - Banner is NEVER destroyed or removed.
+   * - Failure or timeout never hangs the UI or causes a white screen.
    */
   public async showRewardedForAction(params: {
     actionType: 'heal_player' | 'cancel_suspension';
@@ -478,7 +367,10 @@ class AdManagerService {
     onDismiss?: (rewardEarned: boolean) => void;
     onFailure?: (error: any) => void;
   }): Promise<boolean> {
-    if (this.isRewardedShowing) return false;
+    if (this.isRewardedShowing) {
+      this.log('Rewarded Ad already showing');
+      return false;
+    }
 
     this.isRewardedShowing = true;
     let rewardEarned = false;
@@ -487,12 +379,21 @@ class AdManagerService {
       this.log(`Rewarded ad started for action: ${params.actionType}`);
 
       if (this.isNative) {
-        // Ensure ad is ready in memory
+        // Prepare ad if not already preloaded, with a 7-second safeguard timeout
         if (!this.isRewardedLoaded) {
-          const loaded = await this.loadRewarded();
-          if (!loaded) {
+          const prepareWithTimeout = Promise.race([
+            this.loadRewarded(),
+            new Promise<boolean>((_, reject) =>
+              setTimeout(() => reject(new Error('Ad load timeout')), 7000)
+            ),
+          ]);
+
+          try {
+            await prepareWithTimeout;
+          } catch (loadErr) {
+            this.log('Ad prepare failed or timed out:', loadErr);
             this.isRewardedShowing = false;
-            if (params.onFailure) params.onFailure(new Error('Failed to prepare rewarded ad'));
+            if (params.onFailure) params.onFailure(loadErr);
             return false;
           }
         }
@@ -502,9 +403,18 @@ class AdManagerService {
         let failListener: PluginListenerHandle | null = null;
 
         const cleanup = () => {
-          if (rewardListener) rewardListener.remove();
-          if (dismissListener) dismissListener.remove();
-          if (failListener) failListener.remove();
+          if (rewardListener) {
+            rewardListener.remove();
+            rewardListener = null;
+          }
+          if (dismissListener) {
+            dismissListener.remove();
+            dismissListener = null;
+          }
+          if (failListener) {
+            failListener.remove();
+            failListener = null;
+          }
         };
 
         // 1. Listen for user earned reward (onUserEarnedReward)
@@ -512,27 +422,35 @@ class AdManagerService {
           this.log('Reward Earned natively from AdMob SDK (onUserEarnedReward):', reward);
           rewardEarned = true;
           this.recordRewardedAdSuccess();
-          params.onUserEarnedReward();
+          try {
+            params.onUserEarnedReward();
+          } catch (err) {
+            console.error('Error executing onUserEarnedReward:', err);
+          }
         });
 
         // 2. Listen for ad dismissal
         dismissListener = await AdMob.addListener(RewardAdPluginEvents.Dismissed, () => {
-          this.log(`Rewarded ad dismissed. User earned reward: ${rewardEarned}`);
+          this.log(`Rewarded ad dismissed. Reward earned: ${rewardEarned}`);
           this.isRewardedShowing = false;
           this.isRewardedLoaded = false;
           cleanup();
 
           if (params.onDismiss) {
-            params.onDismiss(rewardEarned);
+            try {
+              params.onDismiss(rewardEarned);
+            } catch (err) {
+              console.error('Error in onDismiss callback:', err);
+            }
           }
 
-          // Immediately preload next Rewarded ad
+          // Preload next Rewarded Ad immediately
           setTimeout(() => {
             this.loadRewarded();
-          }, 800);
+          }, 1000);
         });
 
-        // 3. Listen for failure
+        // 3. Listen for presentation failure
         failListener = await AdMob.addListener(RewardAdPluginEvents.FailedToShow, (err: any) => {
           this.log('Rewarded ad failed to show:', err);
           this.isRewardedShowing = false;
@@ -540,18 +458,23 @@ class AdManagerService {
           cleanup();
 
           if (params.onFailure) {
-            params.onFailure(err);
+            try {
+              params.onFailure(err);
+            } catch (cbErr) {
+              console.error('Error in onFailure callback:', cbErr);
+            }
           }
 
           // Preload retry
           setTimeout(() => {
             this.loadRewarded();
-          }, 1500);
+          }, 2000);
         });
 
+        // Show the Rewarded Video Ad natively
         await AdMob.showRewardVideoAd();
       } else {
-        // Web Simulation Mode (allows testing completion vs cancellation in browser)
+        // Web Simulation Mode for browser testing
         this.log('Rewarded ad Web Simulation');
         const actionLabel = params.actionType === 'heal_player' 
           ? 'تسريع علاج اللاعب المصاب' 
@@ -579,41 +502,13 @@ class AdManagerService {
       this.isRewardedShowing = false;
       this.isRewardedLoaded = false;
       if (params.onFailure) params.onFailure(error);
-      setTimeout(() => this.loadRewarded(), 1500);
+      setTimeout(() => this.loadRewarded(), 2000);
       return false;
     }
   }
 
   /**
-   * Pre-loads a Rewarded Video Ad in background
-   */
-  public async loadRewarded(): Promise<boolean> {
-    if (this.isRewardedLoaded) return true;
-
-    try {
-      if (this.isNative) {
-        const options: RewardAdOptions = {
-          adId: ADMOB_CONFIG.REWARDED_ID,
-          isTesting: ADMOB_CONFIG.IS_TEST_MODE,
-        };
-        await AdMob.prepareRewardVideoAd(options);
-      }
-      this.isRewardedLoaded = true;
-      this.log('Rewarded Loaded');
-      return true;
-    } catch (error) {
-      this.log('Rewarded Failed to load:', error);
-      this.isRewardedLoaded = false;
-      return false;
-    }
-  }
-
-  public isRewardedReady(): boolean {
-    return this.isRewardedLoaded || !this.isNative;
-  }
-
-  /**
-   * Plays a Rewarded Video Ad with complete lifecycle management
+   * Plays a Rewarded Video Ad with complete lifecycle management (General rewards)
    */
   public async showRewarded(
     rewardType: AdRewardType,
@@ -623,87 +518,63 @@ class AdManagerService {
   ): Promise<boolean> {
     if (this.isRewardedShowing) return false;
 
-    // Generate unique ad session transaction ID
     const sessionId = AdRewardManager.createAdSession(rewardType);
-    this.activeRewardSessionId = sessionId;
-    const wasBannerActiveBefore = this.lastBannerRequestedState || this.isBannerVisible;
+    this.isRewardedShowing = true;
+    let rewardEarnedNatively = false;
 
     try {
-      this.isRewardedShowing = true;
       this.log(`Rewarded Showing for ${rewardType} (Session: ${sessionId})...`);
 
-      let rewardEarnedNatively = false;
-
       if (this.isNative) {
-        // Cleanly suspend banner view to give fullscreen rewarded video full GPU priority
-        await this.suspendBannerForFullscreenAd();
+        if (!this.isRewardedLoaded) {
+          await this.loadRewarded();
+        }
 
-        // Native Android Bridge listener for Reward
-        const rewardListener = await AdMob.addListener(RewardAdPluginEvents.Rewarded, (reward: AdMobRewardItem) => {
+        let rewardListener: PluginListenerHandle | null = null;
+        let dismissListener: PluginListenerHandle | null = null;
+        let failListener: PluginListenerHandle | null = null;
+
+        const cleanup = () => {
+          if (rewardListener) rewardListener.remove();
+          if (dismissListener) dismissListener.remove();
+          if (failListener) failListener.remove();
+        };
+
+        rewardListener = await AdMob.addListener(RewardAdPluginEvents.Rewarded, (reward: AdMobRewardItem) => {
           this.log('Reward Earned natively from AdMob SDK:', reward);
           rewardEarnedNatively = true;
           this.recordRewardedAdSuccess();
 
-          // Validate and prevent duplicate claim
           const claimResult = AdRewardManager.verifyAndConsumeReward(sessionId, rewardType);
           if (claimResult.success && onRewardEarnedCallback) {
             onRewardEarnedCallback(claimResult);
           }
         });
 
-        const dismissListener = await AdMob.addListener(RewardAdPluginEvents.Dismissed, () => {
+        dismissListener = await AdMob.addListener(RewardAdPluginEvents.Dismissed, () => {
           this.log('Rewarded dismissed');
           this.isRewardedShowing = false;
           this.isRewardedLoaded = false;
-          this.activeRewardSessionId = null;
-          rewardListener.remove();
-          dismissListener.remove();
+          cleanup();
 
-          if (!rewardEarnedNatively) {
-            this.log('Rewarded closed before earning reward — no reward granted');
-          }
           if (onDismissCallback) onDismissCallback();
-
-          // Restore banner cleanly after stabilization
-          setTimeout(async () => {
-            if (wasBannerActiveBefore && !this.state.isPremium && this.lastBannerRequestedState) {
-              await this.showBanner(true);
-            }
-          }, 500);
-
-          // Preload next rewarded ad in background
-          setTimeout(() => this.loadRewarded(), 8000);
+          setTimeout(() => this.loadRewarded(), 1500);
         });
 
-        const failListener = await AdMob.addListener(RewardAdPluginEvents.FailedToShow, (err) => {
+        failListener = await AdMob.addListener(RewardAdPluginEvents.FailedToShow, (err) => {
           this.log('Rewarded Failed to show natively:', err);
           this.isRewardedShowing = false;
           this.isRewardedLoaded = false;
-          this.activeRewardSessionId = null;
-          rewardListener.remove();
-          dismissListener.remove();
-          failListener.remove();
+          cleanup();
           if (onFailureHandler) onFailureHandler(err);
-
-          // Restore banner cleanly on failure
-          setTimeout(async () => {
-            if (wasBannerActiveBefore && !this.state.isPremium && this.lastBannerRequestedState) {
-              await this.showBanner(true);
-            }
-          }, 500);
+          setTimeout(() => this.loadRewarded(), 2000);
         });
-
-        if (!this.isRewardedLoaded) {
-          await this.loadRewarded();
-        }
 
         await AdMob.showRewardVideoAd();
       } else {
-        // Web Simulation Mode for browser preview
+        // Web Simulation Mode
         this.log('Rewarded Showing (Web Simulation)...');
-        await new Promise(resolve => setTimeout(resolve, 1500));
         rewardEarnedNatively = true;
-        this.log('Reward Earned (Web Simulation)');
         this.recordRewardedAdSuccess();
 
         const claimResult = AdRewardManager.verifyAndConsumeReward(sessionId, rewardType);
@@ -712,7 +583,6 @@ class AdManagerService {
         }
 
         this.isRewardedShowing = false;
-        this.activeRewardSessionId = null;
         if (onDismissCallback) onDismissCallback();
       }
 
@@ -721,22 +591,12 @@ class AdManagerService {
       this.log('Reward Failed:', error);
       this.isRewardedShowing = false;
       this.isRewardedLoaded = false;
-      this.activeRewardSessionId = null;
       if (onFailureHandler) onFailureHandler(error);
-
-      setTimeout(async () => {
-        if (wasBannerActiveBefore && !this.state.isPremium && this.lastBannerRequestedState) {
-          await this.showBanner(true);
-        }
-      }, 500);
-
+      setTimeout(() => this.loadRewarded(), 2000);
       return false;
     }
   }
 
-  /**
-   * Alias for showRewarded
-   */
   public showRewardedAd(
     rewardType: AdRewardType,
     onRewardEarnedCallback?: (result: AdRewardClaimResult) => void,
@@ -751,21 +611,12 @@ class AdManagerService {
     this.saveState();
   }
 
-  /**
-   * Called after every completed match to increment interstitial frequency counter
-   */
   public onMatchCompleted(): { shouldShowInterstitial: boolean } {
     this.state.matchesPlayedSinceLastInterstitial += 1;
     this.saveState();
-    this.log(`Matches played since last interstitial: ${this.state.matchesPlayedSinceLastInterstitial}/${ADMOB_CONFIG.INTERSTITIAL_FREQUENCY_MATCHES}`);
-    return {
-      shouldShowInterstitial: this.shouldShowInterstitial(),
-    };
+    return { shouldShowInterstitial: false };
   }
 
-  /**
-   * Activates a Training Boost for the next match
-   */
   public activateTrainingBoost(
     type: TrainingBoostType,
     currentRound: number,
@@ -791,7 +642,7 @@ class AdManagerService {
       description: descriptions[type],
       activatedAtRound: currentRound,
       activatedAtDateStr: dateStr,
-      bonusValue: 0.05, // +5% balanced boost
+      bonusValue: 0.05,
       isConsumed: false,
     };
 
@@ -801,9 +652,6 @@ class AdManagerService {
     return boost;
   }
 
-  /**
-   * Consumes the active training boost after match completion
-   */
   public consumeTrainingBoost(): void {
     if (this.state.activeBoost) {
       this.log(`Training Boost Consumed: ${this.state.activeBoost.title}`);
