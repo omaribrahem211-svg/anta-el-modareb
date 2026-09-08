@@ -24,9 +24,12 @@ class AdManagerService {
   private isNative = false;
   private isBannerVisible = false;
   private isBannerCreated = false;
+  private isBannerActive = false;
+  private isBannerLoading = false;
   private bannerOperationLock = false;
   private bannerRetryTimer: NodeJS.Timeout | null = null;
   private bannerRetryCount = 0;
+  private readonly MAX_BANNER_RETRIES = 2;
   private isRewardedLoaded = false;
   private isRewardedShowing = false;
   private bannerListenersAttached = false;
@@ -52,11 +55,11 @@ class AdManagerService {
         CapApp.addListener('appStateChange', (appState) => {
           this.log(`App State Changed: isActive = ${appState.isActive}`);
           if (appState.isActive) {
-            // When app resumes, ensure the persistent banner is alive
-            if (!this.state.isPremium && !this.isRewardedShowing) {
+            // When app resumes, only request banner if it was never loaded and not currently active
+            if (!this.state.isPremium && !this.isBannerActive && !this.isBannerLoading && !this.isRewardedShowing) {
               setTimeout(() => {
                 this.ensureBannerActive();
-              }, 400);
+              }, 1000);
             }
           }
         });
@@ -137,14 +140,15 @@ class AdManagerService {
                 this.log('Native Banner Ad Loaded successfully');
                 this.isBannerVisible = true;
                 this.isBannerCreated = true;
+                this.isBannerActive = true;
+                this.isBannerLoading = false;
                 this.bannerRetryCount = 0;
               });
 
               const failedHandle = await AdMob.addListener(BannerAdPluginEvents.FailedToLoad, (error: any) => {
                 this.log('Native Banner Ad Failed to Load:', error);
-                this.isBannerVisible = false;
-                this.isBannerCreated = false;
-                // Auto-retry banner with backoff to recover from transient network drops
+                this.isBannerLoading = false;
+                // If the ad failed to load (e.g. no fill or offline), do NOT freeze or loop
                 this.scheduleBannerRetry();
               });
 
@@ -163,8 +167,10 @@ class AdManagerService {
         this.isInitialized = true;
         this.isInitializing = false;
 
-        // Immediately start loading persistent Banner
-        this.ensureBannerActive();
+        // Start loading persistent Banner safely in background
+        this.ensureBannerActive().catch((err) => {
+          this.log('Background banner init non-blocking notice:', err);
+        });
 
         // Preload rewarded ad so it is ready when needed
         setTimeout(() => {
@@ -189,18 +195,23 @@ class AdManagerService {
   }
 
   /**
-   * Schedule automatic retry when banner fails to load (e.g. offline on launch)
+   * Schedule automatic gentle retry when banner fails to load (capped at MAX_BANNER_RETRIES)
+   * Never loops infinitely, never blocks the game or UI thread.
    */
   private scheduleBannerRetry() {
     if (this.state.isPremium || this.bannerRetryTimer) return;
+    if (this.bannerRetryCount >= this.MAX_BANNER_RETRIES) {
+      this.log('Banner retry limit reached. Preserving game stability without further attempts.');
+      return;
+    }
 
     this.bannerRetryCount++;
-    const delay = Math.min(30000, Math.max(5000, this.bannerRetryCount * 5000));
-    this.log(`Scheduling Banner retry #${this.bannerRetryCount} in ${delay}ms...`);
+    const delay = 40000 * this.bannerRetryCount; // 40s, 80s gentle non-blocking backoff
+    this.log(`Scheduling Banner gentle retry #${this.bannerRetryCount} in ${delay}ms...`);
 
     this.bannerRetryTimer = setTimeout(() => {
       this.bannerRetryTimer = null;
-      if (!this.state.isPremium) {
+      if (!this.state.isPremium && !this.isBannerActive) {
         this.ensureBannerActive();
       }
     }, delay);
@@ -208,14 +219,20 @@ class AdManagerService {
 
   /**
    * Ensures the persistent Banner Ad is active at the bottom of the screen.
+   * - Single-instance guarantee: will not recreate or call loadAd() if already active.
    * - Never destroyed or hidden during matches or screen changes.
    * - Positioned above the bottom navigation bar (margin 58 DP).
    * - Uses real production Ad Unit ID: ca-app-pub-5272866425919152/4077924883
-   * - Calls native loadAd() properly.
+   * - Completely non-blocking and safe against UI freeze or white screen.
    */
   public async ensureBannerActive(): Promise<boolean> {
     if (this.state.isPremium) {
       return false;
+    }
+
+    // If banner is already active or in-flight loading, do NOT re-call loadAd() or showBanner()
+    if (this.isBannerActive || this.isBannerLoading) {
+      return true;
     }
 
     if (this.bannerOperationLock) {
@@ -223,6 +240,7 @@ class AdManagerService {
     }
 
     this.bannerOperationLock = true;
+    this.isBannerLoading = true;
 
     try {
       if (!this.isInitialized) {
@@ -238,23 +256,24 @@ class AdManagerService {
           isTesting: false,
         };
 
-        // On Android, showBanner() creates the AdView and calls loadAd() if not present,
-        // or executes updateExistingAdView() -> adView.loadAd() if already created.
         await AdMob.showBanner(options);
         this.isBannerCreated = true;
         this.isBannerVisible = true;
+        this.isBannerActive = true;
         this.log('Native Banner Ad active (loadAd invoked)');
       } else {
         this.isBannerVisible = true;
+        this.isBannerActive = true;
       }
 
       return true;
     } catch (error) {
       this.log('Banner ensureActive notice:', error);
-      // If error occurs, schedule self-healing retry
+      this.isBannerLoading = false;
       this.scheduleBannerRetry();
       return false;
     } finally {
+      this.isBannerLoading = false;
       this.bannerOperationLock = false;
     }
   }
@@ -283,6 +302,8 @@ class AdManagerService {
   public async destroyBanner(): Promise<boolean> {
     this.isBannerVisible = false;
     this.isBannerCreated = false;
+    this.isBannerActive = false;
+    this.isBannerLoading = false;
     if (this.bannerRetryTimer) {
       clearTimeout(this.bannerRetryTimer);
       this.bannerRetryTimer = null;

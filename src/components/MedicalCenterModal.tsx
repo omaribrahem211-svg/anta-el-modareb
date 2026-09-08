@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useGame } from '../context/GameContext';
 import { Player, PlayerInjury } from '../types/game';
 import { getPositionArabic, getPositionBadgeClass } from '../utils/positionHelper';
+import { AdManager } from '../services/adManager';
 import {
   HeartPulse,
   Activity,
@@ -17,7 +18,9 @@ import {
   DollarSign,
   Stethoscope,
   Bandage,
-  Award
+  Award,
+  Film,
+  Play
 } from 'lucide-react';
 
 interface MedicalCenterModalProps {
@@ -31,9 +34,10 @@ export const MedicalCenterModal: React.FC<MedicalCenterModalProps> = ({
   onClose,
   onSelectPlayer,
 }) => {
-  const { userClub, manager, treatPlayerInHospital, upgradeFacility } = useGame();
+  const { userClub, manager, treatPlayerInHospital, upgradeFacility, healPlayerWithAd } = useGame();
   const [notification, setNotification] = useState<{ text: string; isError: boolean } | null>(null);
   const [selectedPlayerForDetail, setSelectedPlayerForDetail] = useState<Player | null>(null);
+  const [adLoadingPlayerId, setAdLoadingPlayerId] = useState<string | null>(null);
 
   if (!isOpen || !userClub || manager.isUnemployed) {
     return null;
@@ -71,6 +75,37 @@ export const MedicalCenterModal: React.FC<MedicalCenterModalProps> = ({
     const res = treatPlayerInHospital(player.id, treatmentType);
     setNotification({ text: res.message, isError: !res.success });
     setTimeout(() => setNotification(null), 4000);
+  };
+
+  const handleWatchAdToHeal = async (player: Player) => {
+    if (adLoadingPlayerId) return;
+    setAdLoadingPlayerId(player.id);
+
+    try {
+      await AdManager.showRewardedForAction({
+        actionType: 'heal_player',
+        onUserEarnedReward: () => {
+          const res = healPlayerWithAd(player.id);
+          setNotification({ text: `🎉 ${res.message}`, isError: !res.success });
+          setTimeout(() => setNotification(null), 5000);
+        },
+        onDismiss: (earned) => {
+          if (!earned) {
+            setNotification({ text: 'لم تكتمل مشاهدة الإعلان، لم يتم تطبيق الشفاء الفوري.', isError: true });
+            setTimeout(() => setNotification(null), 3500);
+          }
+        },
+        onFailure: () => {
+          setNotification({ text: 'تعذر تحميل الإعلان حالياً، يرجى المحاولة بعد قليل.', isError: true });
+          setTimeout(() => setNotification(null), 3500);
+        }
+      });
+    } catch (e) {
+      setNotification({ text: 'حدث خطأ أثناء الاتصال بنظام الإعلانات.', isError: true });
+      setTimeout(() => setNotification(null), 3500);
+    } finally {
+      setAdLoadingPlayerId(null);
+    }
   };
 
   return (
@@ -244,6 +279,34 @@ export const MedicalCenterModal: React.FC<MedicalCenterModalProps> = ({
                             style={{ width: `${progressPct}%` }}
                           />
                         </div>
+                      </div>
+
+                      {/* Rewarded Video Ad: Instant Free Healing */}
+                      <div className="bg-gradient-to-r from-amber-950/40 via-emerald-950/30 to-teal-950/40 border border-amber-500/40 rounded-xl p-2.5 flex flex-col sm:flex-row items-center justify-between gap-2.5">
+                        <div className="flex items-center gap-2">
+                          <div className="w-8 h-8 rounded-lg bg-amber-500/20 border border-amber-500/30 flex items-center justify-center shrink-0">
+                            <Film className="w-4 h-4 text-amber-400" />
+                          </div>
+                          <div>
+                            <div className="font-bold text-xs text-white flex items-center gap-1.5">
+                              <span>🎬 علاج وشفاء فوري مجاناً</span>
+                              <span className="text-[10px] bg-amber-500/20 text-amber-300 px-1.5 py-0.2 rounded-full font-bold">
+                                إعلان بمكافأة
+                              </span>
+                            </div>
+                            <p className="text-[10px] text-slate-300 mt-0.5">
+                              شاهد إعلاناً قصيراً لشفاء اللاعب 100% وعودته للملاعب فوراً دون دفع أي رسوم.
+                            </p>
+                          </div>
+                        </div>
+                        <button
+                          onClick={() => handleWatchAdToHeal(player)}
+                          disabled={adLoadingPlayerId === player.id}
+                          className="w-full sm:w-auto px-3 py-1.5 bg-gradient-to-r from-amber-500 to-emerald-500 hover:from-amber-400 hover:to-emerald-400 text-slate-950 font-black text-xs rounded-lg shadow transition-all active:scale-95 shrink-0 flex items-center justify-center gap-1 cursor-pointer disabled:opacity-50"
+                        >
+                          <Play className="w-3 h-3 fill-current" />
+                          <span>{adLoadingPlayerId === player.id ? 'جارٍ التشغيل...' : 'مشاهدة إعلان وشفاء اللاعب فوراً 🎬'}</span>
+                        </button>
                       </div>
 
                       {/* Hospital Treatment Action Options */}
