@@ -24,12 +24,10 @@ googleProvider.setCustomParameters({
   prompt: 'select_account'
 });
 
-// Configure robust persistent local cache with multi-tab support
+// Configure robust persistent local cache for mobile WebView
 let cacheConfig;
 try {
-  cacheConfig = persistentLocalCache({
-    tabManager: persistentMultipleTabManager()
-  });
+  cacheConfig = persistentLocalCache({});
 } catch {
   cacheConfig = memoryLocalCache();
 }
@@ -38,11 +36,12 @@ try {
 export const db = initializeFirestore(
   app,
   {
-    experimentalForceLongPolling: true,
     localCache: cacheConfig
   },
   firebaseConfig.firestoreDatabaseId || undefined
 );
+
+console.log('[STARTUP] Firebase initialized', Math.round(performance.now()) + 'ms');
 
 export default app;
 

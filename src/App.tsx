@@ -35,6 +35,12 @@ import { AdminLayout } from './components/admin/AdminLayout';
 import { AdminAccessDenied } from './components/admin/AdminAccessDenied';
 
 function GameApp() {
+  console.log('[STARTUP] App rendered', Math.round(performance.now()) + 'ms');
+
+  useEffect(() => {
+    console.log('[STARTUP] first screen ready', Math.round(performance.now()) + 'ms');
+  }, []);
+
   const { isAdmin } = useAuth();
   const { dayAdvanceSummary, showDaySummaryModal, closeDaySummaryModal, isMatchDay, liveMatch } = useGame();
   const [activeTab, setActiveTab] = useState<ActiveTab>('dashboard');

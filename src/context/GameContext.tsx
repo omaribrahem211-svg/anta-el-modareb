@@ -1041,47 +1041,60 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     };
   }, [user?.uid, applyLoadedSave]);
 
-  // Persist game state (Local-First: IndexedDB + localStorage mirror, and queue debounced smart sync)
+  // Persist game state (Local-First: IndexedDB + localStorage mirror, debounced to avoid UI freezing)
+  const saveTimeoutRef = useRef<any>(null);
   useEffect(() => {
     if (!isInitialLoadDoneRef.current) return;
 
-    try {
-      gameStateRepository.saveLocalGameState({
-        schemaVersion: 2,
-        saveVersion: 1,
-        lastLocalSaveAt: Date.now(),
-        season,
-        activeLeague,
-        teams,
-        standings,
-        fixtures,
-        currentRound,
-        manager,
-        transferMarket,
-        incomingBids,
-        inbox,
-        cupTournament,
-        jobOffers,
-        seasonEndSummary,
-        transferHistory,
-        clubEconomy,
-        calendarDate,
-        activeNegotiations,
-        boardSystem,
-        dailyNews,
-        retiredPlayers,
-        worldRankings,
-        scoutedOpponents,
-        deletedMessageIds,
-      });
-
-      // Queue coalesced debounced background cloud sync
-      if (user?.uid) {
-        smartSyncManager.queueDebouncedSync(getSyncInput());
-      }
-    } catch (err) {
-      console.warn('Failed to save to local state repository:', err);
+    if (saveTimeoutRef.current) {
+      clearTimeout(saveTimeoutRef.current);
     }
+
+    saveTimeoutRef.current = setTimeout(() => {
+      try {
+        gameStateRepository.saveLocalGameState({
+          schemaVersion: 2,
+          saveVersion: 1,
+          lastLocalSaveAt: Date.now(),
+          season,
+          activeLeague,
+          teams,
+          standings,
+          fixtures,
+          currentRound,
+          manager,
+          transferMarket,
+          incomingBids,
+          inbox,
+          cupTournament,
+          jobOffers,
+          seasonEndSummary,
+          transferHistory,
+          clubEconomy,
+          calendarDate,
+          activeNegotiations,
+          boardSystem,
+          dailyNews,
+          retiredPlayers,
+          worldRankings,
+          scoutedOpponents,
+          deletedMessageIds,
+        });
+
+        // Queue coalesced debounced background cloud sync
+        if (user?.uid) {
+          smartSyncManager.queueDebouncedSync(getSyncInput());
+        }
+      } catch (err) {
+        console.warn('Failed to save to local state repository:', err);
+      }
+    }, 1000);
+
+    return () => {
+      if (saveTimeoutRef.current) {
+        clearTimeout(saveTimeoutRef.current);
+      }
+    };
   }, [season, activeLeague, teams, standings, fixtures, currentRound, manager, transferMarket, incomingBids, inbox, cupTournament, jobOffers, seasonEndSummary, transferHistory, clubEconomy, calendarDate, activeNegotiations, boardSystem, dailyNews, retiredPlayers, worldRankings, scoutedOpponents, deletedMessageIds, user?.uid, getSyncInput]);
 
   // Cloud Synchronization with Firestore (Delegated to SmartSyncManager with Dirty & Quota Protections)
@@ -1089,38 +1102,42 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     return smartSyncManager.triggerMilestoneSync(getSyncInput(), isManual ? 'manual' : 'round');
   }, [getSyncInput]);
 
-  // World Database Integrity Validation on Mount
+  // World Database Integrity Validation - Safely deferred to background without blocking startup
   useEffect(() => {
-    try {
-      const rawWorldClubs: Club[] = [];
-      const seen = new Set<string>();
+    const timer = setTimeout(() => {
+      try {
+        const rawWorldClubs: Club[] = [];
+        const seen = new Set<string>();
 
-      // 1. Live teams (the active league state) have top authority
-      teams.forEach(t => {
-        if (!seen.has(t.id)) {
-          seen.add(t.id);
-          rawWorldClubs.push(t);
-        }
-      });
-
-      // 2. Add remaining global league clubs
-      Object.values(GLOBAL_LEAGUES).forEach(league => {
-        (league.teams || []).forEach(t => {
+        // 1. Live teams (the active league state) have top authority
+        teams.forEach(t => {
           if (!seen.has(t.id)) {
             seen.add(t.id);
             rawWorldClubs.push(t);
           }
         });
-      });
 
-      // 3. Guarantee strict single-ownership of all players across the world database
-      const allWorldClubs = sanitizeWorldPlayerOwnership(rawWorldClubs);
+        // 2. Add remaining global league clubs
+        Object.values(GLOBAL_LEAGUES).forEach(league => {
+          (league.teams || []).forEach(t => {
+            if (!seen.has(t.id)) {
+              seen.add(t.id);
+              rawWorldClubs.push(t);
+            }
+          });
+        });
 
-      validateWorldDatabase(allWorldClubs, GLOBAL_LEAGUES, { logToConsole: true });
-    } catch (err) {
-      console.warn('[World Validation] Error validating world database:', err);
-    }
-  }, [teams]);
+        // 3. Guarantee strict single-ownership of all players across the world database
+        const allWorldClubs = sanitizeWorldPlayerOwnership(rawWorldClubs);
+
+        validateWorldDatabase(allWorldClubs, GLOBAL_LEAGUES, { logToConsole: false });
+      } catch (err) {
+        console.warn('[World Validation] Error validating world database:', err);
+      }
+    }, 8000);
+
+    return () => clearTimeout(timer);
+  }, []);
 
   // Load Active Admin Broadcasts to Inbox
   useEffect(() => {

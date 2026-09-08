@@ -129,6 +129,7 @@ class AdManagerService {
 
         this.isInitialized = true;
         this.isInitializing = false;
+        console.log('[STARTUP] AdManager initialized', Math.round(performance.now()) + 'ms');
 
         return true;
       } catch (error) {

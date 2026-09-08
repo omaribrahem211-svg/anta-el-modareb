@@ -14,11 +14,11 @@ window.addEventListener('error', (event) => {
   console.warn('[SystemGuard] Handled global runtime error:', event.message);
 });
 
+console.log('[STARTUP] React mounting', Math.round(performance.now()) + 'ms');
+
 createRoot(document.getElementById('root')!).render(
-  <StrictMode>
-    <ErrorBoundary>
-      <App />
-    </ErrorBoundary>
-  </StrictMode>,
+  <ErrorBoundary>
+    <App />
+  </ErrorBoundary>,
 );
 
