@@ -21,7 +21,7 @@ export const InContentBannerAd: React.FC<InContentBannerAdProps> = ({ className 
     return () => unsub();
   }, []);
 
-  if (isPremium) {
+  if (!ADMOB_CONFIG.ENABLE_BANNER || isPremium) {
     return null;
   }
 

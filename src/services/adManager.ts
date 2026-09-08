@@ -60,8 +60,8 @@ class AdManagerService {
         CapApp.addListener('appStateChange', (appState) => {
           console.log(`[APP] Activity lifecycle: stateChanged isActive = ${appState.isActive}`);
           if (appState.isActive) {
-            // When app resumes, only request banner if it was never loaded and not currently active
-            if (!this.state.isPremium && !this.isBannerActive && !this.isBannerLoading && !this.isRewardedShowing && !this.isInterstitialShowing) {
+            // When app resumes, only request banner if enabled and not currently active
+            if (ADMOB_CONFIG.ENABLE_BANNER && !this.state.isPremium && !this.isBannerActive && !this.isBannerLoading && !this.isRewardedShowing && !this.isInterstitialShowing) {
               setTimeout(() => {
                 this.ensureBannerActive();
               }, 1000);
@@ -140,8 +140,8 @@ class AdManagerService {
 
           console.log('[ADMOB] SDK initialized');
 
-          // Setup Banner listeners ONCE to prevent listener leaks
-          if (!this.bannerListenersAttached) {
+          // Setup Banner listeners ONCE to prevent listener leaks if banner is enabled
+          if (ADMOB_CONFIG.ENABLE_BANNER && !this.bannerListenersAttached) {
             try {
               const loadedHandle = await AdMob.addListener(BannerAdPluginEvents.Loaded, () => {
                 console.log('[ADMOB] Banner loaded');
@@ -175,10 +175,12 @@ class AdManagerService {
         this.isInitialized = true;
         this.isInitializing = false;
 
-        // Start loading persistent Banner safely in background
-        this.ensureBannerActive().catch((err) => {
-          this.log('Background banner init non-blocking notice:', err);
-        });
+        // Start loading persistent Banner safely in background if enabled
+        if (ADMOB_CONFIG.ENABLE_BANNER) {
+          this.ensureBannerActive().catch((err) => {
+            this.log('Background banner init non-blocking notice:', err);
+          });
+        }
 
         // Preload interstitial ad in the background non-blocking
         setTimeout(() => {
@@ -239,7 +241,10 @@ class AdManagerService {
    * - Completely non-blocking and safe against UI freeze or white screen.
    */
   public async ensureBannerActive(): Promise<boolean> {
-    if (this.state.isPremium) {
+    if (!ADMOB_CONFIG.ENABLE_BANNER || this.state.isPremium) {
+      if (this.isBannerActive || this.isBannerCreated) {
+        await this.destroyBanner();
+      }
       return false;
     }
 
@@ -295,6 +300,7 @@ class AdManagerService {
    * Direct showBanner method
    */
   public async showBanner(): Promise<boolean> {
+    if (!ADMOB_CONFIG.ENABLE_BANNER) return false;
     return this.ensureBannerActive();
   }
 

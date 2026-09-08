@@ -11,6 +11,7 @@ export interface AdMobConfigType {
   IS_TEST_MODE: boolean;
   ENABLE_LOGS: boolean;
   ENABLE_REWARDS: boolean; // Master toggle to disable/enable all rewards
+  ENABLE_BANNER: boolean;  // Master toggle to disable/enable all banner ads (Top & Bottom)
   INTERSTITIAL_FREQUENCY_MATCHES: number; // Show interstitial every N matches
   REWARDED_COOLDOWN_SECONDS: number;     // Cooldown between rewarded ad claims
   APP_ID: string;
@@ -48,6 +49,7 @@ export const ADMOB_CONFIG: AdMobConfigType = {
   IS_TEST_MODE: false,
   ENABLE_LOGS: true,
   ENABLE_REWARDS: true, // تفعيل إعلانات المكافأة
+  ENABLE_BANNER: false, // إيقاف إعلانات البانر في تطبيق الأندرويد بناءً على طلب المستخدم
   INTERSTITIAL_FREQUENCY_MATCHES: 3, // عرض إعلان بيني كل 3 مباريات عند اكتمالها
   REWARDED_COOLDOWN_SECONDS: 0,           // متاح عند الحاجة لعلاج أو إلغاء إيقاف لاعب
   APP_ID: PRODUCTION_AD_IDS.APP_ID,
