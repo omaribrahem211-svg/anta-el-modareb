@@ -151,6 +151,7 @@ interface GameContextType {
   unreadMessagesCount: number;
   liveMatch: LiveMatchState | null;
   seasonFinished: boolean;
+  isSimulationRunning: boolean;
 
   // Multi-Season & Career State
   season: SeasonInfo;
@@ -324,6 +325,11 @@ const GameContext = createContext<GameContextType | undefined>(undefined);
 
 export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const { user } = useAuth();
+
+  // Concurrency guard to prevent multiple simultaneous simulations and UI freezing
+  const [isSimulationRunning, setIsSimulationRunning] = useState(false);
+  const isSimulationRunningRef = useRef(false);
+  const liveMatchTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   // 1. Season State
   const [season, setSeason] = useState<SeasonInfo>(() => {
@@ -1195,18 +1201,40 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   // Live match playback timer ticker (Real event-by-event simulation)
   useEffect(() => {
-    if (!liveMatch || !liveMatch.isPlaying || liveMatch.isFinished || liveMatch.isHalfTime) return;
+    if (!liveMatch || !liveMatch.isPlaying || liveMatch.isFinished || liveMatch.isHalfTime) {
+      if (liveMatchTimerRef.current) {
+        clearInterval(liveMatchTimerRef.current);
+        liveMatchTimerRef.current = null;
+      }
+      return;
+    }
 
-    const intervalTime = 600 / liveMatch.speed; // e.g. 600ms per simulated minute at 1x
+    const intervalTime = Math.max(80, 600 / liveMatch.speed); // e.g. 600ms per simulated minute at 1x
 
-    const timer = setInterval(() => {
+    if (liveMatchTimerRef.current) {
+      clearInterval(liveMatchTimerRef.current);
+      liveMatchTimerRef.current = null;
+    }
+
+    liveMatchTimerRef.current = setInterval(() => {
       setLiveMatch(prev => {
-        if (!prev || !prev.isPlaying || prev.isFinished || prev.isHalfTime) return prev;
+        if (!prev || !prev.isPlaying || prev.isFinished || prev.isHalfTime) {
+          if (liveMatchTimerRef.current) {
+            clearInterval(liveMatchTimerRef.current);
+            liveMatchTimerRef.current = null;
+          }
+          return prev;
+        }
         return simulateMatchStep(prev, userClub?.tactics);
       });
     }, intervalTime);
 
-    return () => clearInterval(timer);
+    return () => {
+      if (liveMatchTimerRef.current) {
+        clearInterval(liveMatchTimerRef.current);
+        liveMatchTimerRef.current = null;
+      }
+    };
   }, [liveMatch?.isPlaying, liveMatch?.isFinished, liveMatch?.isHalfTime, liveMatch?.speed, userClub?.tactics]);
 
   // Actions
@@ -1377,7 +1405,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   // Match management
   const startLiveMatch = (fixtureId?: string) => {
-    if (seasonFinished) return;
+    if (isSimulationRunningRef.current || seasonFinished) return;
 
     const roundFixtures = fixtures.filter(f => f.round === currentRound);
     const targetFixture = fixtureId
@@ -1541,6 +1569,12 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   const skipLiveMatchToEnd = () => {
+    if (isSimulationRunningRef.current) return;
+    if (liveMatchTimerRef.current) {
+      clearInterval(liveMatchTimerRef.current);
+      liveMatchTimerRef.current = null;
+    }
+
     setLiveMatch(prev => {
       if (!prev || prev.isFinished) return prev;
       try {
@@ -1576,9 +1610,19 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   const finishLiveMatchAndAdvance = () => {
+    if (isSimulationRunningRef.current) return;
     if (!liveMatch || !liveMatch.isFinished) return;
 
-    const { fixture, homeTeam, awayTeam, homeScore, awayScore, events, stats } = liveMatch;
+    isSimulationRunningRef.current = true;
+    setIsSimulationRunning(true);
+
+    if (liveMatchTimerRef.current) {
+      clearInterval(liveMatchTimerRef.current);
+      liveMatchTimerRef.current = null;
+    }
+
+    try {
+      const { fixture, homeTeam, awayTeam, homeScore, awayScore, events, stats } = liveMatch;
 
     // 1. Update this fixture
     let updatedFixtures = fixtures.map(f => {
@@ -2193,10 +2237,16 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     AdManager.consumeTrainingBoost();
     // Interstitial Check (non-blocking background preload & show if ready)
     AdManager.onMatchCompleted();
+    } finally {
+      setTimeout(() => {
+        isSimulationRunningRef.current = false;
+        setIsSimulationRunning(false);
+      }, 300);
+    }
   };
 
   const instantSimulateCurrentRound = () => {
-    if (seasonFinished) return;
+    if (isSimulationRunningRef.current || seasonFinished) return;
 
     const roundFixtures = fixtures.filter(f => f.round === currentRound && !f.isPlayed);
     const userPlaysThisRound = userClub && roundFixtures.some(f => f.homeTeamId === userClub.id || f.awayTeamId === userClub.id);
@@ -2230,6 +2280,16 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         return;
       }
     }
+
+    isSimulationRunningRef.current = true;
+    setIsSimulationRunning(true);
+
+    if (liveMatchTimerRef.current) {
+      clearInterval(liveMatchTimerRef.current);
+      liveMatchTimerRef.current = null;
+    }
+
+    try {
 
     // 1. Simulate all matches of current round
     let updatedFixtures = [...fixtures];
@@ -2769,74 +2829,93 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     AdManager.consumeTrainingBoost();
     // Interstitial Check (non-blocking background preload & show if ready)
     AdManager.onMatchCompleted();
+    } finally {
+      setTimeout(() => {
+        isSimulationRunningRef.current = false;
+        setIsSimulationRunning(false);
+      }, 300);
+    }
   };
 
   const simulateMultipleRounds = (roundsCount: number = 10): { success: boolean; simulatedCount: number; message: string } => {
+    if (isSimulationRunningRef.current) {
+      return { success: false, simulatedCount: 0, message: 'المحاكاة جارية حالياً' };
+    }
     if (seasonFinished) {
       return { success: false, simulatedCount: 0, message: 'الموسم منتهٍ بالفعل!' };
     }
 
-    const res = simulateMultipleLeagueRounds(
-      roundsCount,
-      currentRound,
-      totalRounds,
-      teams,
-      standings,
-      fixtures,
-      activeLeague,
-      userClub?.id
-    );
+    isSimulationRunningRef.current = true;
+    setIsSimulationRunning(true);
 
-    if (res.simulatedRoundsCount === 0) {
-      return { success: false, simulatedCount: 0, message: 'لم يتم العثور على جولات متبقية للمحاكاة.' };
-    }
-
-    setFixtures(res.nextFixtures);
-    setStandings(res.nextStandings);
-    setTeams(res.nextTeams);
-    setCurrentRound(res.nextRound);
-
-    if (res.seasonFinished) {
-      const summaryClub = userClub || res.nextTeams.find(t => t.isUserClub) || res.nextTeams[0];
-      const summary = calculateSeasonEndSummary(
-        { ...season, status: 'completed', totalRounds },
-        res.nextStandings,
-        summaryClub,
+    try {
+      const res = simulateMultipleLeagueRounds(
+        roundsCount,
+        currentRound,
+        totalRounds,
+        teams,
+        standings,
+        fixtures,
         activeLeague,
-        cupTournament,
-        manager
+        userClub?.id
       );
-      const generatedOffers = generateSeasonJobOffers(
-        manager,
-        summaryClub,
-        activeLeague,
-        summary.finalPosition
-      );
-      setSeasonEndSummary(summary);
-      setJobOffers(generatedOffers);
-      setShowSeasonTransitionModal(true);
-      setSeason(prev => ({ ...prev, status: 'completed' }));
+
+      if (res.simulatedRoundsCount === 0) {
+        return { success: false, simulatedCount: 0, message: 'لم يتم العثور على جولات متبقية للمحاكاة.' };
+      }
+
+      setFixtures(res.nextFixtures);
+      setStandings(res.nextStandings);
+      setTeams(res.nextTeams);
+      setCurrentRound(res.nextRound);
+
+      if (res.seasonFinished) {
+        const summaryClub = userClub || res.nextTeams.find(t => t.isUserClub) || res.nextTeams[0];
+        const summary = calculateSeasonEndSummary(
+          { ...season, status: 'completed', totalRounds },
+          res.nextStandings,
+          summaryClub,
+          activeLeague,
+          cupTournament,
+          manager
+        );
+        const generatedOffers = generateSeasonJobOffers(
+          manager,
+          summaryClub,
+          activeLeague,
+          summary.finalPosition
+        );
+        setSeasonEndSummary(summary);
+        setJobOffers(generatedOffers);
+        setShowSeasonTransitionModal(true);
+        setSeason(prev => ({ ...prev, status: 'completed' }));
+      }
+
+      const batchMsg: InboxMessage = {
+        id: `msg_batch_sim_${Date.now()}`,
+        title: `⚡ تقرير المحاكاة السريعة لـ ${res.simulatedRoundsCount} جولات`,
+        sender: 'المحلل الفني والإحصائي',
+        date: `الجولة ${res.nextRound}`,
+        type: 'news',
+        read: false,
+        content: `تمت محاكاة ${res.simulatedRoundsCount} جولات بنجاح.\n` +
+          (userClub
+            ? `حصيلة فريقك (${userClub.name}): ${res.userClubStatsDelta.wins} فوز، ${res.userClubStatsDelta.draws} تعادل، ${res.userClubStatsDelta.losses} هزيمة. حصدت ${res.userClubStatsDelta.points} نقطة، وسجلت ${res.userClubStatsDelta.goalsFor} هدفاً واستقبلت ${res.userClubStatsDelta.goalsAgainst}.`
+            : `تم تحديث جدول الترتيب وإحصائيات الفرق واللاعبين لجميع الأندية.`),
+      };
+      setInbox(prev => [batchMsg, ...prev]);
+
+      return {
+        success: true,
+        simulatedCount: res.simulatedRoundsCount,
+        message: `تمت محاكاة ${res.simulatedRoundsCount} جولات بنجاح!`,
+      };
+    } finally {
+      setTimeout(() => {
+        isSimulationRunningRef.current = false;
+        setIsSimulationRunning(false);
+      }, 300);
     }
-
-    const batchMsg: InboxMessage = {
-      id: `msg_batch_sim_${Date.now()}`,
-      title: `⚡ تقرير المحاكاة السريعة لـ ${res.simulatedRoundsCount} جولات`,
-      sender: 'المحلل الفني والإحصائي',
-      date: `الجولة ${res.nextRound}`,
-      type: 'news',
-      read: false,
-      content: `تمت محاكاة ${res.simulatedRoundsCount} جولات بنجاح.\n` +
-        (userClub
-          ? `حصيلة فريقك (${userClub.name}): ${res.userClubStatsDelta.wins} فوز، ${res.userClubStatsDelta.draws} تعادل، ${res.userClubStatsDelta.losses} هزيمة. حصدت ${res.userClubStatsDelta.points} نقطة، وسجلت ${res.userClubStatsDelta.goalsFor} هدفاً واستقبلت ${res.userClubStatsDelta.goalsAgainst}.`
-          : `تم تحديث جدول الترتيب وإحصائيات الفرق واللاعبين لجميع الأندية.`),
-    };
-    setInbox(prev => [batchMsg, ...prev]);
-
-    return {
-      success: true,
-      simulatedCount: res.simulatedRoundsCount,
-      message: `تمت محاكاة ${res.simulatedRoundsCount} جولات بنجاح!`,
-    };
   };
 
   // ----------------------------------------------------
@@ -4461,8 +4540,13 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   // ----------------------------------------------------
 
   const advanceToNextDay = (skipToMatch: boolean = false) => {
-    // Gating check: Block advancement if today is match day and match is not yet completed
-    if (userClub && !seasonFinished) {
+    if (isSimulationRunningRef.current) return;
+    isSimulationRunningRef.current = true;
+    setIsSimulationRunning(true);
+
+    try {
+      // Gating check: Block advancement if today is match day and match is not yet completed
+      if (userClub && !seasonFinished) {
       const roundFixtures = fixtures.filter(f => f.round === currentRound);
       const userFixture = roundFixtures.find(f => f.homeTeamId === userClub.id || f.awayTeamId === userClub.id);
 
@@ -4762,6 +4846,12 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     setCalendarDate(newDate);
     setDayAdvanceSummary(summary);
     setShowDaySummaryModal(true);
+    } finally {
+      setTimeout(() => {
+        isSimulationRunningRef.current = false;
+        setIsSimulationRunning(false);
+      }, 300);
+    }
   };
 
   const closeDaySummaryModal = () => {
@@ -5759,13 +5849,16 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         currentRound,
         totalRounds,
         manager,
+        isUnemployed,
         transferMarket,
         transferHistory,
         clubEconomy,
+        incomingBids,
         inbox,
         unreadMessagesCount,
         liveMatch,
         seasonFinished,
+        isSimulationRunning,
         season,
         activeLeague,
         allLeagues: GLOBAL_LEAGUES,

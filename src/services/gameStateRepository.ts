@@ -136,62 +136,101 @@ async function idbSet<T>(key: string, value: T): Promise<boolean> {
   });
 }
 
+let isSavingToStorage = false;
+let pendingSavePayload: LocalGameSavePayload | null = null;
+let saveResolveQueue: Array<() => void> = [];
+
+async function executeSave(payload: LocalGameSavePayload): Promise<void> {
+  const timestampedPayload: LocalGameSavePayload = {
+    ...payload,
+    schemaVersion: payload.schemaVersion || 2,
+    saveVersion: (payload.saveVersion || 0) + 1,
+    lastLocalSaveAt: Date.now(),
+  };
+
+  // 1. Asynchronous write to IndexedDB (off main thread)
+  try {
+    await idbSet('current_save', timestampedPayload);
+  } catch (err) {
+    console.warn('[GameStateRepo] Error writing to IndexedDB:', err);
+  }
+
+  // 2. Synchronous safety-mirror to localStorage with safe catch
+  const safeSetLS = (key: string, val: string) => {
+    try {
+      localStorage.setItem(key, val);
+    } catch (e) {
+      // Safe catch for storage limits
+    }
+  };
+
+  // Save critical lightweight metadata and core entities first
+  safeSetLS(`${LEGACY_STORAGE_PREFIX}_meta_save_version`, String(timestampedPayload.saveVersion));
+  safeSetLS(`${LEGACY_STORAGE_PREFIX}_meta_save_time`, String(timestampedPayload.lastLocalSaveAt));
+  safeSetLS(`${LEGACY_STORAGE_PREFIX}_manager`, JSON.stringify(timestampedPayload.manager));
+  safeSetLS(`${LEGACY_STORAGE_PREFIX}_season`, JSON.stringify(timestampedPayload.season));
+  safeSetLS(`${LEGACY_STORAGE_PREFIX}_activeLeague`, JSON.stringify(timestampedPayload.activeLeague));
+  safeSetLS(`${LEGACY_STORAGE_PREFIX}_currentRound`, JSON.stringify(timestampedPayload.currentRound));
+  safeSetLS(`${LEGACY_STORAGE_PREFIX}_calendarDate`, JSON.stringify(timestampedPayload.calendarDate));
+  safeSetLS(`${LEGACY_STORAGE_PREFIX}_clubEconomy`, JSON.stringify(timestampedPayload.clubEconomy));
+  safeSetLS(`${LEGACY_STORAGE_PREFIX}_standings`, JSON.stringify(timestampedPayload.standings));
+  safeSetLS(`${LEGACY_STORAGE_PREFIX}_boardSystem`, JSON.stringify(timestampedPayload.boardSystem));
+  safeSetLS(`${LEGACY_STORAGE_PREFIX}_cupTournament`, JSON.stringify(timestampedPayload.cupTournament));
+
+  // Secondary items
+  safeSetLS(`${LEGACY_STORAGE_PREFIX}_teams`, JSON.stringify(timestampedPayload.teams));
+  safeSetLS(`${LEGACY_STORAGE_PREFIX}_fixtures`, JSON.stringify(timestampedPayload.fixtures));
+  safeSetLS(`${LEGACY_STORAGE_PREFIX}_inbox`, JSON.stringify(timestampedPayload.inbox));
+  safeSetLS(`${LEGACY_STORAGE_PREFIX}_transferHistory`, JSON.stringify(timestampedPayload.transferHistory));
+  safeSetLS(`${LEGACY_STORAGE_PREFIX}_jobOffers`, JSON.stringify(timestampedPayload.jobOffers));
+  safeSetLS(`${LEGACY_STORAGE_PREFIX}_transferMarket`, JSON.stringify(timestampedPayload.transferMarket));
+  safeSetLS(`${LEGACY_STORAGE_PREFIX}_incomingBids`, JSON.stringify(timestampedPayload.incomingBids));
+  safeSetLS(`${LEGACY_STORAGE_PREFIX}_seasonEndSummary`, JSON.stringify(timestampedPayload.seasonEndSummary));
+  safeSetLS(`${LEGACY_STORAGE_PREFIX}_activeNegotiations`, JSON.stringify(timestampedPayload.activeNegotiations));
+  safeSetLS(`${LEGACY_STORAGE_PREFIX}_dailyNews`, JSON.stringify(timestampedPayload.dailyNews));
+  safeSetLS(`${LEGACY_STORAGE_PREFIX}_retiredPlayers`, JSON.stringify(timestampedPayload.retiredPlayers));
+  safeSetLS(`${LEGACY_STORAGE_PREFIX}_worldRankings`, JSON.stringify(timestampedPayload.worldRankings));
+  safeSetLS(`${LEGACY_STORAGE_PREFIX}_scoutedOpponents`, JSON.stringify(timestampedPayload.scoutedOpponents));
+  safeSetLS(`${LEGACY_STORAGE_PREFIX}_deletedMessageIds`, JSON.stringify(timestampedPayload.deletedMessageIds || []));
+}
+
 export const gameStateRepository = {
   /**
-   * Save complete game state locally (IndexedDB primary + localStorage fast backup)
+   * Save complete game state locally with queue coalescing to prevent parallel blocking writes
    */
   async saveLocalGameState(payload: LocalGameSavePayload): Promise<void> {
-    const timestampedPayload: LocalGameSavePayload = {
-      ...payload,
-      schemaVersion: payload.schemaVersion || 2,
-      saveVersion: (payload.saveVersion || 0) + 1,
-      lastLocalSaveAt: Date.now(),
-    };
+    pendingSavePayload = payload;
 
-    // 1. Asynchronous write to IndexedDB
-    try {
-      await idbSet('current_save', timestampedPayload);
-    } catch (err) {
-      console.warn('[GameStateRepo] Error writing to IndexedDB:', err);
-    }
+    return new Promise<void>((resolve) => {
+      saveResolveQueue.push(resolve);
 
-    // 2. Synchronous safety-mirror to localStorage (for instant reload & backward compatibility)
-    const safeSetLS = (key: string, val: string) => {
-      try {
-        localStorage.setItem(key, val);
-      } catch (e) {
-        // Safe catch for individual quota limits
+      if (isSavingToStorage) {
+        // Coalesce: A save is already running, this payload will be picked up next
+        return;
       }
-    };
 
-    // Save critical lightweight metadata and core entities first
-    safeSetLS(`${LEGACY_STORAGE_PREFIX}_meta_save_version`, String(timestampedPayload.saveVersion));
-    safeSetLS(`${LEGACY_STORAGE_PREFIX}_meta_save_time`, String(timestampedPayload.lastLocalSaveAt));
-    safeSetLS(`${LEGACY_STORAGE_PREFIX}_manager`, JSON.stringify(timestampedPayload.manager));
-    safeSetLS(`${LEGACY_STORAGE_PREFIX}_season`, JSON.stringify(timestampedPayload.season));
-    safeSetLS(`${LEGACY_STORAGE_PREFIX}_activeLeague`, JSON.stringify(timestampedPayload.activeLeague));
-    safeSetLS(`${LEGACY_STORAGE_PREFIX}_currentRound`, JSON.stringify(timestampedPayload.currentRound));
-    safeSetLS(`${LEGACY_STORAGE_PREFIX}_calendarDate`, JSON.stringify(timestampedPayload.calendarDate));
-    safeSetLS(`${LEGACY_STORAGE_PREFIX}_clubEconomy`, JSON.stringify(timestampedPayload.clubEconomy));
-    safeSetLS(`${LEGACY_STORAGE_PREFIX}_standings`, JSON.stringify(timestampedPayload.standings));
-    safeSetLS(`${LEGACY_STORAGE_PREFIX}_boardSystem`, JSON.stringify(timestampedPayload.boardSystem));
-    safeSetLS(`${LEGACY_STORAGE_PREFIX}_cupTournament`, JSON.stringify(timestampedPayload.cupTournament));
+      isSavingToStorage = true;
 
-    // Secondary items
-    safeSetLS(`${LEGACY_STORAGE_PREFIX}_teams`, JSON.stringify(timestampedPayload.teams));
-    safeSetLS(`${LEGACY_STORAGE_PREFIX}_fixtures`, JSON.stringify(timestampedPayload.fixtures));
-    safeSetLS(`${LEGACY_STORAGE_PREFIX}_inbox`, JSON.stringify(timestampedPayload.inbox));
-    safeSetLS(`${LEGACY_STORAGE_PREFIX}_transferHistory`, JSON.stringify(timestampedPayload.transferHistory));
-    safeSetLS(`${LEGACY_STORAGE_PREFIX}_jobOffers`, JSON.stringify(timestampedPayload.jobOffers));
-    safeSetLS(`${LEGACY_STORAGE_PREFIX}_transferMarket`, JSON.stringify(timestampedPayload.transferMarket));
-    safeSetLS(`${LEGACY_STORAGE_PREFIX}_incomingBids`, JSON.stringify(timestampedPayload.incomingBids));
-    safeSetLS(`${LEGACY_STORAGE_PREFIX}_seasonEndSummary`, JSON.stringify(timestampedPayload.seasonEndSummary));
-    safeSetLS(`${LEGACY_STORAGE_PREFIX}_activeNegotiations`, JSON.stringify(timestampedPayload.activeNegotiations));
-    safeSetLS(`${LEGACY_STORAGE_PREFIX}_dailyNews`, JSON.stringify(timestampedPayload.dailyNews));
-    safeSetLS(`${LEGACY_STORAGE_PREFIX}_retiredPlayers`, JSON.stringify(timestampedPayload.retiredPlayers));
-    safeSetLS(`${LEGACY_STORAGE_PREFIX}_worldRankings`, JSON.stringify(timestampedPayload.worldRankings));
-    safeSetLS(`${LEGACY_STORAGE_PREFIX}_scoutedOpponents`, JSON.stringify(timestampedPayload.scoutedOpponents));
-    safeSetLS(`${LEGACY_STORAGE_PREFIX}_deletedMessageIds`, JSON.stringify(timestampedPayload.deletedMessageIds || []));
+      const processQueue = async () => {
+        while (pendingSavePayload) {
+          const toSave = pendingSavePayload;
+          pendingSavePayload = null;
+
+          try {
+            await executeSave(toSave);
+          } catch (err) {
+            console.warn('[GameStateRepo] Save execution error:', err);
+          }
+        }
+
+        isSavingToStorage = false;
+        const resolvers = saveResolveQueue;
+        saveResolveQueue = [];
+        resolvers.forEach(r => r());
+      };
+
+      processQueue();
+    });
   },
 
   /**

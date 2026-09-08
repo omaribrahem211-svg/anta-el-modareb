@@ -48,6 +48,7 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({ setActiveTab, onSele
     startLiveMatch,
     instantSimulateCurrentRound,
     seasonFinished,
+    isSimulationRunning,
     season,
     activeLeague,
     openSeasonModal,
@@ -118,7 +119,8 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({ setActiveTab, onSele
             <div className="flex items-center gap-2">
               <button
                 onClick={() => advanceToNextDay(false)}
-                className="flex items-center gap-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 font-bold text-xs px-3.5 py-2.5 rounded-xl shadow cursor-pointer transition-all active:scale-95 shrink-0"
+                disabled={isSimulationRunning}
+                className="flex items-center gap-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 font-bold text-xs px-3.5 py-2.5 rounded-xl shadow cursor-pointer transition-all active:scale-95 shrink-0 disabled:opacity-50 disabled:pointer-events-none"
               >
                 <Clock className="w-3.5 h-3.5 text-cyan-400" />
                 <span>اليوم التالي</span>
@@ -126,10 +128,11 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({ setActiveTab, onSele
 
               <button
                 onClick={() => instantSimulateCurrentRound()}
-                className="flex items-center gap-1.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-xs px-4 py-2.5 rounded-xl shadow cursor-pointer transition-all active:scale-95 shrink-0"
+                disabled={isSimulationRunning}
+                className="flex items-center gap-1.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-xs px-4 py-2.5 rounded-xl shadow cursor-pointer transition-all active:scale-95 shrink-0 disabled:opacity-50 disabled:pointer-events-none"
               >
                 <Zap className="w-3.5 h-3.5 text-amber-300" />
-                <span>محاكاة الجولة {currentRound}</span>
+                <span>{isSimulationRunning ? 'جارٍ المحاكاة...' : `محاكاة الجولة ${currentRound}`}</span>
               </button>
             </div>
           </div>
@@ -467,11 +470,12 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({ setActiveTab, onSele
               <div className="grid grid-cols-2 gap-2.5">
                 <button
                   id="dashboard_play_live_btn"
+                  disabled={isSimulationRunning}
                   onClick={() => {
                     setActiveTab('matches');
                     startLiveMatch();
                   }}
-                  className="flex items-center justify-center gap-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-black text-sm py-3 px-4 rounded-xl shadow-lg shadow-emerald-950/50 transition-all active:scale-95 cursor-pointer"
+                  className="flex items-center justify-center gap-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-black text-sm py-3 px-4 rounded-xl shadow-lg shadow-emerald-950/50 transition-all active:scale-95 cursor-pointer disabled:opacity-50 disabled:pointer-events-none"
                 >
                   <Play className="w-4 h-4 fill-white" />
                   <span>خوض المباراة لايف ⚽</span>
@@ -479,14 +483,15 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({ setActiveTab, onSele
 
                 <button
                   id="dashboard_instant_sim_btn"
+                  disabled={isSimulationRunning}
                   onClick={() => {
                     instantSimulateCurrentRound();
                     setActiveTab('matches');
                   }}
-                  className="flex items-center justify-center gap-1.5 bg-slate-800 hover:bg-slate-750 border border-slate-700 text-amber-300 font-bold text-xs py-3 px-3 rounded-xl transition-all active:scale-95 cursor-pointer"
+                  className="flex items-center justify-center gap-1.5 bg-slate-800 hover:bg-slate-750 border border-slate-700 text-amber-300 font-bold text-xs py-3 px-3 rounded-xl transition-all active:scale-95 cursor-pointer disabled:opacity-50 disabled:pointer-events-none"
                 >
                   <Zap className="w-3.5 h-3.5 text-amber-400" />
-                  <span>محاكاة الجولة {currentRound} ⚡</span>
+                  <span>{isSimulationRunning ? 'جارٍ المحاكاة...' : `محاكاة الجولة ${currentRound} ⚡`}</span>
                 </button>
               </div>
             ) : (
@@ -562,20 +567,22 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({ setActiveTab, onSele
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1">
             <button
               id="dashboard_sim_rest_round_btn"
+              disabled={isSimulationRunning}
               onClick={() => {
                 instantSimulateCurrentRound();
                 setActiveTab('matches');
               }}
-              className="flex items-center justify-center gap-2 bg-gradient-to-r from-indigo-600 to-cyan-600 hover:from-indigo-500 hover:to-cyan-500 text-white font-black text-xs sm:text-sm py-3 px-4 rounded-xl shadow-lg shadow-indigo-950/50 transition-all active:scale-95 cursor-pointer"
+              className="flex items-center justify-center gap-2 bg-gradient-to-r from-indigo-600 to-cyan-600 hover:from-indigo-500 hover:to-cyan-500 text-white font-black text-xs sm:text-sm py-3 px-4 rounded-xl shadow-lg shadow-indigo-950/50 transition-all active:scale-95 cursor-pointer disabled:opacity-50 disabled:pointer-events-none"
             >
               <Zap className="w-4 h-4 text-cyan-200" />
-              <span>محاكاة نتائج مباريات الجولة {currentRound} ⚡</span>
+              <span>{isSimulationRunning ? 'جارٍ المحاكاة...' : `محاكاة نتائج مباريات الجولة ${currentRound} ⚡`}</span>
             </button>
 
             <button
               id="dashboard_advance_day_rest_btn"
+              disabled={isSimulationRunning}
               onClick={() => advanceToNextDay(false)}
-              className="flex items-center justify-center gap-2 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 font-bold text-xs sm:text-sm py-3 px-4 rounded-xl transition-all active:scale-95 cursor-pointer"
+              className="flex items-center justify-center gap-2 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 font-bold text-xs sm:text-sm py-3 px-4 rounded-xl transition-all active:scale-95 cursor-pointer disabled:opacity-50 disabled:pointer-events-none"
             >
               <Clock className="w-4 h-4 text-cyan-400" />
               <span>التقدم بالتقويم (+1 يوم) ➔</span>

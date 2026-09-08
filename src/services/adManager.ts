@@ -36,6 +36,20 @@ class AdManagerService {
   private isRewardedLoaded = false;
   private isRewardedShowing = false;
   private rewardedLoadPromise: Promise<boolean> | null = null;
+  private rewardedListenerHandles: PluginListenerHandle[] = [];
+
+  private async cleanupRewardedListeners() {
+    while (this.rewardedListenerHandles.length > 0) {
+      const handle = this.rewardedListenerHandles.pop();
+      if (handle) {
+        try {
+          await handle.remove();
+        } catch {
+          // ignore
+        }
+      }
+    }
+  }
 
   private state: AdManagerState = {
     isPremium: false,
@@ -313,11 +327,11 @@ class AdManagerService {
    * Loads a Rewarded Video Ad on demand when the player requests it.
    * Strict Guarantees:
    * - No preload at startup.
-   * - Uses: ca-app-pub-5272866425919152/6872814469
-   * - Waits for actual load event with a safe timeout (default 8000ms).
-   * - Resolves false immediately on timeout or error without freezing the UI.
+   * - Uses: ca-app-pub-5272866425919152/6872814469 (or configured ID)
+   * - Single listener guarantee with strict cleanup.
+   * - Never leaves isRewardedLoaded true after failure.
    */
-  public async loadRewarded(timeoutMs: number = 8000): Promise<boolean> {
+  public async loadRewarded(timeoutMs: number = 15000): Promise<boolean> {
     if (this.isRewardedLoaded) return true;
     if (this.isRewardedLoading && this.rewardedLoadPromise) {
       return this.rewardedLoadPromise;
@@ -333,35 +347,25 @@ class AdManagerService {
     this.rewardedLoadPromise = new Promise<boolean>(async (resolve) => {
       let settled = false;
       let timer: NodeJS.Timeout | null = null;
-      let loadedListener: PluginListenerHandle | null = null;
-      let failedListener: PluginListenerHandle | null = null;
 
-      const cleanup = () => {
+      const finish = async (success: boolean) => {
+        if (settled) return;
+        settled = true;
         if (timer) {
           clearTimeout(timer);
           timer = null;
         }
-        if (loadedListener) {
-          loadedListener.remove();
-          loadedListener = null;
-        }
-        if (failedListener) {
-          failedListener.remove();
-          failedListener = null;
-        }
+        await this.cleanupRewardedListeners();
         this.isRewardedLoading = false;
+        this.isRewardedLoaded = success;
         this.rewardedLoadPromise = null;
+        resolve(success);
       };
 
       // Safe timeout for loading
       timer = setTimeout(() => {
-        if (!settled) {
-          settled = true;
-          this.isRewardedLoaded = false;
-          cleanup();
-          console.warn(`[ADMOB] Rewarded load timed out after ${timeoutMs}ms`);
-          resolve(false);
-        }
+        console.warn(`[REWARDED] failed`, `Load timed out after ${timeoutMs}ms`);
+        finish(false);
       }, timeoutMs);
 
       try {
@@ -369,27 +373,22 @@ class AdManagerService {
           await this.initialize();
         }
 
-        // Listen for actual Loaded event
-        loadedListener = await AdMob.addListener(RewardAdPluginEvents.Loaded, () => {
-          if (!settled) {
-            settled = true;
-            this.isRewardedLoaded = true;
-            cleanup();
-            console.log('[ADMOB] Rewarded loaded');
-            resolve(true);
-          }
-        });
+        // Clean any previous listeners before registering new ones
+        await this.cleanupRewardedListeners();
 
-        // Listen for FailedToLoad event
-        failedListener = await AdMob.addListener(RewardAdPluginEvents.FailedToLoad, (err: any) => {
-          if (!settled) {
-            settled = true;
-            this.isRewardedLoaded = false;
-            cleanup();
-            console.warn('[ADMOB] Rewarded failed to load:', err);
-            resolve(false);
-          }
+        // 1. Listen for Loaded event
+        const loadedHandle = await AdMob.addListener(RewardAdPluginEvents.Loaded, () => {
+          console.log('[REWARDED] loaded');
+          finish(true);
         });
+        this.rewardedListenerHandles.push(loadedHandle);
+
+        // 2. Listen for FailedToLoad event
+        const failedHandle = await AdMob.addListener(RewardAdPluginEvents.FailedToLoad, (err: any) => {
+          console.warn('[REWARDED] failed', err);
+          finish(false);
+        });
+        this.rewardedListenerHandles.push(failedHandle);
 
         const options: RewardAdOptions = {
           adId: ADMOB_CONFIG.REWARDED_ID || 'ca-app-pub-5272866425919152/6872814469',
@@ -397,23 +396,14 @@ class AdManagerService {
         };
 
         // Trigger prepare in native SDK
+        console.log('[REWARDED] prepare started');
         AdMob.prepareRewardVideoAd(options).catch((err: any) => {
-          if (!settled) {
-            settled = true;
-            this.isRewardedLoaded = false;
-            cleanup();
-            console.warn('[ADMOB] prepareRewardVideoAd rejected:', err);
-            resolve(false);
-          }
+          console.warn('[REWARDED] failed', err);
+          finish(false);
         });
       } catch (ex) {
-        if (!settled) {
-          settled = true;
-          this.isRewardedLoaded = false;
-          cleanup();
-          console.warn('[ADMOB] loadRewarded exception:', ex);
-          resolve(false);
-        }
+        console.warn('[REWARDED] failed', ex);
+        finish(false);
       }
     });
 
@@ -424,9 +414,9 @@ class AdManagerService {
    * Executes a native Rewarded Video Ad with complete safety:
    * - Checks or loads on demand.
    * - Safeguard timeouts around presentation & entire ad lifecycle.
-   * - NEVER leaves isRewardedShowing stuck in true.
+   * - NEVER leaves isRewardedShowing or isRewardedLoaded stuck in true.
    * - Grants reward ONLY upon RewardAdPluginEvents.Rewarded.
-   * - Cleans up listeners and preloads next ad in background after dismissal.
+   * - Cleans up all listeners on dismissal or failure.
    */
   private async executeRewardedAd(params: {
     rewardTypeLabel: string;
@@ -434,8 +424,8 @@ class AdManagerService {
     onDismiss?: (rewardEarned: boolean) => void;
     onFailure?: (error: any) => void;
   }): Promise<boolean> {
-    if (this.isRewardedShowing) {
-      this.log('Rewarded Ad is already showing, ignoring duplicate call');
+    if (this.isRewardedShowing || this.isRewardedLoading) {
+      console.warn('[REWARDED] Busy: Rewarded Ad is already loading or showing');
       return false;
     }
 
@@ -448,7 +438,7 @@ class AdManagerService {
       if (this.isNative) {
         // 1. Ensure ad is loaded on demand with timeout
         if (!this.isRewardedLoaded) {
-          const loaded = await this.loadRewarded(7000);
+          const loaded = await this.loadRewarded(15000);
           if (!loaded) {
             this.isRewardedShowing = false;
             this.isRewardedLoaded = false;
@@ -458,16 +448,12 @@ class AdManagerService {
           }
         }
 
-        let rewardListener: PluginListenerHandle | null = null;
-        let dismissListener: PluginListenerHandle | null = null;
-        let failListener: PluginListenerHandle | null = null;
-        let showedListener: PluginListenerHandle | null = null;
         let presentationTimer: NodeJS.Timeout | null = null;
         let sessionTimer: NodeJS.Timeout | null = null;
         let adHasShown = false;
         let isCleanedUp = false;
 
-        const cleanup = () => {
+        const cleanup = async () => {
           if (isCleanedUp) return;
           isCleanedUp = true;
 
@@ -479,32 +465,21 @@ class AdManagerService {
             clearTimeout(sessionTimer);
             sessionTimer = null;
           }
-          if (rewardListener) {
-            rewardListener.remove();
-            rewardListener = null;
-          }
-          if (dismissListener) {
-            dismissListener.remove();
-            dismissListener = null;
-          }
-          if (failListener) {
-            failListener.remove();
-            failListener = null;
-          }
-          if (showedListener) {
-            showedListener.remove();
-            showedListener = null;
-          }
 
+          await this.cleanupRewardedListeners();
           this.isRewardedShowing = false;
           this.isRewardedLoaded = false;
+          this.isRewardedLoading = false;
         };
 
+        // Clean any previous listeners before registering presentation listeners
+        await this.cleanupRewardedListeners();
+
         // Critical Safeguard 1: If ad does not appear within 7 seconds, abort
-        presentationTimer = setTimeout(() => {
+        presentationTimer = setTimeout(async () => {
           if (!adHasShown && this.isRewardedShowing) {
-            console.warn('[ADMOB] Presentation timeout: Ad did not show within 7s');
-            cleanup();
+            console.warn('[REWARDED] failed to show', 'Presentation timeout (7s)');
+            await cleanup();
             if (params.onFailure) {
               params.onFailure(new Error('انتهت مهلة عرض الإعلان'));
             }
@@ -512,11 +487,10 @@ class AdManagerService {
         }, 7000);
 
         // Critical Safeguard 2: Master session timeout (90 seconds maximum ad duration)
-        // Ensures Promise or state NEVER hangs indefinitely
-        sessionTimer = setTimeout(() => {
+        sessionTimer = setTimeout(async () => {
           if (this.isRewardedShowing) {
-            console.warn('[ADMOB] Master session timeout reached (90s)');
-            cleanup();
+            console.warn('[REWARDED] Master session timeout reached (90s)');
+            await cleanup();
             if (params.onDismiss) {
               params.onDismiss(rewardEarned);
             }
@@ -524,18 +498,19 @@ class AdManagerService {
         }, 90000);
 
         // A. Listen for presentation start
-        showedListener = await AdMob.addListener(RewardAdPluginEvents.Showed, () => {
+        const showedHandle = await AdMob.addListener(RewardAdPluginEvents.Showed, () => {
           adHasShown = true;
           if (presentationTimer) {
             clearTimeout(presentationTimer);
             presentationTimer = null;
           }
-          console.log('[ADMOB] Rewarded ad showed successfully');
+          console.log('[REWARDED] show started');
         });
+        this.rewardedListenerHandles.push(showedHandle);
 
-        // B. Listen for Reward Earned
-        rewardListener = await AdMob.addListener(RewardAdPluginEvents.Rewarded, (reward: AdMobRewardItem) => {
-          console.log('[ADMOB] Rewarded earned:', reward);
+        // B. Listen for Reward Earned (strictly only grant reward here!)
+        const rewardHandle = await AdMob.addListener(RewardAdPluginEvents.Rewarded, (reward: AdMobRewardItem) => {
+          console.log('[REWARDED] rewarded', reward);
           rewardEarned = true;
           this.recordRewardedAdSuccess();
           try {
@@ -544,11 +519,12 @@ class AdManagerService {
             console.error('Error in onRewardEarned callback:', err);
           }
         });
+        this.rewardedListenerHandles.push(rewardHandle);
 
         // C. Listen for Dismissed
-        dismissListener = await AdMob.addListener(RewardAdPluginEvents.Dismissed, () => {
-          console.log(`[ADMOB] Rewarded dismissed. Reward earned: ${rewardEarned}`);
-          cleanup();
+        const dismissHandle = await AdMob.addListener(RewardAdPluginEvents.Dismissed, async () => {
+          console.log(`[REWARDED] dismissed (rewardEarned: ${rewardEarned})`);
+          await cleanup();
 
           if (params.onDismiss) {
             try {
@@ -558,11 +534,12 @@ class AdManagerService {
             }
           }
         });
+        this.rewardedListenerHandles.push(dismissHandle);
 
         // D. Listen for FailedToShow
-        failListener = await AdMob.addListener(RewardAdPluginEvents.FailedToShow, (err: any) => {
-          console.warn('[ADMOB] Rewarded failed to show:', err);
-          cleanup();
+        const failHandle = await AdMob.addListener(RewardAdPluginEvents.FailedToShow, async (err: any) => {
+          console.warn('[REWARDED] failed to show', err);
+          await cleanup();
 
           if (params.onFailure) {
             try {
@@ -572,14 +549,13 @@ class AdManagerService {
             }
           }
         });
+        this.rewardedListenerHandles.push(failHandle);
 
-        // Critical Safeguard 3: Safe show call with catch
-        // In @capacitor-community/admob, showRewardVideoAd Promise may only resolve on reward,
-        // so we must catch rejections and NEVER let it block the main flow
-        AdMob.showRewardVideoAd().catch((showError: any) => {
-          console.warn('[ADMOB] showRewardVideoAd rejected:', showError);
+        // Trigger show in native SDK
+        AdMob.showRewardVideoAd().catch(async (showError: any) => {
+          console.warn('[REWARDED] failed to show', showError);
           if (!adHasShown) {
-            cleanup();
+            await cleanup();
             if (params.onFailure) {
               params.onFailure(showError);
             }
@@ -595,11 +571,13 @@ class AdManagerService {
         if (confirmed) {
           rewardEarned = true;
           this.recordRewardedAdSuccess();
-          console.log('[ADMOB] Rewarded rewarded (web simulation)');
+          console.log('[REWARDED] rewarded (web simulation)');
           params.onRewardEarned();
         }
 
         this.isRewardedShowing = false;
+        this.isRewardedLoaded = false;
+        this.isRewardedLoading = false;
         if (params.onDismiss) {
           params.onDismiss(rewardEarned);
         }
@@ -607,9 +585,11 @@ class AdManagerService {
 
       return true;
     } catch (error) {
-      console.warn('[ADMOB] executeRewardedAd exception:', error);
+      console.warn('[REWARDED] failed', error);
+      await this.cleanupRewardedListeners();
       this.isRewardedShowing = false;
       this.isRewardedLoaded = false;
+      this.isRewardedLoading = false;
       if (params.onFailure) params.onFailure(error);
       return false;
     }

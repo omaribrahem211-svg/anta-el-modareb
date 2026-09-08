@@ -82,6 +82,7 @@ export const MatchesTab: React.FC = () => {
     setFormation,
     updateTactics,
     seasonFinished,
+    isSimulationRunning,
     openSeasonModal,
     season,
     instantSimulateCurrentRound,
@@ -463,10 +464,11 @@ export const MatchesTab: React.FC = () => {
               </div>
 
               <button
+                disabled={isSimulationRunning}
                 onClick={finishLiveMatchAndAdvance}
-                className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-black text-sm py-3.5 px-4 rounded-2xl shadow-xl shadow-emerald-950/60 transition-all active:scale-95 cursor-pointer"
+                className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-black text-sm py-3.5 px-4 rounded-2xl shadow-xl shadow-emerald-950/60 transition-all active:scale-95 cursor-pointer disabled:opacity-50 disabled:pointer-events-none"
               >
-                <span>تأكيد النتيجة والانتقال للجولة التالية</span>
+                <span>{isSimulationRunning ? 'جارٍ حفظ النتيجة والانتقال...' : 'تأكيد النتيجة والانتقال للجولة التالية'}</span>
                 <ArrowRight className="w-4 h-4" />
               </button>
             </div>
@@ -1151,17 +1153,19 @@ export const MatchesTab: React.FC = () => {
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
               <button
                 id="instant_simulate_round_rest_btn"
+                disabled={isSimulationRunning}
                 onClick={() => instantSimulateCurrentRound()}
-                className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-indigo-600 to-cyan-600 hover:from-indigo-500 hover:to-cyan-500 text-white font-black text-xs sm:text-sm py-3.5 px-4 rounded-2xl shadow-lg shadow-indigo-950/60 transition-all active:scale-95 cursor-pointer"
+                className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-indigo-600 to-cyan-600 hover:from-indigo-500 hover:to-cyan-500 text-white font-black text-xs sm:text-sm py-3.5 px-4 rounded-2xl shadow-lg shadow-indigo-950/60 transition-all active:scale-95 cursor-pointer disabled:opacity-50 disabled:pointer-events-none"
               >
                 <Zap className="w-4 h-4 text-cyan-300" />
-                <span>محاكاة نتائج مباريات الجولة {currentRound} لباقي الفرق ⚡</span>
+                <span>{isSimulationRunning ? 'جارٍ المحاكاة...' : `محاكاة نتائج مباريات الجولة ${currentRound} لباقي الفرق ⚡`}</span>
               </button>
 
               <button
                 id="advance_day_rest_btn"
+                disabled={isSimulationRunning}
                 onClick={() => advanceToNextDay(false)}
-                className="w-full flex items-center justify-center gap-2 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-bold text-xs sm:text-sm py-3 px-4 rounded-2xl shadow transition-all active:scale-95 cursor-pointer"
+                className="w-full flex items-center justify-center gap-2 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-bold text-xs sm:text-sm py-3 px-4 rounded-2xl shadow transition-all active:scale-95 cursor-pointer disabled:opacity-50 disabled:pointer-events-none"
               >
                 <Clock className="w-4 h-4 text-cyan-400" />
                 <span>التقدم بالتقويم (+1 يوم) ➔</span>
@@ -1186,8 +1190,9 @@ export const MatchesTab: React.FC = () => {
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
               <button
                 id="start_live_match_btn"
+                disabled={isSimulationRunning}
                 onClick={() => userFixture?.id ? startLiveMatch(userFixture.id) : startLiveMatch()}
-                className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-black text-sm py-3.5 px-4 rounded-2xl shadow-lg shadow-emerald-950/60 transition-all active:scale-95 cursor-pointer"
+                className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-black text-sm py-3.5 px-4 rounded-2xl shadow-lg shadow-emerald-950/60 transition-all active:scale-95 cursor-pointer disabled:opacity-50 disabled:pointer-events-none"
               >
                 <Play className="w-4 h-4 fill-white" />
                 <span>خوض مباراة الجولة {currentRound} الآن ⚽</span>
@@ -1195,11 +1200,12 @@ export const MatchesTab: React.FC = () => {
 
               <button
                 id="instant_simulate_round_btn"
+                disabled={isSimulationRunning}
                 onClick={() => instantSimulateCurrentRound()}
-                className="w-full flex items-center justify-center gap-2 bg-slate-800 hover:bg-slate-750 text-amber-300 border border-slate-700 font-bold text-xs sm:text-sm py-3 px-4 rounded-2xl shadow transition-all active:scale-95 cursor-pointer"
+                className="w-full flex items-center justify-center gap-2 bg-slate-800 hover:bg-slate-750 text-amber-300 border border-slate-700 font-bold text-xs sm:text-sm py-3 px-4 rounded-2xl shadow transition-all active:scale-95 cursor-pointer disabled:opacity-50 disabled:pointer-events-none"
               >
                 <FastForward className="w-4 h-4 text-amber-400" />
-                <span>محاكاة نتائج مباريات الجولة {currentRound}</span>
+                <span>{isSimulationRunning ? 'جارٍ المحاكاة...' : `محاكاة نتائج مباريات الجولة ${currentRound}`}</span>
               </button>
             </div>
           </div>
