@@ -2,12 +2,14 @@ import { Capacitor, PluginListenerHandle } from '@capacitor/core';
 import { App as CapApp } from '@capacitor/app';
 import {
   AdMob,
+  AdOptions,
   BannerAdOptions,
   BannerAdSize,
   BannerAdPosition,
   RewardAdOptions,
   RewardAdPluginEvents,
   BannerAdPluginEvents,
+  InterstitialAdPluginEvents,
   AdMobRewardItem,
 } from '@capacitor-community/admob';
 import { ADMOB_CONFIG } from '../config/admobConfig';
@@ -32,6 +34,9 @@ class AdManagerService {
   private readonly MAX_BANNER_RETRIES = 2;
   private isRewardedLoaded = false;
   private isRewardedShowing = false;
+  private isInterstitialLoaded = false;
+  private isInterstitialLoading = false;
+  private isInterstitialShowing = false;
   private bannerListenersAttached = false;
   private bannerListenerHandles: PluginListenerHandle[] = [];
 
@@ -53,10 +58,10 @@ class AdManagerService {
     if (this.isNative) {
       try {
         CapApp.addListener('appStateChange', (appState) => {
-          this.log(`App State Changed: isActive = ${appState.isActive}`);
+          console.log(`[APP] Activity lifecycle: stateChanged isActive = ${appState.isActive}`);
           if (appState.isActive) {
             // When app resumes, only request banner if it was never loaded and not currently active
-            if (!this.state.isPremium && !this.isBannerActive && !this.isBannerLoading && !this.isRewardedShowing) {
+            if (!this.state.isPremium && !this.isBannerActive && !this.isBannerLoading && !this.isRewardedShowing && !this.isInterstitialShowing) {
               setTimeout(() => {
                 this.ensureBannerActive();
               }, 1000);
@@ -64,7 +69,7 @@ class AdManagerService {
           }
         });
       } catch (e) {
-        this.log('CapApp listener registration note:', e);
+        console.warn('[APP] CapApp listener registration note:', e);
       }
     }
   }
@@ -133,11 +138,13 @@ class AdManagerService {
             initializeForTesting: ADMOB_CONFIG.IS_TEST_MODE,
           });
 
+          console.log('[ADMOB] SDK initialized');
+
           // Setup Banner listeners ONCE to prevent listener leaks
           if (!this.bannerListenersAttached) {
             try {
               const loadedHandle = await AdMob.addListener(BannerAdPluginEvents.Loaded, () => {
-                this.log('Native Banner Ad Loaded successfully');
+                console.log('[ADMOB] Banner loaded');
                 this.isBannerVisible = true;
                 this.isBannerCreated = true;
                 this.isBannerActive = true;
@@ -146,7 +153,7 @@ class AdManagerService {
               });
 
               const failedHandle = await AdMob.addListener(BannerAdPluginEvents.FailedToLoad, (error: any) => {
-                this.log('Native Banner Ad Failed to Load:', error);
+                console.warn('[ADMOB] Banner failed:', error);
                 this.isBannerLoading = false;
                 // If the ad failed to load (e.g. no fill or offline), do NOT freeze or loop
                 this.scheduleBannerRetry();
@@ -155,13 +162,14 @@ class AdManagerService {
               this.bannerListenerHandles.push(loadedHandle, failedHandle);
               this.bannerListenersAttached = true;
             } catch (listenerErr) {
-              this.log('Banner listener registration notice:', listenerErr);
+              console.warn('[ADMOB] Banner listener registration notice:', listenerErr);
             }
           }
 
           this.log('Native AdMob SDK initialized successfully');
         } else {
           this.log('Web/Preview Mode: AdMob running in web simulation mode');
+          console.log('[ADMOB] SDK initialized (web simulation mode)');
         }
 
         this.isInitialized = true;
@@ -172,10 +180,15 @@ class AdManagerService {
           this.log('Background banner init non-blocking notice:', err);
         });
 
+        // Preload interstitial ad in the background non-blocking
+        setTimeout(() => {
+          this.loadInterstitial().catch(e => console.warn('[ADMOB] Interstitial background preload notice:', e));
+        }, 1000);
+
         // Preload rewarded ad so it is ready when needed
         setTimeout(() => {
-          this.loadRewarded();
-        }, 1200);
+          this.loadRewarded().catch(e => console.warn('[ADMOB] Rewarded background preload notice:', e));
+        }, 2200);
 
         return true;
       } catch (error) {
@@ -320,26 +333,146 @@ class AdManagerService {
   }
 
   /**
-   * Interstitial Ads are permanently removed from the application per user request.
+   * Check if Interstitial ad is ready in memory
    */
   public isInterstitialActive(): boolean {
-    return false;
+    return this.isInterstitialLoaded;
   }
 
   public isInterstitialShowingNow(): boolean {
-    return false;
+    return this.isInterstitialShowing;
   }
 
+  /**
+   * Asynchronously preloads an Interstitial Ad in background using original ID:
+   * ca-app-pub-5272866425919152/5931052283
+   * Guarantees: Non-blocking, never freezes UI, logs properly.
+   */
   public async loadInterstitial(): Promise<boolean> {
-    return false;
+    if (this.state.isPremium) return false;
+    if (this.isInterstitialLoaded) return true;
+    if (this.isInterstitialLoading) return false;
+
+    this.isInterstitialLoading = true;
+
+    try {
+      if (this.isNative) {
+        const adId = ADMOB_CONFIG.INTERSTITIAL_ID || 'ca-app-pub-5272866425919152/5931052283';
+        const options: AdOptions = {
+          adId,
+          isTesting: false,
+        };
+        await AdMob.prepareInterstitial(options);
+        this.isInterstitialLoaded = true;
+        console.log('[ADMOB] Interstitial loaded');
+      } else {
+        // Web mode simulation
+        this.isInterstitialLoaded = true;
+        console.log('[ADMOB] Interstitial loaded (web simulation)');
+      }
+      return true;
+    } catch (error) {
+      this.isInterstitialLoaded = false;
+      console.warn('[ADMOB] Interstitial failed:', error);
+      return false;
+    } finally {
+      this.isInterstitialLoading = false;
+    }
   }
 
-  public async showInterstitial(): Promise<boolean> {
-    return false;
+  /**
+   * Shows the preloaded Interstitial Ad if ready.
+   * STRICT GUARANTEES:
+   * - If not loaded, do NOT stop or freeze the game; continue directly and trigger background preload.
+   * - If ad fails to show, do NOT freeze, do NOT reload WebView, continue directly.
+   * - After closing the ad, resume game seamlessly from the exact same state without reloading.
+   * - Immediately start loading a new Interstitial Ad in the background.
+   */
+  public async showInterstitial(onDismiss?: () => void): Promise<boolean> {
+    if (this.state.isPremium) {
+      if (onDismiss) onDismiss();
+      return false;
+    }
+
+    if (this.isInterstitialShowing) {
+      if (onDismiss) onDismiss();
+      return false;
+    }
+
+    // If not loaded, do NOT stop the game! Continue directly and preload for next time.
+    if (!this.isInterstitialLoaded && this.isNative) {
+      console.log('[ADMOB] Interstitial not loaded yet, skipping without blocking game');
+      if (onDismiss) onDismiss();
+      this.loadInterstitial().catch(e => console.warn('[ADMOB] Interstitial background preload error:', e));
+      return false;
+    }
+
+    this.isInterstitialShowing = true;
+    let dismissHandled = false;
+
+    const handleDismissal = () => {
+      if (!dismissHandled) {
+        dismissHandled = true;
+        this.isInterstitialShowing = false;
+        this.isInterstitialLoaded = false;
+        console.log('[ADMOB] Interstitial closed');
+        if (onDismiss) {
+          try {
+            onDismiss();
+          } catch (e) {
+            console.error('Error in interstitial onDismiss callback:', e);
+          }
+        }
+        // Immediately start background preload of next interstitial
+        setTimeout(() => {
+          this.loadInterstitial().catch(err => console.warn('[ADMOB] Interstitial background preload error:', err));
+        }, 1000);
+      }
+    };
+
+    try {
+      if (this.isNative) {
+        let showedListener: PluginListenerHandle | null = null;
+        let dismissedListener: PluginListenerHandle | null = null;
+        let failListener: PluginListenerHandle | null = null;
+
+        const cleanup = () => {
+          if (showedListener) showedListener.remove();
+          if (dismissedListener) dismissedListener.remove();
+          if (failListener) failListener.remove();
+        };
+
+        showedListener = await AdMob.addListener(InterstitialAdPluginEvents.Showed, () => {
+          console.log('[ADMOB] Interstitial shown');
+        });
+
+        dismissedListener = await AdMob.addListener(InterstitialAdPluginEvents.Dismissed, () => {
+          cleanup();
+          handleDismissal();
+        });
+
+        failListener = await AdMob.addListener(InterstitialAdPluginEvents.FailedToShow, (err: any) => {
+          console.warn('[ADMOB] Interstitial failed:', err);
+          cleanup();
+          handleDismissal();
+        });
+
+        await AdMob.showInterstitial();
+      } else {
+        // Web Simulation Mode
+        console.log('[ADMOB] Interstitial shown (web mode)');
+        handleDismissal();
+      }
+      return true;
+    } catch (error) {
+      console.warn('[ADMOB] Interstitial failed:', error);
+      handleDismissal();
+      return false;
+    }
   }
 
   public shouldShowInterstitial(): boolean {
-    return false;
+    return this.isInterstitialLoaded && !this.state.isPremium;
   }
 
   /**
@@ -357,10 +490,10 @@ class AdManagerService {
         await AdMob.prepareRewardVideoAd(options);
       }
       this.isRewardedLoaded = true;
-      this.log('Rewarded Ad loaded & ready in memory');
+      console.log('[ADMOB] Rewarded loaded');
       return true;
     } catch (error) {
-      this.log('Rewarded Failed to load in background:', error);
+      console.warn('[ADMOB] Rewarded failed:', error);
       this.isRewardedLoaded = false;
       return false;
     }
@@ -412,7 +545,7 @@ class AdManagerService {
           try {
             await prepareWithTimeout;
           } catch (loadErr) {
-            this.log('Ad prepare failed or timed out:', loadErr);
+            console.warn('[ADMOB] Rewarded failed:', loadErr);
             this.isRewardedShowing = false;
             if (params.onFailure) params.onFailure(loadErr);
             return false;
@@ -440,7 +573,7 @@ class AdManagerService {
 
         // 1. Listen for user earned reward (onUserEarnedReward)
         rewardListener = await AdMob.addListener(RewardAdPluginEvents.Rewarded, (reward: AdMobRewardItem) => {
-          this.log('Reward Earned natively from AdMob SDK (onUserEarnedReward):', reward);
+          console.log('[ADMOB] Rewarded rewarded:', reward);
           rewardEarned = true;
           this.recordRewardedAdSuccess();
           try {
@@ -473,7 +606,7 @@ class AdManagerService {
 
         // 3. Listen for presentation failure
         failListener = await AdMob.addListener(RewardAdPluginEvents.FailedToShow, (err: any) => {
-          this.log('Rewarded ad failed to show:', err);
+          console.warn('[ADMOB] Rewarded failed:', err);
           this.isRewardedShowing = false;
           this.isRewardedLoaded = false;
           cleanup();
@@ -507,6 +640,7 @@ class AdManagerService {
 
         if (confirmed) {
           rewardEarned = true;
+          console.log('[ADMOB] Rewarded rewarded: (web simulated reward)');
           this.recordRewardedAdSuccess();
           params.onUserEarnedReward();
         }
@@ -519,7 +653,7 @@ class AdManagerService {
 
       return true;
     } catch (error) {
-      this.log('showRewardedForAction error:', error);
+      console.warn('[ADMOB] Rewarded failed:', error);
       this.isRewardedShowing = false;
       this.isRewardedLoaded = false;
       if (params.onFailure) params.onFailure(error);
@@ -562,7 +696,7 @@ class AdManagerService {
         };
 
         rewardListener = await AdMob.addListener(RewardAdPluginEvents.Rewarded, (reward: AdMobRewardItem) => {
-          this.log('Reward Earned natively from AdMob SDK:', reward);
+          console.log('[ADMOB] Rewarded rewarded:', reward);
           rewardEarnedNatively = true;
           this.recordRewardedAdSuccess();
 
@@ -583,7 +717,7 @@ class AdManagerService {
         });
 
         failListener = await AdMob.addListener(RewardAdPluginEvents.FailedToShow, (err) => {
-          this.log('Rewarded Failed to show natively:', err);
+          console.warn('[ADMOB] Rewarded failed:', err);
           this.isRewardedShowing = false;
           this.isRewardedLoaded = false;
           cleanup();
@@ -595,6 +729,7 @@ class AdManagerService {
       } else {
         // Web Simulation Mode
         this.log('Rewarded Showing (Web Simulation)...');
+        console.log('[ADMOB] Rewarded rewarded: (web simulated reward)');
         rewardEarnedNatively = true;
         this.recordRewardedAdSuccess();
 
@@ -609,7 +744,7 @@ class AdManagerService {
 
       return true;
     } catch (error) {
-      this.log('Reward Failed:', error);
+      console.warn('[ADMOB] Rewarded failed:', error);
       this.isRewardedShowing = false;
       this.isRewardedLoaded = false;
       if (onFailureHandler) onFailureHandler(error);
@@ -632,9 +767,38 @@ class AdManagerService {
     this.saveState();
   }
 
-  public onMatchCompleted(): { shouldShowInterstitial: boolean } {
+  /**
+   * Called when a match completes.
+   * Checks interstitial frequency threshold.
+   * If threshold reached and interstitial is loaded, shows it smoothly.
+   * If not loaded, does NOT freeze or wait: runs onAfterAd immediately and preloads in background.
+   */
+  public onMatchCompleted(onAfterAd?: () => void): { shouldShowInterstitial: boolean } {
+    if (this.state.isPremium) {
+      if (onAfterAd) onAfterAd();
+      return { shouldShowInterstitial: false };
+    }
+
     this.state.matchesPlayedSinceLastInterstitial += 1;
     this.saveState();
+
+    const threshold = ADMOB_CONFIG.INTERSTITIAL_FREQUENCY_MATCHES || 3;
+    if (this.state.matchesPlayedSinceLastInterstitial >= threshold) {
+      this.state.matchesPlayedSinceLastInterstitial = 0;
+      this.saveState();
+
+      if (this.isInterstitialLoaded) {
+        this.showInterstitial(onAfterAd);
+        return { shouldShowInterstitial: true };
+      } else {
+        // Interstitial not ready yet: do not block gameplay or freeze UI
+        this.loadInterstitial().catch(e => console.warn('[ADMOB] Interstitial background preload notice:', e));
+        if (onAfterAd) onAfterAd();
+        return { shouldShowInterstitial: false };
+      }
+    }
+
+    if (onAfterAd) onAfterAd();
     return { shouldShowInterstitial: false };
   }
 

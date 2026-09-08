@@ -2174,6 +2174,8 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     // Boost Consumption
     AdManager.consumeTrainingBoost();
+    // Interstitial Check (non-blocking background preload & show if ready)
+    AdManager.onMatchCompleted();
   };
 
   const instantSimulateCurrentRound = () => {
@@ -2748,6 +2750,8 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     // Boost Consumption
     AdManager.consumeTrainingBoost();
+    // Interstitial Check (non-blocking background preload & show if ready)
+    AdManager.onMatchCompleted();
   };
 
   const simulateMultipleRounds = (roundsCount: number = 10): { success: boolean; simulatedCount: number; message: string } => {
