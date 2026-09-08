@@ -50,17 +50,6 @@ class AdManagerService {
   constructor() {
     this.loadState();
     this.isNative = Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'android';
-
-    // Safe lifecycle tracking - purely observational, NO AdMob calls to prevent freezes
-    if (this.isNative) {
-      try {
-        CapApp.addListener('appStateChange', (appState) => {
-          console.log(`[APP] App state changed: isActive = ${appState.isActive}`);
-        });
-      } catch (e) {
-        console.warn('[APP] CapApp listener note:', e);
-      }
-    }
   }
 
   private log(message: string, ...args: any[]) {
@@ -140,15 +129,6 @@ class AdManagerService {
 
         this.isInitialized = true;
         this.isInitializing = false;
-
-        // Start Banner in background only after UI and React have settled cleanly
-        if (ADMOB_CONFIG.ENABLE_BANNER && !this.state.isPremium) {
-          setTimeout(() => {
-            this.ensureBannerActive().catch((err) => {
-              this.log('Background banner init notice:', err);
-            });
-          }, 3000);
-        }
 
         return true;
       } catch (error) {
@@ -230,7 +210,7 @@ class AdManagerService {
           adSize: BannerAdSize.BANNER,
           position: BannerAdPosition.BOTTOM_CENTER,
           margin: BOTTOM_NAV_MARGIN_DP,
-          isTesting: false,
+          isTesting: ADMOB_CONFIG.IS_TEST_MODE,
         };
 
         await AdMob.showBanner(options);
@@ -412,7 +392,7 @@ class AdManagerService {
 
         const options: RewardAdOptions = {
           adId: ADMOB_CONFIG.REWARDED_ID || 'ca-app-pub-5272866425919152/6872814469',
-          isTesting: false,
+          isTesting: ADMOB_CONFIG.IS_TEST_MODE,
         };
 
         // Trigger prepare in native SDK
@@ -576,15 +556,6 @@ class AdManagerService {
               console.error('Error in onDismiss callback:', err);
             }
           }
-
-          // Preload the next Rewarded Ad in the background only after completion
-          setTimeout(() => {
-            if (!this.state.isPremium && !this.isRewardedShowing && !this.isRewardedLoaded) {
-              this.loadRewarded(10000).catch((e) => {
-                this.log('Background next rewarded preload notice:', e);
-              });
-            }
-          }, 2000);
         });
 
         // D. Listen for FailedToShow

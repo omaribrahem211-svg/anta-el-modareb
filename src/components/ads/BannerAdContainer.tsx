@@ -18,11 +18,17 @@ export const BannerAdContainer: React.FC<BannerAdContainerProps> = ({ activeTab,
     return () => unsubscribe();
   }, []);
 
-  // Ensure banner is loaded once on initial mount if enabled and not premium.
+  // Safely defer banner request until after game startup and WebView have completely settled
   useEffect(() => {
-    if (ADMOB_CONFIG.ENABLE_BANNER && !isPremium) {
-      AdManager.ensureBannerActive();
-    }
+    if (!ADMOB_CONFIG.ENABLE_BANNER || isPremium) return;
+
+    const timer = setTimeout(() => {
+      AdManager.ensureBannerActive().catch((err) => {
+        console.warn('[BannerAdContainer] Deferred banner notice:', err);
+      });
+    }, 5000);
+
+    return () => clearTimeout(timer);
   }, [isPremium]);
 
   return null;

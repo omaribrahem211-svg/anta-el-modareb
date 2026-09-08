@@ -65,9 +65,14 @@ function GameApp() {
     return () => unsub();
   }, []);
 
-  // Initialize AdMob on startup
+  // Initialize AdMob cleanly in background after app and WebView have completely settled
   useEffect(() => {
-    AdManager.init();
+    const timer = setTimeout(() => {
+      AdManager.init().catch((err) => {
+        console.warn('[AdMob] Deferred init notice:', err);
+      });
+    }, 4000);
+    return () => clearTimeout(timer);
   }, []);
 
   // Listen for global open-admob-rewards event (disabled when rewards are turned off)

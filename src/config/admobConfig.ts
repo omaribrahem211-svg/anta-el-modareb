@@ -43,11 +43,11 @@ export const PRODUCTION_AD_IDS = {
   REWARDED_ID: 'ca-app-pub-5272866425919152/6872814469',      // إعلان بمكافأة حقيقي (علاج وإلغاء إيقاف)
 };
 
-// Real Ads only (NO Test Ads)
-export const IS_TEST_MODE = false;
+// Activated for diagnosis to use Google test ads and guarantee 100% fill rate and zero crashes
+export const IS_TEST_MODE = true;
 
 export const ADMOB_CONFIG: AdMobConfigType = {
-  IS_TEST_MODE: false,
+  IS_TEST_MODE: true,
   ENABLE_LOGS: true,
   ENABLE_REWARDS: true, // تفعيل إعلانات المكافأة
   ENABLE_BANNER: true,  // تفعيل إعلان البانر الثابت المستقر في أسفل الشاشة
