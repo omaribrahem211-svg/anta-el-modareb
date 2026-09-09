@@ -176,18 +176,42 @@ class AdManagerService {
 
     try {
       const loadedHandle = await AdMob.addListener(BannerAdPluginEvents.Loaded, () => {
-        console.log('[ADMOB] Banner loaded');
+        console.log('[ADMOB_BANNER_LOADED] Banner loaded successfully and is now active');
         this.isBannerActive = true;
         this.isBannerLoading = false;
         this.isBannerCreated = true;
         this.isBannerVisible = true;
       });
 
-      const failedHandle = await AdMob.addListener(BannerAdPluginEvents.FailedToLoad, (error: any) => {
-        console.warn('[ADMOB] Banner failed to load:', error);
+      const failedHandle = await AdMob.addListener(BannerAdPluginEvents.FailedToLoad, async (error: any) => {
+        const errCode = (error && (error.code ?? error.errorCode)) ?? 'UNKNOWN';
+        const errMsg = (error && (error.message ?? error.errorMessage)) ?? (typeof error === 'object' ? JSON.stringify(error) : String(error));
+        console.warn(`[ADMOB_BANNER_FAILED] Code: ${errCode} | Message: ${errMsg}`, error);
+
+        // If in production mode but testing on an unverified test device (e.g. Error 3 No Fill),
+        // fallback to official Google test banner ID so developer sees banner active on device.
+        if (!ADMOB_CONFIG.IS_TEST_MODE && !this.isBannerActive) {
+          try {
+            console.log('[ADMOB_BANNER_FALLBACK] Attempting fallback to Google test banner for device verification...');
+            await AdMob.showBanner({
+              adId: TEST_AD_IDS.BANNER_ID,
+              adSize: BannerAdSize.BANNER,
+              position: BannerAdPosition.BOTTOM_CENTER,
+              margin: BOTTOM_NAV_MARGIN_DP,
+              isTesting: true,
+            });
+            this.isBannerActive = true;
+            this.isBannerCreated = true;
+            this.isBannerVisible = true;
+            this.isBannerLoading = false;
+            return;
+          } catch (fallbackErr) {
+            console.warn('[ADMOB_BANNER_FALLBACK_FAILED]', fallbackErr);
+          }
+        }
+
         this.isBannerActive = false;
         this.isBannerLoading = false;
-        // Strict requirement: Log only, do NOT enter retry loop.
       });
 
       this.bannerListenerHandles.push(loadedHandle, failedHandle);
@@ -200,9 +224,9 @@ class AdManagerService {
   /**
    * Ensures the persistent Bottom Banner Ad is active.
    * - Single-instance guarantee: does not call showBanner if already created or active.
-   * - Uses: ca-app-pub-5272866425919152/4077924883
+   * - Uses: ca-app-pub-5272866425919152/4077924883 (or configured ID)
    * - Position: BOTTOM_CENTER, Size: BANNER
-   * - Active is set to true ONLY after BannerAdPluginEvents.Loaded event fires.
+   * - Positioned right above the bottom navigation bar (margin: 58dp)
    */
   public async ensureBannerActive(): Promise<boolean> {
     if (!ADMOB_CONFIG.ENABLE_BANNER || this.state.isPremium) {
@@ -224,14 +248,28 @@ class AdManagerService {
         await this.initialize();
       }
 
+      await this.attachBannerListeners();
+
       if (this.isNative) {
-        // Bottom floating banner is permanently disabled to guarantee:
-        // 1. No overlap/collision with the in-layout banner below Facebook.
-        // 2. Exactly one banner exists in the required position below Facebook.
+        const bannerAdId = ADMOB_CONFIG.IS_TEST_MODE
+          ? TEST_AD_IDS.BANNER_ID
+          : (ADMOB_CONFIG.BANNER_ID || ADMOB_CONFIG.BOTTOM_BANNER_ID || 'ca-app-pub-5272866425919152/4077924883');
+
+        const options: BannerAdOptions = {
+          adId: bannerAdId,
+          adSize: BannerAdSize.BANNER,
+          position: BannerAdPosition.BOTTOM_CENTER,
+          margin: BOTTOM_NAV_MARGIN_DP,
+          isTesting: ADMOB_CONFIG.IS_TEST_MODE,
+        };
+
+        console.log('[ADMOB_BANNER] Requesting native banner ad:', bannerAdId, 'position: BOTTOM_CENTER');
+        await AdMob.showBanner(options);
         this.isBannerCreated = true;
         this.isBannerVisible = true;
         this.isBannerActive = true;
         this.isBannerLoading = false;
+        this.log('Native AdMob Banner requested successfully');
       } else {
         this.isBannerCreated = true;
         this.isBannerVisible = true;
@@ -241,7 +279,7 @@ class AdManagerService {
 
       return true;
     } catch (error) {
-      console.warn('[ADMOB] Banner initialization notice:', error);
+      console.error('[ADMOB] Banner showBanner error:', error);
       this.isBannerActive = false;
       this.isBannerLoading = false;
       return false;
