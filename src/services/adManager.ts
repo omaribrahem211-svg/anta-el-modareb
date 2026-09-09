@@ -11,7 +11,7 @@ import {
   InterstitialAdPluginEvents,
   AdMobRewardItem,
 } from '@capacitor-community/admob';
-import { ADMOB_CONFIG } from '../config/admobConfig';
+import { ADMOB_CONFIG, TEST_AD_IDS } from '../config/admobConfig';
 import { AdManagerState, ActiveTrainingBoost, TrainingBoostType } from '../types/game';
 import { AdRewardManager, AdRewardType, AdRewardClaimResult } from './adRewardService';
 
@@ -246,8 +246,12 @@ class AdManagerService {
       }
 
       if (this.isNative) {
+        const bannerAdId = ADMOB_CONFIG.IS_TEST_MODE
+          ? TEST_AD_IDS.BOTTOM_BANNER_ID
+          : (ADMOB_CONFIG.BANNER_ID || ADMOB_CONFIG.BOTTOM_BANNER_ID || 'ca-app-pub-5272866425919152/4077924883');
+
         const options: BannerAdOptions = {
-          adId: ADMOB_CONFIG.BANNER_ID || ADMOB_CONFIG.BOTTOM_BANNER_ID || 'ca-app-pub-5272866425919152/4077924883',
+          adId: bannerAdId,
           adSize: BannerAdSize.BANNER,
           position: BannerAdPosition.BOTTOM_CENTER,
           margin: BOTTOM_NAV_MARGIN_DP,
@@ -326,8 +330,12 @@ class AdManagerService {
       }
 
       if (this.isNative) {
+        const topBannerAdId = ADMOB_CONFIG.IS_TEST_MODE
+          ? TEST_AD_IDS.TOP_BANNER_ID
+          : (ADMOB_CONFIG.TOP_BANNER_ID || 'ca-app-pub-5272866425919152/6734203345');
+
         const options: BannerAdOptions = {
-          adId: ADMOB_CONFIG.TOP_BANNER_ID || 'ca-app-pub-5272866425919152/6734203345',
+          adId: topBannerAdId,
           adSize: BannerAdSize.BANNER,
           position: BannerAdPosition.TOP_CENTER,
           margin: 0,
@@ -412,21 +420,38 @@ class AdManagerService {
 
         await this.cleanupInterstitialListeners();
 
+        const primaryInterstitialId = ADMOB_CONFIG.IS_TEST_MODE
+          ? TEST_AD_IDS.INTERSTITIAL_ID
+          : (ADMOB_CONFIG.INTERSTITIAL_ID || 'ca-app-pub-5272866425919152/5931052283');
+        const isTesting = ADMOB_CONFIG.IS_TEST_MODE;
+
         const loadedHandle = await AdMob.addListener(InterstitialAdPluginEvents.Loaded, () => {
           this.log('Interstitial loaded successfully');
           finish(true);
         });
         this.interstitialListenerHandles.push(loadedHandle);
 
-        const failHandle = await AdMob.addListener(InterstitialAdPluginEvents.FailedToLoad, (err) => {
+        const failHandle = await AdMob.addListener(InterstitialAdPluginEvents.FailedToLoad, async (err) => {
           this.log('Interstitial failed to load:', err);
+          if (!isTesting) {
+            this.log('Falling back to test interstitial ad for device verification...');
+            try {
+              await AdMob.prepareInterstitial({
+                adId: TEST_AD_IDS.INTERSTITIAL_ID,
+                isTesting: true,
+              });
+              return;
+            } catch (fallbackErr) {
+              this.log('Fallback interstitial also failed:', fallbackErr);
+            }
+          }
           finish(false);
         });
         this.interstitialListenerHandles.push(failHandle);
 
         await AdMob.prepareInterstitial({
-          adId: ADMOB_CONFIG.INTERSTITIAL_ID || 'ca-app-pub-5272866425919152/5931052283',
-          isTesting: ADMOB_CONFIG.IS_TEST_MODE,
+          adId: primaryInterstitialId,
+          isTesting: isTesting,
         });
       } catch (e) {
         this.log('Error preparing interstitial:', e);
@@ -506,9 +531,7 @@ class AdManagerService {
         }
       }, 6000);
 
-      await AdMob.showInterstitial({
-        adId: ADMOB_CONFIG.INTERSTITIAL_ID || 'ca-app-pub-5272866425919152/5931052283',
-      });
+      await AdMob.showInterstitial();
       return true;
     } catch (err) {
       this.log('Error showing interstitial:', err);
@@ -634,6 +657,11 @@ class AdManagerService {
         // Clean any previous listeners before registering new ones
         await this.cleanupRewardedListeners();
 
+        const primaryRewardedId = ADMOB_CONFIG.IS_TEST_MODE
+          ? TEST_AD_IDS.REWARDED_ID
+          : (ADMOB_CONFIG.REWARDED_ID || 'ca-app-pub-5272866425919152/6872814469');
+        const isTesting = ADMOB_CONFIG.IS_TEST_MODE;
+
         // 1. Listen for Loaded event
         const loadedHandle = await AdMob.addListener(RewardAdPluginEvents.Loaded, () => {
           console.log('[REWARDED] loaded');
@@ -642,19 +670,31 @@ class AdManagerService {
         this.rewardedListenerHandles.push(loadedHandle);
 
         // 2. Listen for FailedToLoad event
-        const failedHandle = await AdMob.addListener(RewardAdPluginEvents.FailedToLoad, (err: any) => {
+        const failedHandle = await AdMob.addListener(RewardAdPluginEvents.FailedToLoad, async (err: any) => {
           console.warn('[REWARDED] failed', err);
+          if (!isTesting) {
+            console.log('[REWARDED] Falling back to test rewarded ad for device verification...');
+            try {
+              await AdMob.prepareRewardVideoAd({
+                adId: TEST_AD_IDS.REWARDED_ID,
+                isTesting: true,
+              });
+              return;
+            } catch (fallbackErr) {
+              console.warn('[REWARDED] Fallback rewarded ad also failed:', fallbackErr);
+            }
+          }
           finish(false);
         });
         this.rewardedListenerHandles.push(failedHandle);
 
         const options: RewardAdOptions = {
-          adId: ADMOB_CONFIG.REWARDED_ID || 'ca-app-pub-5272866425919152/6872814469',
-          isTesting: ADMOB_CONFIG.IS_TEST_MODE,
+          adId: primaryRewardedId,
+          isTesting: isTesting,
         };
 
         // Trigger prepare in native SDK
-        console.log('[REWARDED] prepare started');
+        console.log('[REWARDED] prepare started with adId:', primaryRewardedId, 'isTesting:', isTesting);
         AdMob.prepareRewardVideoAd(options).catch((err: any) => {
           console.warn('[REWARDED] failed', err);
           finish(false);
@@ -810,9 +850,7 @@ class AdManagerService {
         this.rewardedListenerHandles.push(failHandle);
 
         // Trigger show in native SDK
-        AdMob.showRewardVideoAd({
-          adId: ADMOB_CONFIG.REWARDED_ID || 'ca-app-pub-5272866425919152/6872814469',
-        }).catch(async (showError: any) => {
+        AdMob.showRewardVideoAd().catch(async (showError: any) => {
           console.warn('[REWARDED] failed to show', showError);
           if (!adHasShown) {
             await cleanup();

@@ -71,13 +71,13 @@ function GameApp() {
     return () => unsub();
   }, []);
 
-  // Initialize AdMob cleanly in background after app and WebView have completely settled
+  // Initialize AdMob cleanly in background after app startup
   useEffect(() => {
     const timer = setTimeout(() => {
       AdManager.init().catch((err) => {
-        console.warn('[AdMob] Deferred init notice:', err);
+        console.warn('[AdMob] Init notice:', err);
       });
-    }, 4000);
+    }, 400);
     return () => clearTimeout(timer);
   }, []);
 

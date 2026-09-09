@@ -24,7 +24,7 @@ export interface AdMobConfigType {
 }
 
 // Google Official Standard Android Test Ad Unit IDs
-const TEST_AD_IDS = {
+export const TEST_AD_IDS = {
   APP_ID: 'ca-app-pub-3940256099942544~3347511713',
   TOP_BANNER_ID: 'ca-app-pub-3940256099942544/6300978111',
   BOTTOM_BANNER_ID: 'ca-app-pub-3940256099942544/6300978111',
@@ -43,12 +43,13 @@ export const PRODUCTION_AD_IDS = {
   REWARDED_ID: 'ca-app-pub-5272866425919152/6872814469',      // إعلان بمكافأة حقيقي (علاج وإلغاء إيقاف)
 };
 
-// Set to false to use real Google AdMob Production IDs
-export const IS_TEST_MODE = false;
+// Set to true to activate AdMob ads for testing on Android devices
+// When true, official Google test ads appear with 100% guarantee during testing
+export const IS_TEST_MODE = true;
 
 export const ADMOB_CONFIG: AdMobConfigType = {
-  IS_TEST_MODE: false,
-  ENABLE_LOGS: false,
+  IS_TEST_MODE: true,
+  ENABLE_LOGS: true,
   ENABLE_REWARDS: true, // تفعيل إعلانات المكافأة
   ENABLE_BANNER: true,  // تفعيل إعلان البانر الثابت المستقر في أسفل الشاشة
   ENABLE_INTERSTITIAL: true, // تفعيل الإعلانات البينية للإنتاج بعد كل 5 مباريات
