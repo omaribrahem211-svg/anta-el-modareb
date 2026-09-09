@@ -9,7 +9,7 @@ import {
 } from '../services/trainerProfileService';
 
 export const WelcomeModalHandler: React.FC = () => {
-  const { manager, updateTrainerProfile } = useGame();
+  const { manager, updateTrainerProfile, selectStartingClub } = useGame();
   const [needsProfileCreation, setNeedsProfileCreation] = useState<boolean>(false);
   const [isReady, setIsReady] = useState<boolean>(false);
 
@@ -51,9 +51,12 @@ export const WelcomeModalHandler: React.FC = () => {
     return null;
   }
 
-  const handleProfileCreated = (profile: LocalTrainerProfile) => {
+  const handleProfileCreated = (profile: LocalTrainerProfile, startingClubId?: string) => {
     if (updateTrainerProfile) {
       updateTrainerProfile(profile.name, profile.age, profile.nationality);
+    }
+    if (startingClubId && selectStartingClub) {
+      selectStartingClub(startingClubId);
     }
     setNeedsProfileCreation(false);
   };

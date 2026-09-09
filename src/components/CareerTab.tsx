@@ -38,7 +38,10 @@ import {
   PiggyBank,
   ChevronDown,
   ChevronUp,
+  Share2,
 } from 'lucide-react';
+import { CoachCardModal } from './CoachCardModal';
+import { ClubSelectionModal } from './ClubSelectionModal';
 
 export const CareerTab: React.FC = () => {
   const {
@@ -60,6 +63,8 @@ export const CareerTab: React.FC = () => {
   const [newName, setNewName] = useState(manager.name);
   const [showResetModal, setShowResetModal] = useState(false);
   const [showResetSuccess, setShowResetSuccess] = useState(false);
+  const [showCoachCardModal, setShowCoachCardModal] = useState(false);
+  const [showClubSelectModal, setShowClubSelectModal] = useState(false);
 
   // Financial system state
   const [showDonateModal, setShowDonateModal] = useState(false);
@@ -80,8 +85,14 @@ export const CareerTab: React.FC = () => {
   };
 
   const handleConfirmReset = () => {
-    resetGame();
+    // Open club selection screen to allow choosing starting 4th tier club
     setShowResetModal(false);
+    setShowClubSelectModal(true);
+  };
+
+  const handleClubSelectedForNewCareer = (clubId: string) => {
+    resetGame(clubId);
+    setShowClubSelectModal(false);
     setShowResetSuccess(true);
     setNewName('الكابتن الجديد');
     setTimeout(() => {
@@ -272,6 +283,34 @@ export const CareerTab: React.FC = () => {
             </div>
           </div>
         </div>
+
+        {/* Coach Card Button / Trigger */}
+        <button
+          type="button"
+          onClick={() => setShowCoachCardModal(true)}
+          className="w-full py-3 px-4 bg-gradient-to-r from-amber-500/15 via-amber-400/20 to-emerald-500/15 hover:from-amber-500/25 hover:to-emerald-500/25 border border-amber-400/40 rounded-2xl flex items-center justify-between text-right cursor-pointer transition-all active:scale-[0.99] shadow-lg shadow-amber-500/5 group"
+        >
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-amber-400 to-amber-600 text-slate-950 flex items-center justify-center font-black shadow-md shrink-0">
+              <Trophy className="w-5 h-5" />
+            </div>
+            <div>
+              <div className="text-xs font-black text-amber-300 flex items-center gap-1.5">
+                <span>كارت المدرب الرسمي (Coach Card)</span>
+                <span className="text-[10px] bg-amber-500 text-slate-950 px-2 py-0.2 rounded-full font-bold">
+                  أنت المدرب
+                </span>
+              </div>
+              <div className="text-[11px] text-slate-300 mt-0.5">
+                تخصيص صورتك، استعراض بياناتك، ومشاركة الكارت عبر واتساب
+              </div>
+            </div>
+          </div>
+          <div className="flex items-center gap-1.5 text-xs font-bold text-amber-400 group-hover:translate-x-[-3px] transition-transform">
+            <Share2 className="w-4 h-4" />
+            <span>عرض ومشاركة</span>
+          </div>
+        </button>
       </div>
 
       {/* 💼 MANAGER FINANCIAL WEALTH & PERSONAL LEDGER (الذمة المالية والمحفظة الشخصية للمدرب) */}
@@ -930,6 +969,24 @@ export const CareerTab: React.FC = () => {
 
           </div>
         </div>
+      )}
+
+      {/* Official Coach Card Modal */}
+      <CoachCardModal
+        isOpen={showCoachCardModal}
+        onClose={() => setShowCoachCardModal(false)}
+        manager={manager}
+        userClub={userClub}
+        worldRankings={worldRankings}
+      />
+
+      {/* Starting 4th Tier Club Selection Modal */}
+      {showClubSelectModal && (
+        <ClubSelectionModal
+          onClubSelected={handleClubSelectedForNewCareer}
+          onClose={() => setShowClubSelectModal(false)}
+          initialSelectedClubId={userClub?.id}
+        />
       )}
 
     </div>

@@ -8,6 +8,7 @@ import {
   RewardAdOptions,
   RewardAdPluginEvents,
   BannerAdPluginEvents,
+  InterstitialAdPluginEvents,
   AdMobRewardItem,
 } from '@capacitor-community/admob';
 import { ADMOB_CONFIG } from '../config/admobConfig';
@@ -23,13 +24,38 @@ class AdManagerService {
   private initPromise: Promise<boolean> | null = null;
   private isNative = false;
 
-  // Banner State
+  // Banner State (Bottom Banner)
   private isBannerVisible = false;
   private isBannerCreated = false;
   private isBannerActive = false;
   private isBannerLoading = false;
   private bannerListenersAttached = false;
   private bannerListenerHandles: PluginListenerHandle[] = [];
+
+  // Top Banner State
+  private isTopBannerActive = false;
+  private isTopBannerLoading = false;
+  private isTopBannerCreated = false;
+
+  // Interstitial State
+  private isInterstitialLoading = false;
+  private isInterstitialLoaded = false;
+  private isInterstitialShowing = false;
+  private interstitialListenerHandles: PluginListenerHandle[] = [];
+  private lastShownFixtureId: string | null = null;
+
+  private async cleanupInterstitialListeners() {
+    while (this.interstitialListenerHandles.length > 0) {
+      const handle = this.interstitialListenerHandles.pop();
+      if (handle) {
+        try {
+          await handle.remove();
+        } catch {
+          // ignore
+        }
+      }
+    }
+  }
 
   // Rewarded State
   private isRewardedLoading = false;
@@ -280,38 +306,268 @@ class AdManagerService {
   }
 
   // ==========================================
-  // INTERSTITIAL ADS (COMPLETELY DISABLED)
+  // TOP BANNER (NATIVE ADMOB)
+  // ==========================================
+
+  public async ensureTopBannerActive(): Promise<boolean> {
+    if (!ADMOB_CONFIG.ENABLE_BANNER || this.state.isPremium) {
+      return false;
+    }
+
+    if (this.isTopBannerActive || this.isTopBannerCreated || this.isTopBannerLoading) {
+      return true;
+    }
+
+    this.isTopBannerLoading = true;
+
+    try {
+      if (!this.isInitialized) {
+        await this.initialize();
+      }
+
+      if (this.isNative) {
+        const options: BannerAdOptions = {
+          adId: ADMOB_CONFIG.TOP_BANNER_ID || 'ca-app-pub-5272866425919152/6734203345',
+          adSize: BannerAdSize.BANNER,
+          position: BannerAdPosition.TOP_CENTER,
+          margin: 0,
+          isTesting: ADMOB_CONFIG.IS_TEST_MODE,
+        };
+
+        await AdMob.showBanner(options);
+        this.isTopBannerCreated = true;
+        this.isTopBannerActive = true;
+        this.isTopBannerLoading = false;
+        this.log('Native Top Banner Ad request sent');
+      } else {
+        this.isTopBannerCreated = true;
+        this.isTopBannerActive = true;
+        this.isTopBannerLoading = false;
+      }
+
+      return true;
+    } catch (error) {
+      console.warn('[ADMOB] Top Banner showBanner error:', error);
+      this.isTopBannerActive = false;
+      this.isTopBannerLoading = false;
+      return false;
+    }
+  }
+
+  // ==========================================
+  // INTERSTITIAL ADS (PRODUCTION ADMOB)
   // ==========================================
 
   public isInterstitialActive(): boolean {
-    return false;
+    return ADMOB_CONFIG.ENABLE_INTERSTITIAL && !this.state.isPremium;
   }
 
   public isInterstitialShowingNow(): boolean {
-    return false;
+    return this.isInterstitialShowing;
   }
 
   public shouldShowInterstitial(): boolean {
-    return false;
+    if (!ADMOB_CONFIG.ENABLE_INTERSTITIAL || this.state.isPremium) return false;
+    const freq = ADMOB_CONFIG.INTERSTITIAL_FREQUENCY_MATCHES || 5;
+    return (this.state.matchesPlayedSinceLastInterstitial || 0) >= freq;
   }
 
-  public async loadInterstitial(): Promise<boolean> {
-    return false;
+  public async loadInterstitial(timeoutMs: number = 8000): Promise<boolean> {
+    if (!ADMOB_CONFIG.ENABLE_INTERSTITIAL || this.state.isPremium) return false;
+    if (this.isInterstitialLoaded) return true;
+    if (this.isInterstitialLoading) return false;
+
+    if (!this.isNative) {
+      this.isInterstitialLoaded = true;
+      return true;
+    }
+
+    this.isInterstitialLoading = true;
+
+    return new Promise<boolean>(async (resolve) => {
+      let settled = false;
+      let timer: NodeJS.Timeout | null = null;
+
+      const finish = async (success: boolean) => {
+        if (settled) return;
+        settled = true;
+        if (timer) {
+          clearTimeout(timer);
+          timer = null;
+        }
+        await this.cleanupInterstitialListeners();
+        this.isInterstitialLoading = false;
+        this.isInterstitialLoaded = success;
+        resolve(success);
+      };
+
+      timer = setTimeout(() => {
+        finish(false);
+      }, timeoutMs);
+
+      try {
+        if (!this.isInitialized) {
+          await this.initialize();
+        }
+
+        await this.cleanupInterstitialListeners();
+
+        const loadedHandle = await AdMob.addListener(InterstitialAdPluginEvents.Loaded, () => {
+          this.log('Interstitial loaded successfully');
+          finish(true);
+        });
+        this.interstitialListenerHandles.push(loadedHandle);
+
+        const failHandle = await AdMob.addListener(InterstitialAdPluginEvents.FailedToLoad, (err) => {
+          this.log('Interstitial failed to load:', err);
+          finish(false);
+        });
+        this.interstitialListenerHandles.push(failHandle);
+
+        await AdMob.prepareInterstitial({
+          adId: ADMOB_CONFIG.INTERSTITIAL_ID || 'ca-app-pub-5272866425919152/5931052283',
+          isTesting: ADMOB_CONFIG.IS_TEST_MODE,
+        });
+      } catch (e) {
+        this.log('Error preparing interstitial:', e);
+        finish(false);
+      }
+    });
   }
 
   public async showInterstitial(onDismiss?: () => void): Promise<boolean> {
-    if (onDismiss) {
-      try {
-        onDismiss();
-      } catch (e) {
-        console.error('Error in onDismiss callback:', e);
-      }
+    if (!ADMOB_CONFIG.ENABLE_INTERSTITIAL || this.state.isPremium || this.isInterstitialShowing) {
+      if (onDismiss) onDismiss();
+      return false;
     }
-    return false;
+
+    if (!this.isNative) {
+      if (onDismiss) onDismiss();
+      return true;
+    }
+
+    // إذا لم يكن الإعلان Loaded، لا تنتظر ولا توقف اللعبة
+    if (!this.isInterstitialLoaded) {
+      if (onDismiss) onDismiss();
+      // Preload quietly in the background for next time
+      this.loadInterstitial().catch(() => {});
+      return false;
+    }
+
+    this.isInterstitialShowing = true;
+    let isCleanedUp = false;
+
+    const cleanup = async () => {
+      if (isCleanedUp) return;
+      isCleanedUp = true;
+      await this.cleanupInterstitialListeners();
+      this.isInterstitialShowing = false;
+      this.isInterstitialLoaded = false;
+      this.isInterstitialLoading = false;
+      // Preload next in background after showing
+      setTimeout(() => {
+        this.loadInterstitial().catch(() => {});
+      }, 5000);
+    };
+
+    try {
+      await this.cleanupInterstitialListeners();
+
+      const dismissHandle = await AdMob.addListener(InterstitialAdPluginEvents.Dismissed, async () => {
+        await cleanup();
+        if (onDismiss) {
+          try {
+            onDismiss();
+          } catch (e) {
+            console.error('Error in onDismiss callback:', e);
+          }
+        }
+      });
+      this.interstitialListenerHandles.push(dismissHandle);
+
+      const failHandle = await AdMob.addListener(InterstitialAdPluginEvents.FailedToShow, async (err) => {
+        this.log('Interstitial failed to show:', err);
+        await cleanup();
+        if (onDismiss) {
+          try {
+            onDismiss();
+          } catch (e) {
+            console.error('Error in onDismiss callback:', e);
+          }
+        }
+      });
+      this.interstitialListenerHandles.push(failHandle);
+
+      // Safe presentation fallback timeout: never freeze the game
+      setTimeout(() => {
+        if (this.isInterstitialShowing) {
+          cleanup();
+          if (onDismiss) onDismiss();
+        }
+      }, 6000);
+
+      await AdMob.showInterstitial();
+      return true;
+    } catch (err) {
+      this.log('Error showing interstitial:', err);
+      await cleanup();
+      if (onDismiss) onDismiss();
+      return false;
+    }
   }
 
-  public onMatchCompleted(onAfterAd?: () => void): { shouldShowInterstitial: boolean } {
-    if (onAfterAd) onAfterAd();
+  public onMatchCompleted(fixtureId?: string, onAfterAd?: () => void): { shouldShowInterstitial: boolean } {
+    const callback = () => {
+      if (onAfterAd) {
+        try {
+          onAfterAd();
+        } catch (e) {
+          console.error('Error in onAfterAd callback:', e);
+        }
+      }
+    };
+
+    if (!ADMOB_CONFIG.ENABLE_INTERSTITIAL || this.state.isPremium) {
+      callback();
+      return { shouldShowInterstitial: false };
+    }
+
+    // لا يظهر أكثر من مرة لنفس المباراة
+    if (fixtureId && fixtureId === this.lastShownFixtureId) {
+      callback();
+      return { shouldShowInterstitial: false };
+    }
+
+    this.state.matchesPlayedSinceLastInterstitial = (this.state.matchesPlayedSinceLastInterstitial || 0) + 1;
+    this.saveState();
+
+    const frequency = ADMOB_CONFIG.INTERSTITIAL_FREQUENCY_MATCHES || 5;
+
+    // Background preload preparation when reaching 4th match so it is ready on the 5th match
+    if (this.state.matchesPlayedSinceLastInterstitial === frequency - 1 && !this.isInterstitialLoaded) {
+      this.loadInterstitial().catch(() => {});
+    }
+
+    // يظهر فقط بعد كل 5 مباريات مكتملة
+    if (this.state.matchesPlayedSinceLastInterstitial >= frequency) {
+      this.state.matchesPlayedSinceLastInterstitial = 0;
+      this.saveState();
+      if (fixtureId) {
+        this.lastShownFixtureId = fixtureId;
+      }
+
+      if (this.isInterstitialLoaded) {
+        this.showInterstitial(callback);
+        return { shouldShowInterstitial: true };
+      } else {
+        // إذا لم يكن الإعلان Loaded، لا تنتظر ولا توقف اللعبة
+        callback();
+        this.loadInterstitial().catch(() => {});
+        return { shouldShowInterstitial: false };
+      }
+    }
+
+    callback();
     return { shouldShowInterstitial: false };
   }
 

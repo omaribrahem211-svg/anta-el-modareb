@@ -284,7 +284,8 @@ interface GameContextType {
 
   // Career & Cloud Saves
   saveToCloud: (isManual?: boolean) => Promise<{ success: boolean; message: string }>;
-  resetGame: () => void;
+  resetGame: (startingClubId?: string) => void;
+  selectStartingClub: (clubId: string) => boolean;
   updateManagerName: (name: string) => void;
   updateTrainerProfile: (name: string, age: number, nationality: string) => void;
   exportCurrentSavePayload: () => any;
@@ -5543,7 +5544,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     };
   };
 
-  const resetGame = () => {
+  const resetGame = (startingClubId?: string) => {
     // Clear storage repository (IndexedDB and localStorage mirrors)
     gameStateRepository.clearLocalGameState().catch(err => console.warn('Error clearing local game state:', err));
 
@@ -5571,11 +5572,17 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     localStorage.removeItem(`${STORAGE_KEY}_scoutedOpponents`);
     localStorage.removeItem(`${STORAGE_KEY}_deletedMessageIds`);
 
-    const freshTeams = applyWorldOverridesToClubs(INITIAL_TEAMS);
+    const rawTeams = applyWorldOverridesToClubs(INITIAL_TEAMS);
+    const chosenClubId = startingClubId || 'team_user';
+    const freshTeams = rawTeams.map(t => ({
+      ...t,
+      isUserClub: t.id === chosenClubId,
+    }));
+    const chosenUserClub = freshTeams.find(t => t.id === chosenClubId) || freshTeams[0];
     const freshMarket = applyWorldOverridesToMarket(INITIAL_TRANSFER_MARKET);
-    const freshCup = initNationalCupTournament(1, 'مصر', freshTeams, freshTeams[0]);
+    const freshCup = initNationalCupTournament(1, 'مصر', freshTeams, chosenUserClub);
 
-    const freshAgenda = generateMasterSeasonAgenda(1, EGYPT_TIER_4_LEAGUE, freshTeams, freshCup, undefined, freshTeams[0]);
+    const freshAgenda = generateMasterSeasonAgenda(1, EGYPT_TIER_4_LEAGUE, freshTeams, freshCup, undefined, chosenUserClub);
     const maxR = Math.max(...freshAgenda.map(f => f.round), 44);
 
     setSeason({ ...INITIAL_SEASON, totalRounds: maxR });
@@ -5585,18 +5592,26 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     setCupTournament(freshCup);
     setFixtures(freshAgenda);
     setCurrentRound(1);
-    setManager(INITIAL_MANAGER);
+    setManager({
+      ...INITIAL_MANAGER,
+      currentClubId: chosenUserClub.id,
+      clubsManaged: [chosenUserClub.name],
+    });
     setTransferMarket(freshMarket);
     setIncomingBids([]);
     setDeletedMessageIds([]);
-    setInbox(INITIAL_INBOX);
+    setInbox(INITIAL_INBOX.map((msg, idx) => idx === 0 ? {
+      ...msg,
+      title: `مرحباً بك في ${chosenUserClub.name}!`,
+      content: `يا كابتن، بنرحب بيك على رأس القيادة الفنية لنادي ${chosenUserClub.name} العريق في دوري الدرجة الرابعة. الجماهير هنا بتعشق الكورة ومستنية منك تصعد بالفريق للدرجة الثالثة وتعمل موسم تاريخي. الخزينة فيها ${chosenUserClub.budget.toLocaleString()} جنيه، والقائمة تحت أمرك. ورينا شطارتك وتكتيكك!`,
+    } : msg));
     setJobOffers([]);
     setSeasonEndSummary(null);
     setShowSeasonTransitionModal(false);
     setLiveMatch(null);
     setTransferHistory([]);
     setClubEconomy({
-      clubBudget: freshTeams[0]?.budget || 250000,
+      clubBudget: chosenUserClub.budget || 85000,
       transferSpendingTotal: 0,
       transferIncomeTotal: 0,
       salaryExpensesTotal: 0,
@@ -5607,10 +5622,32 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     });
     setCalendarDate(getInitialSeasonDate(1));
     setActiveNegotiations([]);
-    setBoardSystem(generateInitialBoardSystem(freshTeams[0], 4, freshTeams.length, freshTeams, false));
+    setBoardSystem(generateInitialBoardSystem(chosenUserClub, 4, freshTeams.length, freshTeams, false));
     setDailyNews([]);
     setRetiredPlayers([]);
     setScoutedOpponents({});
+  };
+
+  const selectStartingClub = (clubId: string): boolean => {
+    const target = teams.find(t => t.id === clubId);
+    if (!target) return false;
+
+    const updatedTeams = teams.map(t => ({
+      ...t,
+      isUserClub: t.id === clubId,
+    }));
+    setTeams(updatedTeams);
+    setManager(prev => ({
+      ...prev,
+      currentClubId: target.id,
+      clubsManaged: Array.from(new Set([...(prev.clubsManaged || []), target.name])),
+    }));
+    setClubEconomy(prev => ({
+      ...prev,
+      clubBudget: target.budget,
+    }));
+    setBoardSystem(generateInitialBoardSystem(target, 4, updatedTeams.length, updatedTeams, false));
+    return true;
   };
 
   const updateManagerName = (name: string) => {
@@ -5952,6 +5989,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         resignToUnemployed,
         saveToCloud,
         resetGame,
+        selectStartingClub,
         updateManagerName,
         updateTrainerProfile,
         exportCurrentSavePayload,

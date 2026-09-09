@@ -43,17 +43,17 @@ export const PRODUCTION_AD_IDS = {
   REWARDED_ID: 'ca-app-pub-5272866425919152/6872814469',      // إعلان بمكافأة حقيقي (علاج وإلغاء إيقاف)
 };
 
-// Activated for diagnosis to use Google test ads and guarantee 100% fill rate and zero crashes
-export const IS_TEST_MODE = true;
+// Set to false to use real Google AdMob Production IDs
+export const IS_TEST_MODE = false;
 
 export const ADMOB_CONFIG: AdMobConfigType = {
-  IS_TEST_MODE: true,
-  ENABLE_LOGS: true,
+  IS_TEST_MODE: false,
+  ENABLE_LOGS: false,
   ENABLE_REWARDS: true, // تفعيل إعلانات المكافأة
   ENABLE_BANNER: true,  // تفعيل إعلان البانر الثابت المستقر في أسفل الشاشة
-  ENABLE_INTERSTITIAL: false, // تعطيل الإعلانات البينية بالكامل مؤقتاً لاستقرار اللعبة ومنع الشاشة البيضاء والتهنيج
-  INTERSTITIAL_FREQUENCY_MATCHES: 3, // عرض إعلان بيني كل 3 مباريات عند اكتمالها
-  REWARDED_COOLDOWN_SECONDS: 0,           // متاح عند الحاجة لعلاج أو إلغاء إيقاف لاعب
+  ENABLE_INTERSTITIAL: true, // تفعيل الإعلانات البينية للإنتاج بعد كل 5 مباريات
+  INTERSTITIAL_FREQUENCY_MATCHES: 5, // عرض إعلان بيني كل 5 مباريات عند اكتمالها
+  REWARDED_COOLDOWN_SECONDS: 0,           // متاح عند الحاجة
   APP_ID: PRODUCTION_AD_IDS.APP_ID,
   TOP_BANNER_ID: PRODUCTION_AD_IDS.TOP_BANNER_ID,
   BOTTOM_BANNER_ID: PRODUCTION_AD_IDS.BOTTOM_BANNER_ID,

@@ -23,10 +23,15 @@ export const BannerAdContainer: React.FC<BannerAdContainerProps> = ({ activeTab,
     if (!ADMOB_CONFIG.ENABLE_BANNER || isPremium) return;
 
     const timer = setTimeout(() => {
+      // Bottom Native AdMob Banner
       AdManager.ensureBannerActive().catch((err) => {
-        console.warn('[BannerAdContainer] Deferred banner notice:', err);
+        console.warn('[BannerAdContainer] Deferred bottom banner notice:', err);
       });
-    }, 5000);
+      // Top Native AdMob Banner
+      AdManager.ensureTopBannerActive().catch((err) => {
+        console.warn('[BannerAdContainer] Deferred top banner notice:', err);
+      });
+    }, 4000);
 
     return () => clearTimeout(timer);
   }, [isPremium]);

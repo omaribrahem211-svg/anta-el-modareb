@@ -21,7 +21,6 @@ import {
   Play,
   Pause,
   FastForward,
-  SkipForward,
   CheckCircle2,
   Calendar,
   Shield,
@@ -105,23 +104,6 @@ export const MatchesTab: React.FC = () => {
   const [isScoutingLoading, setIsScoutingLoading] = useState(false);
   const [scoutingToast, setScoutingToast] = useState<{ text: string; isError: boolean } | null>(null);
   const [showScoutingModal, setShowScoutingModal] = useState(false);
-
-  const isSkippingRef = React.useRef(false);
-  const [isSkipping, setIsSkipping] = useState(false);
-
-  const handleSafeSkip = () => {
-    if (isSkipping || isSkippingRef.current || !liveMatch || liveMatch.isFinished) return;
-    isSkippingRef.current = true;
-    setIsSkipping(true);
-    try {
-      skipLiveMatchToEnd();
-    } finally {
-      setTimeout(() => {
-        isSkippingRef.current = false;
-        setIsSkipping(false);
-      }, 300);
-    }
-  };
   const [subToast, setSubToast] = useState<string | null>(null);
   const [tacticalToast, setTacticalToast] = useState<string | null>(null);
   const [snoozedTacticalAlerts, setSnoozedTacticalAlerts] = useState<Record<string, number>>({});
@@ -417,35 +399,21 @@ export const MatchesTab: React.FC = () => {
             </div>
           </div>
 
-          {/* In-Game Speed & Action Controls (if not finished) */}
+          {/* In-Game Action Controls (if not finished) */}
           {!liveMatch.isFinished && !liveMatch.isHalfTime ? (
-            <div className="grid grid-cols-4 gap-2 mt-4 pt-3 border-t border-slate-800">
+            <div className="flex items-center justify-between mt-4 pt-3 border-t border-slate-800">
               <button
                 onClick={liveMatch.isPlaying ? pauseLiveMatch : resumeLiveMatch}
-                className="col-span-1 flex items-center justify-center gap-1 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-white font-bold text-xs py-2 rounded-xl cursor-pointer"
+                className="flex items-center justify-center gap-2 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-white font-bold text-xs py-2.5 px-4 rounded-xl cursor-pointer transition-all active:scale-95"
               >
-                {liveMatch.isPlaying ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
-                <span>{liveMatch.isPlaying ? 'إيقاف' : 'استئناف'}</span>
+                {liveMatch.isPlaying ? <Pause className="w-4 h-4 text-amber-400" /> : <Play className="w-4 h-4 text-emerald-400" />}
+                <span>{liveMatch.isPlaying ? 'إيقاف مؤقت' : 'استئناف اللعب'}</span>
               </button>
 
-              <button
-                onClick={() => setMatchSpeed(liveMatch.speed === 1 ? 2 : liveMatch.speed === 2 ? 4 : 1)}
-                className="col-span-1 flex items-center justify-center gap-1 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-amber-400 font-mono font-bold text-xs py-2 rounded-xl cursor-pointer"
-              >
-                <FastForward className="w-4 h-4" />
-                <span>{liveMatch.speed}x</span>
-              </button>
-
-              <button
-                disabled={isSkipping}
-                onClick={handleSafeSkip}
-                className={`col-span-2 flex items-center justify-center gap-1.5 bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-500 hover:to-orange-500 text-white font-black text-xs py-2 rounded-xl shadow-md cursor-pointer transition-all active:scale-95 ${
-                  isSkipping ? 'opacity-60 cursor-not-allowed pointer-events-none' : ''
-                }`}
-              >
-                <SkipForward className="w-4 h-4" />
-                <span>{isSkipping ? 'جاري التخطي...' : 'تخطي للنهاية (صافرة الحكم)'}</span>
-              </button>
+              <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-slate-950/80 border border-slate-800 text-slate-300 text-xs font-semibold">
+                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                <span>سرعة طبيعية (1x) • متابعة كاملة</span>
+              </div>
             </div>
           ) : liveMatch.isFinished ? (
             /* Match Finished Banner & Advance CTA */
@@ -961,25 +929,14 @@ export const MatchesTab: React.FC = () => {
               </div>
             </div>
 
-            {/* Resume 2nd Half Action Button & Skip to end */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-1">
+            {/* Resume 2nd Half Action Button */}
+            <div className="pt-1">
               <button
                 onClick={() => resumeSecondHalf(teamTalkChosen === 'motivate' || teamTalkChosen === 'demand')}
-                className="sm:col-span-2 py-3.5 px-4 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-black text-sm rounded-2xl shadow-xl shadow-emerald-950/60 transition-all active:scale-95 flex items-center justify-center gap-2 cursor-pointer"
+                className="w-full py-3.5 px-4 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-black text-sm rounded-2xl shadow-xl shadow-emerald-950/60 transition-all active:scale-95 flex items-center justify-center gap-2 cursor-pointer"
               >
                 <Play className="w-4 h-4 fill-white" />
                 <span>استئناف الشوط الثاني (الدقائق 46 - 90)</span>
-              </button>
-
-              <button
-                disabled={isSkipping}
-                onClick={handleSafeSkip}
-                className={`sm:col-span-1 py-3.5 px-4 bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-500 hover:to-orange-500 text-white font-black text-xs rounded-2xl shadow-md transition-all active:scale-95 flex items-center justify-center gap-1.5 cursor-pointer ${
-                  isSkipping ? 'opacity-60 cursor-not-allowed pointer-events-none' : ''
-                }`}
-              >
-                <SkipForward className="w-4 h-4" />
-                <span>{isSkipping ? 'جاري التخطي...' : 'تخطي للنهاية'}</span>
               </button>
             </div>
           </div>
