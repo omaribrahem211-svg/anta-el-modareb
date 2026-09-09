@@ -10,16 +10,13 @@
 export interface AdMobConfigType {
   IS_TEST_MODE: boolean;
   ENABLE_LOGS: boolean;
-  ENABLE_REWARDS: boolean; // Master toggle to disable/enable all rewards
-  ENABLE_BANNER: boolean;  // Native stable bottom banner toggle
-  ENABLE_INTERSTITIAL: boolean; // Interstitial ads toggle (disabled for stability)
-  INTERSTITIAL_FREQUENCY_MATCHES: number; // Show interstitial every N matches
-  REWARDED_COOLDOWN_SECONDS: number;     // Cooldown between rewarded ad claims
+  ENABLE_REWARDS: boolean; // Master toggle for rewarded ads
+  ENABLE_BANNER: boolean;  // In-content banner ad toggle
+  REWARDED_COOLDOWN_SECONDS: number;
   APP_ID: string;
-  TOP_BANNER_ID: string;    // بانر تحت صفحة الفيسبوك (Top In-Content Banner)
-  BOTTOM_BANNER_ID: string; // بانر فوق القائمة السفلية (Bottom Fixed Banner)
-  BANNER_ID: string;        // Native banner ad unit ID
-  INTERSTITIAL_ID: string;
+  TOP_BANNER_ID: string;    // بانر تحت صفحة الفيسبوك (In-Content Banner)
+  BOTTOM_BANNER_ID: string; // بانر احتياطي
+  BANNER_ID: string;
   REWARDED_ID: string;
 }
 
@@ -29,36 +26,30 @@ export const TEST_AD_IDS = {
   TOP_BANNER_ID: 'ca-app-pub-3940256099942544/6300978111',
   BOTTOM_BANNER_ID: 'ca-app-pub-3940256099942544/6300978111',
   BANNER_ID: 'ca-app-pub-3940256099942544/6300978111',
-  INTERSTITIAL_ID: 'ca-app-pub-3940256099942544/1033173712',
   REWARDED_ID: 'ca-app-pub-3940256099942544/5224354917',
 };
 
 // Official Production AdMob IDs for "أنت المدرب"
 export const PRODUCTION_AD_IDS = {
   APP_ID: 'ca-app-pub-5272866425919152~1232269694',
-  BANNER_ID: 'ca-app-pub-5272866425919152/4077924883',        // البانر الثابت أسفل الشاشة
+  BANNER_ID: 'ca-app-pub-5272866425919152/4077924883',
   TOP_BANNER_ID: 'ca-app-pub-5272866425919152/6734203345',    // بانر تحت جزء صفحة الفيسبوك
-  BOTTOM_BANNER_ID: 'ca-app-pub-5272866425919152/4077924883', // بانر أسفل الشاشة
-  INTERSTITIAL_ID: 'ca-app-pub-5272866425919152/5931052283',  // إعلان بيني أصلي مسبق التحميل
-  REWARDED_ID: 'ca-app-pub-5272866425919152/6872814469',      // إعلان بمكافأة حقيقي (علاج وإلغاء إيقاف)
+  BOTTOM_BANNER_ID: 'ca-app-pub-5272866425919152/4077924883',
+  REWARDED_ID: 'ca-app-pub-5272866425919152/6872814469',      // إعلان بمكافأة حقيقي
 };
 
-// Set to true to activate AdMob ads for testing on Android devices
-// When true, official Google test ads appear with 100% guarantee during testing
-export const IS_TEST_MODE = true;
+// Production Mode: IS_TEST_MODE = false for Google Play release
+export const IS_TEST_MODE = false;
 
 export const ADMOB_CONFIG: AdMobConfigType = {
-  IS_TEST_MODE: true,
+  IS_TEST_MODE: false,
   ENABLE_LOGS: true,
   ENABLE_REWARDS: true, // تفعيل إعلانات المكافأة
-  ENABLE_BANNER: true,  // تفعيل إعلان البانر الثابت المستقر في أسفل الشاشة
-  ENABLE_INTERSTITIAL: true, // تفعيل الإعلانات البينية للإنتاج بعد كل 5 مباريات
-  INTERSTITIAL_FREQUENCY_MATCHES: 5, // عرض إعلان بيني كل 5 مباريات عند اكتمالها
-  REWARDED_COOLDOWN_SECONDS: 0,           // متاح عند الحاجة
+  ENABLE_BANNER: true,  // تفعيل إعلان البانر داخل المحتوى أسفل الفيسبوك
+  REWARDED_COOLDOWN_SECONDS: 0,
   APP_ID: PRODUCTION_AD_IDS.APP_ID,
   TOP_BANNER_ID: PRODUCTION_AD_IDS.TOP_BANNER_ID,
   BOTTOM_BANNER_ID: PRODUCTION_AD_IDS.BOTTOM_BANNER_ID,
   BANNER_ID: PRODUCTION_AD_IDS.BANNER_ID,
-  INTERSTITIAL_ID: PRODUCTION_AD_IDS.INTERSTITIAL_ID,
   REWARDED_ID: PRODUCTION_AD_IDS.REWARDED_ID,
 };
