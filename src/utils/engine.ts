@@ -55,6 +55,8 @@ export interface LiveSimulationState {
   currentMinute: number;
   homeScore: number;
   awayScore: number;
+  homePenalties?: number;
+  awayPenalties?: number;
   events: MatchEvent[];
   stats: MatchStats;
   isPlaying: boolean;
@@ -1571,18 +1573,19 @@ export function updateLeagueStandings(
       const isDraw = homeScore === awayScore;
       const isLoss = homeScore < awayScore;
       const formResult: 'W' | 'D' | 'L' = isWin ? 'W' : isDraw ? 'D' : 'L';
+      const prevForm = Array.isArray(standing.form) ? standing.form : [];
 
       return {
         ...standing,
-        played: standing.played + 1,
-        won: standing.won + (isWin ? 1 : 0),
-        drawn: standing.drawn + (isDraw ? 1 : 0),
-        lost: standing.lost + (isLoss ? 1 : 0),
-        goalsFor: standing.goalsFor + homeScore,
-        goalsAgainst: standing.goalsAgainst + awayScore,
-        goalDifference: (standing.goalsFor + homeScore) - (standing.goalsAgainst + awayScore),
-        points: standing.points + (isWin ? 3 : isDraw ? 1 : 0),
-        form: [...standing.form.slice(-4), formResult],
+        played: (standing.played || 0) + 1,
+        won: (standing.won || 0) + (isWin ? 1 : 0),
+        drawn: (standing.drawn || 0) + (isDraw ? 1 : 0),
+        lost: (standing.lost || 0) + (isLoss ? 1 : 0),
+        goalsFor: (standing.goalsFor || 0) + homeScore,
+        goalsAgainst: (standing.goalsAgainst || 0) + awayScore,
+        goalDifference: ((standing.goalsFor || 0) + homeScore) - ((standing.goalsAgainst || 0) + awayScore),
+        points: (standing.points || 0) + (isWin ? 3 : isDraw ? 1 : 0),
+        form: [...prevForm.slice(-4), formResult],
       };
     }
 
@@ -1591,18 +1594,19 @@ export function updateLeagueStandings(
       const isDraw = homeScore === awayScore;
       const isLoss = awayScore < homeScore;
       const formResult: 'W' | 'D' | 'L' = isWin ? 'W' : isDraw ? 'D' : 'L';
+      const prevForm = Array.isArray(standing.form) ? standing.form : [];
 
       return {
         ...standing,
-        played: standing.played + 1,
-        won: standing.won + (isWin ? 1 : 0),
-        drawn: standing.drawn + (isDraw ? 1 : 0),
-        lost: standing.lost + (isLoss ? 1 : 0),
-        goalsFor: standing.goalsFor + awayScore,
-        goalsAgainst: standing.goalsAgainst + homeScore,
-        goalDifference: (standing.goalsFor + awayScore) - (standing.goalsAgainst + homeScore),
-        points: standing.points + (isWin ? 3 : isDraw ? 1 : 0),
-        form: [...standing.form.slice(-4), formResult],
+        played: (standing.played || 0) + 1,
+        won: (standing.won || 0) + (isWin ? 1 : 0),
+        drawn: (standing.drawn || 0) + (isDraw ? 1 : 0),
+        lost: (standing.lost || 0) + (isLoss ? 1 : 0),
+        goalsFor: (standing.goalsFor || 0) + awayScore,
+        goalsAgainst: (standing.goalsAgainst || 0) + homeScore,
+        goalDifference: ((standing.goalsFor || 0) + awayScore) - ((standing.goalsAgainst || 0) + homeScore),
+        points: (standing.points || 0) + (isWin ? 3 : isDraw ? 1 : 0),
+        form: [...prevForm.slice(-4), formResult],
       };
     }
 

@@ -155,43 +155,49 @@ async function executeSave(payload: LocalGameSavePayload): Promise<void> {
     console.warn('[GameStateRepo] Error writing to IndexedDB:', err);
   }
 
-  // 2. Synchronous safety-mirror to localStorage with safe catch
-  const safeSetLS = (key: string, val: string) => {
+  // 2. Non-blocking safety-mirror to localStorage (deferred so it never blocks React UI or frame rendering)
+  setTimeout(() => {
     try {
-      localStorage.setItem(key, val);
-    } catch (e) {
-      // Safe catch for storage limits
+      const safeSetLS = (key: string, val: string) => {
+        try {
+          localStorage.setItem(key, val);
+        } catch (e) {
+          // Safe catch for storage limits
+        }
+      };
+
+      // Save critical lightweight metadata and core entities first
+      safeSetLS(`${LEGACY_STORAGE_PREFIX}_meta_save_version`, String(timestampedPayload.saveVersion));
+      safeSetLS(`${LEGACY_STORAGE_PREFIX}_meta_save_time`, String(timestampedPayload.lastLocalSaveAt));
+      safeSetLS(`${LEGACY_STORAGE_PREFIX}_manager`, JSON.stringify(timestampedPayload.manager));
+      safeSetLS(`${LEGACY_STORAGE_PREFIX}_season`, JSON.stringify(timestampedPayload.season));
+      safeSetLS(`${LEGACY_STORAGE_PREFIX}_activeLeague`, JSON.stringify(timestampedPayload.activeLeague));
+      safeSetLS(`${LEGACY_STORAGE_PREFIX}_currentRound`, JSON.stringify(timestampedPayload.currentRound));
+      safeSetLS(`${LEGACY_STORAGE_PREFIX}_calendarDate`, JSON.stringify(timestampedPayload.calendarDate));
+      safeSetLS(`${LEGACY_STORAGE_PREFIX}_clubEconomy`, JSON.stringify(timestampedPayload.clubEconomy));
+      safeSetLS(`${LEGACY_STORAGE_PREFIX}_standings`, JSON.stringify(timestampedPayload.standings));
+      safeSetLS(`${LEGACY_STORAGE_PREFIX}_boardSystem`, JSON.stringify(timestampedPayload.boardSystem));
+      safeSetLS(`${LEGACY_STORAGE_PREFIX}_cupTournament`, JSON.stringify(timestampedPayload.cupTournament));
+
+      // Secondary items
+      safeSetLS(`${LEGACY_STORAGE_PREFIX}_teams`, JSON.stringify(timestampedPayload.teams));
+      safeSetLS(`${LEGACY_STORAGE_PREFIX}_fixtures`, JSON.stringify(timestampedPayload.fixtures));
+      safeSetLS(`${LEGACY_STORAGE_PREFIX}_inbox`, JSON.stringify(timestampedPayload.inbox));
+      safeSetLS(`${LEGACY_STORAGE_PREFIX}_transferHistory`, JSON.stringify(timestampedPayload.transferHistory));
+      safeSetLS(`${LEGACY_STORAGE_PREFIX}_jobOffers`, JSON.stringify(timestampedPayload.jobOffers));
+      safeSetLS(`${LEGACY_STORAGE_PREFIX}_transferMarket`, JSON.stringify(timestampedPayload.transferMarket));
+      safeSetLS(`${LEGACY_STORAGE_PREFIX}_incomingBids`, JSON.stringify(timestampedPayload.incomingBids));
+      safeSetLS(`${LEGACY_STORAGE_PREFIX}_seasonEndSummary`, JSON.stringify(timestampedPayload.seasonEndSummary));
+      safeSetLS(`${LEGACY_STORAGE_PREFIX}_activeNegotiations`, JSON.stringify(timestampedPayload.activeNegotiations));
+      safeSetLS(`${LEGACY_STORAGE_PREFIX}_dailyNews`, JSON.stringify(timestampedPayload.dailyNews));
+      safeSetLS(`${LEGACY_STORAGE_PREFIX}_retiredPlayers`, JSON.stringify(timestampedPayload.retiredPlayers));
+      safeSetLS(`${LEGACY_STORAGE_PREFIX}_worldRankings`, JSON.stringify(timestampedPayload.worldRankings));
+      safeSetLS(`${LEGACY_STORAGE_PREFIX}_scoutedOpponents`, JSON.stringify(timestampedPayload.scoutedOpponents));
+      safeSetLS(`${LEGACY_STORAGE_PREFIX}_deletedMessageIds`, JSON.stringify(timestampedPayload.deletedMessageIds || []));
+    } catch (mirrorErr) {
+      console.warn('[GameStateRepo] Deferred localStorage mirror notice:', mirrorErr);
     }
-  };
-
-  // Save critical lightweight metadata and core entities first
-  safeSetLS(`${LEGACY_STORAGE_PREFIX}_meta_save_version`, String(timestampedPayload.saveVersion));
-  safeSetLS(`${LEGACY_STORAGE_PREFIX}_meta_save_time`, String(timestampedPayload.lastLocalSaveAt));
-  safeSetLS(`${LEGACY_STORAGE_PREFIX}_manager`, JSON.stringify(timestampedPayload.manager));
-  safeSetLS(`${LEGACY_STORAGE_PREFIX}_season`, JSON.stringify(timestampedPayload.season));
-  safeSetLS(`${LEGACY_STORAGE_PREFIX}_activeLeague`, JSON.stringify(timestampedPayload.activeLeague));
-  safeSetLS(`${LEGACY_STORAGE_PREFIX}_currentRound`, JSON.stringify(timestampedPayload.currentRound));
-  safeSetLS(`${LEGACY_STORAGE_PREFIX}_calendarDate`, JSON.stringify(timestampedPayload.calendarDate));
-  safeSetLS(`${LEGACY_STORAGE_PREFIX}_clubEconomy`, JSON.stringify(timestampedPayload.clubEconomy));
-  safeSetLS(`${LEGACY_STORAGE_PREFIX}_standings`, JSON.stringify(timestampedPayload.standings));
-  safeSetLS(`${LEGACY_STORAGE_PREFIX}_boardSystem`, JSON.stringify(timestampedPayload.boardSystem));
-  safeSetLS(`${LEGACY_STORAGE_PREFIX}_cupTournament`, JSON.stringify(timestampedPayload.cupTournament));
-
-  // Secondary items
-  safeSetLS(`${LEGACY_STORAGE_PREFIX}_teams`, JSON.stringify(timestampedPayload.teams));
-  safeSetLS(`${LEGACY_STORAGE_PREFIX}_fixtures`, JSON.stringify(timestampedPayload.fixtures));
-  safeSetLS(`${LEGACY_STORAGE_PREFIX}_inbox`, JSON.stringify(timestampedPayload.inbox));
-  safeSetLS(`${LEGACY_STORAGE_PREFIX}_transferHistory`, JSON.stringify(timestampedPayload.transferHistory));
-  safeSetLS(`${LEGACY_STORAGE_PREFIX}_jobOffers`, JSON.stringify(timestampedPayload.jobOffers));
-  safeSetLS(`${LEGACY_STORAGE_PREFIX}_transferMarket`, JSON.stringify(timestampedPayload.transferMarket));
-  safeSetLS(`${LEGACY_STORAGE_PREFIX}_incomingBids`, JSON.stringify(timestampedPayload.incomingBids));
-  safeSetLS(`${LEGACY_STORAGE_PREFIX}_seasonEndSummary`, JSON.stringify(timestampedPayload.seasonEndSummary));
-  safeSetLS(`${LEGACY_STORAGE_PREFIX}_activeNegotiations`, JSON.stringify(timestampedPayload.activeNegotiations));
-  safeSetLS(`${LEGACY_STORAGE_PREFIX}_dailyNews`, JSON.stringify(timestampedPayload.dailyNews));
-  safeSetLS(`${LEGACY_STORAGE_PREFIX}_retiredPlayers`, JSON.stringify(timestampedPayload.retiredPlayers));
-  safeSetLS(`${LEGACY_STORAGE_PREFIX}_worldRankings`, JSON.stringify(timestampedPayload.worldRankings));
-  safeSetLS(`${LEGACY_STORAGE_PREFIX}_scoutedOpponents`, JSON.stringify(timestampedPayload.scoutedOpponents));
-  safeSetLS(`${LEGACY_STORAGE_PREFIX}_deletedMessageIds`, JSON.stringify(timestampedPayload.deletedMessageIds || []));
+  }, 50);
 }
 
 export const gameStateRepository = {

@@ -331,6 +331,8 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const [isSimulationRunning, setIsSimulationRunning] = useState(false);
   const isSimulationRunningRef = useRef(false);
   const liveMatchTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const isFinishingMatchRef = useRef(false);
+  const completedMatchFixtureIdRef = useRef<string | null>(null);
 
   // 1. Season State
   const [season, setSeason] = useState<SeasonInfo>(() => {
@@ -1226,7 +1228,14 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           }
           return prev;
         }
-        return simulateMatchStep(prev, userClub?.tactics);
+        const next = simulateMatchStep(prev, userClub?.tactics);
+        if (next.isFinished || !next.isPlaying || next.isHalfTime) {
+          if (liveMatchTimerRef.current) {
+            clearInterval(liveMatchTimerRef.current);
+            liveMatchTimerRef.current = null;
+          }
+        }
+        return next;
       });
     }, intervalTime);
 
@@ -1450,6 +1459,8 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const awayTeam = teams.find(t => t.id === targetFixture.awayTeamId) || (targetFixture.awayTeamId ? findClubInWorld(targetFixture.awayTeamId) : undefined) || teams[1];
 
     const initialSimulationState = createInitialLiveMatchState(targetFixture, homeTeam, awayTeam, userClub?.tactics, userClub?.id);
+    completedMatchFixtureIdRef.current = null;
+    isFinishingMatchRef.current = false;
     setLiveMatch(initialSimulationState);
   };
 
@@ -1611,18 +1622,57 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   const finishLiveMatchAndAdvance = () => {
-    if (isSimulationRunningRef.current) return;
-    if (!liveMatch || !liveMatch.isFinished) return;
+    console.error('[MatchEndingFlow] finishLiveMatchAndAdvance called. State:', liveMatch ? {
+      fixtureId: liveMatch.fixture?.id,
+      isFinished: liveMatch.isFinished,
+      minute: liveMatch.currentMinute,
+      score: `${liveMatch.homeScore}-${liveMatch.awayScore}`
+    } : 'null');
 
+    if (isFinishingMatchRef.current || isSimulationRunningRef.current) {
+      console.error('[MatchEndingFlow] Blocked: match finalization or simulation already running');
+      return;
+    }
+    if (!liveMatch || !liveMatch.isFinished) {
+      console.error('[MatchEndingFlow] Blocked: liveMatch is not active or not finished');
+      return;
+    }
+
+    const currentFixtureId = liveMatch.fixture?.id;
+    if (!currentFixtureId) {
+      console.error('[MatchEndingFlow] Blocked: liveMatch has no fixture ID. Clearing state.');
+      setLiveMatch(null);
+      return;
+    }
+
+    if (completedMatchFixtureIdRef.current === currentFixtureId) {
+      console.error('[MatchEndingFlow] Idempotency catch: fixture', currentFixtureId, 'already finalized');
+      setLiveMatch(null);
+      return;
+    }
+
+    const targetFixtureInList = fixtures.find(f => f && f.id === currentFixtureId);
+    if (targetFixtureInList && targetFixtureInList.isPlayed) {
+      console.error('[MatchEndingFlow] Fixture', currentFixtureId, 'is already marked isPlayed in list. Clearing liveMatch.');
+      completedMatchFixtureIdRef.current = currentFixtureId;
+      setLiveMatch(null);
+      return;
+    }
+
+    // Acquire locks and mark fixture completed
+    isFinishingMatchRef.current = true;
     isSimulationRunningRef.current = true;
     setIsSimulationRunning(true);
+    completedMatchFixtureIdRef.current = currentFixtureId;
 
     if (liveMatchTimerRef.current) {
+      console.error('[MatchEndingFlow] Cleared liveMatchTimerRef interval immediately');
       clearInterval(liveMatchTimerRef.current);
       liveMatchTimerRef.current = null;
     }
 
     try {
+      console.error('[MatchEndingFlow] Processing match finalization for fixture:', currentFixtureId);
       const { fixture, homeTeam, awayTeam, homeScore, awayScore, events, stats } = liveMatch;
 
     // 1. Update this fixture
@@ -2224,6 +2274,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
 
     // Commit changes
+    console.error('[MatchEndingFlow] Committing updated states to React: fixtures, standings, manager, cup, inbox, teams, currentRound');
     setFixtures(updatedFixtures);
     setStandings(updatedStandings);
     setManager(updatedManager);
@@ -2238,11 +2289,21 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     AdManager.consumeTrainingBoost();
     // Interstitial Check (non-blocking background preload & show if ready)
     AdManager.onMatchCompleted();
+    console.error('[MatchEndingFlow] Match finalization completed successfully for round:', currentRound, '-> next:', nextRoundNumber);
+    } catch (error) {
+      console.error('[MatchEndingFlow] CRITICAL UNCAUGHT EXCEPTION in finishLiveMatchAndAdvance:', error);
+      try {
+        setLiveMatch(null);
+      } catch (e) {
+        console.error('[MatchEndingFlow] Failed to clear liveMatch in catch block:', e);
+      }
     } finally {
       setTimeout(() => {
+        isFinishingMatchRef.current = false;
         isSimulationRunningRef.current = false;
         setIsSimulationRunning(false);
-      }, 300);
+        console.error('[MatchEndingFlow] Concurrency locks released successfully');
+      }, 100);
     }
   };
 
@@ -2830,11 +2891,14 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     AdManager.consumeTrainingBoost();
     // Interstitial Check (non-blocking background preload & show if ready)
     AdManager.onMatchCompleted();
+    console.error('[MatchEndingFlow] Instant simulate round completed successfully');
+    } catch (error) {
+      console.error('[MatchEndingFlow] CRITICAL UNCAUGHT EXCEPTION in instantSimulateCurrentRound:', error);
     } finally {
       setTimeout(() => {
         isSimulationRunningRef.current = false;
         setIsSimulationRunning(false);
-      }, 300);
+      }, 100);
     }
   };
 
@@ -4847,11 +4911,14 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     setCalendarDate(newDate);
     setDayAdvanceSummary(summary);
     setShowDaySummaryModal(true);
+    console.error('[DailyProgression] Day advanced successfully to:', newDate.formattedArabic);
+    } catch (error) {
+      console.error('[DailyProgression] CRITICAL UNCAUGHT EXCEPTION in advanceToNextDay:', error);
     } finally {
       setTimeout(() => {
         isSimulationRunningRef.current = false;
         setIsSimulationRunning(false);
-      }, 300);
+      }, 100);
     }
   };
 
