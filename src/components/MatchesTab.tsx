@@ -228,31 +228,47 @@ export const MatchesTab: React.FC = () => {
   // Resolve upcoming match details for user club
   const upcomingMatchAnalysis = useMemo(() => {
     if (!userFixture || !userClub?.id) return null;
-    const isUserHome = userFixture.homeTeamId === userClub.id;
-    const oppTeamId = isUserHome ? userFixture.awayTeamId : userFixture.homeTeamId;
-    const oppClub = (oppTeamId ? (teams.find(t => t && t.id === oppTeamId) || findClubInWorld(oppTeamId)) : null) || null;
+    try {
+      const isUserHome = userFixture.homeTeamId === userClub.id;
+      const oppTeamId = isUserHome ? userFixture.awayTeamId : userFixture.homeTeamId;
+      const oppClub = (oppTeamId ? (teams.find(t => t && t.id === oppTeamId) || findClubInWorld(oppTeamId)) : null) || null;
 
-    if (!oppClub) return null;
+      if (!oppClub) return null;
 
-    const oppManager = oppClub.manager || getOrCreateClubManager(oppClub);
-    const oppSquad = calculateSquadStrength(oppClub);
-    const userSquad = userSquadStrength || calculateSquadStrength(userClub);
+      const oppManager = oppClub.manager || getOrCreateClubManager(oppClub) || {
+        id: `mgr_${oppClub.id}`,
+        name: 'مدرب المنافس',
+        rating: 65,
+        worldRank: 450,
+        preferredFormation: '4-3-3',
+      };
+      const oppSquad = calculateSquadStrength(oppClub) || { overall: 65, attack: 65, midfield: 65, defense: 65, goalkeeper: 65, benchOverall: 65 };
+      const userSquad = userSquadStrength || calculateSquadStrength(userClub) || { overall: 65, attack: 65, midfield: 65, defense: 65, goalkeeper: 65, benchOverall: 65 };
 
-    const homeSquad = isUserHome ? userSquad : oppSquad;
-    const awaySquad = isUserHome ? oppSquad : userSquad;
-    const homeMgrRating = isUserHome ? (userDynamicManagerRating || 50) : (oppManager.rating || 65);
-    const awayMgrRating = isUserHome ? (oppManager.rating || 65) : (userDynamicManagerRating || 50);
+      const homeSquad = isUserHome ? userSquad : oppSquad;
+      const awaySquad = isUserHome ? oppSquad : userSquad;
+      const homeMgrRating = isUserHome ? (userDynamicManagerRating || 50) : (oppManager.rating || 65);
+      const awayMgrRating = isUserHome ? (oppManager.rating || 65) : (userDynamicManagerRating || 50);
 
-    const odds = calculateMatchProbabilities(homeSquad, awaySquad, homeMgrRating, awayMgrRating);
+      const odds = calculateMatchProbabilities(homeSquad, awaySquad, homeMgrRating, awayMgrRating) || {
+        homeWin: 40,
+        draw: 30,
+        awayWin: 30,
+        tacticalEdge: 'balanced',
+      };
 
-    return {
-      isUserHome,
-      oppClub,
-      oppManager,
-      oppSquad,
-      userSquad,
-      odds,
-    };
+      return {
+        isUserHome,
+        oppClub,
+        oppManager,
+        oppSquad,
+        userSquad,
+        odds,
+      };
+    } catch (e) {
+      console.error('[MatchesTab] Error calculating upcomingMatchAnalysis:', e);
+      return null;
+    }
   }, [userFixture, userClub, teams, userSquadStrength, userDynamicManagerRating]);
 
   // If in a live match
@@ -455,8 +471,16 @@ export const MatchesTab: React.FC = () => {
               </div>
 
               <button
+                id="finish_match_and_advance_btn"
                 disabled={isSimulationRunning}
-                onClick={finishLiveMatchAndAdvance}
+                onClick={() => {
+                  console.error('[MatchesTab] User clicked Confirm Result & Advance button');
+                  try {
+                    finishLiveMatchAndAdvance();
+                  } catch (err) {
+                    console.error('[MatchesTab] Error during finishLiveMatchAndAdvance click:', err);
+                  }
+                }}
                 className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-black text-sm py-3.5 px-4 rounded-2xl shadow-xl shadow-emerald-950/60 transition-all active:scale-95 cursor-pointer disabled:opacity-50 disabled:pointer-events-none"
               >
                 <span>{isSimulationRunning ? 'جارٍ حفظ النتيجة والانتقال...' : 'تأكيد النتيجة والانتقال للجولة التالية'}</span>
@@ -1257,8 +1281,8 @@ export const MatchesTab: React.FC = () => {
                   <span>توجيه تكتيكي ذكي:</span>
                 </span>
                 <p className="text-xs text-slate-300 leading-relaxed">
-                  {upcomingMatchAnalysis.oppSquad.overall > upcomingMatchAnalysis.userSquad.overall
-                    ? `فريق ${upcomingMatchAnalysis.oppClub.name} يتفوق في القوة الإجمالية. يُنصح بالاعتماد على التكتيك المتوازن أو الهجمات المرتدة وتضييق المساحات في الثلث الدفاعي.`
+                  {(upcomingMatchAnalysis?.oppSquad?.overall || 65) > (upcomingMatchAnalysis?.userSquad?.overall || 65)
+                    ? `فريق ${upcomingMatchAnalysis?.oppClub?.name || 'المنافس'} يتفوق في القوة الإجمالية. يُنصح بالاعتماد على التكتيك المتوازن أو الهجمات المرتدة وتضييق المساحات في الثلث الدفاعي.`
                     : `فريقك يمتلك أفضلية القوة الفنية. يُنصح بفرض أسلوب الاستحواذ الهجومي والضغط في نصف ملعب المنافس لحسم اللقاء مبكراً.`}
                 </p>
               </div>
@@ -1270,7 +1294,7 @@ export const MatchesTab: React.FC = () => {
                   <span>الجاهزية البدنية والتناوب:</span>
                 </span>
                 <p className="text-xs text-slate-300 leading-relaxed">
-                  {upcomingMatchAnalysis.userSquad.benchOverall < 65
+                  {(upcomingMatchAnalysis?.userSquad?.benchOverall || 65) < 65
                     ? `دكة البدلاء بحاجة لتعزيز في سوق الانتقالات. احرص على تدوير اللاعبين المصابين بالإرهاق قبل انطلاق صافرة البداية.`
                     : `دكة البدلاء جاهزة لإحداث الفارق في الشوط الثاني عند استبدال العناصر المجهدة.`}
                 </p>
@@ -1459,7 +1483,7 @@ export const MatchesTab: React.FC = () => {
 
                       {!canAfford && (
                         <span className="text-xs text-rose-400 font-bold">
-                          رصيد النادي غير كافٍ ({userClub?.budget.toLocaleString()} ج.م)
+                          رصيد النادي غير كافٍ ({(userClub?.budget || 0).toLocaleString()} ج.م)
                         </span>
                       )}
                     </div>
@@ -1480,7 +1504,7 @@ export const MatchesTab: React.FC = () => {
                 </h3>
               </div>
               <span className="text-[11px] bg-slate-800 text-slate-300 px-2.5 py-1 rounded-full font-mono border border-slate-700">
-                {upcomingMatchAnalysis.isUserHome ? 'ملعبك (المضيف)' : 'خارج الديار (الضيف)'}
+                {upcomingMatchAnalysis?.isUserHome ? 'ملعبك (المضيف)' : 'خارج الديار (الضيف)'}
               </span>
             </div>
 
@@ -1499,11 +1523,11 @@ export const MatchesTab: React.FC = () => {
                 <div className="bg-slate-900/90 border border-emerald-500/40 rounded-xl p-3 space-y-2">
                   <div className="flex items-center gap-2">
                     <div className="w-8 h-8 rounded-lg bg-emerald-500/20 border border-emerald-500/50 flex items-center justify-center font-black text-emerald-300 text-xs shrink-0">
-                      {manager.name.charAt(0)}
+                      {(manager?.name || 'م').charAt(0)}
                     </div>
                     <div className="min-w-0">
-                      <h4 className="font-bold text-xs text-white truncate">{manager.name}</h4>
-                      <span className="text-[10px] text-emerald-400 block font-medium">(أنت - {userClub?.name})</span>
+                      <h4 className="font-bold text-xs text-white truncate">{manager?.name || 'المدرب'}</h4>
+                      <span className="text-[10px] text-emerald-400 block font-medium">(أنت - {userClub?.name || 'فريقك'})</span>
                     </div>
                   </div>
 
@@ -1514,7 +1538,7 @@ export const MatchesTab: React.FC = () => {
                     </div>
                     <div className="flex items-center justify-between">
                       <span className="text-slate-400">{t('manager_points')}:</span>
-                      <span className="font-mono text-slate-200">{manager.rankingPoints || 1200} نقطة</span>
+                      <span className="font-mono text-slate-200">{(manager?.rankingPoints || 1200).toLocaleString()} نقطة</span>
                     </div>
                     <div className="flex items-center justify-between">
                       <span className="text-slate-400">{t('preferred_formation')}:</span>
@@ -1527,26 +1551,26 @@ export const MatchesTab: React.FC = () => {
                 <div className="bg-slate-900/90 border border-rose-500/30 rounded-xl p-3 space-y-2">
                   <div className="flex items-center gap-2">
                     <div className="w-8 h-8 rounded-lg bg-rose-500/20 border border-rose-500/50 flex items-center justify-center font-black text-rose-300 text-xs shrink-0">
-                      {upcomingMatchAnalysis.oppManager.name.charAt(0)}
+                      {(upcomingMatchAnalysis?.oppManager?.name || 'م').charAt(0)}
                     </div>
                     <div className="min-w-0">
-                      <h4 className="font-bold text-xs text-white truncate">{upcomingMatchAnalysis.oppManager.name}</h4>
-                      <span className="text-[10px] text-rose-400 block font-medium">({upcomingMatchAnalysis.oppClub.name})</span>
+                      <h4 className="font-bold text-xs text-white truncate">{upcomingMatchAnalysis?.oppManager?.name || 'مدرب المنافس'}</h4>
+                      <span className="text-[10px] text-rose-400 block font-medium">({upcomingMatchAnalysis?.oppClub?.name || 'المنافس'})</span>
                     </div>
                   </div>
 
                   <div className="space-y-1 text-[11px]">
                     <div className="flex items-center justify-between">
                       <span className="text-slate-400">{t('manager_strength')}:</span>
-                      <span className="font-mono font-black text-rose-400 text-xs">{upcomingMatchAnalysis.oppManager.rating} ⭐</span>
+                      <span className="font-mono font-black text-rose-400 text-xs">{upcomingMatchAnalysis?.oppManager?.rating || 65} ⭐</span>
                     </div>
                     <div className="flex items-center justify-between">
                       <span className="text-slate-400">{t('manager_ranking')}:</span>
-                      <span className="font-mono text-slate-200">#{upcomingMatchAnalysis.oppManager.worldRank || 450} عالمياً</span>
+                      <span className="font-mono text-slate-200">#{upcomingMatchAnalysis?.oppManager?.worldRank || 450} عالمياً</span>
                     </div>
                     <div className="flex items-center justify-between">
                       <span className="text-slate-400">{t('preferred_formation')}:</span>
-                      <span className="font-mono font-bold text-slate-300">{upcomingMatchAnalysis.oppManager.preferredFormation}</span>
+                      <span className="font-mono font-bold text-slate-300">{upcomingMatchAnalysis?.oppManager?.preferredFormation || '4-3-3'}</span>
                     </div>
                   </div>
                 </div>
@@ -1564,56 +1588,57 @@ export const MatchesTab: React.FC = () => {
                 {[
                   {
                     label: t('overall_strength'),
-                    userVal: upcomingMatchAnalysis.userSquad.overall,
-                    oppVal: upcomingMatchAnalysis.oppSquad.overall
+                    userVal: upcomingMatchAnalysis?.userSquad?.overall || 65,
+                    oppVal: upcomingMatchAnalysis?.oppSquad?.overall || 65
                   },
                   {
                     label: t('attack'),
-                    userVal: upcomingMatchAnalysis.userSquad.attack,
-                    oppVal: upcomingMatchAnalysis.oppSquad.attack
+                    userVal: upcomingMatchAnalysis?.userSquad?.attack || 65,
+                    oppVal: upcomingMatchAnalysis?.oppSquad?.attack || 65
                   },
                   {
                     label: t('midfield'),
-                    userVal: upcomingMatchAnalysis.userSquad.midfield,
-                    oppVal: upcomingMatchAnalysis.oppSquad.midfield
+                    userVal: upcomingMatchAnalysis?.userSquad?.midfield || 65,
+                    oppVal: upcomingMatchAnalysis?.oppSquad?.midfield || 65
                   },
                   {
                     label: t('defense'),
-                    userVal: upcomingMatchAnalysis.userSquad.defense,
-                    oppVal: upcomingMatchAnalysis.oppSquad.defense
+                    userVal: upcomingMatchAnalysis?.userSquad?.defense || 65,
+                    oppVal: upcomingMatchAnalysis?.oppSquad?.defense || 65
                   },
                   {
                     label: t('goalkeeping'),
-                    userVal: upcomingMatchAnalysis.userSquad.goalkeeper,
-                    oppVal: upcomingMatchAnalysis.oppSquad.goalkeeper
+                    userVal: upcomingMatchAnalysis?.userSquad?.goalkeeper || 65,
+                    oppVal: upcomingMatchAnalysis?.oppSquad?.goalkeeper || 65
                   },
                   {
                     label: t('bench_strength'),
-                    userVal: upcomingMatchAnalysis.userSquad.benchOverall,
-                    oppVal: upcomingMatchAnalysis.oppSquad.benchOverall
+                    userVal: upcomingMatchAnalysis?.userSquad?.benchOverall || 65,
+                    oppVal: upcomingMatchAnalysis?.oppSquad?.benchOverall || 65
                   },
                 ].map((row, idx) => {
                   const isUserAhead = row.userVal > row.oppVal;
                   const isOppAhead = row.oppVal > row.userVal;
+                  const total = (row.userVal + row.oppVal) || 1;
                   return (
                     <div key={idx} className="space-y-1">
                       <div className="flex items-center justify-between text-[11px]">
                         <span className={`font-mono font-bold ${isUserAhead ? 'text-emerald-400' : 'text-slate-300'}`}>
-                          {userClub?.shortName}: {row.userVal}
+                          {userClub?.shortName || userClub?.name || 'فريقك'}: {row.userVal}
                         </span>
                         <span className="text-slate-400 font-medium">{row.label}</span>
                         <span className={`font-mono font-bold ${isOppAhead ? 'text-rose-400' : 'text-slate-300'}`}>
-                          {upcomingMatchAnalysis.oppClub.shortName}: {row.oppVal}
+                          {upcomingMatchAnalysis?.oppClub?.shortName || upcomingMatchAnalysis?.oppClub?.name || 'المنافس'}: {row.oppVal}
                         </span>
                       </div>
                       <div className="h-2 rounded-full bg-slate-900 border border-slate-800 overflow-hidden flex">
                         <div 
                           className="bg-emerald-500 transition-all duration-500" 
-                          style={{ width: `${(row.userVal / (row.userVal + row.oppVal)) * 100}%` }} 
+                          style={{ width: `${(row.userVal / total) * 100}%` }} 
                         />
                         <div 
                           className="bg-rose-500 transition-all duration-500" 
-                          style={{ width: `${(row.oppVal / (row.userVal + row.oppVal)) * 100}%` }} 
+                          style={{ width: `${(row.oppVal / total) * 100}%` }} 
                         />
                       </div>
                     </div>
@@ -1636,19 +1661,19 @@ export const MatchesTab: React.FC = () => {
                 <div className="bg-slate-900/90 border border-slate-800 p-2.5 rounded-xl">
                   <span className="text-[10px] text-slate-400 block">{t('home_win_chance')}</span>
                   <span className="font-mono font-black text-base text-emerald-400">
-                    {upcomingMatchAnalysis.odds.homeWin}%
+                    {upcomingMatchAnalysis?.odds?.homeWin ?? 40}%
                   </span>
                 </div>
                 <div className="bg-slate-900/90 border border-slate-800 p-2.5 rounded-xl">
                   <span className="text-[10px] text-slate-400 block">{t('draw_chance')}</span>
                   <span className="font-mono font-black text-base text-amber-400">
-                    {upcomingMatchAnalysis.odds.draw}%
+                    {upcomingMatchAnalysis?.odds?.draw ?? 30}%
                   </span>
                 </div>
                 <div className="bg-slate-900/90 border border-slate-800 p-2.5 rounded-xl">
                   <span className="text-[10px] text-slate-400 block">{t('away_win_chance')}</span>
                   <span className="font-mono font-black text-base text-blue-400">
-                    {upcomingMatchAnalysis.odds.awayWin}%
+                    {upcomingMatchAnalysis?.odds?.awayWin ?? 30}%
                   </span>
                 </div>
               </div>
@@ -1656,9 +1681,9 @@ export const MatchesTab: React.FC = () => {
               <div className="p-2.5 rounded-xl bg-slate-900 border border-slate-800/80 text-[11px] text-slate-300 flex items-center gap-2">
                 <Info className="w-4 h-4 text-amber-400 shrink-0" />
                 <span>
-                  {upcomingMatchAnalysis.odds.tacticalEdge === 'home'
+                  {upcomingMatchAnalysis?.odds?.tacticalEdge === 'home'
                     ? t('tactical_edge_home')
-                    : upcomingMatchAnalysis.odds.tacticalEdge === 'away'
+                    : upcomingMatchAnalysis?.odds?.tacticalEdge === 'away'
                     ? t('tactical_edge_away')
                     : t('tactical_edge_balanced')}
                 </span>
@@ -1685,6 +1710,9 @@ export const MatchesTab: React.FC = () => {
             const away = (teams.find(t => t && t.id === fixture.awayTeamId) || (fixture.awayTeamId ? findClubInWorld(fixture.awayTeamId) : undefined)) || { name: getClubDisplayName(fixture.awayTeamId, teams), shortName: 'ضف', primaryColor: '#334155', isUserClub: false };
             const isUserGame = Boolean(home?.isUserClub || away?.isUserClub || (userClub?.id && (fixture.homeTeamId === userClub.id || fixture.awayTeamId === userClub.id)));
 
+            const homeInitial = (home?.shortName || home?.name || 'مض').slice(0, 1);
+            const awayInitial = (away?.shortName || away?.name || 'ضف').slice(0, 1);
+
             return (
               <div
                 key={fixture.id}
@@ -1701,9 +1729,9 @@ export const MatchesTab: React.FC = () => {
                   </span>
                   <div 
                     className="w-7 h-7 rounded-lg flex items-center justify-center font-bold text-xs shrink-0 text-white"
-                    style={{ backgroundColor: home.primaryColor }}
+                    style={{ backgroundColor: home.primaryColor || '#334155' }}
                   >
-                    {home.shortName.slice(0, 1)}
+                    {homeInitial}
                   </div>
                 </div>
 
@@ -1720,9 +1748,9 @@ export const MatchesTab: React.FC = () => {
                 <div className="flex items-center gap-2 min-w-0 flex-1 justify-start text-right">
                   <div 
                     className="w-7 h-7 rounded-lg flex items-center justify-center font-bold text-xs shrink-0 text-white"
-                    style={{ backgroundColor: away.primaryColor }}
+                    style={{ backgroundColor: away.primaryColor || '#334155' }}
                   >
-                    {away.shortName.slice(0, 1)}
+                    {awayInitial}
                   </div>
                   <span className={`text-xs font-bold truncate ${away.isUserClub ? 'text-emerald-300' : 'text-white'}`}>
                     {away.name}

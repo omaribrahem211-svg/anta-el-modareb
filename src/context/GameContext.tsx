@@ -2289,6 +2289,43 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     AdManager.consumeTrainingBoost();
     // Interstitial Check (non-blocking background preload & show if ready)
     AdManager.onMatchCompleted();
+
+    // Immediately persist to local disk repository before releasing the concurrency lock
+    try {
+      console.error('[MatchEndingFlow] Saving state to local repository...');
+      gameStateRepository.saveLocalGameState({
+        schemaVersion: 2,
+        saveVersion: 1,
+        lastLocalSaveAt: Date.now(),
+        season,
+        activeLeague,
+        teams: updatedAllTeams,
+        standings: updatedStandings,
+        fixtures: updatedFixtures,
+        currentRound: nextRoundNumber,
+        manager: updatedManager,
+        transferMarket,
+        incomingBids,
+        inbox: [...newInboxMsgs, ...inbox],
+        cupTournament: updatedCupTournament,
+        jobOffers,
+        seasonEndSummary,
+        transferHistory,
+        clubEconomy,
+        calendarDate,
+        activeNegotiations,
+        boardSystem,
+        dailyNews,
+        retiredPlayers,
+        worldRankings,
+        scoutedOpponents,
+        deletedMessageIds,
+      });
+      console.error('[MatchEndingFlow] Local save completed successfully.');
+    } catch (saveErr) {
+      console.error('[MatchEndingFlow] Non-fatal save error in finishLiveMatchAndAdvance:', saveErr);
+    }
+
     console.error('[MatchEndingFlow] Match finalization completed successfully for round:', currentRound, '-> next:', nextRoundNumber);
     } catch (error) {
       console.error('[MatchEndingFlow] CRITICAL UNCAUGHT EXCEPTION in finishLiveMatchAndAdvance:', error);
@@ -2298,12 +2335,13 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         console.error('[MatchEndingFlow] Failed to clear liveMatch in catch block:', e);
       }
     } finally {
+      // Concurrency lock released ONLY after state update and save have finished
       setTimeout(() => {
         isFinishingMatchRef.current = false;
         isSimulationRunningRef.current = false;
         setIsSimulationRunning(false);
         console.error('[MatchEndingFlow] Concurrency locks released successfully');
-      }, 100);
+      }, 150);
     }
   };
 

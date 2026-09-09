@@ -33,6 +33,7 @@ import { AdRewardType } from './services/adRewardService';
 import { ActiveTab, Player } from './types/game';
 import { AdminLayout } from './components/admin/AdminLayout';
 import { AdminAccessDenied } from './components/admin/AdminAccessDenied';
+import { MatchErrorBoundary } from './components/MatchErrorBoundary';
 
 function GameApp() {
   console.log('[STARTUP] App rendered', Math.round(performance.now()) + 'ms');
@@ -215,7 +216,9 @@ function GameApp() {
         )}
 
         {activeTab === 'matches' && (
-          <MatchesTab />
+          <MatchErrorBoundary componentName="MatchesTab">
+            <MatchesTab />
+          </MatchErrorBoundary>
         )}
 
         {activeTab === 'online_pvp' && (
