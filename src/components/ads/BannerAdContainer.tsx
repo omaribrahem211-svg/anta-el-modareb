@@ -18,9 +18,18 @@ export const BannerAdContainer: React.FC<BannerAdContainerProps> = ({ activeTab,
     return () => unsubscribe();
   }, []);
 
-  // Safely defer banner request until after game startup and WebView have completely settled
+  // Safely defer banner request until after game startup and WebView have completely settled,
+  // and strictly hide banners during live matches
   useEffect(() => {
     if (!ADMOB_CONFIG.ENABLE_BANNER || isPremium) return;
+
+    if (isMatchActive) {
+      // Strictly do not show any banner during a match
+      AdManager.hideBanner().catch((err) => {
+        console.warn('[BannerAdContainer] Hide banner during match notice:', err);
+      });
+      return;
+    }
 
     const timer = setTimeout(() => {
       // Bottom Native AdMob Banner
@@ -31,10 +40,10 @@ export const BannerAdContainer: React.FC<BannerAdContainerProps> = ({ activeTab,
       AdManager.ensureTopBannerActive().catch((err) => {
         console.warn('[BannerAdContainer] Deferred top banner notice:', err);
       });
-    }, 4000);
+    }, 3500);
 
     return () => clearTimeout(timer);
-  }, [isPremium]);
+  }, [isPremium, isMatchActive]);
 
   return null;
 };

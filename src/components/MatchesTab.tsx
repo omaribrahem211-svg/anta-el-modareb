@@ -410,9 +410,32 @@ export const MatchesTab: React.FC = () => {
                 <span>{liveMatch.isPlaying ? 'إيقاف مؤقت' : 'استئناف اللعب'}</span>
               </button>
 
-              <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-slate-950/80 border border-slate-800 text-slate-300 text-xs font-semibold">
-                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-                <span>سرعة طبيعية (1x) • متابعة كاملة</span>
+              <div className="flex items-center gap-1.5 bg-slate-950/90 border border-slate-800 p-1 rounded-xl">
+                <span className="text-[11px] font-semibold text-slate-400 px-1 hidden sm:inline">السرعة:</span>
+                <button
+                  type="button"
+                  onClick={() => setMatchSpeed(1)}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                    (liveMatch.speed || 1) === 1
+                      ? 'bg-emerald-500 text-slate-950 shadow-md font-black'
+                      : 'text-slate-400 hover:text-white hover:bg-slate-800'
+                  }`}
+                  title="السرعة الطبيعية 1X"
+                >
+                  1X
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setMatchSpeed(2)}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                    liveMatch.speed === 2
+                      ? 'bg-amber-400 text-slate-950 shadow-md font-black animate-pulse'
+                      : 'text-slate-400 hover:text-white hover:bg-slate-800'
+                  }`}
+                  title="مضاعفة السرعة 2X"
+                >
+                  2X
+                </button>
               </div>
             </div>
           ) : liveMatch.isFinished ? (

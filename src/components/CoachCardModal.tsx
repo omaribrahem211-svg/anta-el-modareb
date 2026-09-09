@@ -104,17 +104,18 @@ export const CoachCardModal: React.FC<CoachCardModalProps> = ({
     if (isSharing) return;
     setIsSharing(true);
 
-    const shareTitle = `كارت المدرب: ${manager.name} - أنت المدرب`;
+    const shareTitle = `كارت المدرب: ${manager.name} - لعبة أنت المدرب`;
     const shareText = 
-      `🏆 بطاقة المدرب الرسمي في لعبة "أنت المدرب" ⚽\n\n` +
+      `🏆 كارت المدرب الرسمي - لعبة أنت المدرب ⚽\n\n` +
       `👤 الاسم: ${manager.name}\n` +
       `🌍 الدولة: ${manager.nationality || 'مصر'}\n` +
       `🎂 العمر: ${manager.age || 35} سنة\n` +
       `🌐 الترتيب العالمي: المركز #${globalRank}\n` +
       `🛡️ النادي: ${userClub?.name || 'دوري الدرجة الرابعة'}\n` +
       `📊 المباريات: ${manager.matchesManaged} مباراة | نسبة الفوز: ${winRate}%\n` +
-      `🥇 البطولات: ${manager.trophies || 0}\n\n` +
-      `⭐ "أنت المدرب" - لعبة التدريب الكروي الواقعية`;
+      `🥇 البطولات: ${manager.trophies || 0} بطولة\n\n` +
+      `🔥 حَمّل لعبة أنت المدرب وشوف قدراتك التدريبية!\n` +
+      `⚽ لعبة أنت المدرب - لعبة التدريب الكروي الواقعية`;
 
     try {
       // 1. Try Capacitor Native Android Share Plugin
@@ -126,7 +127,7 @@ export const CoachCardModal: React.FC<CoachCardModalProps> = ({
             text: shareText,
             dialogTitle: 'مشاركة كارت المدرب عبر واتساب والتطبيقات',
           });
-          setToastMessage('تم فتح نافذة المشاركة الرسمية بنجاح!');
+          setToastMessage('تم فتح نافذة المشاركة بنجاح!');
           setTimeout(() => setToastMessage(null), 3000);
           return;
         }
@@ -205,12 +206,12 @@ export const CoachCardModal: React.FC<CoachCardModalProps> = ({
           {/* Distinctive Decorative Top Hologram / Golden Watermark */}
           <div className="absolute top-0 right-0 left-0 h-1.5 bg-gradient-to-r from-amber-400 via-emerald-400 to-amber-500" />
           
-          {/* Card Top Header Branding: "أنت المدرب" */}
+          {/* Card Top Header Branding: "لعبة أنت المدرب" */}
           <div className="text-center mb-4 relative">
-            <div className="inline-flex items-center gap-2 px-3.5 py-1 rounded-full bg-amber-500/15 border border-amber-400/30 text-amber-300 text-xs font-black tracking-wider uppercase shadow-inner">
-              <Sparkles className="w-3.5 h-3.5 text-amber-400" />
-              <span>أنت المدرب • الكارت الرسمي</span>
-              <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+            <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-gradient-to-r from-amber-500/25 via-amber-400/20 to-emerald-500/25 border border-amber-400/50 text-amber-300 text-xs font-black tracking-wide shadow-inner">
+              <Sparkles className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+              <span>لعبة أنت المدرب</span>
+              <Sparkles className="w-3.5 h-3.5 text-amber-400 shrink-0" />
             </div>
           </div>
 
@@ -330,9 +331,16 @@ export const CoachCardModal: React.FC<CoachCardModalProps> = ({
             </div>
           </div>
 
+          {/* Required Slogan Banner */}
+          <div className="mt-3 p-2.5 rounded-2xl bg-gradient-to-r from-amber-500/20 via-emerald-500/20 to-amber-500/20 border border-amber-400/40 text-center shadow-inner">
+            <p className="text-xs font-black text-amber-300 tracking-tight">
+              🔥 حَمّل لعبة أنت المدرب وشوف قدراتك التدريبية!
+            </p>
+          </div>
+
           {/* Bottom Card Footer Watermark */}
-          <div className="mt-3 text-center text-[10px] text-slate-500 tracking-wide">
-            رخصة تدريب معتمدة • أنت المدرب (Anta El Modareb)
+          <div className="mt-2.5 text-center text-[10px] text-slate-400 tracking-wide font-medium">
+            رخصة تدريب معتمدة • لعبة أنت المدرب
           </div>
         </div>
 

@@ -506,7 +506,9 @@ class AdManagerService {
         }
       }, 6000);
 
-      await AdMob.showInterstitial();
+      await AdMob.showInterstitial({
+        adId: ADMOB_CONFIG.INTERSTITIAL_ID || 'ca-app-pub-5272866425919152/5931052283',
+      });
       return true;
     } catch (err) {
       this.log('Error showing interstitial:', err);
@@ -808,7 +810,9 @@ class AdManagerService {
         this.rewardedListenerHandles.push(failHandle);
 
         // Trigger show in native SDK
-        AdMob.showRewardVideoAd().catch(async (showError: any) => {
+        AdMob.showRewardVideoAd({
+          adId: ADMOB_CONFIG.REWARDED_ID || 'ca-app-pub-5272866425919152/6872814469',
+        }).catch(async (showError: any) => {
           console.warn('[REWARDED] failed to show', showError);
           if (!adHasShown) {
             await cleanup();
