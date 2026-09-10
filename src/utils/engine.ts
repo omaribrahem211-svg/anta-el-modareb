@@ -690,6 +690,7 @@ export function simulateMatchStep(
 
   // Check Fulltime trigger at minute 90
   if (nextMinute > 90) {
+    console.log('[MatchEndingFlow] MATCH_90_REACHED');
     return {
       ...prevState,
       currentMinute: 90,

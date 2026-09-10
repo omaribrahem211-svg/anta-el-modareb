@@ -332,6 +332,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const isSimulationRunningRef = useRef(false);
   const liveMatchTimerRef = useRef<NodeJS.Timeout | null>(null);
   const isFinishingMatchRef = useRef(false);
+  const isMatchFinishedRef = useRef(false);
   const completedMatchFixtureIdRef = useRef<string | null>(null);
 
   // 1. Season State
@@ -1220,6 +1221,14 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
 
     liveMatchTimerRef.current = setInterval(() => {
+      if (isMatchFinishedRef.current) {
+        if (liveMatchTimerRef.current) {
+          clearInterval(liveMatchTimerRef.current);
+          liveMatchTimerRef.current = null;
+        }
+        return;
+      }
+
       setLiveMatch(prev => {
         if (!prev || !prev.isPlaying || prev.isFinished || prev.isHalfTime) {
           if (liveMatchTimerRef.current) {
@@ -1229,7 +1238,11 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           return prev;
         }
         const next = simulateMatchStep(prev, userClub?.tactics);
-        if (next.isFinished || !next.isPlaying || next.isHalfTime) {
+        if (next.isFinished || !next.isPlaying || next.isHalfTime || next.currentMinute >= 90) {
+          if (next.isFinished || next.currentMinute >= 90) {
+            isMatchFinishedRef.current = true;
+            console.log('[MatchEndingFlow] MATCH_90_REACHED: Simulation interval stopped cleanly once.');
+          }
           if (liveMatchTimerRef.current) {
             clearInterval(liveMatchTimerRef.current);
             liveMatchTimerRef.current = null;
@@ -1461,6 +1474,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const initialSimulationState = createInitialLiveMatchState(targetFixture, homeTeam, awayTeam, userClub?.tactics, userClub?.id);
     completedMatchFixtureIdRef.current = null;
     isFinishingMatchRef.current = false;
+    isMatchFinishedRef.current = false;
     setLiveMatch(initialSimulationState);
   };
 
@@ -1622,6 +1636,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   const finishLiveMatchAndAdvance = () => {
+    console.log('[MatchEndingFlow] END_MATCH_STARTED');
     console.error('[MatchEndingFlow] finishLiveMatchAndAdvance called. State:', liveMatch ? {
       fixtureId: liveMatch.fixture?.id,
       isFinished: liveMatch.isFinished,
@@ -1674,6 +1689,21 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     try {
       console.error('[MatchEndingFlow] Processing match finalization for fixture:', currentFixtureId);
       const { fixture, homeTeam, awayTeam, homeScore, awayScore, events, stats } = liveMatch;
+      const homeTeamId = homeTeam?.id || fixture?.homeTeamId;
+      const awayTeamId = awayTeam?.id || fixture?.awayTeamId;
+
+    // 5. Clean up simulation buffer: Keep meaningful match events (goals, cards, substitutions, penalties, saves, chances)
+    // and prune generic high-frequency text commentary to prevent huge memory / localStorage payload.
+    const persistentEvents = (events || []).filter(e => 
+      e && (
+        e.type === 'goal' || 
+        e.type === 'yellow_card' || 
+        e.type === 'red_card' || 
+        e.type === 'substitution' || 
+        e.type === 'save' || 
+        e.type === 'chance'
+      )
+    );
 
     // 1. Update this fixture
     let updatedFixtures = fixtures.map(f => {
@@ -1683,7 +1713,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           homeScore,
           awayScore,
           isPlayed: true,
-          events,
+          events: persistentEvents,
           stats,
         };
       }
@@ -1691,7 +1721,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     });
 
     let updatedStandings = (!fixture.competitionType || fixture.competitionType === 'league')
-      ? updateLeagueStandings(standings, homeTeam.id, awayTeam.id, homeScore, awayScore)
+      ? updateLeagueStandings(standings, homeTeamId, awayTeamId, homeScore, awayScore)
       : standings;
 
     // Update cup tournament matches if this was a cup match
@@ -2073,7 +2103,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const oppTier = activeLeague.tier || 1;
     const oppRep = activeLeague.reputation || 50;
     const oppTeamObj = isUserHome ? awayTeam : homeTeam;
-    const oppClubRating = oppTeamObj?.rating || 65;
+    const oppClubRating = (oppTeamObj as any)?.rating || oppTeamObj?.reputation || 65;
     const { managerPointsDelta } = calculateMatchRankingPoints(isUserWin ? 'W' : isUserDraw ? 'D' : 'L', oppTier, oppRep, 'league', oppClubRating);
     const updatedRankingPoints = Math.max(100, (manager.rankingPoints || 1200) + managerPointsDelta);
 
@@ -2173,7 +2203,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
 
     // 7. Generate Match & Cup Inbox Messages
-    const oppName = isUserHome ? awayTeam.name : homeTeam.name;
+    const oppName = isUserHome ? (awayTeam?.name || 'المنافس') : (homeTeam?.name || 'المنافس');
     const matchOutcomeTitle = isUserWin
       ? `فوز مستحق على ${oppName}! 🎉 (${userScore}-${oppScore})`
       : isUserDraw
@@ -2286,13 +2316,28 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     setLiveMatch(null);
 
     // Boost Consumption
-    AdManager.consumeTrainingBoost();
-    // Interstitial Check (non-blocking background preload & show if ready)
-    AdManager.onMatchCompleted();
+    try {
+      AdManager.consumeTrainingBoost();
+    } catch (e) {
+      console.warn('Non-fatal error consuming training boost:', e);
+    }
+
+    // Interstitial Check (decoupled microtask so it never blocks React UI or causes race condition)
+    try {
+      queueMicrotask(() => {
+        try {
+          AdManager.onMatchCompleted();
+        } catch (adErr) {
+          console.warn('Non-fatal AdMob onMatchCompleted error:', adErr);
+        }
+      });
+    } catch (e) {
+      // ignore
+    }
 
     // Immediately persist to local disk repository before releasing the concurrency lock
+    console.log('[MatchEndingFlow] SAVE_STARTED');
     try {
-      console.error('[MatchEndingFlow] Saving state to local repository...');
       gameStateRepository.saveLocalGameState({
         schemaVersion: 2,
         saveVersion: 1,
@@ -2321,12 +2366,12 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         scoutedOpponents,
         deletedMessageIds,
       });
-      console.error('[MatchEndingFlow] Local save completed successfully.');
+      console.log('[MatchEndingFlow] SAVE_COMPLETED');
     } catch (saveErr) {
       console.error('[MatchEndingFlow] Non-fatal save error in finishLiveMatchAndAdvance:', saveErr);
     }
 
-    console.error('[MatchEndingFlow] Match finalization completed successfully for round:', currentRound, '-> next:', nextRoundNumber);
+    console.log('[MatchEndingFlow] END_MATCH_COMPLETED');
     } catch (error) {
       console.error('[MatchEndingFlow] CRITICAL UNCAUGHT EXCEPTION in finishLiveMatchAndAdvance:', error);
       try {

@@ -115,7 +115,7 @@ export const MatchesTab: React.FC = () => {
     if (!liveMatch || liveMatch.currentMinute <= 1) {
       setSnoozedTacticalAlerts({});
     }
-  }, [liveMatch?.fixtureId, liveMatch?.currentMinute]);
+  }, [liveMatch?.fixture?.id, liveMatch?.currentMinute]);
 
   // Compute live smart tactical advisory alert
   const activeTacticalAlert = useMemo(() => {
@@ -200,20 +200,23 @@ export const MatchesTab: React.FC = () => {
 
   // Confetti on win after match finishes
   useEffect(() => {
-    if (liveMatch && liveMatch.isFinished && userClub?.id) {
-      const isUserHome = liveMatch.homeTeam?.id === userClub.id;
-      const userGoals = isUserHome ? liveMatch.homeScore : liveMatch.awayScore;
-      const oppGoals = isUserHome ? liveMatch.awayScore : liveMatch.homeScore;
+    if (liveMatch && liveMatch.isFinished) {
+      console.log('[MatchEndingFlow] RESULT_RENDERED');
+      if (userClub?.id) {
+        const isUserHome = liveMatch.homeTeam?.id === userClub.id;
+        const userGoals = isUserHome ? liveMatch.homeScore : liveMatch.awayScore;
+        const oppGoals = isUserHome ? liveMatch.awayScore : liveMatch.homeScore;
 
-      if (userGoals > oppGoals) {
-        try {
-          confetti({
-            particleCount: 80,
-            spread: 70,
-            origin: { y: 0.6 }
-          });
-        } catch {
-          // ignore
+        if (userGoals > oppGoals) {
+          try {
+            confetti({
+              particleCount: 80,
+              spread: 70,
+              origin: { y: 0.6 }
+            });
+          } catch {
+            // ignore
+          }
         }
       }
     }
@@ -273,6 +276,9 @@ export const MatchesTab: React.FC = () => {
 
   // If in a live match
   if (liveMatch) {
+    if (liveMatch.isFinished) {
+      console.log('[MatchEndingFlow] RESULT_RENDER_STARTED');
+    }
     const isUserHome = userClub ? liveMatch.homeTeam?.id === userClub.id : false;
     const userGoals = isUserHome ? liveMatch.homeScore : liveMatch.awayScore;
     const oppGoals = isUserHome ? liveMatch.awayScore : liveMatch.homeScore;
@@ -280,12 +286,12 @@ export const MatchesTab: React.FC = () => {
     const isUserDraw = userGoals === oppGoals;
 
     // Filter events up to current minute
-    const visibleEvents = (liveMatch.events || []).filter(e => e.minute <= liveMatch.currentMinute);
+    const visibleEvents = (liveMatch.events || []).filter(e => e && e.minute <= liveMatch.currentMinute);
 
     const activeUserLineup = isUserHome ? (liveMatch.homeLineup || []) : (liveMatch.awayLineup || []);
     const userTeamObj = isUserHome ? liveMatch.homeTeam : liveMatch.awayTeam;
-    const startingPlayers = (userTeamObj?.players || []).filter(p => activeUserLineup.includes(p.id));
-    const benchPlayers = (userTeamObj?.players || []).filter(p => !activeUserLineup.includes(p.id));
+    const startingPlayers = (userTeamObj?.players || []).filter(p => p && p.id && activeUserLineup.includes(p.id));
+    const benchPlayers = (userTeamObj?.players || []).filter(p => p && p.id && !activeUserLineup.includes(p.id));
 
     const handleExecuteSub = () => {
       if (!selectedOutPlayerId || !selectedInPlayerId) return;
@@ -354,7 +360,7 @@ export const MatchesTab: React.FC = () => {
                   </span>
                 ) : (
                   <span className="text-[10px] text-slate-300 font-medium bg-slate-800/80 border border-slate-700/60 px-1.5 py-0.2 rounded truncate max-w-[120px]">
-                    {liveMatch.homeTeam.manager?.name || 'المدرب'} ({liveMatch.homeTeam.manager?.rating || liveMatch.homeTeam.rating || 65} ⭐)
+                    {liveMatch.homeTeam.manager?.name || 'المدرب'} ({liveMatch.homeTeam.manager?.rating || liveMatch.homeTeam.reputation || 65} ⭐)
                   </span>
                 )}
               </div>
@@ -390,7 +396,7 @@ export const MatchesTab: React.FC = () => {
                   </span>
                 ) : (
                   <span className="text-[10px] text-slate-300 font-medium bg-slate-800/80 border border-slate-700/60 px-1.5 py-0.2 rounded truncate max-w-[120px]">
-                    {liveMatch.awayTeam.manager?.name || 'المدرب'} ({liveMatch.awayTeam.manager?.rating || liveMatch.awayTeam.rating || 65} ⭐)
+                    {liveMatch.awayTeam.manager?.name || 'المدرب'} ({liveMatch.awayTeam.manager?.rating || liveMatch.awayTeam.reputation || 65} ⭐)
                   </span>
                 )}
               </div>

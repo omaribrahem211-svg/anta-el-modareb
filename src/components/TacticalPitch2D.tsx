@@ -342,8 +342,11 @@ export const TacticalPitch2D: React.FC<TacticalPitch2DProps> = ({
     role: c.role
   }));
 
-  const homeColor = homeTeam.primaryColor || '#dc2626';
-  const awayColor = awayTeam.primaryColor || '#1d4ed8';
+  const homeColor = homeTeam?.primaryColor || '#dc2626';
+  const awayColor = awayTeam?.primaryColor || '#1d4ed8';
+
+  const homeName = homeTeam?.shortName || homeTeam?.name || 'المضيف';
+  const awayName = awayTeam?.shortName || awayTeam?.name || 'الضيف';
 
   return (
     <div className="space-y-2">
@@ -351,7 +354,7 @@ export const TacticalPitch2D: React.FC<TacticalPitch2DProps> = ({
       <div className="flex items-center justify-between text-[11px] font-bold px-2 py-1 bg-slate-950/80 rounded-xl border border-slate-800">
         <div className="flex items-center gap-1.5" style={{ color: homeColor }}>
           <span className="w-2 h-2 rounded-full" style={{ backgroundColor: homeColor }} />
-          <span>{homeTeam.shortName}</span>
+          <span>{homeName}</span>
           <span className="font-mono text-slate-300">({momentum}%)</span>
         </div>
 
@@ -359,7 +362,7 @@ export const TacticalPitch2D: React.FC<TacticalPitch2DProps> = ({
 
         <div className="flex items-center gap-1.5" style={{ color: awayColor }}>
           <span className="font-mono text-slate-300">({100 - momentum}%)</span>
-          <span>{awayTeam.shortName}</span>
+          <span>{awayName}</span>
           <span className="w-2 h-2 rounded-full" style={{ backgroundColor: awayColor }} />
         </div>
       </div>
@@ -542,10 +545,10 @@ export const TacticalPitch2D: React.FC<TacticalPitch2DProps> = ({
         {/* Pitch Corner Watermark / Formation indicator */}
         <div className="absolute bottom-2 left-2 flex items-center gap-2 pointer-events-none">
           <span className="text-[9px] bg-black/60 backdrop-blur-sm text-slate-200 px-2 py-0.5 rounded-full border border-white/10 font-mono">
-            {homeTeam.shortName}: {homeFormation}
+            {homeName}: {homeFormation}
           </span>
           <span className="text-[9px] bg-black/60 backdrop-blur-sm text-slate-200 px-2 py-0.5 rounded-full border border-white/10 font-mono">
-            {awayTeam.shortName}: {awayFormation}
+            {awayName}: {awayFormation}
           </span>
         </div>
       </div>
