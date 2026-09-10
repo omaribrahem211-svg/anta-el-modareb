@@ -139,11 +139,15 @@ class AdManagerService {
             initializeForTesting: ADMOB_CONFIG.IS_TEST_MODE,
           });
           console.log('[ADMOB] SDK initialized');
+          console.log('[BANNER_TEST] Banner completely disabled');
 
-          // Attach persistent banner listeners once
-          await this.attachBannerListeners();
+          // [BANNER_TEST] Banner listeners skipped in isolation test
+          if (ADMOB_CONFIG.ENABLE_BANNER) {
+            await this.attachBannerListeners();
+          }
         } else {
           console.log('[ADMOB] SDK initialized (web simulation mode)');
+          console.log('[BANNER_TEST] Banner completely disabled');
         }
 
         this.isInitialized = true;
@@ -172,7 +176,7 @@ class AdManagerService {
    * Attaches Banner listeners once to handle load and failure events.
    */
   private async attachBannerListeners(): Promise<void> {
-    if (this.bannerListenersAttached || !this.isNative) return;
+    if (!ADMOB_CONFIG.ENABLE_BANNER || this.bannerListenersAttached || !this.isNative) return;
 
     try {
       const loadedHandle = await AdMob.addListener(BannerAdPluginEvents.Loaded, () => {
@@ -207,7 +211,11 @@ class AdManagerService {
    * - Positioned right above the bottom navigation bar (margin: 58dp)
    */
   public async ensureBannerActive(): Promise<boolean> {
-    if (!ADMOB_CONFIG.ENABLE_BANNER || this.state.isPremium) {
+    if (!ADMOB_CONFIG.ENABLE_BANNER) {
+      return false;
+    }
+
+    if (this.state.isPremium) {
       if (this.isBannerActive || this.isBannerCreated) {
         await this.destroyBanner();
       }
@@ -270,6 +278,7 @@ class AdManagerService {
   }
 
   public async hideBanner(): Promise<boolean> {
+    if (!ADMOB_CONFIG.ENABLE_BANNER) return true;
     return this.destroyBanner();
   }
 
@@ -278,6 +287,10 @@ class AdManagerService {
     this.isBannerCreated = false;
     this.isBannerActive = false;
     this.isBannerLoading = false;
+
+    if (!ADMOB_CONFIG.ENABLE_BANNER) {
+      return true;
+    }
 
     if (this.isNative) {
       try {

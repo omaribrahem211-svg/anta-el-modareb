@@ -45,7 +45,7 @@ export const ADMOB_CONFIG: AdMobConfigType = {
   IS_TEST_MODE: false,
   ENABLE_LOGS: true,
   ENABLE_REWARDS: true, // تفعيل إعلانات المكافأة
-  ENABLE_BANNER: true,  // تفعيل إعلان البانر داخل المحتوى أسفل الفيسبوك
+  ENABLE_BANNER: false, // [BANNER_TEST] Disabled for isolation test build
   REWARDED_COOLDOWN_SECONDS: 0,
   APP_ID: PRODUCTION_AD_IDS.APP_ID,
   TOP_BANNER_ID: PRODUCTION_AD_IDS.TOP_BANNER_ID,
