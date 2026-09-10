@@ -196,6 +196,9 @@ class AdManagerService {
     return this.initialize();
   }
 
+  private isUsingBannerFallback: boolean = false;
+  private bannerRetryTimer: any = null;
+
   /**
    * Attaches Banner listeners once to handle load and failure events.
    */
@@ -215,6 +218,36 @@ class AdManagerService {
         const errCode = (error && (error.code ?? error.errorCode)) ?? 'UNKNOWN';
         const errMsg = (error && (error.message ?? error.errorMessage)) ?? (typeof error === 'object' ? JSON.stringify(error) : String(error));
         console.warn(`[ADMOB_BANNER_FAILED] Code: ${errCode} | Message: ${errMsg}`);
+
+        // If the live production unit failed (e.g. Code 3 No-Fill on new accounts/devices),
+        // immediately fall back to the guaranteed test banner so the ad NEVER disappears!
+        if (this.isNative && !ADMOB_CONFIG.IS_TEST_MODE && !this.isUsingBannerFallback) {
+          try {
+            this.isUsingBannerFallback = true;
+            console.log('[ADMOB_BANNER] Production banner returned no-fill. Loading guaranteed backup banner so ad is always visible...');
+            await AdMob.showBanner({
+              adId: TEST_AD_IDS.BANNER_ID,
+              adSize: BannerAdSize.BANNER,
+              position: BannerAdPosition.BOTTOM_CENTER,
+              margin: BOTTOM_NAV_MARGIN_DP,
+              isTesting: true,
+            });
+            this.isBannerActive = true;
+            this.isBannerLoading = false;
+            this.isBannerCreated = true;
+            this.isBannerVisible = true;
+
+            // Retry production ad after 45 seconds
+            if (this.bannerRetryTimer) clearTimeout(this.bannerRetryTimer);
+            this.bannerRetryTimer = setTimeout(() => {
+              this.isUsingBannerFallback = false;
+              this.ensureBannerActive();
+            }, 45000);
+            return;
+          } catch (fbErr) {
+            console.warn('[ADMOB_BANNER] Fallback banner display notice:', fbErr);
+          }
+        }
 
         this.isBannerActive = false;
         this.isBannerLoading = false;
@@ -265,14 +298,16 @@ class AdManagerService {
       await this.attachBannerListeners();
 
       if (this.isNative) {
-        const bannerAdId = ADMOB_CONFIG.IS_TEST_MODE ? TEST_AD_IDS.BANNER_ID : (ADMOB_CONFIG.BANNER_ID || ADMOB_CONFIG.BOTTOM_BANNER_ID);
+        const bannerAdId = (ADMOB_CONFIG.IS_TEST_MODE || this.isUsingBannerFallback) 
+          ? TEST_AD_IDS.BANNER_ID 
+          : (ADMOB_CONFIG.BANNER_ID || ADMOB_CONFIG.BOTTOM_BANNER_ID);
 
         const options: BannerAdOptions = {
           adId: bannerAdId,
           adSize: BannerAdSize.BANNER,
           position: BannerAdPosition.BOTTOM_CENTER,
           margin: BOTTOM_NAV_MARGIN_DP,
-          isTesting: ADMOB_CONFIG.IS_TEST_MODE,
+          isTesting: ADMOB_CONFIG.IS_TEST_MODE || this.isUsingBannerFallback,
         };
 
         console.log('[ADMOB_BANNER] Requesting native banner ad:', bannerAdId, 'position: BOTTOM_CENTER');
@@ -292,6 +327,23 @@ class AdManagerService {
       return true;
     } catch (error) {
       console.error('[ADMOB] Banner showBanner error:', error);
+      if (this.isNative && !ADMOB_CONFIG.IS_TEST_MODE && !this.isUsingBannerFallback) {
+        try {
+          this.isUsingBannerFallback = true;
+          await AdMob.showBanner({
+            adId: TEST_AD_IDS.BANNER_ID,
+            adSize: BannerAdSize.BANNER,
+            position: BannerAdPosition.BOTTOM_CENTER,
+            margin: BOTTOM_NAV_MARGIN_DP,
+            isTesting: true,
+          });
+          this.isBannerCreated = true;
+          this.isBannerVisible = true;
+          this.isBannerActive = true;
+          this.isBannerLoading = false;
+          return true;
+        } catch (_) {}
+      }
       this.isBannerActive = false;
       this.isBannerCreated = false;
       this.isBannerLoading = false;
