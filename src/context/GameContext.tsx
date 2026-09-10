@@ -90,6 +90,7 @@ import { evaluateMatchImpactOnConfidence, updateDailyBoardConfidence, getClubLea
 import { EGYPT_TIER_4_LEAGUE, getLeagueById, GLOBAL_LEAGUES, findClubInWorld, getClubDisplayName } from '../data/leaguesData';
 import { AdManager } from '../services/adManager';
 import { ADMOB_CONFIG } from '../config/admobConfig';
+import { DIAGNOSTIC_CONFIG } from '../config/diagnosticConfig';
 import { AdRewardType, AdRewardClaimResult } from '../services/adRewardService';
 import { MIGRATION_STORAGE_KEY, runOneTimeWorldMigration, inferClubCountry } from '../utils/worldMigration';
 import { validateWorldDatabase, sanitizeWorldPlayerOwnership } from '../utils/worldValidation';
@@ -1723,9 +1724,16 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       return f;
     });
 
-    let updatedStandings = (!fixture.competitionType || fixture.competitionType === 'league')
-      ? updateLeagueStandings(standings, homeTeamId, awayTeamId, homeScore, awayScore)
-      : standings;
+    let updatedStandings = standings;
+    if (DIAGNOSTIC_CONFIG.ENABLE_STANDINGS_UPDATE) {
+      console.log('[DIAG] STANDINGS_STARTED');
+      if (!fixture.competitionType || fixture.competitionType === 'league') {
+        updatedStandings = updateLeagueStandings(standings, homeTeamId, awayTeamId, homeScore, awayScore);
+      }
+      console.log('[DIAG] STANDINGS_COMPLETED');
+    } else {
+      console.log('[DIAG] STANDINGS_SKIPPED [TEST_A]');
+    }
 
     // Update cup tournament matches if this was a cup match
     let updatedCupTournament = cupTournament;
@@ -1812,89 +1820,97 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       { homeTeamId: homeTeam.id, awayTeamId: awayTeam.id, homeScore, awayScore, events: persistentEvents }
     ];
 
-    const otherRoundFixtures = updatedFixtures.filter(f => f.round === currentRound && f.id !== fixture.id && !f.isPlayed);
-    
-    otherRoundFixtures.forEach(otherFix => {
-      const otherHome = (teams.find(t => t && t.id === otherFix.homeTeamId) || (otherFix.homeTeamId ? findClubInWorld(otherFix.homeTeamId) : undefined) || teams[0]) || ({ id: otherFix.homeTeamId || 'home_dummy', name: 'الفريق المضيف', shortName: 'مض', players: [], tactics: { startingPlayerIds: [], benchPlayerIds: [] } } as any);
-      const otherAway = (teams.find(t => t && t.id === otherFix.awayTeamId) || (otherFix.awayTeamId ? findClubInWorld(otherFix.awayTeamId) : undefined) || teams[1]) || ({ id: otherFix.awayTeamId || 'away_dummy', name: 'الفريق الضيف', shortName: 'ضف', players: [], tactics: { startingPlayerIds: [], benchPlayerIds: [] } } as any);
-      const isOtherCup = otherFix.competitionType === 'cup';
-      const otherResult = isOtherCup ? simulateKnockoutMatch(otherHome, otherAway) : simulateMatch(otherHome, otherAway, otherHome.tactics, otherAway.tactics);
-      const prunedOtherEvents = pruneCpuEvents(otherResult.events);
+    if (DIAGNOSTIC_CONFIG.ENABLE_CPU_SIMULATION) {
+      console.log('[DIAG] CPU_SIMULATION_STARTED');
+      const otherRoundFixtures = updatedFixtures.filter(f => f.round === currentRound && f.id !== fixture.id && !f.isPlayed);
+      
+      otherRoundFixtures.forEach(otherFix => {
+        const otherHome = (teams.find(t => t && t.id === otherFix.homeTeamId) || (otherFix.homeTeamId ? findClubInWorld(otherFix.homeTeamId) : undefined) || teams[0]) || ({ id: otherFix.homeTeamId || 'home_dummy', name: 'الفريق المضيف', shortName: 'مض', players: [], tactics: { startingPlayerIds: [], benchPlayerIds: [] } } as any);
+        const otherAway = (teams.find(t => t && t.id === otherFix.awayTeamId) || (otherFix.awayTeamId ? findClubInWorld(otherFix.awayTeamId) : undefined) || teams[1]) || ({ id: otherFix.awayTeamId || 'away_dummy', name: 'الفريق الضيف', shortName: 'ضف', players: [], tactics: { startingPlayerIds: [], benchPlayerIds: [] } } as any);
+        const isOtherCup = otherFix.competitionType === 'cup';
+        const otherResult = isOtherCup ? simulateKnockoutMatch(otherHome, otherAway) : simulateMatch(otherHome, otherAway, otherHome.tactics, otherAway.tactics);
+        const prunedOtherEvents = pruneCpuEvents(otherResult.events);
 
-      updatedFixtures = updatedFixtures.map(f => {
-        if (f.id === otherFix.id) {
-          return {
-            ...f,
-            homeScore: otherResult.homeScore,
-            awayScore: otherResult.awayScore,
-            homePenalties: isOtherCup ? (otherResult as any).homePenalties : undefined,
-            awayPenalties: isOtherCup ? (otherResult as any).awayPenalties : undefined,
-            winnerTeamId: isOtherCup ? (otherResult as any).winnerTeamId : undefined,
-            isPlayed: true,
-            events: prunedOtherEvents,
-            stats: otherResult.stats,
+        updatedFixtures = updatedFixtures.map(f => {
+          if (f.id === otherFix.id) {
+            return {
+              ...f,
+              homeScore: otherResult.homeScore,
+              awayScore: otherResult.awayScore,
+              homePenalties: isOtherCup ? (otherResult as any).homePenalties : undefined,
+              awayPenalties: isOtherCup ? (otherResult as any).awayPenalties : undefined,
+              winnerTeamId: isOtherCup ? (otherResult as any).winnerTeamId : undefined,
+              isPlayed: true,
+              events: prunedOtherEvents,
+              stats: otherResult.stats,
+            };
+          }
+          return f;
+        });
+
+        if (isOtherCup && updatedCupTournament) {
+          const koRes = otherResult as any;
+          updatedCupTournament = {
+            ...updatedCupTournament,
+            matches: updatedCupTournament.matches.map(m => {
+              if (m.id === otherFix.id || (m.stage === otherFix.cupStage && (m.homeTeamId === otherHome.id || m.awayTeamId === otherAway.id))) {
+                return {
+                  ...m,
+                  homeScore: koRes.homeScore,
+                  awayScore: koRes.awayScore,
+                  homePenalties: koRes.homePenalties,
+                  awayPenalties: koRes.awayPenalties,
+                  winnerTeamId: koRes.winnerTeamId,
+                  isPlayed: true,
+                  events: prunedOtherEvents,
+                  stats: koRes.stats,
+                };
+              }
+              return m;
+            }),
           };
+          if (otherFix.cupStage === 'final') {
+            updatedCupTournament.isCompleted = true;
+            updatedCupTournament.winnerClubId = koRes.winnerTeamId;
+            updatedCupTournament.runnerUpClubId = koRes.winnerTeamId === otherHome.id ? otherAway.id : otherHome.id;
+          }
         }
-        return f;
-      });
 
-      if (isOtherCup && updatedCupTournament) {
-        const koRes = otherResult as any;
-        updatedCupTournament = {
-          ...updatedCupTournament,
-          matches: updatedCupTournament.matches.map(m => {
-            if (m.id === otherFix.id || (m.stage === otherFix.cupStage && (m.homeTeamId === otherHome.id || m.awayTeamId === otherAway.id))) {
-              return {
-                ...m,
-                homeScore: koRes.homeScore,
-                awayScore: koRes.awayScore,
-                homePenalties: koRes.homePenalties,
-                awayPenalties: koRes.awayPenalties,
-                winnerTeamId: koRes.winnerTeamId,
-                isPlayed: true,
-                events: prunedOtherEvents,
-                stats: koRes.stats,
-              };
-            }
-            return m;
-          }),
-        };
-        if (otherFix.cupStage === 'final') {
-          updatedCupTournament.isCompleted = true;
-          updatedCupTournament.winnerClubId = koRes.winnerTeamId;
-          updatedCupTournament.runnerUpClubId = koRes.winnerTeamId === otherHome.id ? otherAway.id : otherHome.id;
+        allRoundMatches.push({
+          homeTeamId: otherHome.id,
+          awayTeamId: otherAway.id,
+          homeScore: otherResult.homeScore,
+          awayScore: otherResult.awayScore,
+          events: prunedOtherEvents,
+        });
+
+        if (DIAGNOSTIC_CONFIG.ENABLE_STANDINGS_UPDATE) {
+          if (!otherFix.competitionType || otherFix.competitionType === 'league') {
+            updatedStandings = updateLeagueStandings(updatedStandings, otherHome.id, otherAway.id, otherResult.homeScore, otherResult.awayScore);
+          } else if (otherFix.competitionType === 'cup' && updatedCupTournament) {
+            updatedCupTournament = {
+              ...updatedCupTournament,
+              matches: updatedCupTournament.matches.map(m => {
+                if (m.id === otherFix.id || (m.stage === otherFix.cupStage && (m.homeTeamId === otherHome.id || m.awayTeamId === otherAway.id))) {
+                  return {
+                    ...m,
+                    homeScore: otherResult.homeScore,
+                    awayScore: otherResult.awayScore,
+                    isPlayed: true,
+                    events: prunedOtherEvents,
+                    stats: otherResult.stats,
+                  };
+                }
+                return m;
+              }),
+            };
+          }
         }
-      }
-
-      allRoundMatches.push({
-        homeTeamId: otherHome.id,
-        awayTeamId: otherAway.id,
-        homeScore: otherResult.homeScore,
-        awayScore: otherResult.awayScore,
-        events: prunedOtherEvents,
       });
-
-      if (!otherFix.competitionType || otherFix.competitionType === 'league') {
-        updatedStandings = updateLeagueStandings(updatedStandings, otherHome.id, otherAway.id, otherResult.homeScore, otherResult.awayScore);
-      } else if (otherFix.competitionType === 'cup' && updatedCupTournament) {
-        updatedCupTournament = {
-          ...updatedCupTournament,
-          matches: updatedCupTournament.matches.map(m => {
-            if (m.id === otherFix.id || (m.stage === otherFix.cupStage && (m.homeTeamId === otherHome.id || m.awayTeamId === otherAway.id))) {
-              return {
-                ...m,
-                homeScore: otherResult.homeScore,
-                awayScore: otherResult.awayScore,
-                isPlayed: true,
-                events: prunedOtherEvents,
-                stats: otherResult.stats,
-              };
-            }
-            return m;
-          }),
-        };
-      }
-    });
+      console.log('[DIAG] CPU_SIMULATION_COMPLETED');
+    } else {
+      console.log('[DIAG] CPU_SIMULATION_SKIPPED [TEST_A]');
+    }
 
     // 3. Advance Cup Tournament if applicable
     let cupNewsMessage: string | undefined = undefined;
@@ -1971,7 +1987,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const roundWages = userClub ? Math.round((userClub.players || []).reduce((sum, p) => sum + (p.salary || 1000), 0) / 4) : 0;
 
     // Update club economy tracking
-    if (userClub) {
+    if (DIAGNOSTIC_CONFIG.ENABLE_BOARD_AND_ECONOMY && userClub) {
       setClubEconomy(prev => ({
         ...prev,
         matchIncomeTotal: prev.matchIncomeTotal + totalMatchRevenue,
@@ -1981,114 +1997,121 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
 
     // Update player fitness, morale, and comprehensive stats across ALL teams in the league
-    const updatedAllTeams = teams.map(t => {
-      const matchAsHome = allRoundMatches.find(m => m.homeTeamId === t.id);
-      const matchAsAway = allRoundMatches.find(m => m.awayTeamId === t.id);
-      const matchPlayed = matchAsHome || matchAsAway;
+    let updatedAllTeams = teams;
+    if (DIAGNOSTIC_CONFIG.ENABLE_PLAYER_PROCESSING) {
+      console.log('[DIAG] PLAYER_PROCESSING_STARTED');
+      updatedAllTeams = teams.map(t => {
+        const matchAsHome = allRoundMatches.find(m => m.homeTeamId === t.id);
+        const matchAsAway = allRoundMatches.find(m => m.awayTeamId === t.id);
+        const matchPlayed = matchAsHome || matchAsAway;
 
-      if (!matchPlayed) return t;
+        if (!matchPlayed) return t;
 
-      const isHome = !!matchAsHome;
-      const tScore = isHome ? matchPlayed.homeScore : matchPlayed.awayScore;
-      const matchOppScore = isHome ? matchPlayed.awayScore : matchPlayed.homeScore;
-      const isTeamWin = tScore > matchOppScore;
-      const isTeamDraw = tScore === matchOppScore;
+        const isHome = !!matchAsHome;
+        const tScore = isHome ? matchPlayed.homeScore : matchPlayed.awayScore;
+        const matchOppScore = isHome ? matchPlayed.awayScore : matchPlayed.homeScore;
+        const isTeamWin = tScore > matchOppScore;
+        const isTeamDraw = tScore === matchOppScore;
 
-      const teamPlayers = Array.isArray(t.players) ? t.players : [];
-      const startingIds = (t.isUserClub && userClub)
-        ? (userClub.tactics?.startingPlayerIds || teamPlayers.slice(0, 11).map(p => p.id))
-        : (t.tactics?.startingPlayerIds || teamPlayers.slice(0, 11).map(p => p.id));
+        const teamPlayers = Array.isArray(t.players) ? t.players : [];
+        const startingIds = (t.isUserClub && userClub)
+          ? (userClub.tactics?.startingPlayerIds || teamPlayers.slice(0, 11).map(p => p.id))
+          : (t.tactics?.startingPlayerIds || teamPlayers.slice(0, 11).map(p => p.id));
 
-      const { updatedPlayers: fatigueUpdatedPlayers, transferMessages, departedPlayers } = processPostMatchPlayerUpdates(
-        t,
-        startingIds,
-        matchPlayed,
-        isTeamWin,
-        isTeamDraw,
-        t.isUserClub
-      );
+        const { updatedPlayers: fatigueUpdatedPlayers, transferMessages, departedPlayers } = processPostMatchPlayerUpdates(
+          t,
+          startingIds,
+          matchPlayed,
+          isTeamWin,
+          isTeamDraw,
+          t.isUserClub
+        );
 
-      if (transferMessages.length > 0) {
-        setInbox(prev => [...transferMessages, ...prev]);
-      }
-
-      let extraTransferIncome = 0;
-      if (departedPlayers.length > 0) {
-        extraTransferIncome = departedPlayers.reduce((sum, dp) => sum + dp.fee, 0);
-      }
-
-      // Precompute player match events into an O(1) lookup map once per team
-      const matchStatsMap = buildMatchStatsMap(matchPlayed.events);
-
-      const updatedPlayers = fatigueUpdatedPlayers.map(p => {
-        const isStarter = startingIds.includes(p.id);
-
-        const pStats = matchStatsMap.getPlayerStats(p.id, p.name);
-        const playerGoals = pStats.goals;
-        const playerAssists = pStats.assists;
-        const playerYellows = pStats.yellows;
-        const playerReds = pStats.reds;
-
-        // Realistic individual match rating
-        let matchRating = isStarter ? (isTeamWin ? 7.3 : isTeamDraw ? 6.7 : 6.1) : 6.0;
-        if (playerGoals > 0) matchRating += playerGoals * 0.9;
-        if (playerAssists > 0) matchRating += playerAssists * 0.5;
-        if (playerYellows > 0) matchRating -= 0.4;
-        if (playerReds > 0) matchRating -= 2.0;
-        if (p.positionCategory === 'GK' && matchOppScore === 0 && isStarter) matchRating += 0.8;
-        matchRating = Math.min(10, Math.max(4, Number(matchRating.toFixed(1))));
-
-        const currentApps = p.stats?.appearances || 0;
-        const currentAvg = p.stats?.averageRating || 7.0;
-        const newAvg = isStarter ? Number(((currentAvg * currentApps + matchRating) / (currentApps + 1)).toFixed(2)) : currentAvg;
-        const totalYellows = (p.stats?.yellowCards || 0) + playerYellows;
-        const totalReds = (p.stats?.redCards || 0) + playerReds;
-
-        // Realistic Suspension Tracking:
-        let newSuspensionMatches = p.suspensionMatches ? Math.max(0, p.suspensionMatches - 1) : 0;
-        let newIsSuspended = newSuspensionMatches > 0;
-        let newSuspensionReason = newIsSuspended ? p.suspensionReason : undefined;
-
-        if (playerReds > 0) {
-          newSuspensionMatches = 2;
-          newIsSuspended = true;
-          newSuspensionReason = 'طرد ببطاقة حمراء مباشرة';
-        } else if (playerYellows > 0 && totalYellows > 0 && totalYellows % 3 === 0) {
-          newSuspensionMatches = 1;
-          newIsSuspended = true;
-          newSuspensionReason = 'تراكم 3 بطاقات صفراء';
+        if (transferMessages.length > 0) {
+          setInbox(prev => [...transferMessages, ...prev]);
         }
 
-        const roundWageEarned = Math.round((p.salary || 2000) / 4);
-        const playerSavings = (p.savings !== undefined ? p.savings : calculateInitialPlayerSavings(p)) + roundWageEarned;
+        let extraTransferIncome = 0;
+        if (departedPlayers.length > 0) {
+          extraTransferIncome = departedPlayers.reduce((sum, dp) => sum + dp.fee, 0);
+        }
+
+        // Precompute player match events into an O(1) lookup map once per team
+        const matchStatsMap = buildMatchStatsMap(matchPlayed.events);
+
+        const updatedPlayers = fatigueUpdatedPlayers.map(p => {
+          const isStarter = startingIds.includes(p.id);
+
+          const pStats = matchStatsMap.getPlayerStats(p.id, p.name);
+          const playerGoals = pStats.goals;
+          const playerAssists = pStats.assists;
+          const playerYellows = pStats.yellows;
+          const playerReds = pStats.reds;
+
+          // Realistic individual match rating
+          let matchRating = isStarter ? (isTeamWin ? 7.3 : isTeamDraw ? 6.7 : 6.1) : 6.0;
+          if (playerGoals > 0) matchRating += playerGoals * 0.9;
+          if (playerAssists > 0) matchRating += playerAssists * 0.5;
+          if (playerYellows > 0) matchRating -= 0.4;
+          if (playerReds > 0) matchRating -= 2.0;
+          if (p.positionCategory === 'GK' && matchOppScore === 0 && isStarter) matchRating += 0.8;
+          matchRating = Math.min(10, Math.max(4, Number(matchRating.toFixed(1))));
+
+          const currentApps = p.stats?.appearances || 0;
+          const currentAvg = p.stats?.averageRating || 7.0;
+          const newAvg = isStarter ? Number(((currentAvg * currentApps + matchRating) / (currentApps + 1)).toFixed(2)) : currentAvg;
+          const totalYellows = (p.stats?.yellowCards || 0) + playerYellows;
+          const totalReds = (p.stats?.redCards || 0) + playerReds;
+
+          // Realistic Suspension Tracking:
+          let newSuspensionMatches = p.suspensionMatches ? Math.max(0, p.suspensionMatches - 1) : 0;
+          let newIsSuspended = newSuspensionMatches > 0;
+          let newSuspensionReason = newIsSuspended ? p.suspensionReason : undefined;
+
+          if (playerReds > 0) {
+            newSuspensionMatches = 2;
+            newIsSuspended = true;
+            newSuspensionReason = 'طرد ببطاقة حمراء مباشرة';
+          } else if (playerYellows > 0 && totalYellows > 0 && totalYellows % 3 === 0) {
+            newSuspensionMatches = 1;
+            newIsSuspended = true;
+            newSuspensionReason = 'تراكم 3 بطاقات صفراء';
+          }
+
+          const roundWageEarned = Math.round((p.salary || 2000) / 4);
+          const playerSavings = (p.savings !== undefined ? p.savings : calculateInitialPlayerSavings(p)) + roundWageEarned;
+
+          return {
+            ...p,
+            savings: playerSavings,
+            totalBonusesReceived: p.totalBonusesReceived ?? 0,
+            isSuspended: newIsSuspended,
+            suspensionMatches: newSuspensionMatches,
+            suspensionReason: newSuspensionReason,
+            stats: {
+              ...p.stats,
+              appearances: currentApps + (isStarter ? 1 : 0),
+              goals: (p.stats?.goals || 0) + playerGoals,
+              assists: (p.stats?.assists || 0) + playerAssists,
+              yellowCards: totalYellows,
+              redCards: totalReds,
+              cleanSheets: (p.stats?.cleanSheets || 0) + (p.positionCategory === 'GK' && matchOppScore === 0 && isStarter ? 1 : 0),
+              averageRating: newAvg,
+            }
+          };
+        });
 
         return {
-          ...p,
-          savings: playerSavings,
-          totalBonusesReceived: p.totalBonusesReceived ?? 0,
-          isSuspended: newIsSuspended,
-          suspensionMatches: newSuspensionMatches,
-          suspensionReason: newSuspensionReason,
-          stats: {
-            ...p.stats,
-            appearances: currentApps + (isStarter ? 1 : 0),
-            goals: (p.stats?.goals || 0) + playerGoals,
-            assists: (p.stats?.assists || 0) + playerAssists,
-            yellowCards: totalYellows,
-            redCards: totalReds,
-            cleanSheets: (p.stats?.cleanSheets || 0) + (p.positionCategory === 'GK' && matchOppScore === 0 && isStarter ? 1 : 0),
-            averageRating: newAvg,
-          }
+          ...t,
+          budget: t.isUserClub ? t.budget + totalMatchRevenue + cupBonusPrize + extraTransferIncome : t.budget,
+          developmentPoints: t.isUserClub ? (t.developmentPoints || 0) + cupBonusDevPoints : t.developmentPoints,
+          players: updatedPlayers,
         };
       });
-
-      return {
-        ...t,
-        budget: t.isUserClub ? t.budget + totalMatchRevenue + cupBonusPrize + extraTransferIncome : t.budget,
-        developmentPoints: t.isUserClub ? (t.developmentPoints || 0) + cupBonusDevPoints : t.developmentPoints,
-        players: updatedPlayers,
-      };
-    });
+      console.log('[DIAG] PLAYER_PROCESSING_COMPLETED');
+    } else {
+      console.log('[DIAG] PLAYER_PROCESSING_SKIPPED [TEST_A]');
+    }
 
     // 5. Update Manager Profile & World Ranking Points (Rebalanced for meaningful, challenging long-term progression)
     const xpGained = isUserWin ? 25 : isUserDraw ? 8 : 2;
@@ -2193,7 +2216,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     // 6. Dynamic Board & Fan Confidence Evaluation based on Club Target Position
     const matchOppClub = isUserHome ? awayTeam : homeTeam;
     let evalResult: ReturnType<typeof evaluateMatchImpactOnConfidence> | null = null;
-    if (boardSystem && userClub) {
+    if (DIAGNOSTIC_CONFIG.ENABLE_BOARD_AND_ECONOMY && boardSystem && userClub) {
       evalResult = evaluateMatchImpactOnConfidence(
         boardSystem,
         userClub,
@@ -2255,19 +2278,25 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
 
     // 6.5. Generate Incoming AI Bids & Check Expiring Contracts for User Club
-    const latestUserClub = updatedAllTeams.find(t => t.isUserClub || (userClub && t.id === userClub.id)) || userClub;
-    if (latestUserClub) {
-      const aiBidsResult = generateIncomingAiBids(updatedAllTeams, latestUserClub, currentRound, season.seasonNumber);
-      if (aiBidsResult.bids.length > 0) {
-        setIncomingBids(prev => [...aiBidsResult.bids, ...prev]);
-        newInboxMsgs.unshift(...aiBidsResult.inboxMessages);
-      }
+    if (DIAGNOSTIC_CONFIG.ENABLE_INCOMING_BIDS) {
+      console.log('[DIAG] BIDS_STARTED');
+      const latestUserClub = updatedAllTeams.find(t => t.isUserClub || (userClub && t.id === userClub.id)) || userClub;
+      if (latestUserClub) {
+        const aiBidsResult = generateIncomingAiBids(updatedAllTeams, latestUserClub, currentRound, season.seasonNumber);
+        if (aiBidsResult.bids.length > 0) {
+          setIncomingBids(prev => [...aiBidsResult.bids, ...prev]);
+          newInboxMsgs.unshift(...aiBidsResult.inboxMessages);
+        }
 
-      // Check expiring contracts
-      const contractAlerts = checkExpiringContracts(latestUserClub, `الجولة ${currentRound}`, inbox);
-      if (contractAlerts.length > 0) {
-        newInboxMsgs.unshift(...contractAlerts);
+        // Check expiring contracts
+        const contractAlerts = checkExpiringContracts(latestUserClub, `الجولة ${currentRound}`, inbox);
+        if (contractAlerts.length > 0) {
+          newInboxMsgs.unshift(...contractAlerts);
+        }
       }
+      console.log('[DIAG] BIDS_COMPLETED');
+    } else {
+      console.log('[DIAG] BIDS_SKIPPED [TEST_A]');
     }
 
     const nextRoundNumber = currentRound + 1;
@@ -2314,11 +2343,15 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     // Commit changes
     console.error('[MatchEndingFlow] Committing updated states to React: fixtures, standings, manager, cup, inbox, teams, currentRound');
     setFixtures(updatedFixtures);
-    setStandings(updatedStandings);
+    if (DIAGNOSTIC_CONFIG.ENABLE_STANDINGS_UPDATE) {
+      setStandings(updatedStandings);
+    }
     setManager(updatedManager);
     setCupTournament(updatedCupTournament);
     setInbox(prev => [...newInboxMsgs, ...prev]);
-    setTeams(updatedAllTeams);
+    if (DIAGNOSTIC_CONFIG.ENABLE_PLAYER_PROCESSING) {
+      setTeams(updatedAllTeams);
+    }
 
     setCurrentRound(nextRoundNumber);
     setLiveMatch(null);
@@ -2344,42 +2377,49 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
 
     // Immediately persist to local disk repository before releasing the concurrency lock
-    console.log('[MatchEndingFlow] SAVE_STARTED');
-    try {
-      gameStateRepository.saveLocalGameState({
-        schemaVersion: 2,
-        saveVersion: 1,
-        lastLocalSaveAt: Date.now(),
-        season,
-        activeLeague,
-        teams: updatedAllTeams,
-        standings: updatedStandings,
-        fixtures: updatedFixtures,
-        currentRound: nextRoundNumber,
-        manager: updatedManager,
-        transferMarket,
-        incomingBids,
-        inbox: [...newInboxMsgs, ...inbox],
-        cupTournament: updatedCupTournament,
-        jobOffers,
-        seasonEndSummary,
-        transferHistory,
-        clubEconomy,
-        calendarDate,
-        activeNegotiations,
-        boardSystem,
-        dailyNews,
-        retiredPlayers,
-        worldRankings,
-        scoutedOpponents,
-        deletedMessageIds,
-      });
-      console.log('[MatchEndingFlow] SAVE_COMPLETED');
-    } catch (saveErr) {
-      console.error('[MatchEndingFlow] Non-fatal save error in finishLiveMatchAndAdvance:', saveErr);
+    if (DIAGNOSTIC_CONFIG.ENABLE_SAVE) {
+      console.log('[DIAG] SAVE_STARTED');
+      console.log('[MatchEndingFlow] SAVE_STARTED');
+      try {
+        gameStateRepository.saveLocalGameState({
+          schemaVersion: 2,
+          saveVersion: 1,
+          lastLocalSaveAt: Date.now(),
+          season,
+          activeLeague,
+          teams: updatedAllTeams,
+          standings: updatedStandings,
+          fixtures: updatedFixtures,
+          currentRound: nextRoundNumber,
+          manager: updatedManager,
+          transferMarket,
+          incomingBids,
+          inbox: [...newInboxMsgs, ...inbox],
+          cupTournament: updatedCupTournament,
+          jobOffers,
+          seasonEndSummary,
+          transferHistory,
+          clubEconomy,
+          calendarDate,
+          activeNegotiations,
+          boardSystem,
+          dailyNews,
+          retiredPlayers,
+          worldRankings,
+          scoutedOpponents,
+          deletedMessageIds,
+        });
+        console.log('[DIAG] SAVE_COMPLETED');
+        console.log('[MatchEndingFlow] SAVE_COMPLETED');
+      } catch (saveErr) {
+        console.error('[MatchEndingFlow] Non-fatal save error in finishLiveMatchAndAdvance:', saveErr);
+      }
+    } else {
+      console.log('[DIAG] SAVE_SKIPPED [TEST_A]');
     }
 
     console.log('[MatchEndingFlow] END_MATCH_COMPLETED');
+    console.log('[DIAG] ADVANCE_COMPLETED');
     } catch (error) {
       console.error('[MatchEndingFlow] CRITICAL UNCAUGHT EXCEPTION in finishLiveMatchAndAdvance:', error);
       try {
