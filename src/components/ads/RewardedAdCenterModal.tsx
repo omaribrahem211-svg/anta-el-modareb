@@ -13,7 +13,6 @@ import {
   Loader2, 
   Gift 
 } from 'lucide-react';
-import confetti from 'canvas-confetti';
 import { AdManager } from '../../services/adManager';
 import { ADMOB_CONFIG } from '../../config/admobConfig';
 import { 
@@ -86,13 +85,6 @@ export const RewardedAdCenterModal: React.FC<RewardedAdCenterModalProps> = ({
 
         if (gameResult.success) {
           setSuccessMessage(gameResult.message);
-          try {
-            confetti({
-              particleCount: 60,
-              spread: 70,
-              origin: { y: 0.7 },
-            });
-          } catch (_) {}
         } else {
           setErrorMessage(gameResult.message);
         }

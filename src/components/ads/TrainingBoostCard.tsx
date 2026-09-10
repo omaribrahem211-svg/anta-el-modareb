@@ -16,7 +16,6 @@ import {
   Zap,
   Clock
 } from 'lucide-react';
-import confetti from 'canvas-confetti';
 
 export const TrainingBoostCard: React.FC = () => {
   if (!ADMOB_CONFIG.ENABLE_REWARDS) return null;
@@ -119,14 +118,6 @@ export const TrainingBoostCard: React.FC = () => {
         setActiveBoost(newBoost);
         setIsLoadingAd(false);
         setSuccessMessage(`تم تفعيل (${newBoost.title}) بنجاح للمباراة القادمة! ⚡`);
-
-        try {
-          confetti({
-            particleCount: 50,
-            spread: 60,
-            origin: { y: 0.8 },
-          });
-        } catch (_) {}
       },
       // 2. On Dismiss Callback
       () => {

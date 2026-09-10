@@ -34,7 +34,6 @@ import { ActiveTab, Player } from './types/game';
 import { AdminLayout } from './components/admin/AdminLayout';
 import { AdminAccessDenied } from './components/admin/AdminAccessDenied';
 import { MatchErrorBoundary } from './components/MatchErrorBoundary';
-import { DiagnosticOverlay } from './components/DiagnosticOverlay';
 
 function GameApp() {
   console.log('[STARTUP] App rendered', Math.round(performance.now()) + 'ms');
@@ -312,7 +311,6 @@ export default function App() {
       <AuthProvider>
         <GameProvider>
           <GameApp />
-          <DiagnosticOverlay />
         </GameProvider>
       </AuthProvider>
     </LanguageProvider>
