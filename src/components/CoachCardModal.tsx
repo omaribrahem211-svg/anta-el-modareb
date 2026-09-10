@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Share } from '@capacitor/share';
 import { ManagerProfile, Club, WorldRankingsData } from '../types/game';
+import { generateCoachCardImage } from '../utils/coachCardImageGenerator';
 import { 
   Camera, 
   Share2, 
@@ -13,9 +14,10 @@ import {
   X, 
   RotateCcw,
   Sparkles,
-  TrendingUp,
-  Flame,
-  UserCheck
+  UserCheck,
+  Download,
+  MessageCircle,
+  Loader2
 } from 'lucide-react';
 
 interface CoachCardModalProps {
@@ -36,7 +38,7 @@ export const CoachCardModal: React.FC<CoachCardModalProps> = ({
   worldRankings,
 }) => {
   const [photoUrl, setPhotoUrl] = useState<string | null>(null);
-  const [isSharing, setIsSharing] = useState(false);
+  const [actionLoading, setActionLoading] = useState<'download' | 'whatsapp' | 'facebook' | 'share' | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -100,68 +102,177 @@ export const CoachCardModal: React.FC<CoachCardModalProps> = ({
     }
   };
 
-  const handleNativeShare = async () => {
-    if (isSharing) return;
-    setIsSharing(true);
+  const prepareImageFile = async (): Promise<{ file: File; dataUrl: string; blob: Blob }> => {
+    const { dataUrl, blob } = await generateCoachCardImage({
+      manager,
+      userClub,
+      globalRank,
+      winRate,
+      photoUrl,
+    });
+    const safeName = (manager.name || 'مدرب').replace(/[^\w\u0600-\u06FF]/g, '_');
+    const fileName = `كارت_المدرب_${safeName}.png`;
+    const file = new File([blob], fileName, { type: 'image/png' });
+    return { file, dataUrl, blob };
+  };
 
-    const shareTitle = `كارت المدرب: ${manager.name} - لعبة أنت المدرب`;
-    const shareText = 
-      `🏆 كارت المدرب الرسمي - لعبة أنت المدرب ⚽\n\n` +
-      `👤 الاسم: ${manager.name}\n` +
-      `🌍 الدولة: ${manager.nationality || 'مصر'}\n` +
-      `🎂 العمر: ${manager.age || 35} سنة\n` +
-      `🌐 الترتيب العالمي: المركز #${globalRank}\n` +
-      `🛡️ النادي: ${userClub?.name || 'دوري الدرجة الرابعة'}\n` +
-      `📊 المباريات: ${manager.matchesManaged} مباراة | نسبة الفوز: ${winRate}%\n` +
-      `🥇 البطولات: ${manager.trophies || 0} بطولة\n\n` +
-      `🔥 حَمّل لعبة أنت المدرب وشوف قدراتك التدريبية!\n` +
-      `⚽ لعبة أنت المدرب - لعبة التدريب الكروي الواقعية`;
-
+  // 1. Download Card Image (PNG)
+  const handleDownloadImage = async () => {
+    if (actionLoading) return;
+    setActionLoading('download');
+    setToastMessage('جاري إنشاء صورة الكارت بجودة فائقة...');
     try {
-      // 1. Try Capacitor Native Android Share Plugin
-      try {
-        const canShare = await Share.canShare();
-        if (canShare?.value) {
-          await Share.share({
-            title: shareTitle,
-            text: shareText,
-            dialogTitle: 'مشاركة كارت المدرب عبر واتساب والتطبيقات',
-          });
-          setToastMessage('تم فتح نافذة المشاركة بنجاح!');
-          setTimeout(() => setToastMessage(null), 3000);
-          return;
-        }
-      } catch (nativeErr) {
-        console.log('Capacitor Share plugin fallback:', nativeErr);
-      }
-
-      // 2. Try Web Share API (Standard in modern Android browsers)
-      if (navigator.share) {
-        try {
-          await navigator.share({
-            title: shareTitle,
-            text: shareText,
-          });
-          setToastMessage('تمت المشاركة بنجاح!');
-          setTimeout(() => setToastMessage(null), 3000);
-          return;
-        } catch (webShareErr: any) {
-          if (webShareErr.name === 'AbortError') {
-            return; // User canceled
-          }
-        }
-      }
-
-      // 3. Fallback: Copy to clipboard
-      await navigator.clipboard.writeText(shareText);
-      setToastMessage('تم نسخ بيانات كارت المدرب للحافظة بنجاح!');
-      setTimeout(() => setToastMessage(null), 3500);
-    } catch (finalErr) {
-      console.warn('Share error:', finalErr);
-      setToastMessage('تعذر فتح المشاركة، تأكد من إعطاء الصلاحيات للتطبيق.');
-      setTimeout(() => setToastMessage(null), 3500);
+      const { dataUrl, file } = await prepareImageFile();
+      const a = document.createElement('a');
+      a.href = dataUrl;
+      a.download = file.name;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setToastMessage('تم حفظ صورة كارت المدرب في جهازك بنجاح! 📸');
+    } catch (err) {
+      console.error('Download error:', err);
+      setToastMessage('تعذر تنزيل الصورة، يرجى المحاولة مرة أخرى.');
     } finally {
-      setIsSharing(false);
+      setActionLoading(null);
+      setTimeout(() => setToastMessage(null), 3500);
+    }
+  };
+
+  // 2. Share to WhatsApp / WhatsApp Story
+  const handleShareWhatsApp = async () => {
+    if (actionLoading) return;
+    setActionLoading('whatsapp');
+    setToastMessage('جاري تجهيز صورة كارت المدرب لواتساب...');
+    try {
+      const { file, dataUrl } = await prepareImageFile();
+
+      // Try native share sheet with the image file (allows WhatsApp / WhatsApp Status selection)
+      if (navigator.canShare && navigator.canShare({ files: [file] })) {
+        await navigator.share({
+          files: [file],
+          title: `كارت المدرب: ${manager.name}`,
+          text: `🏆 كارت المدرب الرسمي: ${manager.name} ⚽ لعبة أنت المدرب\n🔥 الترتيب العالمي: #${globalRank} | البطولات: ${manager.trophies || 0}`,
+        });
+        setToastMessage('تمت المشاركة بنجاح عبر واتساب!');
+        return;
+      }
+
+      // Fallback: Download image and open WhatsApp
+      const a = document.createElement('a');
+      a.href = dataUrl;
+      a.download = file.name;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+
+      const msg = encodeURIComponent(
+        `🏆 كارت المدرب الرسمي: ${manager.name} ⚽\n` +
+        `🌍 الدولة: ${manager.nationality || 'مصر'} | الترتيب العالمي: #${globalRank}\n` +
+        `🛡️ النادي: ${userClub?.name || 'دوري الدرجة الرابعة'}\n` +
+        `🥇 البطولات: ${manager.trophies || 0} | نسبة الفوز: ${winRate}%\n` +
+        `🔥 حَمّل لعبة أنت المدرب وشوف مهاراتك التدريبية!`
+      );
+      window.open(`https://api.whatsapp.com/send?text=${msg}`, '_blank');
+      setToastMessage('تم تنزيل صورة الكارت وفتح واتساب لمشاركتها كحالة (ستوري) أو رسالة!');
+    } catch (err: any) {
+      if (err?.name !== 'AbortError') {
+        console.error('WhatsApp share error:', err);
+        setToastMessage('حدث خطأ أثناء المشاركة، يرجى استخدام زر التحميل.');
+      }
+    } finally {
+      setActionLoading(null);
+      setTimeout(() => setToastMessage(null), 4000);
+    }
+  };
+
+  // 3. Share to Facebook
+  const handleShareFacebook = async () => {
+    if (actionLoading) return;
+    setActionLoading('facebook');
+    setToastMessage('جاري تجهيز صورة كارت المدرب لفيسبوك...');
+    try {
+      const { file, dataUrl } = await prepareImageFile();
+
+      // Try native share with image file (supports Facebook feed & Facebook story)
+      if (navigator.canShare && navigator.canShare({ files: [file] })) {
+        await navigator.share({
+          files: [file],
+          title: `كارت المدرب: ${manager.name}`,
+          text: `🏆 كارت المدرب الرسمي: ${manager.name} ⚽ لعبة أنت المدرب\n🔥 حَمّل اللعبة ونافسني!`,
+        });
+        setToastMessage('تمت المشاركة بنجاح على فيسبوك!');
+        return;
+      }
+
+      // Fallback: Download image and open Facebook
+      const a = document.createElement('a');
+      a.href = dataUrl;
+      a.download = file.name;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+
+      const fbUrl = `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent('https://www.facebook.com/share/1dM9YvHPFr/')}&quote=${encodeURIComponent(`🏆 كارت المدرب الرسمي: ${manager.name} - لعبة أنت المدرب`)}`;
+      window.open(fbUrl, '_blank');
+      setToastMessage('تم تنزيل صورة الكارت وفتح فيسبوك لنشرها في القصة (Story) أو المنشورات!');
+    } catch (err: any) {
+      if (err?.name !== 'AbortError') {
+        console.error('Facebook share error:', err);
+        setToastMessage('حدث خطأ أثناء المشاركة، يرجى استخدام زر التحميل.');
+      }
+    } finally {
+      setActionLoading(null);
+      setTimeout(() => setToastMessage(null), 4000);
+    }
+  };
+
+  // 4. Share to All Apps (Native Share Image File)
+  const handleShareAll = async () => {
+    if (actionLoading) return;
+    setActionLoading('share');
+    setToastMessage('جاري تحضير مشاركة صورة الكارت...');
+    try {
+      const { file } = await prepareImageFile();
+
+      // 1. Try native Web Share API with image file
+      if (navigator.canShare && navigator.canShare({ files: [file] })) {
+        await navigator.share({
+          files: [file],
+          title: `كارت المدرب: ${manager.name} - لعبة أنت المدرب`,
+          text: `🏆 كارت المدرب الرسمي: ${manager.name} ⚽ لعبة أنت المدرب\n🔥 الترتيب العالمي: #${globalRank}`,
+        });
+        setToastMessage('تمت مشاركة صورة الكارت بنجاح!');
+        return;
+      }
+
+      // 2. Capacitor Share fallback
+      try {
+        const canShareCap = await Share.canShare();
+        if (canShareCap?.value) {
+          await Share.share({
+            title: `كارت المدرب: ${manager.name}`,
+            text: `🏆 كارت المدرب الرسمي: ${manager.name} ⚽\n🌐 الترتيب: #${globalRank}\n🥇 البطولات: ${manager.trophies || 0}\n🔥 حَمّل لعبة أنت المدرب!`,
+            dialogTitle: 'مشاركة كارت المدرب مع التطبيقات',
+          });
+          setToastMessage('تم فتح نافذة المشاركة!');
+          return;
+        }
+      } catch (capErr) {
+        console.warn('Capacitor share fallback:', capErr);
+      }
+
+      // 3. Fallback: Download image
+      await handleDownloadImage();
+    } catch (err: any) {
+      if (err?.name !== 'AbortError') {
+        console.warn('Share all error:', err);
+        setToastMessage('تعذر فتح المشاركة المباشرة، جاري تنزيل الصورة.');
+        await handleDownloadImage();
+      }
+    } finally {
+      setActionLoading(null);
+      setTimeout(() => setToastMessage(null), 3500);
     }
   };
 
@@ -344,24 +455,83 @@ export const CoachCardModal: React.FC<CoachCardModalProps> = ({
           </div>
         </div>
 
-        {/* Action Buttons: Native Share Button & Photo Button */}
+        {/* Action Buttons: Download, WhatsApp Story, Facebook, Native Share & Photo Upload */}
         <div className="w-full mt-4 space-y-2">
+          {/* 1. Download Card Image Button */}
           <button
             type="button"
-            disabled={isSharing}
-            onClick={handleNativeShare}
-            className="w-full py-3.5 px-5 bg-gradient-to-r from-amber-500 via-amber-400 to-emerald-400 hover:from-amber-400 hover:to-emerald-300 text-slate-950 font-black text-sm rounded-2xl shadow-xl shadow-amber-500/20 flex items-center justify-center gap-2 cursor-pointer transition-all active:scale-95 disabled:opacity-50"
+            id="btn_download_coach_card_image"
+            disabled={actionLoading !== null}
+            onClick={handleDownloadImage}
+            className="w-full py-3 px-4 bg-gradient-to-r from-emerald-600 via-emerald-500 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-black text-sm rounded-2xl shadow-lg shadow-emerald-500/20 flex items-center justify-center gap-2 cursor-pointer transition-all active:scale-95 disabled:opacity-50"
           >
-            <Share2 className="w-4 h-4" />
-            <span>{isSharing ? 'جاري المشاركة...' : 'مشاركة كارت المدرب (واتساب / التطبيقات)'}</span>
+            {actionLoading === 'download' ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : (
+              <Download className="w-4 h-4 text-emerald-100" />
+            )}
+            <span>{actionLoading === 'download' ? 'جاري إنشاء وتنزيل الصورة...' : 'تحميل صورة الكارت بجودة عالية (PNG)'}</span>
           </button>
 
+          {/* 2. Social Share Row: WhatsApp Story & Facebook */}
+          <div className="grid grid-cols-2 gap-2">
+            {/* WhatsApp Story / Message */}
+            <button
+              type="button"
+              id="btn_share_whatsapp"
+              disabled={actionLoading !== null}
+              onClick={handleShareWhatsApp}
+              className="py-2.5 px-3 bg-[#25D366] hover:bg-[#20bd5a] text-slate-950 font-black text-xs rounded-xl shadow-md shadow-green-500/20 flex items-center justify-center gap-1.5 cursor-pointer transition-all active:scale-95 disabled:opacity-50"
+            >
+              {actionLoading === 'whatsapp' ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin text-slate-950" />
+              ) : (
+                <MessageCircle className="w-3.5 h-3.5 text-slate-950" />
+              )}
+              <span>{actionLoading === 'whatsapp' ? 'جاري التجهيز...' : 'واتساب / ستوري'}</span>
+            </button>
+
+            {/* Facebook Share */}
+            <button
+              type="button"
+              id="btn_share_facebook"
+              disabled={actionLoading !== null}
+              onClick={handleShareFacebook}
+              className="py-2.5 px-3 bg-[#1877F2] hover:bg-[#166fe5] text-white font-black text-xs rounded-xl shadow-md shadow-blue-500/20 flex items-center justify-center gap-1.5 cursor-pointer transition-all active:scale-95 disabled:opacity-50"
+            >
+              {actionLoading === 'facebook' ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin text-white" />
+              ) : (
+                <Share2 className="w-3.5 h-3.5 text-white" />
+              )}
+              <span>{actionLoading === 'facebook' ? 'جاري التجهيز...' : 'مشاركة فيسبوك'}</span>
+            </button>
+          </div>
+
+          {/* 3. Share to All Apps (Native Share Image File) */}
           <button
             type="button"
-            onClick={() => fileInputRef.current?.click()}
-            className="w-full py-2.5 px-4 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs rounded-xl flex items-center justify-center gap-2 transition-colors cursor-pointer"
+            id="btn_share_all_apps"
+            disabled={actionLoading !== null}
+            onClick={handleShareAll}
+            className="w-full py-2.5 px-4 bg-gradient-to-r from-amber-500 via-amber-400 to-amber-500 hover:from-amber-400 hover:to-amber-300 text-slate-950 font-black text-xs rounded-xl shadow-md shadow-amber-500/20 flex items-center justify-center gap-2 cursor-pointer transition-all active:scale-95 disabled:opacity-50"
           >
-            <Camera className="w-3.5 h-3.5 text-amber-400" />
+            {actionLoading === 'share' ? (
+              <Loader2 className="w-3.5 h-3.5 animate-spin text-slate-950" />
+            ) : (
+              <Share2 className="w-3.5 h-3.5 text-slate-950" />
+            )}
+            <span>{actionLoading === 'share' ? 'جاري المشاركة...' : 'مشاركة صورة الكارت لكل التطبيقات'}</span>
+          </button>
+
+          {/* 4. Upload / Change Coach Photo */}
+          <button
+            type="button"
+            id="btn_change_coach_photo"
+            onClick={() => fileInputRef.current?.click()}
+            className="w-full py-2 px-3 bg-slate-800/80 hover:bg-slate-700 text-slate-300 font-bold text-[11px] rounded-xl flex items-center justify-center gap-1.5 transition-colors cursor-pointer border border-slate-700/60"
+          >
+            <Camera className="w-3 h-3 text-amber-400" />
             <span>تغيير صورة المدرب من الجهاز</span>
           </button>
         </div>

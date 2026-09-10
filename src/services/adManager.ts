@@ -196,7 +196,6 @@ class AdManagerService {
     return this.initialize();
   }
 
-  private isUsingBannerFallback: boolean = false;
   private bannerRetryTimer: any = null;
 
   /**
@@ -219,39 +218,15 @@ class AdManagerService {
         const errMsg = (error && (error.message ?? error.errorMessage)) ?? (typeof error === 'object' ? JSON.stringify(error) : String(error));
         console.warn(`[ADMOB_BANNER_FAILED] Code: ${errCode} | Message: ${errMsg}`);
 
-        // If the live production unit failed (e.g. Code 3 No-Fill on new accounts/devices),
-        // immediately fall back to the guaranteed test banner so the ad NEVER disappears!
-        if (this.isNative && !ADMOB_CONFIG.IS_TEST_MODE && !this.isUsingBannerFallback) {
-          try {
-            this.isUsingBannerFallback = true;
-            console.log('[ADMOB_BANNER] Production banner returned no-fill. Loading guaranteed backup banner so ad is always visible...');
-            await AdMob.showBanner({
-              adId: TEST_AD_IDS.BANNER_ID,
-              adSize: BannerAdSize.BANNER,
-              position: BannerAdPosition.BOTTOM_CENTER,
-              margin: BOTTOM_NAV_MARGIN_DP,
-              isTesting: true,
-            });
-            this.isBannerActive = true;
-            this.isBannerLoading = false;
-            this.isBannerCreated = true;
-            this.isBannerVisible = true;
-
-            // Retry production ad after 45 seconds
-            if (this.bannerRetryTimer) clearTimeout(this.bannerRetryTimer);
-            this.bannerRetryTimer = setTimeout(() => {
-              this.isUsingBannerFallback = false;
-              this.ensureBannerActive();
-            }, 45000);
-            return;
-          } catch (fbErr) {
-            console.warn('[ADMOB_BANNER] Fallback banner display notice:', fbErr);
-          }
-        }
-
         this.isBannerActive = false;
         this.isBannerLoading = false;
         this.isBannerCreated = false;
+
+        // Schedule retry for production ad after 60s
+        if (this.bannerRetryTimer) clearTimeout(this.bannerRetryTimer);
+        this.bannerRetryTimer = setTimeout(() => {
+          this.ensureBannerActive();
+        }, 60000);
       });
 
       this.bannerListenerHandles.push(loadedHandle, failedHandle);
@@ -263,7 +238,8 @@ class AdManagerService {
 
   /**
    * Ensures the persistent Bottom Banner Ad is active.
-   * - Uses: ca-app-pub-5272866425919152/4077924883 (or configured ID)
+   * - Strictly uses production unit ID: ca-app-pub-5272866425919152/4077924883
+   * - No test ad fallback used.
    * - Position: BOTTOM_CENTER, Size: BANNER
    * - Positioned right above the bottom navigation bar (margin: 58dp)
    */
@@ -298,25 +274,24 @@ class AdManagerService {
       await this.attachBannerListeners();
 
       if (this.isNative) {
-        const bannerAdId = (ADMOB_CONFIG.IS_TEST_MODE || this.isUsingBannerFallback) 
-          ? TEST_AD_IDS.BANNER_ID 
-          : (ADMOB_CONFIG.BANNER_ID || ADMOB_CONFIG.BOTTOM_BANNER_ID);
+        // Strictly use production Banner ID (No test ads)
+        const bannerAdId = ADMOB_CONFIG.BANNER_ID || ADMOB_CONFIG.BOTTOM_BANNER_ID || 'ca-app-pub-5272866425919152/4077924883';
 
         const options: BannerAdOptions = {
           adId: bannerAdId,
           adSize: BannerAdSize.BANNER,
           position: BannerAdPosition.BOTTOM_CENTER,
           margin: BOTTOM_NAV_MARGIN_DP,
-          isTesting: ADMOB_CONFIG.IS_TEST_MODE || this.isUsingBannerFallback,
+          isTesting: false,
         };
 
-        console.log('[ADMOB_BANNER] Requesting native banner ad:', bannerAdId, 'position: BOTTOM_CENTER');
+        console.log('[ADMOB_BANNER] Requesting production banner ad:', bannerAdId, 'position: BOTTOM_CENTER');
         await AdMob.showBanner(options);
         this.isBannerCreated = true;
         this.isBannerVisible = true;
         this.isBannerActive = true;
         this.isBannerLoading = false;
-        this.log('Native AdMob Banner requested successfully');
+        this.log('Native Production AdMob Banner requested successfully');
       } else {
         this.isBannerCreated = true;
         this.isBannerVisible = true;
@@ -327,23 +302,6 @@ class AdManagerService {
       return true;
     } catch (error) {
       console.error('[ADMOB] Banner showBanner error:', error);
-      if (this.isNative && !ADMOB_CONFIG.IS_TEST_MODE && !this.isUsingBannerFallback) {
-        try {
-          this.isUsingBannerFallback = true;
-          await AdMob.showBanner({
-            adId: TEST_AD_IDS.BANNER_ID,
-            adSize: BannerAdSize.BANNER,
-            position: BannerAdPosition.BOTTOM_CENTER,
-            margin: BOTTOM_NAV_MARGIN_DP,
-            isTesting: true,
-          });
-          this.isBannerCreated = true;
-          this.isBannerVisible = true;
-          this.isBannerActive = true;
-          this.isBannerLoading = false;
-          return true;
-        } catch (_) {}
-      }
       this.isBannerActive = false;
       this.isBannerCreated = false;
       this.isBannerLoading = false;

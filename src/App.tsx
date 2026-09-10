@@ -24,7 +24,6 @@ import { DaySummaryModal } from './components/DaySummaryModal';
 import { MatchDayBlockerModal } from './components/MatchDayBlockerModal';
 import { WelcomeModalHandler } from './components/WelcomeModalHandler';
 import { FacebookBanner } from './components/FacebookBanner';
-import { InContentBannerAd } from './components/ads/InContentBannerAd';
 import { BannerAdContainer } from './components/ads/BannerAdContainer';
 import { RewardedAdCenterModal } from './components/ads/RewardedAdCenterModal';
 import { AdManager } from './services/adManager';
@@ -190,11 +189,8 @@ function GameApp() {
 
       {/* Main Content Stage - GPU accelerated for smooth page transitions */}
       <main className="flex-1 max-w-5xl w-full mx-auto p-3 sm:p-4 pb-36 gpu-layer">
-        {/* Facebook Community Banner (Dismissible) */}
+        {/* Facebook Community Banner */}
         <FacebookBanner />
-
-        {/* In-Content Sponsored Banner Ad (Cleanly positioned below Facebook Community Section) */}
-        <InContentBannerAd />
 
         {activeTab === 'dashboard' && (
           <DashboardTab 
