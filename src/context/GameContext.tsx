@@ -1226,6 +1226,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         if (liveMatchTimerRef.current) {
           clearInterval(liveMatchTimerRef.current);
           liveMatchTimerRef.current = null;
+          console.log('[DIAG] TIMER_CLEARED');
         }
         return;
       }
@@ -1235,18 +1236,36 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           if (liveMatchTimerRef.current) {
             clearInterval(liveMatchTimerRef.current);
             liveMatchTimerRef.current = null;
+            console.log('[DIAG] TIMER_CLEARED');
           }
           return prev;
         }
+
+        console.log(`[DIAG] TIMER_TICK minute=${prev.currentMinute}`);
         const next = simulateMatchStep(prev, userClub?.tactics);
+
+        console.log(`[DIAG] MATCH_END_CHECK minute=${next.currentMinute}`);
+        const isEndCondition = next.isFinished || next.currentMinute >= 90;
+        console.log(`[DIAG] MATCH_END_CONDITION result=${isEndCondition}`);
+
+        if (next.currentMinute >= 90) {
+          console.log('[DIAG] TIMER_REACHED_90');
+        }
+
         if (next.isFinished || !next.isPlaying || next.isHalfTime || next.currentMinute >= 90) {
           if (next.isFinished || next.currentMinute >= 90) {
             isMatchFinishedRef.current = true;
             console.log('[MatchEndingFlow] MATCH_90_REACHED: Simulation interval stopped cleanly once.');
+            if (!next.isFinished) {
+              console.log('[DIAG] FINISH_MATCH_SKIPPED reason=simulateMatchStep_nextMinute_90_not_greater_than_90');
+            } else {
+              console.log('[DIAG] FINISH_MATCH_CALLED');
+            }
           }
           if (liveMatchTimerRef.current) {
             clearInterval(liveMatchTimerRef.current);
             liveMatchTimerRef.current = null;
+            console.log('[DIAG] TIMER_CLEARED');
           }
         }
         return next;

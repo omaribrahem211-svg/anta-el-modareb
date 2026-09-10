@@ -202,6 +202,7 @@ export const MatchesTab: React.FC = () => {
   useEffect(() => {
     if (liveMatch && liveMatch.isFinished) {
       console.log('[DIAG] MATCH_RESULT_RENDERED');
+      console.log('[DIAG] RESULT_STATE_SET');
       console.log('[MatchEndingFlow] RESULT_RENDERED');
       if (userClub?.id) {
         const isUserHome = liveMatch.homeTeam?.id === userClub.id;
