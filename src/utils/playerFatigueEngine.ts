@@ -44,11 +44,19 @@ export function processPostMatchPlayerUpdates(
   const transferMessages: InboxMessage[] = [];
   const departedPlayers: { player: Player; fee: number; newClubName: string }[] = [];
 
+  // Pre-calculate substitutions in O(E) once for O(1) player lookups
+  const subInIds = new Set<string>();
+  const subInNames = new Set<string>();
+  for (const e of (matchPlayed.events || [])) {
+    if (e && e.type === 'substitution') {
+      if ((e as any).inPlayerId) subInIds.add((e as any).inPlayerId);
+      if (e.inPlayerName) subInNames.add(e.inPlayerName);
+    }
+  }
+
   teamPlayers.forEach(p => {
     const isStarter = startingIds.includes(p.id);
-    const isSub = matchPlayed.events.some(e => 
-      e.type === 'substitution' && (e.inPlayerName === p.name || (e as any).inPlayerId === p.id)
-    );
+    const isSub = !isStarter && ((p.id && subInIds.has(p.id)) || (p.name && subInNames.has(p.name)));
 
     if (isStarter) {
       // 1. STARTER: Stamina decay mitigated by fitness coach
@@ -187,5 +195,70 @@ export function processPostMatchPlayerUpdates(
     updatedPlayers,
     transferMessages,
     departedPlayers,
+  };
+}
+
+export interface PlayerMatchEventStats {
+  goals: number;
+  assists: number;
+  yellows: number;
+  reds: number;
+}
+
+export interface MatchStatsMap {
+  getPlayerStats: (playerId?: string, playerName?: string) => PlayerMatchEventStats;
+}
+
+/**
+ * Builds an aggregated player match stats lookup map in a single O(E) pass.
+ * Allows subsequent per-player lookups in O(1) without repeated array filtering.
+ */
+export function buildMatchStatsMap(events: MatchEvent[] = []): MatchStatsMap {
+  const statsByPlayerId = new Map<string, PlayerMatchEventStats>();
+  const statsByPlayerName = new Map<string, PlayerMatchEventStats>();
+
+  const getOrCreate = (id?: string, name?: string): PlayerMatchEventStats => {
+    let stat = (id ? statsByPlayerId.get(id) : undefined) || (name ? statsByPlayerName.get(name) : undefined);
+    if (!stat) {
+      stat = { goals: 0, assists: 0, yellows: 0, reds: 0 };
+    }
+    if (id && !statsByPlayerId.has(id)) statsByPlayerId.set(id, stat);
+    if (name && !statsByPlayerName.has(name)) statsByPlayerName.set(name, stat);
+    return stat;
+  };
+
+  for (const e of events) {
+    if (!e) continue;
+
+    if (e.type === 'goal') {
+      if (e.playerId || e.playerName) {
+        const s = getOrCreate(e.playerId, e.playerName);
+        s.goals += 1;
+      }
+      if (e.assistPlayerId || e.assistPlayerName) {
+        const a = getOrCreate(e.assistPlayerId, e.assistPlayerName);
+        a.assists += 1;
+      }
+    } else if (e.type === 'yellow_card') {
+      if (e.playerId || e.playerName) {
+        const s = getOrCreate(e.playerId, e.playerName);
+        s.yellows += 1;
+      }
+    } else if (e.type === 'red_card') {
+      if (e.playerId || e.playerName) {
+        const s = getOrCreate(e.playerId, e.playerName);
+        s.reds += 1;
+      }
+    }
+  }
+
+  const defaultStats: PlayerMatchEventStats = { goals: 0, assists: 0, yellows: 0, reds: 0 };
+
+  return {
+    getPlayerStats: (playerId?: string, playerName?: string): PlayerMatchEventStats => {
+      if (playerId && statsByPlayerId.has(playerId)) return statsByPlayerId.get(playerId)!;
+      if (playerName && statsByPlayerName.has(playerName)) return statsByPlayerName.get(playerName)!;
+      return defaultStats;
+    }
   };
 }

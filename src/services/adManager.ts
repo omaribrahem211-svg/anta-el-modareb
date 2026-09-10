@@ -186,29 +186,7 @@ class AdManagerService {
       const failedHandle = await AdMob.addListener(BannerAdPluginEvents.FailedToLoad, async (error: any) => {
         const errCode = (error && (error.code ?? error.errorCode)) ?? 'UNKNOWN';
         const errMsg = (error && (error.message ?? error.errorMessage)) ?? (typeof error === 'object' ? JSON.stringify(error) : String(error));
-        console.warn(`[ADMOB_BANNER_FAILED] Code: ${errCode} | Message: ${errMsg}`, error);
-
-        // If in production mode but testing on an unverified test device (e.g. Error 3 No Fill),
-        // fallback to official Google test banner ID so developer sees banner active on device.
-        if (!ADMOB_CONFIG.IS_TEST_MODE && !this.isBannerActive) {
-          try {
-            console.log('[ADMOB_BANNER_FALLBACK] Attempting fallback to Google test banner for device verification...');
-            await AdMob.showBanner({
-              adId: TEST_AD_IDS.BANNER_ID,
-              adSize: BannerAdSize.BANNER,
-              position: BannerAdPosition.BOTTOM_CENTER,
-              margin: BOTTOM_NAV_MARGIN_DP,
-              isTesting: true,
-            });
-            this.isBannerActive = true;
-            this.isBannerCreated = true;
-            this.isBannerVisible = true;
-            this.isBannerLoading = false;
-            return;
-          } catch (fallbackErr) {
-            console.warn('[ADMOB_BANNER_FALLBACK_FAILED]', fallbackErr);
-          }
-        }
+        console.warn(`[ADMOB_BANNER_FAILED] Code: ${errCode} | Message: ${errMsg}`);
 
         this.isBannerActive = false;
         this.isBannerLoading = false;
@@ -292,7 +270,6 @@ class AdManagerService {
   }
 
   public async hideBanner(): Promise<boolean> {
-    if (!this.state.isPremium) return true;
     return this.destroyBanner();
   }
 

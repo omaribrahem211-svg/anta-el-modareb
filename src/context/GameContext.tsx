@@ -39,7 +39,7 @@ import {
   StaffRole,
 } from '../types/game';
 import { hireStaffMember, getClubStaffBonuses } from '../utils/staffEngine';
-import { processPostMatchPlayerUpdates } from '../utils/playerFatigueEngine';
+import { processPostMatchPlayerUpdates, buildMatchStatsMap } from '../utils/playerFatigueEngine';
 import { simulateMultipleLeagueRounds } from '../utils/batchSimulationEngine';
 import {
   applyAttributeUpgrade,
@@ -1692,18 +1692,21 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       const homeTeamId = homeTeam?.id || fixture?.homeTeamId;
       const awayTeamId = awayTeam?.id || fixture?.awayTeamId;
 
-    // 5. Clean up simulation buffer: Keep meaningful match events (goals, cards, substitutions, penalties, saves, chances)
+    // 5. Clean up simulation buffer: Keep meaningful match events (goals, cards, substitutions, saves, chances, injuries)
     // and prune generic high-frequency text commentary to prevent huge memory / localStorage payload.
-    const persistentEvents = (events || []).filter(e => 
-      e && (
-        e.type === 'goal' || 
-        e.type === 'yellow_card' || 
-        e.type === 'red_card' || 
-        e.type === 'substitution' || 
-        e.type === 'save' || 
-        e.type === 'chance'
-      )
-    );
+    const persistentEvents = (events || []).filter(e => e && e.type !== 'commentary');
+
+    const pruneCpuEvents = (evs: MatchEvent[] = []): MatchEvent[] => {
+      return (evs || []).filter(e =>
+        e && (
+          e.type === 'goal' ||
+          e.type === 'yellow_card' ||
+          e.type === 'red_card' ||
+          e.type === 'substitution' ||
+          e.type === 'injury'
+        )
+      );
+    };
 
     // 1. Update this fixture
     let updatedFixtures = fixtures.map(f => {
@@ -1757,7 +1760,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
               awayPenalties: ap,
               winnerTeamId: matchWinner,
               isPlayed: true,
-              events,
+              events: persistentEvents,
               stats,
             };
           }
@@ -1806,7 +1809,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     // 2. Simulate other matches in the same round
     const allRoundMatches: { homeTeamId: string; awayTeamId: string; homeScore: number; awayScore: number; events: MatchEvent[] }[] = [
-      { homeTeamId: homeTeam.id, awayTeamId: awayTeam.id, homeScore, awayScore, events }
+      { homeTeamId: homeTeam.id, awayTeamId: awayTeam.id, homeScore, awayScore, events: persistentEvents }
     ];
 
     const otherRoundFixtures = updatedFixtures.filter(f => f.round === currentRound && f.id !== fixture.id && !f.isPlayed);
@@ -1816,6 +1819,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       const otherAway = (teams.find(t => t && t.id === otherFix.awayTeamId) || (otherFix.awayTeamId ? findClubInWorld(otherFix.awayTeamId) : undefined) || teams[1]) || ({ id: otherFix.awayTeamId || 'away_dummy', name: 'الفريق الضيف', shortName: 'ضف', players: [], tactics: { startingPlayerIds: [], benchPlayerIds: [] } } as any);
       const isOtherCup = otherFix.competitionType === 'cup';
       const otherResult = isOtherCup ? simulateKnockoutMatch(otherHome, otherAway) : simulateMatch(otherHome, otherAway, otherHome.tactics, otherAway.tactics);
+      const prunedOtherEvents = pruneCpuEvents(otherResult.events);
 
       updatedFixtures = updatedFixtures.map(f => {
         if (f.id === otherFix.id) {
@@ -1827,7 +1831,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             awayPenalties: isOtherCup ? (otherResult as any).awayPenalties : undefined,
             winnerTeamId: isOtherCup ? (otherResult as any).winnerTeamId : undefined,
             isPlayed: true,
-            events: otherResult.events,
+            events: prunedOtherEvents,
             stats: otherResult.stats,
           };
         }
@@ -1848,7 +1852,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                 awayPenalties: koRes.awayPenalties,
                 winnerTeamId: koRes.winnerTeamId,
                 isPlayed: true,
-                events: koRes.events,
+                events: prunedOtherEvents,
                 stats: koRes.stats,
               };
             }
@@ -1867,7 +1871,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         awayTeamId: otherAway.id,
         homeScore: otherResult.homeScore,
         awayScore: otherResult.awayScore,
-        events: otherResult.events,
+        events: prunedOtherEvents,
       });
 
       if (!otherFix.competitionType || otherFix.competitionType === 'league') {
@@ -1882,7 +1886,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                 homeScore: otherResult.homeScore,
                 awayScore: otherResult.awayScore,
                 isPlayed: true,
-                events: otherResult.events,
+                events: prunedOtherEvents,
                 stats: otherResult.stats,
               };
             }
@@ -2013,13 +2017,17 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         extraTransferIncome = departedPlayers.reduce((sum, dp) => sum + dp.fee, 0);
       }
 
+      // Precompute player match events into an O(1) lookup map once per team
+      const matchStatsMap = buildMatchStatsMap(matchPlayed.events);
+
       const updatedPlayers = fatigueUpdatedPlayers.map(p => {
         const isStarter = startingIds.includes(p.id);
 
-        const playerGoals = matchPlayed.events.filter(e => e.type === 'goal' && (e.playerId === p.id || e.playerName === p.name)).length;
-        const playerAssists = matchPlayed.events.filter(e => e.type === 'goal' && (e.assistPlayerId === p.id || e.assistPlayerName === p.name)).length;
-        const playerYellows = matchPlayed.events.filter(e => e.type === 'yellow_card' && (e.playerId === p.id || e.playerName === p.name)).length;
-        const playerReds = matchPlayed.events.filter(e => e.type === 'red_card' && (e.playerId === p.id || e.playerName === p.name)).length;
+        const pStats = matchStatsMap.getPlayerStats(p.id, p.name);
+        const playerGoals = pStats.goals;
+        const playerAssists = pStats.assists;
+        const playerYellows = pStats.yellows;
+        const playerReds = pStats.reds;
 
         // Realistic individual match rating
         let matchRating = isStarter ? (isTeamWin ? 7.3 : isTeamDraw ? 6.7 : 6.1) : 6.0;
@@ -2450,6 +2458,18 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         ? simulateKnockoutMatch(homeTeam, awayTeam)
         : simulateMatch(homeTeam, awayTeam, homeTeam?.tactics, awayTeam?.tactics);
 
+      const isUserMatch = !!userClub && (fix.homeTeamId === userClub.id || fix.awayTeamId === userClub.id);
+      const matchEvents = (matchResult.events || []).filter(e =>
+        e && (
+          e.type === 'goal' ||
+          e.type === 'yellow_card' ||
+          e.type === 'red_card' ||
+          e.type === 'substitution' ||
+          e.type === 'injury' ||
+          (isUserMatch && (e.type === 'save' || e.type === 'chance'))
+        )
+      );
+
       updatedFixtures = updatedFixtures.map(f => {
         if (f.id === fix.id) {
           return {
@@ -2460,7 +2480,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             awayPenalties: isCup ? (matchResult as any).awayPenalties : undefined,
             winnerTeamId: isCup ? (matchResult as any).winnerTeamId : undefined,
             isPlayed: true,
-            events: matchResult.events,
+            events: matchEvents,
             stats: matchResult.stats,
           };
         }
@@ -2472,7 +2492,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         awayTeamId: awayTeam.id,
         homeScore: matchResult.homeScore,
         awayScore: matchResult.awayScore,
-        events: matchResult.events,
+        events: matchEvents,
       });
 
       if (!fix.competitionType || fix.competitionType === 'league') {
@@ -2493,7 +2513,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                 awayPenalties: koRes.awayPenalties,
                 winnerTeamId: koRes.winnerTeamId,
                 isPlayed: true,
-                events: matchResult.events,
+                events: matchEvents,
                 stats: matchResult.stats,
               };
             }
@@ -2632,14 +2652,18 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         extraTransferIncome = departedPlayers.reduce((sum, dp) => sum + dp.fee, 0);
       }
 
+      // Precompute player match events into an O(1) lookup map once per team
+      const matchStatsMap = buildMatchStatsMap(matchPlayed.events);
+
       const updatedPlayers = (fatigueUpdatedPlayers || []).filter(Boolean).map(p => {
         if (!p || !p.id) return p;
         const isStarter = startingIds.includes(p.id);
 
-        const playerGoals = matchPlayed.events.filter(e => e.type === 'goal' && (e.playerId === p.id || e.playerName === p.name)).length;
-        const playerAssists = matchPlayed.events.filter(e => e.type === 'goal' && (e.assistPlayerId === p.id || e.assistPlayerName === p.name)).length;
-        const playerYellows = matchPlayed.events.filter(e => e.type === 'yellow_card' && (e.playerId === p.id || e.playerName === p.name)).length;
-        const playerReds = matchPlayed.events.filter(e => e.type === 'red_card' && (e.playerId === p.id || e.playerName === p.name)).length;
+        const pStats = matchStatsMap.getPlayerStats(p.id, p.name);
+        const playerGoals = pStats.goals;
+        const playerAssists = pStats.assists;
+        const playerYellows = pStats.yellows;
+        const playerReds = pStats.reds;
 
         let matchRating = isStarter ? (isTeamWin ? 7.2 : isTeamDraw ? 6.6 : 6.0) : 6.0;
         if (playerGoals > 0) matchRating += playerGoals * 0.9;
