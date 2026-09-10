@@ -15,7 +15,6 @@ import {
   TacticalAlert,
   TACTICAL_ARABIC_LABELS,
 } from '../utils/tacticalAdvisor';
-import confetti from 'canvas-confetti';
 import {
   Swords,
   Play,
@@ -198,29 +197,12 @@ export const MatchesTab: React.FC = () => {
     }
   }, [liveMatch?.currentMinute, liveMatch?.events?.length]);
 
-  // Confetti on win after match finishes
+  // Match finished effect
   useEffect(() => {
     if (liveMatch && liveMatch.isFinished) {
       console.log('[DIAG] MATCH_RESULT_RENDERED');
       console.log('[DIAG] RESULT_STATE_SET');
       console.log('[MatchEndingFlow] RESULT_RENDERED');
-      if (userClub?.id) {
-        const isUserHome = liveMatch.homeTeam?.id === userClub.id;
-        const userGoals = isUserHome ? liveMatch.homeScore : liveMatch.awayScore;
-        const oppGoals = isUserHome ? liveMatch.awayScore : liveMatch.homeScore;
-
-        if (userGoals > oppGoals) {
-          try {
-            confetti({
-              particleCount: 80,
-              spread: 70,
-              origin: { y: 0.6 }
-            });
-          } catch {
-            // ignore
-          }
-        }
-      }
     }
   }, [liveMatch?.isFinished]);
 
