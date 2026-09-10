@@ -1252,22 +1252,36 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           console.log('[DIAG] TIMER_REACHED_90');
         }
 
-        if (next.isFinished || !next.isPlaying || next.isHalfTime || next.currentMinute >= 90) {
-          if (next.isFinished || next.currentMinute >= 90) {
-            isMatchFinishedRef.current = true;
-            console.log('[MatchEndingFlow] MATCH_90_REACHED: Simulation interval stopped cleanly once.');
-            if (!next.isFinished) {
-              console.log('[DIAG] FINISH_MATCH_SKIPPED reason=simulateMatchStep_nextMinute_90_not_greater_than_90');
-            } else {
-              console.log('[DIAG] FINISH_MATCH_CALLED');
-            }
+        if (next.currentMinute >= 90 || next.isFinished) {
+          const finishedNext = {
+            ...next,
+            currentMinute: 90,
+            isFinished: true,
+            isPlaying: false,
+            isHalfTime: false,
+          };
+
+          isMatchFinishedRef.current = true;
+          console.log('[MatchEndingFlow] MATCH_90_REACHED: Simulation interval stopped cleanly once.');
+          console.log('[DIAG] FINISH_MATCH_CALLED');
+
+          if (liveMatchTimerRef.current) {
+            clearInterval(liveMatchTimerRef.current);
+            liveMatchTimerRef.current = null;
+            console.log('[DIAG] TIMER_CLEARED');
           }
+
+          return finishedNext;
+        }
+
+        if (!next.isPlaying || next.isHalfTime) {
           if (liveMatchTimerRef.current) {
             clearInterval(liveMatchTimerRef.current);
             liveMatchTimerRef.current = null;
             console.log('[DIAG] TIMER_CLEARED');
           }
         }
+
         return next;
       });
     }, intervalTime);
