@@ -481,6 +481,7 @@ export const MatchesTab: React.FC = () => {
                 id="finish_match_and_advance_btn"
                 disabled={isSimulationRunning}
                 onClick={() => {
+                  console.log('[DIAG] FINISH_BUTTON_CLICKED');
                   console.error('[MatchesTab] User clicked Confirm Result & Advance button');
                   try {
                     finishLiveMatchAndAdvance();

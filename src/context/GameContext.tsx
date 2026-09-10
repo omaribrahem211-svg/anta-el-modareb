@@ -1637,6 +1637,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   const finishLiveMatchAndAdvance = () => {
+    console.log('[DIAG] ADVANCE_STARTED');
     console.log('[MatchEndingFlow] END_MATCH_STARTED');
     console.error('[MatchEndingFlow] finishLiveMatchAndAdvance called. State:', liveMatch ? {
       fixtureId: liveMatch.fixture?.id,
