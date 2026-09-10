@@ -38,7 +38,7 @@ export const PRODUCTION_AD_IDS = {
   TOP_BANNER_ID: 'ca-app-pub-5272866425919152/6734203345',    // بانر تحت جزء صفحة الفيسبوك
   BOTTOM_BANNER_ID: 'ca-app-pub-5272866425919152/4077924883',
   REWARDED_ID: 'ca-app-pub-5272866425919152/6872814469',      // إعلان بمكافأة حقيقي
-  INTERSTITIAL_ID: 'ca-app-pub-3940256099942544/1033173712',  // إعلان بيني (قابل للتحديث لمعرف إنتاجي)
+  INTERSTITIAL_ID: 'ca-app-pub-5272866425919152/3245233091',  // إعلان بيني حقيقي جديد
 };
 
 // Production Mode: IS_TEST_MODE = false for Google Play release

@@ -219,23 +219,6 @@ class AdManagerService {
         this.isBannerActive = false;
         this.isBannerLoading = false;
         this.isBannerCreated = false;
-
-        // Try test ID fallback if production banner failed (e.g. Code 3 No Fill)
-        if (!ADMOB_CONFIG.IS_TEST_MODE) {
-          try {
-            console.log('[ADMOB_BANNER] Fallback to test banner unit...');
-            await AdMob.showBanner({
-              adId: TEST_AD_IDS.BANNER_ID,
-              adSize: BannerAdSize.BANNER,
-              position: BannerAdPosition.BOTTOM_CENTER,
-              margin: BOTTOM_NAV_MARGIN_DP,
-              isTesting: true,
-            });
-            this.isBannerCreated = true;
-            this.isBannerVisible = true;
-            this.isBannerActive = true;
-          } catch (_) {}
-        }
       });
 
       this.bannerListenerHandles.push(loadedHandle, failedHandle);
@@ -282,15 +265,14 @@ class AdManagerService {
       await this.attachBannerListeners();
 
       if (this.isNative) {
-        const prodBannerId = ADMOB_CONFIG.BANNER_ID || ADMOB_CONFIG.BOTTOM_BANNER_ID || 'ca-app-pub-5272866425919152/4077924883';
-        const bannerAdId = ADMOB_CONFIG.IS_TEST_MODE ? TEST_AD_IDS.BANNER_ID : prodBannerId;
+        const bannerAdId = ADMOB_CONFIG.IS_TEST_MODE ? TEST_AD_IDS.BANNER_ID : (ADMOB_CONFIG.BANNER_ID || ADMOB_CONFIG.BOTTOM_BANNER_ID);
 
         const options: BannerAdOptions = {
           adId: bannerAdId,
           adSize: BannerAdSize.BANNER,
           position: BannerAdPosition.BOTTOM_CENTER,
           margin: BOTTOM_NAV_MARGIN_DP,
-          isTesting: ADMOB_CONFIG.IS_TEST_MODE || (bannerAdId === TEST_AD_IDS.BANNER_ID),
+          isTesting: ADMOB_CONFIG.IS_TEST_MODE,
         };
 
         console.log('[ADMOB_BANNER] Requesting native banner ad:', bannerAdId, 'position: BOTTOM_CENTER');
@@ -313,24 +295,6 @@ class AdManagerService {
       this.isBannerActive = false;
       this.isBannerCreated = false;
       this.isBannerLoading = false;
-
-      // If production banner threw immediately, try test unit fallback
-      if (this.isNative && !ADMOB_CONFIG.IS_TEST_MODE) {
-        try {
-          const fallbackOptions: BannerAdOptions = {
-            adId: TEST_AD_IDS.BANNER_ID,
-            adSize: BannerAdSize.BANNER,
-            position: BannerAdPosition.BOTTOM_CENTER,
-            margin: BOTTOM_NAV_MARGIN_DP,
-            isTesting: true,
-          };
-          await AdMob.showBanner(fallbackOptions);
-          this.isBannerCreated = true;
-          this.isBannerVisible = true;
-          this.isBannerActive = true;
-          return true;
-        } catch (_) {}
-      }
       return false;
     }
   }
@@ -466,50 +430,30 @@ class AdManagerService {
 
         await this.cleanupInterstitialListeners();
 
-        const prodId = ADMOB_CONFIG.INTERSTITIAL_ID || TEST_AD_IDS.INTERSTITIAL_ID;
-        const testId = TEST_AD_IDS.INTERSTITIAL_ID;
+        const interstitialAdId = ADMOB_CONFIG.IS_TEST_MODE ? TEST_AD_IDS.INTERSTITIAL_ID : ADMOB_CONFIG.INTERSTITIAL_ID;
 
         const loadedHandle = await AdMob.addListener(InterstitialAdPluginEvents.Loaded, () => {
-          console.log('[ADMOB_INTERSTITIAL_LOADED] Interstitial loaded successfully');
+          console.log('[ADMOB_INTERSTITIAL_LOADED] Interstitial loaded successfully:', interstitialAdId);
           finish(true);
         });
         this.interstitialListenerHandles.push(loadedHandle);
 
         const failedHandle = await AdMob.addListener(InterstitialAdPluginEvents.FailedToLoad, async (err: any) => {
-          console.warn('[ADMOB_INTERSTITIAL_FAILED] Failed to load:', err);
-          if (prodId !== testId) {
-            try {
-              console.log('[ADMOB_INTERSTITIAL] Retrying with test ID fallback...');
-              await AdMob.prepareInterstitial({
-                adId: testId,
-                isTesting: true,
-              });
-              return;
-            } catch (retryErr) {
-              console.warn('[ADMOB_INTERSTITIAL] Retry failed:', retryErr);
-            }
-          }
+          const errCode = (err && (err.code ?? err.errorCode)) ?? 'UNKNOWN';
+          const errMsg = (err && (err.message ?? err.errorMessage)) ?? (typeof err === 'object' ? JSON.stringify(err) : String(err));
+          console.warn(`[ADMOB_INTERSTITIAL_FAILED] Code: ${errCode} | Message: ${errMsg}`);
           finish(false);
         });
         this.interstitialListenerHandles.push(failedHandle);
 
         const options: AdOptions = {
-          adId: prodId,
-          isTesting: ADMOB_CONFIG.IS_TEST_MODE || (prodId === testId),
+          adId: interstitialAdId,
+          isTesting: ADMOB_CONFIG.IS_TEST_MODE,
         };
 
-        console.log('[ADMOB_INTERSTITIAL] Preparing interstitial ad:', prodId);
+        console.log('[ADMOB_INTERSTITIAL] Preparing interstitial ad:', interstitialAdId);
         AdMob.prepareInterstitial(options).catch(async (err: any) => {
           console.warn('[ADMOB_INTERSTITIAL_PREPARE_ERROR]', err);
-          if (prodId !== testId) {
-            try {
-              await AdMob.prepareInterstitial({
-                adId: testId,
-                isTesting: true,
-              });
-              return;
-            } catch (_) {}
-          }
           finish(false);
         });
       } catch (ex) {
@@ -680,12 +624,11 @@ class AdManagerService {
 
         await this.cleanupRewardedListeners();
 
-        const prodId = ADMOB_CONFIG.REWARDED_ID || TEST_AD_IDS.REWARDED_ID;
-        const testId = TEST_AD_IDS.REWARDED_ID;
+        const rewardedAdId = ADMOB_CONFIG.IS_TEST_MODE ? TEST_AD_IDS.REWARDED_ID : ADMOB_CONFIG.REWARDED_ID;
 
         // 1. Listen for Loaded event
         const loadedHandle = await AdMob.addListener(RewardAdPluginEvents.Loaded, () => {
-          console.log('[ADMOB_REWARDED_LOADED] Ad loaded successfully with unit ID:', prodId);
+          console.log('[ADMOB_REWARDED_LOADED] Ad loaded successfully with unit ID:', rewardedAdId);
           finish(true);
         });
         this.rewardedListenerHandles.push(loadedHandle);
@@ -695,40 +638,18 @@ class AdManagerService {
           const errCode = (err && (err.code ?? err.errorCode)) ?? 'UNKNOWN';
           const errMsg = (err && (err.message ?? err.errorMessage)) ?? (typeof err === 'object' ? JSON.stringify(err) : String(err));
           console.warn(`[ADMOB_REWARDED_LOAD_FAILED] Code: ${errCode} | Message: ${errMsg}`);
-
-          if (prodId !== testId) {
-            try {
-              console.log('[ADMOB_REWARDED] Retrying with test rewarded ID fallback...');
-              await AdMob.prepareRewardVideoAd({
-                adId: testId,
-                isTesting: true,
-              });
-              return;
-            } catch (retryErr) {
-              console.warn('[ADMOB_REWARDED] Retry failed:', retryErr);
-            }
-          }
           finish(false);
         });
         this.rewardedListenerHandles.push(failedHandle);
 
         const options: RewardAdOptions = {
-          adId: prodId,
-          isTesting: ADMOB_CONFIG.IS_TEST_MODE || (prodId === testId),
+          adId: rewardedAdId,
+          isTesting: ADMOB_CONFIG.IS_TEST_MODE,
         };
 
-        console.log('[ADMOB_REWARDED] Preparing rewarded ad:', prodId);
+        console.log('[ADMOB_REWARDED] Preparing rewarded ad:', rewardedAdId);
         AdMob.prepareRewardVideoAd(options).catch(async (err: any) => {
           console.warn('[ADMOB_REWARDED_PREPARE_ERROR]', err);
-          if (prodId !== testId) {
-            try {
-              await AdMob.prepareRewardVideoAd({
-                adId: testId,
-                isTesting: true,
-              });
-              return;
-            } catch (_) {}
-          }
           finish(false);
         });
       } catch (ex: any) {
