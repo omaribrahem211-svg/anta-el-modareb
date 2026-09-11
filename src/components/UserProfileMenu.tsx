@@ -10,7 +10,9 @@ import {
   LayoutDashboard,
   Download,
   Upload,
-  RotateCcw
+  RotateCcw,
+  ShieldCheck,
+  ExternalLink
 } from 'lucide-react';
 import { getLocalTrainerProfile } from '../services/trainerProfileService';
 import { SettingsBackupModal } from './SettingsBackupModal';
@@ -138,6 +140,22 @@ export const UserProfileMenu: React.FC<UserProfileMenuProps> = ({ onOpenAdmin, o
                   <span>محلي فوري (Local-First)</span>
                 </span>
               </div>
+
+              {/* Privacy Policy Link */}
+              <button
+                onClick={() => {
+                  setIsDropdownOpen(false);
+                  window.history.pushState({}, '', '/privacy-policy');
+                  window.dispatchEvent(new PopStateEvent('popstate'));
+                }}
+                className="w-full flex items-center justify-between p-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 border border-sky-500/30 text-slate-200 hover:text-white font-medium transition-all cursor-pointer group text-[11px]"
+              >
+                <div className="flex items-center gap-2">
+                  <ShieldCheck className="w-4 h-4 text-sky-400 group-hover:scale-110 transition-transform" />
+                  <span>سياسة الخصوصية (Privacy Policy)</span>
+                </div>
+                <ExternalLink className="w-3.5 h-3.5 text-slate-400 group-hover:text-sky-400" />
+              </button>
             </div>
 
             {/* Danger Zone: Reset Career */}

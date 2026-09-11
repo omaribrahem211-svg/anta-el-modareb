@@ -33,6 +33,7 @@ import { ActiveTab, Player } from './types/game';
 import { AdminLayout } from './components/admin/AdminLayout';
 import { AdminAccessDenied } from './components/admin/AdminAccessDenied';
 import { MatchErrorBoundary } from './components/MatchErrorBoundary';
+import { PrivacyPolicyPage } from './components/PrivacyPolicyPage';
 
 function GameApp() {
   console.log('[STARTUP] App rendered', Math.round(performance.now()) + 'ms');
@@ -60,6 +61,15 @@ function GameApp() {
       window.location.pathname.startsWith('/admin/') ||
       window.location.hash === '#admin' ||
       window.location.hash.startsWith('#/admin')
+    );
+  });
+  const [isPrivacyPolicyMode, setIsPrivacyPolicyMode] = useState<boolean>(() => {
+    return (
+      window.location.pathname === '/privacy-policy' ||
+      window.location.pathname.startsWith('/privacy-policy/') ||
+      window.location.hash === '#privacy-policy' ||
+      window.location.hash.startsWith('#/privacy-policy') ||
+      window.location.hash.startsWith('#privacy-policy')
     );
   });
 
@@ -115,8 +125,8 @@ function GameApp() {
         return;
       }
 
-      // 3. Exit Admin View if open
-      if (isAdminMode) {
+      // 3. Exit Privacy Policy or Admin View if open
+      if (isPrivacyPolicyMode || isAdminMode) {
         handleBackToGame();
         return;
       }
@@ -134,36 +144,59 @@ function GameApp() {
     return () => {
       backListenerPromise.then(l => l.remove()).catch(() => {});
     };
-  }, [selectedPlayer, showDaySummaryModal, closeDaySummaryModal, isAdminMode, activeTab]);
+  }, [selectedPlayer, showDaySummaryModal, closeDaySummaryModal, isAdminMode, isPrivacyPolicyMode, activeTab]);
 
-  // Listen to browser navigation changes for /admin or #admin
+  // Listen to browser navigation changes for /admin, #admin, /privacy-policy, #privacy-policy
   useEffect(() => {
-    const checkAdminRoute = () => {
+    const checkRoutes = () => {
+      const path = window.location.pathname;
+      const hash = window.location.hash;
+
       const isTargetingAdmin = 
-        window.location.pathname === '/admin' ||
-        window.location.pathname.startsWith('/admin/') ||
-        window.location.hash === '#admin' ||
-        window.location.hash.startsWith('#/admin');
+        path === '/admin' ||
+        path.startsWith('/admin/') ||
+        hash === '#admin' ||
+        hash.startsWith('#/admin');
       setIsAdminMode(isTargetingAdmin);
+
+      const isTargetingPrivacy = 
+        path === '/privacy-policy' ||
+        path.startsWith('/privacy-policy/') ||
+        hash === '#privacy-policy' ||
+        hash.startsWith('#/privacy-policy') ||
+        hash.startsWith('#privacy-policy');
+      setIsPrivacyPolicyMode(isTargetingPrivacy);
     };
 
-    window.addEventListener('popstate', checkAdminRoute);
-    window.addEventListener('hashchange', checkAdminRoute);
+    window.addEventListener('popstate', checkRoutes);
+    window.addEventListener('hashchange', checkRoutes);
     return () => {
-      window.removeEventListener('popstate', checkAdminRoute);
-      window.removeEventListener('hashchange', checkAdminRoute);
+      window.removeEventListener('popstate', checkRoutes);
+      window.removeEventListener('hashchange', checkRoutes);
     };
   }, []);
 
   const handleBackToGame = () => {
     setIsAdminMode(false);
-    if (window.location.hash === '#admin' || window.location.hash.startsWith('#/admin')) {
+    setIsPrivacyPolicyMode(false);
+    if (
+      window.location.hash === '#admin' || 
+      window.location.hash.startsWith('#/admin') ||
+      window.location.hash === '#privacy-policy' ||
+      window.location.hash.startsWith('#/privacy-policy') ||
+      window.location.hash.startsWith('#privacy-policy')
+    ) {
       window.location.hash = '';
     }
-    if (window.location.pathname.startsWith('/admin')) {
+    if (window.location.pathname.startsWith('/admin') || window.location.pathname.startsWith('/privacy-policy')) {
       window.history.pushState({}, '', '/');
     }
   };
+
+  // If in Privacy Policy Mode (publicly accessible, no login required)
+  if (isPrivacyPolicyMode) {
+    return <PrivacyPolicyPage onBackToGame={handleBackToGame} />;
+  }
 
   // If in Admin Mode
   if (isAdminMode) {

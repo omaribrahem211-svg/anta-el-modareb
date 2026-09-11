@@ -24,7 +24,10 @@ import {
   Calendar,
   Layers,
   Sparkles,
-  Smartphone
+  Smartphone,
+  ExternalLink,
+  FileText,
+  Info
 } from 'lucide-react';
 
 interface SettingsBackupModalProps {
@@ -347,6 +350,35 @@ export const SettingsBackupModal: React.FC<SettingsBackupModalProps> = ({
               <li>نظام ترقية تلقائي (Auto-Migration) يضمن التوافق التام مع أي تحديثات مستقبلية للعبة.</li>
               <li>نسخة احتياطية محلية تعمل 100% دون اتصال بالإنترنت أو الحاجة لتسجيل حساب.</li>
             </ul>
+          </div>
+
+          {/* About Game & Privacy Policy Link */}
+          <div className="bg-slate-950/70 border border-slate-800 rounded-2xl p-3.5 space-y-2.5">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Info className="w-4 h-4 text-sky-400" />
+                <span className="text-xs font-bold text-white">حول اللعبة والخصوصية (About & Privacy)</span>
+              </div>
+              <span className="text-[10px] text-slate-400 font-mono">الإصدار {APP_BUILD_VERSION}</span>
+            </div>
+            <p className="text-[11px] text-slate-400 leading-relaxed">
+              لعبة "أنت المدرب" تحترم خصوصيتك بالكامل، وتعمل وفق مبدأ الحفظ المحلي أولاً (Local-First)، مع استخدام معتمد لخدمات Google AdMob و Google Firebase.
+            </p>
+            <div className="flex flex-col sm:flex-row items-stretch gap-2 pt-0.5">
+              <button
+                type="button"
+                onClick={() => {
+                  onClose();
+                  window.history.pushState({}, '', '/privacy-policy');
+                  window.dispatchEvent(new PopStateEvent('popstate'));
+                }}
+                className="flex-1 py-2 px-3 bg-sky-950/60 hover:bg-sky-900/60 border border-sky-600/40 text-sky-200 hover:text-white text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-sm active:scale-[0.98]"
+              >
+                <FileText className="w-3.5 h-3.5 text-sky-400" />
+                <span>عرض سياسة الخصوصية الرسمية</span>
+                <ExternalLink className="w-3 h-3 text-sky-400" />
+              </button>
+            </div>
           </div>
 
           {/* Reset Career Danger Zone Option */}
