@@ -1,4 +1,4 @@
-name: Build Android APK
+name: Build Android AAB
 
 on:
   workflow_dispatch:
@@ -9,6 +9,7 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
@@ -42,13 +43,12 @@ jobs:
       - name: Accept Android licenses
         run: yes | sdkmanager --licenses || true
 
-      - name: Build APK
+      - name: Build Release AAB
         working-directory: android
-        run: chmod +x gradlew && ./gradlew assembleDebug
+        run: chmod +x gradlew && ./gradlew bundleRelease
 
-      - name: Upload APK
+      - name: Upload AAB
         uses: actions/upload-artifact@v4
         with:
-          name: anta-el-modareb-apk
-          path: android/app/build/outputs/apk/debug/*.apk
-
+          name: anta-el-modareb-aab
+          path: android/app/build/outputs/bundle/release/*.aab
