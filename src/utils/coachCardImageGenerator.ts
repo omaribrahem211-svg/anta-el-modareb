@@ -1,23 +1,125 @@
+import { toPng } from 'html-to-image';
+import { Filesystem, Directory } from '@capacitor/filesystem';
+import { Share } from '@capacitor/share';
+import { Capacitor } from '@capacitor/core';
 import { ManagerProfile, Club } from '../types/game';
 
-interface GenerateCardOptions {
+export interface TacticalProfileData {
+  styleTitle: string;
+  formation: string;
+  mentalityDesc: string;
+  passingDesc: string;
+  pressingDesc: string;
+  tacticalBio: string;
+}
+
+export interface GenerateCardOptions {
   manager: ManagerProfile;
   userClub: Club | null;
   globalRank: number;
+  rankingPoints: number;
+  totalMatches: number;
+  totalWins: number;
+  totalDraws: number;
+  totalLosses: number;
+  totalGoalsScored: number;
+  totalGoalsConceded: number;
   winRate: number;
+  trophiesCount: number;
+  tacticalProfile: TacticalProfileData;
   photoUrl: string | null;
+  cardElement?: HTMLElement | null;
+}
+
+export interface GeneratedCardResult {
+  dataUrl: string;
+  blob: Blob;
+  file: File;
+  fileName: string;
 }
 
 /**
- * Generates a high-resolution, broadcast-quality PNG image of the Official Coach Card
- * suitable for downloading and sharing on WhatsApp Stories, Facebook, Instagram, etc.
+ * Generates an image of the Coach Card containing 100% of the details.
+ * Prioritizes high-resolution DOM capture of the actual card element,
+ * with a high-fidelity Canvas fallback matching the Dark Premium Emerald/Gold theme.
  */
-export async function generateCoachCardImage(options: GenerateCardOptions): Promise<{ dataUrl: string; blob: Blob }> {
-  const { manager, userClub, globalRank, winRate, photoUrl } = options;
+export async function generateCoachCardImage(options: GenerateCardOptions): Promise<GeneratedCardResult> {
+  const { manager, cardElement } = options;
+  const safeName = (manager.name || 'مدرب').replace(/[^\w\u0600-\u06FF]/g, '_');
+  const fileName = `كارت_المدرب_${safeName}_${Date.now()}.png`;
 
-  // High-resolution canvas dimensions (portrait 1080 x 1420)
+  // Pre-load fonts if available to ensure text renders crisply
+  if (typeof document !== 'undefined' && 'fonts' in document) {
+    try {
+      await document.fonts.ready;
+    } catch {
+      // ignore
+    }
+  }
+
+  // 1. Try DOM capture if element is provided (captures 100% of visual details, icons, fonts, badges)
+  if (cardElement) {
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 80));
+
+      const dataUrl = await toPng(cardElement, {
+        cacheBust: true,
+        pixelRatio: 2.2,
+        backgroundColor: '#020617',
+        skipFonts: true,
+        fontEmbedCSS: '',
+        filter: (node) => {
+          // Exclude interactive camera upload overlay buttons when generating the clean shareable card
+          if (node instanceof HTMLElement) {
+            if (
+              node.id === 'coach_photo_upload_overlay' ||
+              node.classList.contains('photo-upload-overlay') ||
+              node.getAttribute('data-hide-on-export') === 'true'
+            ) {
+              return false;
+            }
+          }
+          return true;
+        },
+      });
+
+      const res = await fetch(dataUrl);
+      const blob = await res.blob();
+      const file = new File([blob], fileName, { type: 'image/png' });
+
+      if (dataUrl && dataUrl.length > 500) {
+        return { dataUrl, blob, file, fileName };
+      }
+    } catch (domErr) {
+      console.warn('[CoachCard] DOM capture notice, falling back to Canvas rendering:', domErr);
+    }
+  }
+
+  // 2. Fallback: High-resolution Canvas rendering matching Dark Premium layout
+  return generateCanvasCoachCard(options, fileName);
+}
+
+/**
+ * Dedicated Canvas renderer for the Coach Card:
+ * Dark Premium design with Emerald & Gold accents, spacious layout, clear stats,
+ * playing style, and official branding.
+ */
+async function generateCanvasCoachCard(options: GenerateCardOptions, fileName: string): Promise<GeneratedCardResult> {
+  const {
+    manager,
+    userClub,
+    globalRank,
+    totalMatches,
+    totalWins,
+    totalDraws,
+    totalLosses,
+    winRate,
+    tacticalProfile,
+    photoUrl,
+  } = options;
+
   const width = 1080;
-  const height = 1420;
+  const height = 1440;
 
   const canvas = document.createElement('canvas');
   canvas.width = width;
@@ -28,305 +130,451 @@ export async function generateCoachCardImage(options: GenerateCardOptions): Prom
     throw new Error('Canvas 2D context not available');
   }
 
-  // Helper for drawing rounded rectangle
   function roundRect(x: number, y: number, w: number, h: number, r: number) {
-    ctx.beginPath();
-    ctx.moveTo(x + r, y);
-    ctx.lineTo(x + w - r, y);
-    ctx.quadraticCurveTo(x + w, y, x + w, y + r);
-    ctx.lineTo(x + w, y + h - r);
-    ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
-    ctx.lineTo(x + r, y + h);
-    ctx.quadraticCurveTo(x, y + h, x, y + h - r);
-    ctx.lineTo(x, y + r);
-    ctx.quadraticCurveTo(x, y, x + r, y);
-    ctx.closePath();
+    ctx!.beginPath();
+    ctx!.moveTo(x + r, y);
+    ctx!.lineTo(x + w - r, y);
+    ctx!.quadraticCurveTo(x + w, y, x + w, y + r);
+    ctx!.lineTo(x + w, y + h - r);
+    ctx!.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+    ctx!.lineTo(x + r, y + h);
+    ctx!.quadraticCurveTo(x, y + h, x, y + h - r);
+    ctx!.lineTo(x, y + r);
+    ctx!.quadraticCurveTo(x, y, x + r, y);
+    ctx!.closePath();
   }
 
-  // 1. Dark Luxurious Background
-  const bgGrad = ctx.createRadialGradient(width / 2, 350, 50, width / 2, height / 2, 900);
-  bgGrad.addColorStop(0, '#1e293b'); // Slate 800
-  bgGrad.addColorStop(0.5, '#0f172a'); // Slate 900
-  bgGrad.addColorStop(1, '#020617'); // Slate 950
+  function drawWrappedText(text: string, x: number, y: number, maxWidth: number, lineHeight: number) {
+    const words = text.split(' ');
+    let line = '';
+    let curY = y;
+    for (let n = 0; n < words.length; n++) {
+      const testLine = line + words[n] + ' ';
+      const metrics = ctx!.measureText(testLine);
+      if (metrics.width > maxWidth && n > 0) {
+        ctx!.fillText(line, x, curY);
+        line = words[n] + ' ';
+        curY += lineHeight;
+      } else {
+        line = testLine;
+      }
+    }
+    ctx!.fillText(line, x, curY);
+    return curY;
+  }
+
+  // 1. Background
+  const bgGrad = ctx.createLinearGradient(0, 0, 0, height);
+  bgGrad.addColorStop(0, '#09131f');
+  bgGrad.addColorStop(0.5, '#061019');
+  bgGrad.addColorStop(1, '#03080e');
   ctx.fillStyle = bgGrad;
   ctx.fillRect(0, 0, width, height);
 
-  // Subtle tactical grid background pattern
-  ctx.strokeStyle = 'rgba(255, 255, 255, 0.03)';
-  ctx.lineWidth = 2;
-  const gridSize = 60;
-  for (let x = 0; x < width; x += gridSize) {
-    ctx.beginPath();
-    ctx.moveTo(x, 0);
-    ctx.lineTo(x, height);
-    ctx.stroke();
-  }
-  for (let y = 0; y < height; y += gridSize) {
-    ctx.beginPath();
-    ctx.moveTo(0, y);
-    ctx.lineTo(width, y);
-    ctx.stroke();
-  }
-
-  // Outer Golden Card Frame
+  // Outer Golden & Emerald Frame
   const margin = 40;
   const cardW = width - margin * 2;
   const cardH = height - margin * 2;
-  const cardRadius = 48;
+  const cardRadius = 36;
 
-  // Outer glow
   ctx.save();
-  ctx.shadowColor = 'rgba(245, 158, 11, 0.45)';
-  ctx.shadowBlur = 40;
-  ctx.strokeStyle = '#d97706';
-  ctx.lineWidth = 6;
+  ctx.shadowColor = 'rgba(245, 158, 11, 0.25)';
+  ctx.shadowBlur = 30;
+  ctx.strokeStyle = '#f59e0b';
+  ctx.lineWidth = 4;
   roundRect(margin, margin, cardW, cardH, cardRadius);
   ctx.stroke();
   ctx.restore();
 
-  // Inner Card Border (Double line gold foil effect)
-  ctx.strokeStyle = '#f59e0b';
-  ctx.lineWidth = 3;
-  roundRect(margin + 12, margin + 12, cardW - 24, cardH - 24, cardRadius - 8);
-  ctx.stroke();
-
-  // Top Holographic Gradient Bar
+  // Top Holographic Accent Bar
   const topGrad = ctx.createLinearGradient(margin, margin, margin + cardW, margin);
   topGrad.addColorStop(0, '#f59e0b');
   topGrad.addColorStop(0.5, '#10b981');
   topGrad.addColorStop(1, '#f59e0b');
   ctx.fillStyle = topGrad;
-  ctx.fillRect(margin + 20, margin + 14, cardW - 40, 8);
+  ctx.fillRect(margin + 24, margin + 2, cardW - 48, 6);
 
-  // 2. Card Header Pill ("لعبة أنت المدرب")
-  const headerPillY = margin + 60;
+  // 2. Header: Logo and Title «أنت المدرب»
+  const headerY = margin + 50;
   ctx.save();
-  const pillGrad = ctx.createLinearGradient(width / 2 - 200, 0, width / 2 + 200, 0);
-  pillGrad.addColorStop(0, 'rgba(245, 158, 11, 0.25)');
-  pillGrad.addColorStop(0.5, 'rgba(16, 185, 129, 0.25)');
-  pillGrad.addColorStop(1, 'rgba(245, 158, 11, 0.25)');
-  ctx.fillStyle = pillGrad;
-  ctx.strokeStyle = '#f59e0b';
+  // Logo Icon
+  ctx.fillStyle = '#f59e0b';
+  roundRect(margin + 40, headerY - 15, 60, 60, 16);
+  ctx.fill();
+  ctx.fillStyle = '#020617';
+  ctx.font = '900 32px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('🏆', margin + 70, headerY + 15);
+
+  // Title Text
+  ctx.textAlign = 'right';
+  ctx.fillStyle = '#fbbf24';
+  ctx.font = '900 34px system-ui, "Cairo", sans-serif';
+  ctx.fillText('أنت المدرب', margin + 40 + 80 + 200, headerY + 5);
+
+  ctx.fillStyle = '#94a3b8';
+  ctx.font = 'bold 20px system-ui, "Cairo", sans-serif';
+  ctx.fillText('بطاقة المدرب الرسمية', margin + 40 + 80 + 200, headerY + 32);
+
+  // OVR Pill on the left
+  const managerLevel = manager.level || 1;
+  const managerOvr = manager.managerRating || (manager as any).rating || Math.min(99, 68 + managerLevel * 3 + (totalWins > 5 ? 5 : 0));
+  const ovrW = 120;
+  const ovrH = 52;
+  const ovrX = margin + cardW - 40 - ovrW;
+  ctx.fillStyle = 'rgba(16, 185, 129, 0.15)';
+  ctx.strokeStyle = '#10b981';
   ctx.lineWidth = 2;
-  roundRect(width / 2 - 240, headerPillY, 480, 56, 28);
+  roundRect(ovrX, headerY - 10, ovrW, ovrH, 14);
   ctx.fill();
   ctx.stroke();
 
-  ctx.fillStyle = '#fbbf24';
-  ctx.font = 'bold 28px system-ui, -apple-system, "Segoe UI", Roboto, "Cairo", sans-serif';
+  ctx.fillStyle = '#34d399';
+  ctx.font = '900 24px system-ui, monospace';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.fillText('✨ كارت المدرب الرسمي • أنت المدرب ✨', width / 2, headerPillY + 28);
+  ctx.fillText(`${managerOvr} OVR`, ovrX + ovrW / 2, headerY + 16);
   ctx.restore();
 
-  // 3. Coach Photo (or placeholder avatar)
-  const photoSize = 280;
-  const photoX = (width - photoSize) / 2;
-  const photoY = headerPillY + 90;
-
-  // Photo Frame Outer Glow & Border
-  ctx.save();
-  ctx.shadowColor = 'rgba(245, 158, 11, 0.6)';
-  ctx.shadowBlur = 24;
-  ctx.strokeStyle = '#fbbf24';
-  ctx.lineWidth = 5;
-  roundRect(photoX, photoY, photoSize, photoSize, 36);
+  // Divider below header
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.1)';
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.moveTo(margin + 40, headerY + 65);
+  ctx.lineTo(margin + cardW - 40, headerY + 65);
   ctx.stroke();
-  ctx.restore();
 
-  // Draw Photo Content (clipped inside rounded rect)
+  // 3. Coach Photo + Name & Club Section
+  const photoSize = 160;
+  const photoX = margin + 50;
+  const photoY = headerY + 95;
+
   ctx.save();
-  roundRect(photoX, photoY, photoSize, photoSize, 36);
+  roundRect(photoX, photoY, photoSize, photoSize, 26);
   ctx.clip();
 
-  let photoDrawn = false;
+  let imgLoaded = false;
   if (photoUrl) {
     try {
       const img = new Image();
-      img.crossOrigin = 'anonymous';
-      await new Promise<void>((resolve, reject) => {
-        img.onload = () => resolve();
-        img.onerror = (e) => reject(e);
-        img.src = photoUrl;
-      });
-      ctx.drawImage(img, photoX, photoY, photoSize, photoSize);
-      photoDrawn = true;
+      img.src = photoUrl;
+      if (!img.complete) {
+        await new Promise((resolve) => {
+          img.onload = () => resolve(true);
+          img.onerror = () => resolve(false);
+        });
+      }
+      if (img.naturalWidth > 0) {
+        ctx.drawImage(img, photoX, photoY, photoSize, photoSize);
+        imgLoaded = true;
+      }
     } catch {
-      photoDrawn = false;
+      imgLoaded = false;
     }
   }
 
-  if (!photoDrawn) {
-    // Default avatar gradient background
-    const avatarBg = ctx.createLinearGradient(photoX, photoY, photoX + photoSize, photoY + photoSize);
-    avatarBg.addColorStop(0, '#1e293b');
-    avatarBg.addColorStop(1, '#0f172a');
-    ctx.fillStyle = avatarBg;
+  if (!imgLoaded) {
+    ctx.fillStyle = '#1e293b';
     ctx.fillRect(photoX, photoY, photoSize, photoSize);
-
-    // Draw coach avatar silhouette / text
     ctx.fillStyle = '#f59e0b';
-    ctx.font = 'bold 96px system-ui, sans-serif';
+    ctx.font = '900 64px system-ui, sans-serif';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText('⚽', photoX + photoSize / 2, photoY + photoSize / 2 - 20);
-
-    ctx.fillStyle = '#94a3b8';
-    ctx.font = 'bold 24px system-ui, "Cairo", sans-serif';
-    ctx.fillText('صورة المدرب', photoX + photoSize / 2, photoY + photoSize / 2 + 65);
+    ctx.fillText((manager.name || 'م')[0], photoX + photoSize / 2, photoY + photoSize / 2);
   }
   ctx.restore();
 
-  // 4. Coach Name & Club
-  const nameY = photoY + photoSize + 60;
+  // Photo border
   ctx.save();
-  ctx.fillStyle = '#ffffff';
-  ctx.font = '900 52px system-ui, -apple-system, "Segoe UI", Roboto, "Cairo", sans-serif';
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.shadowColor = 'rgba(0,0,0,0.8)';
-  ctx.shadowBlur = 12;
-  ctx.fillText(manager.name, width / 2, nameY);
-
-  ctx.shadowBlur = 0;
-  ctx.fillStyle = '#fbbf24';
-  ctx.font = 'bold 28px system-ui, "Cairo", sans-serif';
-  const clubTitle = `المدير الفني • ${userClub?.name || 'دوري الدرجة الرابعة'}`;
-  ctx.fillText(clubTitle, width / 2, nameY + 48);
+  ctx.strokeStyle = '#f59e0b';
+  ctx.lineWidth = 3.5;
+  roundRect(photoX, photoY, photoSize, photoSize, 26);
+  ctx.stroke();
   ctx.restore();
 
-  // 5. Primary Info Grid (الدولة, العمر, الترتيب العالمي)
-  const gridY = nameY + 95;
-  const gridH = 140;
-  const gridMargin = margin + 40;
-  const gridW = width - gridMargin * 2;
-  const colW = gridW / 3;
+  // Coach Name, Club, Level
+  const textStartX = photoX + photoSize + 40;
+  ctx.save();
+  ctx.textAlign = 'right';
+  ctx.textBaseline = 'top';
 
+  ctx.fillStyle = '#ffffff';
+  ctx.font = '900 40px system-ui, "Cairo", sans-serif';
+  ctx.fillText(manager.name, margin + cardW - 50, photoY + 5);
+
+  ctx.fillStyle = '#fbbf24';
+  ctx.font = 'bold 24px system-ui, "Cairo", sans-serif';
+  const clubName = userClub?.name || 'دوري الدرجة الرابعة';
+  ctx.fillText(`المدير الفني لنادي ${clubName}`, margin + cardW - 50, photoY + 58);
+
+  ctx.fillStyle = '#94a3b8';
+  ctx.font = 'bold 20px system-ui, "Cairo", sans-serif';
+  ctx.fillText(`المستوى التدريبي: ${managerLevel}  •  الجنسية: ${manager.nationality || 'مصر'}`, margin + cardW - 50, photoY + 102);
+  ctx.restore();
+
+  // 4. Core Stats Grid: World Rank, Matches, Win Rate (3 Columns)
+  const statsY = photoY + photoSize + 45;
+  const statsH = 150;
+  const statsMargin = margin + 40;
+  const statsW = cardW - 80;
+  const colW = statsW / 3;
+
+  // Background box for 3 stats
   ctx.save();
   ctx.fillStyle = 'rgba(15, 23, 42, 0.85)';
-  ctx.strokeStyle = 'rgba(255, 255, 255, 0.12)';
+  ctx.strokeStyle = 'rgba(245, 158, 11, 0.35)';
   ctx.lineWidth = 2;
-  roundRect(gridMargin, gridY, gridW, gridH, 24);
+  roundRect(statsMargin, statsY, statsW, statsH, 22);
   ctx.fill();
   ctx.stroke();
 
-  // Column 1: Nationality
-  const col1X = gridMargin + colW / 2;
-  ctx.fillStyle = '#94a3b8';
-  ctx.font = '22px system-ui, "Cairo", sans-serif';
-  ctx.textAlign = 'center';
-  ctx.fillText('🌍 الدولة', col1X, gridY + 42);
-  ctx.fillStyle = '#f8fafc';
-  ctx.font = 'bold 32px system-ui, "Cairo", sans-serif';
-  ctx.fillText(manager.nationality || 'مصر', col1X, gridY + 92);
-
-  // Column 2: Age
-  const col2X = gridMargin + colW + colW / 2;
-  ctx.fillStyle = '#94a3b8';
-  ctx.font = '22px system-ui, "Cairo", sans-serif';
-  ctx.fillText('📅 العمر', col2X, gridY + 42);
-  ctx.fillStyle = '#f8fafc';
-  ctx.font = 'bold 32px system-ui, "Cairo", sans-serif';
-  ctx.fillText(`${manager.age || 35} سنة`, col2X, gridY + 92);
-
-  // Column 3: Global Rank
-  const col3X = gridMargin + colW * 2 + colW / 2;
-  ctx.fillStyle = '#fbbf24';
-  ctx.font = '22px system-ui, "Cairo", sans-serif';
-  ctx.fillText('🏆 الترتيب العالمي', col3X, gridY + 42);
+  // Column 1: World Rank (Gold)
+  const c1 = statsMargin + colW * 0.5;
   ctx.fillStyle = '#fcd34d';
-  ctx.font = '900 36px system-ui, "Cairo", sans-serif';
-  ctx.fillText(`#${globalRank}`, col3X, gridY + 92);
-
-  // Column dividers
-  ctx.strokeStyle = 'rgba(255, 255, 255, 0.1)';
-  ctx.lineWidth = 2;
-  ctx.beginPath();
-  ctx.moveTo(gridMargin + colW, gridY + 20);
-  ctx.lineTo(gridMargin + colW, gridY + gridH - 20);
-  ctx.moveTo(gridMargin + colW * 2, gridY + 20);
-  ctx.lineTo(gridMargin + colW * 2, gridY + gridH - 20);
-  ctx.stroke();
-  ctx.restore();
-
-  // 6. Secondary Stats Strip (المباريات, نسبة الفوز, البطولات)
-  const stripY = gridY + gridH + 25;
-  const stripH = 120;
-
-  ctx.save();
-  ctx.fillStyle = 'rgba(30, 41, 59, 0.7)';
-  ctx.strokeStyle = 'rgba(245, 158, 11, 0.3)';
-  ctx.lineWidth = 2;
-  roundRect(gridMargin, stripY, gridW, stripH, 20);
-  ctx.fill();
-  ctx.stroke();
-
-  // Stat 1: Matches
+  ctx.font = 'bold 22px system-ui, "Cairo", sans-serif';
   ctx.textAlign = 'center';
-  ctx.fillStyle = '#94a3b8';
-  ctx.font = '22px system-ui, "Cairo", sans-serif';
-  ctx.fillText('المباريات الملعوبة', col1X, stripY + 40);
+  ctx.fillText('التصنيف العالمي 🏆', c1, statsY + 45);
+  ctx.fillStyle = '#f59e0b';
+  ctx.font = '900 44px system-ui, sans-serif';
+  ctx.fillText(`#${globalRank}`, c1, statsY + 105);
+
+  // Column 2: Matches (White)
+  const c2 = statsMargin + colW * 1.5;
+  ctx.fillStyle = '#cbd5e1';
+  ctx.font = 'bold 22px system-ui, "Cairo", sans-serif';
+  ctx.fillText('عدد المباريات ⚽', c2, statsY + 45);
   ctx.fillStyle = '#ffffff';
-  ctx.font = 'bold 36px system-ui, sans-serif';
-  ctx.fillText(`${manager.matchesManaged}`, col1X, stripY + 84);
+  ctx.font = '900 44px system-ui, sans-serif';
+  ctx.fillText(`${totalMatches}`, c2, statsY + 105);
 
-  // Stat 2: Win Rate
-  ctx.fillStyle = '#94a3b8';
-  ctx.font = '22px system-ui, "Cairo", sans-serif';
-  ctx.fillText('نسبة الفوز', col2X, stripY + 40);
-  ctx.fillStyle = '#34d399';
-  ctx.font = 'bold 36px system-ui, sans-serif';
-  ctx.fillText(`${winRate}%`, col2X, stripY + 84);
+  // Column 3: Win Rate (Emerald)
+  const c3 = statsMargin + colW * 2.5;
+  ctx.fillStyle = '#6ee7b7';
+  ctx.font = 'bold 22px system-ui, "Cairo", sans-serif';
+  ctx.fillText('نسبة الفوز ⚡', c3, statsY + 45);
+  ctx.fillStyle = '#10b981';
+  ctx.font = '900 44px system-ui, sans-serif';
+  ctx.fillText(`${winRate}%`, c3, statsY + 105);
 
-  // Stat 3: Trophies
-  ctx.fillStyle = '#94a3b8';
-  ctx.font = '22px system-ui, "Cairo", sans-serif';
-  ctx.fillText('البطولات المحققة', col3X, stripY + 40);
-  ctx.fillStyle = '#fbbf24';
-  ctx.font = 'bold 36px system-ui, sans-serif';
-  ctx.fillText(`${manager.trophies || 0} 🏆`, col3X, stripY + 84);
+  // Vertical Dividers
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.12)';
+  ctx.beginPath();
+  ctx.moveTo(statsMargin + colW, statsY + 20);
+  ctx.lineTo(statsMargin + colW, statsY + statsH - 20);
+  ctx.moveTo(statsMargin + colW * 2, statsY + 20);
+  ctx.lineTo(statsMargin + colW * 2, statsY + statsH - 20);
+  ctx.stroke();
   ctx.restore();
 
-  // 7. Slogan Banner ("🔥 حَمّل لعبة أنت المدرب وشوف قدراتك التدريبية!")
-  const sloganY = stripY + stripH + 30;
-  const sloganH = 80;
-
+  // Quick Record Sub-Bar (Wins, Draws, Losses)
+  const recY = statsY + statsH + 18;
+  const recH = 60;
   ctx.save();
-  const sloganGrad = ctx.createLinearGradient(gridMargin, 0, gridMargin + gridW, 0);
-  sloganGrad.addColorStop(0, 'rgba(245, 158, 11, 0.25)');
-  sloganGrad.addColorStop(0.5, 'rgba(16, 185, 129, 0.25)');
-  sloganGrad.addColorStop(1, 'rgba(245, 158, 11, 0.25)');
-  ctx.fillStyle = sloganGrad;
-  ctx.strokeStyle = '#f59e0b';
-  ctx.lineWidth = 2;
-  roundRect(gridMargin, sloganY, gridW, sloganH, 20);
+  ctx.fillStyle = 'rgba(2, 6, 23, 0.7)';
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.1)';
+  ctx.lineWidth = 1.5;
+  roundRect(statsMargin, recY, statsW, recH, 14);
   ctx.fill();
   ctx.stroke();
 
-  ctx.fillStyle = '#fbbf24';
-  ctx.font = 'bold 28px system-ui, "Cairo", sans-serif';
+  ctx.font = 'bold 22px system-ui, "Cairo", sans-serif';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.fillText('🔥 حَمّل لعبة أنت المدرب وشوف قدراتك التدريبية! ⚽', width / 2, sloganY + sloganH / 2);
+
+  const rx1 = statsMargin + statsW * 0.2;
+  const rx2 = statsMargin + statsW * 0.5;
+  const rx3 = statsMargin + statsW * 0.8;
+
+  ctx.fillStyle = '#34d399';
+  ctx.fillText(`فوز: ${totalWins} 🟢`, rx1, recY + recH / 2);
+  ctx.fillStyle = '#fbbf24';
+  ctx.fillText(`تعادل: ${totalDraws} 🟡`, rx2, recY + recH / 2);
+  ctx.fillStyle = '#f87171';
+  ctx.fillText(`خسارة: ${totalLosses} 🔴`, rx3, recY + recH / 2);
   ctx.restore();
 
-  // 8. Footer Official Watermark & License
-  const footerY = sloganY + sloganH + 40;
+  // 5. Playing Style Section (أسلوب اللعب)
+  const styleY = recY + recH + 25;
+  const styleH = 190;
+  ctx.save();
+  ctx.fillStyle = 'rgba(15, 23, 42, 0.9)';
+  ctx.strokeStyle = 'rgba(16, 185, 129, 0.35)';
+  ctx.lineWidth = 2;
+  roundRect(statsMargin, styleY, statsW, styleH, 20);
+  ctx.fill();
+  ctx.stroke();
+
+  // Header of Playing Style
+  ctx.fillStyle = '#e2e8f0';
+  ctx.font = '900 24px system-ui, "Cairo", sans-serif';
+  ctx.textAlign = 'right';
+  ctx.fillText('أسلوب اللعب التكتيكي:', statsMargin + statsW - 30, styleY + 40);
+
+  ctx.fillStyle = '#34d399';
+  ctx.font = 'bold 22px system-ui, "Cairo", sans-serif';
+  ctx.textAlign = 'left';
+  ctx.fillText(`⚡ ${tacticalProfile.styleTitle}`, statsMargin + 30, styleY + 40);
+
+  // Bio Text
+  ctx.fillStyle = '#cbd5e1';
+  ctx.font = '21px system-ui, "Cairo", sans-serif';
+  ctx.textAlign = 'right';
+  drawWrappedText(tacticalProfile.tacticalBio, statsMargin + statsW - 30, styleY + 85, statsW - 60, 32);
+
+  // Tactical Tags
+  ctx.fillStyle = '#94a3b8';
+  ctx.font = 'bold 18px system-ui, "Cairo", sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText(
+    `الخطة: ${tacticalProfile.formation}   •   العقلية: ${tacticalProfile.mentalityDesc}   •   التمرير: ${tacticalProfile.passingDesc}`,
+    width / 2,
+    styleY + styleH - 24
+  );
+  ctx.restore();
+
+  // 6. Clean Footer Verification
+  const footerY = styleY + styleH + 45;
   ctx.save();
   ctx.fillStyle = '#64748b';
   ctx.font = '20px system-ui, "Cairo", sans-serif';
   ctx.textAlign = 'center';
-  ctx.fillText('رخصة تدريب معتمدة • أنت المدرب 2026 • Real Football Simulation', width / 2, footerY);
+  ctx.fillText('رخصة تدريب معتمدة • لعبة أنت المدرب 2026', width / 2, footerY);
   ctx.restore();
 
-  // Convert to Data URL & Blob
-  const dataUrl = canvas.toDataURL('image/png', 0.95);
+  const dataUrl = canvas.toDataURL('image/png', 0.98);
   const blob = await new Promise<Blob>((resolve, reject) => {
     canvas.toBlob((b) => {
       if (b) resolve(b);
       else reject(new Error('Failed to create blob from canvas'));
-    }, 'image/png', 0.95);
+    }, 'image/png', 0.98);
   });
 
-  return { dataUrl, blob };
+  const file = new File([blob], fileName, { type: 'image/png' });
+  return { dataUrl, blob, file, fileName };
+}
+
+/**
+ * Downloads the coach card image directly to the user's phone or computer.
+ * Works seamlessly across Android Native (Capacitor Filesystem) and standard Web browsers.
+ */
+export async function downloadCoachCardFile(dataUrl: string, fileName: string): Promise<boolean> {
+  let savedSuccess = false;
+
+  // 1. Android / iOS Native Capacitor Filesystem save
+  if (Capacitor.isNativePlatform()) {
+    try {
+      const base64Data = dataUrl.replace(/^data:image\/\w+;base64,/, '');
+      await Filesystem.writeFile({
+        path: fileName,
+        data: base64Data,
+        directory: Directory.Documents,
+        recursive: true,
+      });
+      savedSuccess = true;
+    } catch (fsErr) {
+      console.warn('[CoachCard] Filesystem Documents save notice, trying Cache:', fsErr);
+      try {
+        const base64Data = dataUrl.replace(/^data:image\/\w+;base64,/, '');
+        await Filesystem.writeFile({
+          path: fileName,
+          data: base64Data,
+          directory: Directory.Cache,
+          recursive: true,
+        });
+        savedSuccess = true;
+      } catch (cacheErr) {
+        console.error('[CoachCard] Native Filesystem save error:', cacheErr);
+      }
+    }
+  }
+
+  // 2. Standard Web Download (Anchor Tag + Blob URL)
+  try {
+    const res = await fetch(dataUrl);
+    const blob = await res.blob();
+    const blobUrl = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = blobUrl;
+    a.download = fileName;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => {
+      document.body.removeChild(a);
+      URL.revokeObjectURL(blobUrl);
+    }, 2000);
+    savedSuccess = true;
+  } catch (webErr) {
+    console.warn('[CoachCard] Web anchor download notice:', webErr);
+    const a = document.createElement('a');
+    a.href = dataUrl;
+    a.download = fileName;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    savedSuccess = true;
+  }
+
+  return savedSuccess;
+}
+
+/**
+ * Shares the Coach Card image file natively.
+ * Guarantees that the image file is physically saved/downloaded on the user's device first,
+ * and then opens the native share dialog with the image file attached.
+ */
+export async function shareCoachCardImage(
+  imageResult: GeneratedCardResult,
+  shareTitle: string,
+  shareText: string
+): Promise<{ shared: boolean; downloaded: boolean }> {
+  const downloaded = await downloadCoachCardFile(imageResult.dataUrl, imageResult.fileName);
+  let shared = false;
+
+  // 1. Android Capacitor Native Sharing
+  if (Capacitor.isNativePlatform()) {
+    try {
+      const base64Data = imageResult.dataUrl.replace(/^data:image\/\w+;base64,/, '');
+      const saved = await Filesystem.writeFile({
+        path: imageResult.fileName,
+        data: base64Data,
+        directory: Directory.Cache,
+        recursive: true,
+      });
+
+      await Share.share({
+        title: shareTitle,
+        text: shareText,
+        url: saved.uri,
+        dialogTitle: 'مشاركة كارت المدرب',
+      });
+      shared = true;
+      return { shared, downloaded };
+    } catch (capErr: any) {
+      if (capErr?.message?.includes('canceled') || capErr?.name === 'AbortError') {
+        return { shared: true, downloaded };
+      }
+      console.warn('[CoachCard] Capacitor share notice:', capErr);
+    }
+  }
+
+  // 2. Web Share API with File
+  if (typeof navigator !== 'undefined' && navigator.canShare && navigator.canShare({ files: [imageResult.file] })) {
+    try {
+      await navigator.share({
+        files: [imageResult.file],
+        title: shareTitle,
+        text: shareText,
+      });
+      shared = true;
+      return { shared, downloaded };
+    } catch (shareErr: any) {
+      if (shareErr?.name === 'AbortError') {
+        return { shared: true, downloaded };
+      }
+      console.warn('[CoachCard] Web Share API notice:', shareErr);
+    }
+  }
+
+  return { shared, downloaded };
 }

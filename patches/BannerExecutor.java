@@ -254,6 +254,7 @@ public class BannerExecutor extends Executor {
         activitySupplier
             .get()
             .runOnUiThread(() -> {
+                Log.d("AdMobBanner", "loadAd() called");
                 final AdRequest adRequest = RequestHelper.createRequest(adOptions);
                 adView.loadAd(adRequest);
             });
@@ -267,15 +268,18 @@ public class BannerExecutor extends Executor {
                     initialize();
                 }
 
+                Log.d("AdMobBanner", "AdView created");
                 final AdRequest adRequest = RequestHelper.createRequest(adOptions);
                 AdViewIdHelper.assignIdToAdView(adView, adOptions, adRequest, logTag, contextSupplier.get());
                 adViewLayout.addView(adView);
+                Log.d("AdMobBanner", "loadAd() called");
                 adView.loadAd(adRequest);
 
                 adView.setAdListener(
                     new AdListener() {
                         @Override
                         public void onAdLoaded() {
+                            Log.d("AdMobBanner", "onAdLoaded");
                             final BannerAdSizeInfo sizeInfo = new BannerAdSizeInfo(adView);
                             notifyListeners(BannerAdPluginEvents.SizeChanged.getWebEventName(), sizeInfo);
                             notifyListeners(BannerAdPluginEvents.Loaded.getWebEventName(), emptyObject);
@@ -284,6 +288,7 @@ public class BannerExecutor extends Executor {
 
                         @Override
                         public void onAdFailedToLoad(@NonNull LoadAdError adError) {
+                            Log.e("AdMobBanner", "onAdFailedToLoad: " + adError.getMessage() + " (code: " + adError.getCode() + ")");
                             activitySupplier.get().runOnUiThread(() -> {
                                 if (mViewGroup != null) {
                                     mViewGroup.removeView(adViewLayout);

@@ -46,7 +46,7 @@ export const BottomNav: React.FC<BottomNavProps> = ({ activeTab, setActiveTab })
 
   const secondaryTabs: { id: ActiveTab; label: string; desc: string; icon: React.ComponentType<{ className?: string }>; badge?: number; tag?: string }[] = [
     { id: 'rankings', label: t('tab_rankings', 'التصنيف العالمي'), desc: 'تصنيف أندية ومدربي العالم الشهري وترتيبك', icon: Globe2 },
-    { id: 'online_pvp', label: t('tab_pvp', 'مباريات أونلاين'), desc: 'التحديات المباشرة متوقفة مؤقتًا وستعود قريبًا', icon: Swords, tag: 'قريباً' },
+    { id: 'online_pvp', label: t('tab_pvp', 'مباريات أونلاين'), desc: 'تحديات مباشرة أونلاين مع أصدقائك عبر كود الغرفة', icon: Swords, tag: 'Live' },
     { id: 'transfers', label: t('tab_transfers', 'سوق الانتقالات'), desc: 'شراء وبيع اللاعبين وعقود الصفقات', icon: ArrowLeftRight },
     { id: 'training', label: t('tab_training', 'مركز التدريب'), desc: 'تطوير مهارات اللاعبين والناشئين', icon: Dumbbell },
     { id: 'club', label: t('tab_club', 'إدارة النادي'), desc: 'المالية، الاستاد، المنشآت والرعاة', icon: Building2 },
