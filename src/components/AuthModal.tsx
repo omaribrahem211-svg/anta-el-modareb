@@ -87,9 +87,12 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onClose, isMandatory = fal
         
         {/* Header Icon & Brand */}
         <div className="text-center mb-6">
-          <div className="w-16 h-16 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center mx-auto mb-3 shadow-inner">
-            <Trophy className="w-8 h-8 text-emerald-400" />
-          </div>
+          <img 
+            src="/anta_elmodareb_logo.png" 
+            alt="شعار أنت المدرب" 
+            className="w-20 h-20 rounded-2xl object-cover shadow-xl border border-amber-500/40 mx-auto mb-3"
+            referrerPolicy="no-referrer"
+          />
           <h2 className="text-2xl font-bold text-slate-100 tracking-wide">
             {mode === 'login' ? 'تسجيل الدخول إلى حسابك' : 'إنشاء حساب مدرب جديد'}
           </h2>

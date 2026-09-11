@@ -52,16 +52,30 @@ export function getOrCreatePlayerId(): string {
 }
 
 export function getWebSocketServerUrl(): string {
-  const metaEnv = (import.meta as any).env;
-  if (metaEnv && metaEnv.VITE_WS_URL) {
-    return metaEnv.VITE_WS_URL;
+  // If explicitly configured in VITE_WS_URL
+  if (typeof import.meta.env.VITE_WS_URL === 'string' && import.meta.env.VITE_WS_URL.trim() !== '') {
+    const envUrl = import.meta.env.VITE_WS_URL.trim();
+    if (typeof window !== 'undefined' && window.location?.hostname) {
+      const isDevHost = window.location.hostname.includes('ais-dev-');
+      const isEnvPreHost = envUrl.includes('ais-pre-');
+      // If running inside the Dev environment before deployment, route to the live dev relay
+      if (isDevHost && isEnvPreHost) {
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        return `${protocol}//${window.location.host}/ws/challenge`;
+      }
+    }
+    return envUrl;
   }
-  const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+
+  const isLocal = typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
   if (isLocal && (window as any).Capacitor?.isNativePlatform?.()) {
     return 'wss://ais-pre-oddg67ylxtk2h3cb3joxcv-830970277363.europe-west2.run.app/ws/challenge';
   }
-  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  return `${protocol}//${window.location.host}/ws/challenge`;
+  if (typeof window !== 'undefined' && window.location?.host) {
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    return `${protocol}//${window.location.host}/ws/challenge`;
+  }
+  return 'wss://ais-pre-oddg67ylxtk2h3cb3joxcv-830970277363.europe-west2.run.app/ws/challenge';
 }
 
 type MessageListener = (data: any) => void;

@@ -1061,8 +1061,8 @@ export function simulateMatchStep(
 
           if (Math.random() < goalProb) {
             homeScore++;
-            const scorer = pickPlayerByPosition(homeActivePlayers, 'FWD', 'MID');
-            const assister = pickPlayerByPosition(homeActivePlayers.filter(p => p.id !== scorer.id), 'MID', 'FWD');
+            const scorer = pickGoalScorer(homeActivePlayers);
+            const assister = pickAssister(homeActivePlayers, scorer.id);
             const comment = GOAL_COMMENTARIES[Math.floor(Math.random() * GOAL_COMMENTARIES.length)];
 
             newEvents.push({
@@ -1156,8 +1156,8 @@ export function simulateMatchStep(
 
           if (Math.random() < goalProb) {
             awayScore++;
-            const scorer = pickPlayerByPosition(awayActivePlayers, 'FWD', 'MID');
-            const assister = pickPlayerByPosition(awayActivePlayers.filter(p => p.id !== scorer.id), 'MID', 'FWD');
+            const scorer = pickGoalScorer(awayActivePlayers);
+            const assister = pickAssister(awayActivePlayers, scorer.id);
             const comment = GOAL_COMMENTARIES[Math.floor(Math.random() * GOAL_COMMENTARIES.length)];
 
             newEvents.push({
@@ -1210,7 +1210,9 @@ export function simulateMatchStep(
       const activeDefenders = isHomePenalty ? awayActivePlayers : homeActivePlayers;
 
       const penaltyTakerId = (isHomePenalty ? currentHomeTactics.penaltyTakerId : currentAwayTactics.penaltyTakerId);
-      const taker = activeShooters.find(p => p.id === penaltyTakerId) || pickPlayerByPosition(activeShooters, 'FWD', 'MID');
+      const outfieldShooters = activeShooters.filter(p => p && p.id && p.positionCategory !== 'GK' && p.position !== 'GK');
+      const designatedTaker = outfieldShooters.find(p => p.id === penaltyTakerId);
+      const taker = designatedTaker || pickGoalScorer(outfieldShooters.length > 0 ? outfieldShooters : activeShooters);
       const gk = activeDefenders.find(p => p.positionCategory === 'GK') || activeDefenders[0];
 
       const takerShooting = taker?.attributes?.shooting || 70;
@@ -1327,7 +1329,7 @@ export function simulateMatchStep(
       if (Math.random() < 0.045) {
         const cornerTeam = isHomeCorner ? prevState.homeTeam : prevState.awayTeam;
         const cornerPlayers = isHomeCorner ? homeActivePlayers : awayActivePlayers;
-        const header = pickPlayerByPosition(cornerPlayers, 'DEF', 'FWD');
+        const header = pickCornerHeader(cornerPlayers);
 
         if (isHomeCorner) {
           homeShots++;
@@ -1525,16 +1527,135 @@ export function simulateMatch(
   };
 }
 
+/**
+ * Strictly picks an OUTFIELD player to score a goal.
+ * GOALKEEPERS ARE ABSOLUTELY FORBIDDEN FROM SCORING.
+ * Distribution:
+ * - FWD (Strikers / Wingers): ~75% weight
+ * - MID (Midfielders): ~20% weight
+ * - DEF (Defenders): ~5% weight
+ * - GK (Goalkeeper): 0% (NEVER)
+ */
+export function pickGoalScorer(players: Player[]): Player {
+  // 1. Strictly exclude goalkeepers
+  const outfield = (players || []).filter(p =>
+    Boolean(p && p.id && p.positionCategory !== 'GK' && p.position !== 'GK')
+  );
+
+  if (outfield.length === 0) {
+    return {
+      id: `p_striker_${Math.floor(Math.random() * 10000)}`,
+      name: 'مهاجم الفريق',
+      position: 'ST',
+      positionCategory: 'FWD',
+      overallRating: 68,
+      potentialRating: 72,
+      number: 9,
+      age: 23,
+      nationality: 'مصر',
+      fitness: 100,
+      morale: 80,
+      form: 7.0,
+      marketValue: 50000,
+      salary: 2000,
+      contractYears: 2,
+      attributes: { pace: 70, shooting: 70, passing: 65, dribbling: 68, defending: 40, physical: 65 },
+      stats: { appearances: 0, starts: 0, minutes: 0, goals: 0, assists: 0, cleanSheets: 0, yellowCards: 0, redCards: 0, shots: 0, shotsOnTarget: 0, passes: 0, tackles: 0, saves: 0, averageRating: 7.0, motm: 0 }
+    };
+  }
+
+  const fwds = outfield.filter(p => p.positionCategory === 'FWD');
+  const mids = outfield.filter(p => p.positionCategory === 'MID');
+  const defs = outfield.filter(p => p.positionCategory === 'DEF');
+
+  const roll = Math.random();
+  // 75% chance for a Forward if available
+  if (roll < 0.75 && fwds.length > 0) {
+    return fwds[Math.floor(Math.random() * fwds.length)];
+  }
+  // 20% chance for a Midfielder if available
+  if (roll < 0.95 && mids.length > 0) {
+    return mids[Math.floor(Math.random() * mids.length)];
+  }
+  // 5% chance for a Defender if available
+  if (defs.length > 0) {
+    return defs[Math.floor(Math.random() * defs.length)];
+  }
+  if (fwds.length > 0) return fwds[Math.floor(Math.random() * fwds.length)];
+  if (mids.length > 0) return mids[Math.floor(Math.random() * mids.length)];
+  return outfield[Math.floor(Math.random() * outfield.length)];
+}
+
+/**
+ * Strictly picks an OUTFIELD player to assist a goal.
+ * GOALKEEPERS ARE ABSOLUTELY FORBIDDEN FROM ASSISTING.
+ */
+export function pickAssister(players: Player[], scorerId?: string): Player | undefined {
+  const outfield = (players || []).filter(p =>
+    Boolean(p && p.id && (!scorerId || p.id !== scorerId) && p.positionCategory !== 'GK' && p.position !== 'GK')
+  );
+
+  if (outfield.length === 0) return undefined;
+  // In ~20% of goals, there is no direct assist (solo effort, rebound, penalty, etc.)
+  if (Math.random() < 0.20) return undefined;
+
+  const mids = outfield.filter(p => p.positionCategory === 'MID');
+  const fwds = outfield.filter(p => p.positionCategory === 'FWD');
+  const defs = outfield.filter(p => p.positionCategory === 'DEF');
+
+  const roll = Math.random();
+  // Midfielders provide the majority of assists (~60%)
+  if (roll < 0.60 && mids.length > 0) {
+    return mids[Math.floor(Math.random() * mids.length)];
+  }
+  // Forwards provide ~28% of assists (wingers, cutbacks)
+  if (roll < 0.88 && fwds.length > 0) {
+    return fwds[Math.floor(Math.random() * fwds.length)];
+  }
+  // Fullbacks / defenders provide ~12% (crosses)
+  if (defs.length > 0) {
+    return defs[Math.floor(Math.random() * defs.length)];
+  }
+  return outfield[Math.floor(Math.random() * outfield.length)];
+}
+
+/**
+ * Strictly picks an OUTFIELD player for a corner header goal (Defenders / Strikers).
+ * GOALKEEPERS ARE ABSOLUTELY FORBIDDEN FROM SCORING.
+ */
+export function pickCornerHeader(players: Player[]): Player {
+  const outfield = (players || []).filter(p =>
+    Boolean(p && p.id && p.positionCategory !== 'GK' && p.position !== 'GK')
+  );
+  if (outfield.length === 0) return pickGoalScorer(players);
+
+  const defs = outfield.filter(p => p.positionCategory === 'DEF');
+  const fwds = outfield.filter(p => p.positionCategory === 'FWD');
+  const mids = outfield.filter(p => p.positionCategory === 'MID');
+
+  // Tall CBs and Strikers score corner headers
+  if (Math.random() < 0.65 && defs.length > 0) {
+    return defs[Math.floor(Math.random() * defs.length)];
+  }
+  if (fwds.length > 0) {
+    return fwds[Math.floor(Math.random() * fwds.length)];
+  }
+  if (defs.length > 0) {
+    return defs[Math.floor(Math.random() * defs.length)];
+  }
+  return mids[Math.floor(Math.random() * mids.length)] || outfield[0];
+}
+
 function pickPlayerByPosition(players: Player[], primary: 'FWD' | 'MID' | 'DEF' | 'GK', secondary?: 'FWD' | 'MID' | 'DEF'): Player {
   if (!players || players.length === 0) {
     return {
       id: `p_dummy_${Math.random()}`,
       name: 'لاعب الفريق',
-      position: 'ST',
-      positionCategory: 'FWD',
+      position: primary === 'GK' ? 'GK' : 'ST',
+      positionCategory: primary,
       overallRating: 65,
       potentialRating: 70,
-      number: 9,
+      number: primary === 'GK' ? 1 : 9,
       age: 24,
       nationality: 'مصر',
       fitness: 100,
@@ -1557,6 +1678,14 @@ function pickPlayerByPosition(players: Player[], primary: 'FWD' | 'MID' | 'DEF' 
     const secondaryMatches = players.filter(p => p.positionCategory === secondary);
     if (secondaryMatches.length > 0) {
       return secondaryMatches[Math.floor(Math.random() * secondaryMatches.length)];
+    }
+  }
+
+  // If primary was not GK, NEVER return a GK in the fallback
+  if (primary !== 'GK') {
+    const outfieldOnly = players.filter(p => p.positionCategory !== 'GK' && p.position !== 'GK');
+    if (outfieldOnly.length > 0) {
+      return outfieldOnly[Math.floor(Math.random() * outfieldOnly.length)];
     }
   }
 
@@ -1783,6 +1912,10 @@ export function updatePlayersForCompletedMatch(
     const moraleChange = isWin ? +5 : isDraw ? +1 : -3;
     const newMorale = Math.min(100, Math.max(25, p.morale + moraleChange));
 
+    // Strict safeguard: Goalkeepers NEVER accumulate goals or assists
+    const verifiedGoals = (p.positionCategory === 'GK' || p.position === 'GK') ? 0 : playerGoals;
+    const verifiedAssists = (p.positionCategory === 'GK' || p.position === 'GK') ? 0 : playerAssists;
+
     return {
       ...p,
       fitness: newFitness,
@@ -1792,8 +1925,8 @@ export function updatePlayersForCompletedMatch(
         appearances: currentApps + 1,
         starts: (prevStats.starts || 0) + (isStarter ? 1 : 0),
         minutes: (prevStats.minutes || 0) + minutesPlayed,
-        goals: (prevStats.goals || 0) + playerGoals,
-        assists: (prevStats.assists || 0) + playerAssists,
+        goals: (prevStats.goals || 0) + verifiedGoals,
+        assists: (prevStats.assists || 0) + verifiedAssists,
         cleanSheets: (prevStats.cleanSheets || 0) + (isCleanSheet ? 1 : 0),
         yellowCards: (prevStats.yellowCards || 0) + playerYellows,
         redCards: (prevStats.redCards || 0) + playerReds,

@@ -1754,6 +1754,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           leagueTier: activeLeague?.tier || 1,
           isCupMatch: state.fixture?.competitionType === 'cup',
           customTicketPrice: userClub.facilities?.ticketPrice,
+          isSkipped: true, // 50% revenue penalty for skipping the match
         }) : undefined;
 
         isMatchFinishedRef.current = true;
@@ -1764,7 +1765,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           isPlaying: false,
           isFinished: true,
           isHalfTime: false,
-          matchRevenue: state.matchRevenue || calculatedRevenue,
+          matchRevenue: calculatedRevenue,
         };
       } catch (err) {
         console.error('Error during skipLiveMatchToEnd:', err);
@@ -2163,16 +2164,17 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     if (userClub && resolvedRevenue) {
       cupRewardMessages.push({
         id: `msg_match_rev_${fixture.id}_${Date.now()}`,
-        title: `💰 تقرير إيراد مباراة الجولة ${currentRound}: +${totalMatchRevenue.toLocaleString()} ج.م`,
+        title: `💰 تقرير إيراد مباراة الجولة ${currentRound}: +${totalMatchRevenue.toLocaleString()} ج.م${resolvedRevenue.isSkippedMatch ? ' (تخطي 50%)' : ''}`,
         sender: 'الإدارة المالية للنادي',
         date: `الجولة ${currentRound}`,
         type: 'board',
         read: false,
         content: `كشف الإيرادات المالية الرسمية لمباراة الجولة ${currentRound}:\n\n` +
           `🏟️ الحضور الجماهيري: ${resolvedRevenue.attendance.toLocaleString()} مشجع من أصل ${resolvedRevenue.stadiumCapacity.toLocaleString()} مقعد (${resolvedRevenue.attendancePercentage}%)\n` +
-          `🎟️ سعر التذكرة: ${resolvedRevenue.ticketPrice} ج.م • إجمالي دخل التذاكر: ${resolvedRevenue.ticketRevenue.toLocaleString()} ج.م\n` +
+          `🎟️ سعر التذكرة: ${resolvedRevenue.ticketPrice} ج.م • دخل التذاكر الأساسي: ${resolvedRevenue.ticketRevenue.toLocaleString()} ج.م\n` +
           `📢 رعاة النادي والإعلانات: ${resolvedRevenue.sponsorsRevenue.toLocaleString()} ج.م (مكافأة الفوز: ${resolvedRevenue.sponsorsWinBonus.toLocaleString()} ج.م)\n` +
           `🏆 مكافأة النتيجة الرسمية (${resolvedRevenue.resultType === 'win' ? 'فوز' : resolvedRevenue.resultType === 'draw' ? 'تعادل' : 'مشاركة'}): ${resolvedRevenue.resultBonus.toLocaleString()} ج.م\n` +
+          (resolvedRevenue.isSkippedMatch ? `\n⚠️ خصم تخطي المباراة (50%): -${resolvedRevenue.skipPenaltyAmount?.toLocaleString()} ج.م\n(تم منحك نصف الإيرادات فقط كخصم لتخطي المباراة، تشجيعاً لخوض المباريات كاملة)\n` : '') +
           (resolvedRevenue.isDoubledWithAd ? `🎁 مكافأة مضاعفة الإعلان (2X): +${resolvedRevenue.adDoubledBonus?.toLocaleString()} ج.م\n` : '') +
           `\n✅ الإجمالي النهائي المودع في رصيد النادي: ${totalMatchRevenue.toLocaleString()} جنيه مصري.`,
       });
@@ -2682,6 +2684,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     let updatedStandings = [...standings];
     let updatedCupTournament = cupTournament;
     const allRoundMatches: { homeTeamId: string; awayTeamId: string; homeScore: number; awayScore: number; events: MatchEvent[] }[] = [];
+    let userSimMatchRevenue: MatchRevenueBreakdown | undefined = undefined;
 
     roundFixtures.forEach(fix => {
       const homeTeam = (teams.find(t => t && t.id === fix.homeTeamId) || (fix.homeTeamId ? findClubInWorld(fix.homeTeamId) : undefined) || teams[0]) || ({ id: fix.homeTeamId || 'home_dummy', name: 'الفريق المضيف', shortName: 'مض', players: [], tactics: { startingPlayerIds: [], benchPlayerIds: [] } } as any);
@@ -2692,6 +2695,29 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         : simulateMatch(homeTeam, awayTeam, homeTeam?.tactics, awayTeam?.tactics);
 
       const isUserMatch = !!userClub && (fix.homeTeamId === userClub.id || fix.awayTeamId === userClub.id);
+      let fixtureUserRevenue: MatchRevenueBreakdown | undefined = undefined;
+
+      if (isUserMatch && userClub) {
+        const isUserHome = fix.homeTeamId === userClub.id;
+        const oppTeam = isUserHome ? awayTeam : homeTeam;
+        const userScore = isUserHome ? matchResult.homeScore : matchResult.awayScore;
+        const oppScore = isUserHome ? matchResult.awayScore : matchResult.homeScore;
+
+        fixtureUserRevenue = calculateMatchRevenue({
+          userClub,
+          opponentClub: oppTeam,
+          isHome: isUserHome,
+          userScore,
+          opponentScore: oppScore,
+          leagueTier: activeLeague?.tier || 1,
+          isCupMatch: isCup,
+          customTicketPrice: userClub.facilities?.ticketPrice,
+          isSkipped: true, // 50% revenue for fast-simulated / skipped match
+        });
+        fixtureUserRevenue.isClaimedToBudget = true;
+        userSimMatchRevenue = fixtureUserRevenue;
+      }
+
       const matchEvents = (matchResult.events || []).filter(e =>
         e && (
           e.type === 'goal' ||
@@ -2715,6 +2741,8 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             isPlayed: true,
             events: matchEvents,
             stats: matchResult.stats,
+            matchRevenue: fixtureUserRevenue || f.matchRevenue,
+            revenueClaimed: isUserMatch ? true : f.revenueClaimed,
           };
         }
         return f;
@@ -2940,8 +2968,8 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           stats: {
             ...p.stats,
             appearances: currentApps + (isStarter ? 1 : 0),
-            goals: (p.stats?.goals || 0) + playerGoals,
-            assists: (p.stats?.assists || 0) + playerAssists,
+            goals: (p.stats?.goals || 0) + ((p.positionCategory === 'GK' || p.position === 'GK') ? 0 : playerGoals),
+            assists: (p.stats?.assists || 0) + ((p.positionCategory === 'GK' || p.position === 'GK') ? 0 : playerAssists),
             yellowCards: totalYellows,
             redCards: totalReds,
             cleanSheets: (p.stats?.cleanSheets || 0) + (p.positionCategory === 'GK' && matchOppScore === 0 && isStarter ? 1 : 0),
@@ -2950,9 +2978,11 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         };
       });
 
+      const simMatchIncome = (t.isUserClub && userSimMatchRevenue) ? userSimMatchRevenue.totalRevenue : 0;
+
       return {
         ...t,
-        budget: t.isUserClub ? t.budget + simCupBonusPrize + extraTransferIncome : t.budget,
+        budget: t.isUserClub ? t.budget + simMatchIncome + simCupBonusPrize + extraTransferIncome : t.budget,
         developmentPoints: t.isUserClub ? (t.developmentPoints || 0) + simCupBonusDevPoints : t.developmentPoints,
         players: updatedPlayers,
       };
@@ -3111,6 +3141,39 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             ? `انتهت المباراة بالتعادل (${userScore}-${oppScore}). حصدنا نقطة واحدة ونستعد للجولة القادمة.`
             : `هزيمة مؤسفة بنتيجة (${userScore}-${oppScore}). الإدارة تأمل في تعديل المسار والتعويض سريعاً.`,
         });
+
+        if (userSimMatchRevenue) {
+          const simRoundWages = Math.round((userClub.players || []).reduce((sum, p) => sum + (p.salary || 1000), 0) / 4);
+          
+          // Club economy tracking
+          if (DIAGNOSTIC_CONFIG.ENABLE_BOARD_AND_ECONOMY) {
+            setClubEconomy(prev => ({
+              ...prev,
+              matchIncomeTotal: prev.matchIncomeTotal + userSimMatchRevenue!.totalRevenue,
+              salaryExpensesTotal: prev.salaryExpensesTotal + simRoundWages,
+              currentSeasonNetProfit: prev.currentSeasonNetProfit + userSimMatchRevenue!.totalRevenue - simRoundWages,
+            }));
+          }
+
+          // Official financial report message
+          newInboxMsgs.push({
+            id: `msg_match_rev_sim_${currentRound}_${Date.now()}`,
+            title: `💰 تقرير إيراد مباراة الجولة ${currentRound} (محاكاة سريعة 50%): +${userSimMatchRevenue.totalRevenue.toLocaleString()} ج.م`,
+            sender: 'الإدارة المالية للنادي',
+            date: `الجولة ${currentRound}`,
+            type: 'board',
+            read: false,
+            content: `كشف الإيرادات المالية الرسمية لمباراة الجولة ${currentRound} (تمت محاكاتها سريعاً):\n\n` +
+              `🏟️ الحضور الجماهيري: ${userSimMatchRevenue.attendance.toLocaleString()} مشجع (${userSimMatchRevenue.attendancePercentage}%)\n` +
+              `🎟️ سعر التذكرة: ${userSimMatchRevenue.ticketPrice} ج.م • دخل التذاكر الأساسي: ${userSimMatchRevenue.ticketRevenue.toLocaleString()} ج.م\n` +
+              `📢 رعاة النادي والإعلانات: ${userSimMatchRevenue.sponsorsRevenue.toLocaleString()} ج.م\n` +
+              `🏆 مكافأة النتيجة الرسمية (${userSimMatchRevenue.resultType === 'win' ? 'فوز' : userSimMatchRevenue.resultType === 'draw' ? 'تعادل' : 'مشاركة'}): ${userSimMatchRevenue.resultBonus.toLocaleString()} ج.م\n` +
+              `💵 إجمالي الإيراد الأساسي: ${userSimMatchRevenue.baseTotalRevenue.toLocaleString()} ج.م\n\n` +
+              `⚠️ خصم تخطي المباراة (50%): -${userSimMatchRevenue.skipPenaltyAmount?.toLocaleString()} ج.م\n` +
+              `💡 تم إيداع نصف الإيرادات فقط كخصم لتخطي/محاكاة المباراة، لتشجيع خوض المباريات كاملة.\n\n` +
+              `✅ الصافي المودع في خزينة النادي: +${userSimMatchRevenue.totalRevenue.toLocaleString()} جنيه مصري.`,
+          });
+        }
       }
     } else {
       // Unemployed manager digest & job offers refresh

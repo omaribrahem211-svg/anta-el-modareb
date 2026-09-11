@@ -118,6 +118,12 @@ export const CreateTrainerModal: React.FC<CreateTrainerModalProps> = ({ onProfil
         
         {/* Step Indicator Header */}
         <div className="text-center mb-5 shrink-0">
+          <img 
+            src="/anta_elmodareb_logo.png" 
+            alt="أنت المدرب" 
+            className="w-16 h-16 rounded-2xl object-cover shadow-xl border border-amber-500/40 mx-auto mb-3"
+            referrerPolicy="no-referrer"
+          />
           <div className="flex items-center justify-center gap-3 mb-2">
             <div className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold transition-all ${
               step === 'profile'

@@ -488,6 +488,18 @@ export const MatchesTab: React.FC = () => {
                   2X
                 </button>
               </div>
+
+              <button
+                id="btn_skip_live_match_to_end"
+                type="button"
+                onClick={skipLiveMatchToEnd}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all bg-rose-950/80 hover:bg-rose-900 border border-rose-800/80 text-rose-300 hover:text-rose-100 cursor-pointer shadow-sm active:scale-95"
+                title="تخطي ما تبقى من دقائق المباراة حتى النهاية (تحصل على 50% فقط من الإيراد)"
+              >
+                <FastForward className="w-3.5 h-3.5 text-rose-400" />
+                <span className="hidden sm:inline">تخطي للنهاية (خصم 50% من الإيراد)</span>
+                <span className="sm:hidden">تخطي (50%)</span>
+              </button>
             </div>
           ) : liveMatch.isFinished ? (
             /* Match Finished Banner & Advance CTA */
@@ -569,6 +581,12 @@ export const MatchesTab: React.FC = () => {
                       <span>• مكافأة النتيجة ({liveMatch.matchRevenue.resultType === 'win' ? 'فوز 🏆' : liveMatch.matchRevenue.resultType === 'draw' ? 'تعادل 🤝' : 'مشاركة ⚽'}):</span>
                       <span className="font-mono text-purple-400 font-bold">+{liveMatch.matchRevenue.resultBonus.toLocaleString()} ج.م</span>
                     </div>
+                    {liveMatch.matchRevenue.isSkippedMatch && (
+                      <div className="flex items-center justify-between text-rose-300 font-bold pt-1 border-t border-slate-800">
+                        <span>⚠️ خصم تخطي المباراة (نصف الإيرادات 50%):</span>
+                        <span className="font-mono text-rose-400">-{liveMatch.matchRevenue.skipPenaltyAmount?.toLocaleString()} ج.م</span>
+                      </div>
+                    )}
                     {liveMatch.matchRevenue.isDoubledWithAd && (
                       <div className="flex items-center justify-between text-amber-300 font-bold pt-1 border-t border-slate-800">
                         <span>🎁 مكافأة مشاهدة إعلان AdMob (مضاعفة 2X):</span>

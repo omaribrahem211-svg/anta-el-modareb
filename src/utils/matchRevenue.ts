@@ -18,6 +18,8 @@ export interface MatchRevenueBreakdown {
   isDoubledWithAd?: boolean;
   adDoubledBonus?: number;
   isClaimedToBudget?: boolean;
+  isSkippedMatch?: boolean;
+  skipPenaltyAmount?: number;
 }
 
 /**
@@ -61,11 +63,13 @@ export interface CalculateRevenueParams {
   leagueTier: number;
   isCupMatch?: boolean;
   customTicketPrice?: number;
+  isSkipped?: boolean;
 }
 
 /**
  * Calculates realistic match revenue based on stadium capacity, coach ticket pricing,
  * attendance elasticity, recent performance, sponsors, and match outcome bonuses.
+ * If the match was skipped/simulated, a 50% deduction is applied to motivate playing the full 90 minutes.
  */
 export function calculateMatchRevenue(params: CalculateRevenueParams): MatchRevenueBreakdown {
   const {
@@ -77,6 +81,7 @@ export function calculateMatchRevenue(params: CalculateRevenueParams): MatchReve
     leagueTier,
     isCupMatch = false,
     customTicketPrice,
+    isSkipped = false,
   } = params;
 
   // 1. Result type
@@ -190,6 +195,10 @@ export function calculateMatchRevenue(params: CalculateRevenueParams): MatchReve
   // 7. Base Total Revenue
   const baseTotalRevenue = ticketRevenue + sponsorsRevenue + resultBonus;
 
+  // 8. Skip Penalty (50% deduction if match was skipped or simulated)
+  const skipPenaltyAmount = isSkipped ? Math.round(baseTotalRevenue * 0.5) : 0;
+  const totalRevenue = isSkipped ? Math.max(0, baseTotalRevenue - skipPenaltyAmount) : baseTotalRevenue;
+
   return {
     isHome,
     stadiumCapacity,
@@ -204,9 +213,11 @@ export function calculateMatchRevenue(params: CalculateRevenueParams): MatchReve
     resultBonus,
     resultType,
     baseTotalRevenue,
-    totalRevenue: baseTotalRevenue,
+    totalRevenue,
     isDoubledWithAd: false,
     adDoubledBonus: 0,
     isClaimedToBudget: false,
+    isSkippedMatch: isSkipped,
+    skipPenaltyAmount,
   };
 }
