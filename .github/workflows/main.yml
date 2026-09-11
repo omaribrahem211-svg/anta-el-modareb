@@ -45,12 +45,12 @@ jobs:
       - name: Accept Android licenses
         run: yes | sdkmanager --licenses || true
 
-      - name: Create signing keystore if needed
+      - name: Create signing keystore
         run: |
-          if [ ! -f android/app/anta-el-modareb-upload.jks ]; then
+          if [ ! -f anta-el-modareb-upload.jks ]; then
             keytool -genkeypair \
               -v \
-              -keystore android/app/anta-el-modareb-upload.jks \
+              -keystore anta-el-modareb-upload.jks \
               -alias anta-upload \
               -keyalg RSA \
               -keysize 2048 \
@@ -62,82 +62,27 @@ jobs:
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-            git add android/app/anta-el-modareb-upload.jks
-            git commit -m "Add Android upload signing key"
+            git add anta-el-modareb-upload.jks
+            git commit -m "Add Android signing key"
             git push
           fi
 
-      - name: Create signing properties
-        run: |
-          cat > android/keystore.properties <<EOF
-          storeFile=anta-el-modareb-upload.jks
-          storePassword=AntaElModareb2026!
-          keyAlias=anta-upload
-          keyPassword=AntaElModareb2026!
-          EOF
-
-      - name: Configure Gradle signing
-        run: |
-          python3 - <<'PY'
-          from pathlib import Path
-
-          p = Path("android/app/build.gradle")
-          text = p.read_text()
-
-          if "keystore.properties" not in text:
-              text = text.replace(
-                  "plugins {",
-                  """import java.util.Properties
-          import java.io.FileInputStream
-
-          def keystorePropertiesFile = rootProject.file("keystore.properties")
-          def keystoreProperties = new Properties()
-
-          if (keystorePropertiesFile.exists()) {
-              keystoreProperties.load(new FileInputStream(keystorePropertiesFile))
-          }
-
-          plugins {""",
-                  1
-              )
-
-              text = text.replace(
-                  "android {",
-                  """android {
-              signingConfigs {
-                  release {
-                      if (keystorePropertiesFile.exists()) {
-                          storeFile file(keystoreProperties['storeFile'])
-                          storePassword keystoreProperties['storePassword']
-                          keyAlias keystoreProperties['keyAlias']
-                          keyPassword keystoreProperties['keyPassword']
-                      }
-                  }
-              }""",
-                  1
-              )
-
-              text = text.replace(
-                  "buildTypes {",
-                  """buildTypes {""",
-                  1
-              )
-
-              text = text.replace(
-                  "release {",
-                  """release {
-                      signingConfig signingConfigs.release""",
-                  1
-              )
-
-              p.write_text(text)
-          PY
-
-      - name: Build signed Release AAB
+      - name: Build Release AAB
         working-directory: android
         run: |
           chmod +x gradlew
           ./gradlew bundleRelease
+
+      - name: Sign AAB
+        run: |
+          jarsigner \
+            -verbose \
+            -sigalg SHA256withRSA \
+            -digestalg SHA-256 \
+            -keystore anta-el-modareb-upload.jks \
+            -storepass "AntaElModareb2026!" \
+            android/app/build/outputs/bundle/release/app-release.aab \
+            anta-upload
 
       - name: Verify AAB signature
         run: |
