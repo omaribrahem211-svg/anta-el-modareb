@@ -6,6 +6,9 @@ on:
     branches:
       - main
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -13,6 +16,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          persist-credentials: true
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -37,14 +42,110 @@ jobs:
       - name: Setup Android
         uses: android-actions/setup-android@v3
 
-      - name: Build AAB
+      - name: Accept Android licenses
+        run: yes | sdkmanager --licenses || true
+
+      - name: Create signing keystore if needed
+        run: |
+          if [ ! -f android/app/anta-el-modareb-upload.jks ]; then
+            keytool -genkeypair \
+              -v \
+              -keystore android/app/anta-el-modareb-upload.jks \
+              -alias anta-upload \
+              -keyalg RSA \
+              -keysize 2048 \
+              -validity 10000 \
+              -storepass "AntaElModareb2026!" \
+              -keypass "AntaElModareb2026!" \
+              -dname "CN=Anta El Modareb, OU=Asomy Games, O=Asomy Games, L=Egypt, ST=Egypt, C=EG"
+
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+            git add android/app/anta-el-modareb-upload.jks
+            git commit -m "Add Android upload signing key"
+            git push
+          fi
+
+      - name: Create signing properties
+        run: |
+          cat > android/keystore.properties <<EOF
+          storeFile=anta-el-modareb-upload.jks
+          storePassword=AntaElModareb2026!
+          keyAlias=anta-upload
+          keyPassword=AntaElModareb2026!
+          EOF
+
+      - name: Configure Gradle signing
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          p = Path("android/app/build.gradle")
+          text = p.read_text()
+
+          if "keystore.properties" not in text:
+              text = text.replace(
+                  "plugins {",
+                  """import java.util.Properties
+          import java.io.FileInputStream
+
+          def keystorePropertiesFile = rootProject.file("keystore.properties")
+          def keystoreProperties = new Properties()
+
+          if (keystorePropertiesFile.exists()) {
+              keystoreProperties.load(new FileInputStream(keystorePropertiesFile))
+          }
+
+          plugins {""",
+                  1
+              )
+
+              text = text.replace(
+                  "android {",
+                  """android {
+              signingConfigs {
+                  release {
+                      if (keystorePropertiesFile.exists()) {
+                          storeFile file(keystoreProperties['storeFile'])
+                          storePassword keystoreProperties['storePassword']
+                          keyAlias keystoreProperties['keyAlias']
+                          keyPassword keystoreProperties['keyPassword']
+                      }
+                  }
+              }""",
+                  1
+              )
+
+              text = text.replace(
+                  "buildTypes {",
+                  """buildTypes {""",
+                  1
+              )
+
+              text = text.replace(
+                  "release {",
+                  """release {
+                      signingConfig signingConfigs.release""",
+                  1
+              )
+
+              p.write_text(text)
+          PY
+
+      - name: Build signed Release AAB
         working-directory: android
         run: |
           chmod +x gradlew
           ./gradlew bundleRelease
 
-      - name: Upload AAB
+      - name: Verify AAB signature
+        run: |
+          jarsigner -verify -verbose -certs \
+          android/app/build/outputs/bundle/release/app-release.aab
+
+      - name: Upload signed AAB
         uses: actions/upload-artifact@v4
         with:
-          name: anta-el-modareb-aab
-          path: android/app/build/outputs/bundle/release/*.aab
+          name: anta-el-modareb-signed-aab
+          path: android/app/build/outputs/bundle/release/app-release.aab
