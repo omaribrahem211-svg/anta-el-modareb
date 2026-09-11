@@ -139,7 +139,7 @@ export const OnlinePvPTab: React.FC = () => {
       setFeedback(null);
       await challengeClient.createRoom(getParticipantPayload());
     } catch (err: any) {
-      setFeedback({ type: 'error', message: 'تعذر الاتصال بخادم التحديات. يرجى المحاولة ثانية.' });
+      setFeedback({ type: 'error', message: err?.message || 'تعذر إنشاء غرفة التحديات. يرجى المحاولة ثانية.' });
     } finally {
       setLoadingAction(null);
     }
@@ -164,7 +164,7 @@ export const OnlinePvPTab: React.FC = () => {
       setFeedback(null);
       await challengeClient.joinRoom(cleanCode, getParticipantPayload());
     } catch (err: any) {
-      setFeedback({ type: 'error', message: 'فشل الانضمام للغرفة. تحقق من الكود والاتصال.' });
+      setFeedback({ type: 'error', message: err?.message || 'فشل الانضمام للغرفة. تحقق من الكود والاتصال.' });
     } finally {
       setLoadingAction(null);
     }
@@ -490,7 +490,7 @@ export const OnlinePvPTab: React.FC = () => {
         {/* GUARANTEE BADGE */}
         <div className="pt-2 border-t border-slate-800 flex items-center gap-2 text-xs text-slate-400">
           <Shield className="w-4 h-4 text-emerald-400 shrink-0" />
-          <span>الاتصال حي ومباشر عبر الذاكرة المؤقتة (RAM Relay) بدون استهلاك أو تخزين على قواعد البيانات</span>
+          <span>اتصال حي ومباشر وفوري لمباريات وتحديات الأصدقاء أونلاين على الأندرويد والويب</span>
         </div>
       </div>
 

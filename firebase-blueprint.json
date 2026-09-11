@@ -108,6 +108,22 @@
         "updatedBy": { "type": "string", "maxLength": 128 }
       },
       "required": ["id", "jobOfferDifficulty", "pvpMinStakeCoins", "pvpMaxStakeCoins", "updatedAt"]
+    },
+    "ChallengeRoom": {
+      "title": "ChallengeRoom",
+      "description": "Real-time online challenge room for live friend PvP matches",
+      "type": "object",
+      "properties": {
+        "code": { "type": "string", "maxLength": 16 },
+        "status": { "type": "string", "enum": ["waiting", "ready", "playing", "completed"] },
+        "createdAt": { "type": "number" },
+        "lastActivity": { "type": "number" },
+        "host": { "type": "object" },
+        "guest": { "type": "object" },
+        "matchState": { "type": "object" },
+        "lastEvent": { "type": "object" }
+      },
+      "required": ["code", "status", "createdAt", "host"]
     }
   },
   "firestore": {
@@ -122,6 +138,10 @@
     "/pvp_matches/{matchId}": {
       "schema": "PvPMatch",
       "description": "Online PvP match simulations"
+    },
+    "/challenge_rooms/{roomCode}": {
+      "schema": "ChallengeRoom",
+      "description": "Real-time challenge rooms for live friend PvP"
     },
     "/pvp_transactions/{txId}": {
       "schema": "PvPTransaction",

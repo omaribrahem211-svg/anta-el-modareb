@@ -1,10 +1,21 @@
 /**
- * Online Challenge WebSocket Client Service
+ * Online Challenge Client Service
  * 
- * Manages live WebSocket communication with the server relay.
- * All challenge data and match progress exist purely in RAM on the relay server.
- * Match history is stored purely in client-side localStorage to minimize network/Firebase overhead.
+ * Supports both Live WebSocket Relay and Direct Firebase Firestore Realtime Sync.
+ * Automatically detects Android native platforms (Capacitor/WebView) and cloud environments
+ * to ensure 100% uninterrupted connectivity for live PvP challenges.
  */
+
+import { db } from '../lib/firebase';
+import {
+  doc,
+  getDoc,
+  setDoc,
+  updateDoc,
+  deleteDoc,
+  onSnapshot,
+  Unsubscribe,
+} from 'firebase/firestore';
 
 export interface ChallengeParticipant {
   playerId: string;
@@ -51,14 +62,55 @@ export function getOrCreatePlayerId(): string {
   return id;
 }
 
-export function getWebSocketServerUrl(): string {
+export function isAndroidOrNative(): boolean {
+  if (typeof window === 'undefined') return false;
+  if ((window as any).Capacitor?.isNativePlatform?.()) return true;
+  if (window.location.protocol === 'file:') return true;
+  if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+    if (navigator.userAgent.includes('Android') || (window as any).Capacitor) {
+      return true;
+    }
+  }
+  return false;
+}
+
+const CODE_CHARS = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
+function generateRoomCode(): string {
+  let code = '';
+  for (let i = 0; i < 6; i++) {
+    code += CODE_CHARS.charAt(Math.floor(Math.random() * CODE_CHARS.length));
+  }
+  return code;
+}
+
+function cleanForFirestore<T>(data: T): T {
+  if (data === null || data === undefined) {
+    return data;
+  }
+  if (Array.isArray(data)) {
+    return data
+      .filter((item) => item !== undefined)
+      .map((item) => cleanForFirestore(item)) as unknown as T;
+  }
+  if (typeof data === 'object' && !(data instanceof Date)) {
+    const clean: Record<string, any> = {};
+    for (const [key, value] of Object.entries(data)) {
+      if (value !== undefined) {
+        clean[key] = cleanForFirestore(value);
+      }
+    }
+    return clean as T;
+  }
+  return data;
+}
+
+export function getWebSocketServerUrl(): string | null {
   // If explicitly configured in VITE_WS_URL
   if (typeof import.meta.env.VITE_WS_URL === 'string' && import.meta.env.VITE_WS_URL.trim() !== '') {
     const envUrl = import.meta.env.VITE_WS_URL.trim();
     if (typeof window !== 'undefined' && window.location?.hostname) {
       const isDevHost = window.location.hostname.includes('ais-dev-');
       const isEnvPreHost = envUrl.includes('ais-pre-');
-      // If running inside the Dev environment before deployment, route to the live dev relay
       if (isDevHost && isEnvPreHost) {
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
         return `${protocol}//${window.location.host}/ws/challenge`;
@@ -67,15 +119,20 @@ export function getWebSocketServerUrl(): string {
     return envUrl;
   }
 
-  const isLocal = typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
-  if (isLocal && (window as any).Capacitor?.isNativePlatform?.()) {
-    return 'wss://ais-pre-oddg67ylxtk2h3cb3joxcv-830970277363.europe-west2.run.app/ws/challenge';
+  // If in Android or native platform, avoid unreachable external websockets
+  if (isAndroidOrNative()) {
+    return null;
   }
+
   if (typeof window !== 'undefined' && window.location?.host) {
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    return `${protocol}//${window.location.host}/ws/challenge`;
+    // If not running on localhost file scheme
+    if (window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      return `${protocol}//${window.location.host}/ws/challenge`;
+    }
   }
-  return 'wss://ais-pre-oddg67ylxtk2h3cb3joxcv-830970277363.europe-west2.run.app/ws/challenge';
+
+  return null;
 }
 
 type MessageListener = (data: any) => void;
@@ -87,10 +144,17 @@ class OnlineChallengeClient {
   private statusListeners: Set<StatusListener> = new Set();
   private connectionStatus: 'disconnected' | 'connecting' | 'connected' = 'disconnected';
   private reconnectAttempts = 0;
-  private maxReconnectAttempts = 6;
+  private maxReconnectAttempts = 3;
   private reconnectTimer: any = null;
   private currentRoomCode: string | null = null;
   private isIntentionalClose = false;
+
+  // Realtime Firestore state
+  private transport: 'websocket' | 'firestore' = 'firestore';
+  private firestoreUnsubscribe: Unsubscribe | null = null;
+  private cachedRoomState: any = null;
+  private lastProcessedEventTime = 0;
+  private lastTickMinute = -1;
 
   public getStatus(): 'disconnected' | 'connecting' | 'connected' {
     return this.connectionStatus;
@@ -113,31 +177,87 @@ class OnlineChallengeClient {
 
   private notifyStatus(status: 'disconnected' | 'connecting' | 'connected') {
     this.connectionStatus = status;
-    this.statusListeners.forEach(listener => listener(status));
+    this.statusListeners.forEach((listener) => {
+      try {
+        listener(status);
+      } catch (err) {
+        console.warn('[OnlineChallenge] Status listener error:', err);
+      }
+    });
   }
 
-  public connect(): Promise<WebSocket> {
-    if (this.socket && (this.socket.readyState === WebSocket.OPEN || this.socket.readyState === WebSocket.CONNECTING)) {
-      return Promise.resolve(this.socket);
+  private emitMessage(data: any) {
+    this.messageListeners.forEach((listener) => {
+      try {
+        listener(data);
+      } catch (err) {
+        console.warn('[OnlineChallenge] Message listener error:', err);
+      }
+    });
+  }
+
+  public async connect(): Promise<any> {
+    if (this.connectionStatus === 'connected') {
+      return Promise.resolve();
     }
 
     this.isIntentionalClose = false;
     this.notifyStatus('connecting');
 
-    return new Promise((resolve, reject) => {
+    // On Android / Native platform, connect directly to Firestore Realtime Relay
+    if (isAndroidOrNative()) {
+      this.transport = 'firestore';
+      this.notifyStatus('connected');
+      console.log('[OnlineChallenge] Android/Native Mode: Connected via Firestore Realtime Relay');
+      return Promise.resolve();
+    }
+
+    // Try WebSocket if a valid URL exists on web
+    const wsUrl = getWebSocketServerUrl();
+    if (wsUrl) {
       try {
-        const url = getWebSocketServerUrl();
+        await this.connectWebSocket(wsUrl);
+        return;
+      } catch (err) {
+        console.log('[OnlineChallenge] WebSocket unavailable, falling back to Firestore Realtime Relay');
+      }
+    }
+
+    // Default to Firestore Realtime Relay (100% availability)
+    this.transport = 'firestore';
+    this.notifyStatus('connected');
+    console.log('[OnlineChallenge] Connected via Firestore Realtime Relay');
+    return Promise.resolve();
+  }
+
+  private connectWebSocket(url: string): Promise<WebSocket> {
+    return new Promise((resolve, reject) => {
+      let timeoutId: any = null;
+      let settled = false;
+
+      try {
         const ws = new WebSocket(url);
 
+        timeoutId = setTimeout(() => {
+          if (!settled) {
+            settled = true;
+            try { ws.close(); } catch {}
+            reject(new Error('WebSocket timeout'));
+          }
+        }, 2000);
+
         ws.onopen = () => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timeoutId);
           this.socket = ws;
+          this.transport = 'websocket';
           this.reconnectAttempts = 0;
           this.notifyStatus('connected');
-          console.log('[WS Challenge] Connected to live relay');
+          console.log('[OnlineChallenge] Connected via Live WebSocket Relay');
 
-          // If reconnecting with a room code, re-sync immediately
           if (this.currentRoomCode) {
-            this.send({
+            this.sendWs({
               type: 'reconnect',
               code: this.currentRoomCode,
               playerId: getOrCreatePlayerId(),
@@ -150,33 +270,42 @@ class OnlineChallengeClient {
         ws.onmessage = (event) => {
           try {
             const data = JSON.parse(event.data);
-            this.messageListeners.forEach(listener => listener(data));
+            this.emitMessage(data);
           } catch (err) {
             console.warn('[WS Challenge] Invalid JSON received:', err);
           }
         };
 
         ws.onerror = (err) => {
-          console.warn('[WS Challenge] WebSocket error:', err);
+          if (!settled) {
+            settled = true;
+            clearTimeout(timeoutId);
+            reject(err);
+          }
         };
 
-        ws.onclose = (e) => {
+        ws.onclose = () => {
           this.socket = null;
-          this.notifyStatus('disconnected');
-
-          if (!this.isIntentionalClose && this.reconnectAttempts < this.maxReconnectAttempts) {
-            this.reconnectAttempts++;
-            const delay = Math.min(1000 * Math.pow(1.5, this.reconnectAttempts), 10000);
-            console.log(`[WS Challenge] Disconnected. Reconnecting in ${Math.round(delay)}ms... (Attempt ${this.reconnectAttempts})`);
-            clearTimeout(this.reconnectTimer);
-            this.reconnectTimer = setTimeout(() => {
-              this.connect().catch(() => {});
-            }, delay);
+          if (!settled) {
+            settled = true;
+            clearTimeout(timeoutId);
+            reject(new Error('WebSocket closed'));
+          } else {
+            // Fallback seamlessly to Firestore if socket drops
+            console.log('[WS Challenge] Socket closed, switching seamlessly to Firestore transport');
+            this.transport = 'firestore';
+            this.notifyStatus('connected');
+            if (this.currentRoomCode) {
+              this.subscribeFirestoreRoom(this.currentRoomCode);
+            }
           }
         };
       } catch (err) {
-        this.notifyStatus('disconnected');
-        reject(err);
+        if (!settled) {
+          settled = true;
+          clearTimeout(timeoutId);
+          reject(err);
+        }
       }
     });
   }
@@ -185,14 +314,130 @@ class OnlineChallengeClient {
     this.isIntentionalClose = true;
     clearTimeout(this.reconnectTimer);
     if (this.socket) {
-      this.socket.close();
+      try { this.socket.close(); } catch {}
       this.socket = null;
     }
+    if (this.firestoreUnsubscribe) {
+      this.firestoreUnsubscribe();
+      this.firestoreUnsubscribe = null;
+    }
     this.currentRoomCode = null;
+    this.cachedRoomState = null;
     this.notifyStatus('disconnected');
   }
 
-  public send(payload: any): boolean {
+  // ==========================================
+  // FIRESTORE REALTIME ENGINE
+  // ==========================================
+
+  private subscribeFirestoreRoom(code: string) {
+    if (this.firestoreUnsubscribe) {
+      this.firestoreUnsubscribe();
+      this.firestoreUnsubscribe = null;
+    }
+
+    const docRef = doc(db, 'challenge_rooms', code);
+    this.firestoreUnsubscribe = onSnapshot(docRef, (snapshot) => {
+      if (!snapshot.exists()) {
+        if (this.currentRoomCode === code) {
+          this.emitMessage({
+            type: 'opponent_left',
+            message: 'تم إغلاق غرفة التحدي من قبل المنشئ.',
+          });
+          this.currentRoomCode = null;
+          this.cachedRoomState = null;
+        }
+        return;
+      }
+
+      const data = snapshot.data() as any;
+      const prev = this.cachedRoomState;
+      this.cachedRoomState = data;
+      const myPlayerId = getOrCreatePlayerId();
+      const isHost = data.host?.playerId === myPlayerId;
+
+      // 1. Guest joined detection
+      if (data.guest && (!prev || !prev.guest)) {
+        this.emitMessage({
+          type: 'opponent_joined',
+          guest: data.guest,
+          room: data,
+        });
+      }
+
+      // 2. Ready status change detection
+      if (prev && (
+        (data.guest?.isReady !== prev.guest?.isReady) ||
+        (data.host?.isReady !== prev.host?.isReady)
+      )) {
+        const oppReady = isHost ? !!data.guest?.isReady : !!data.host?.isReady;
+        this.emitMessage({
+          type: 'opponent_ready_changed',
+          isReady: oppReady,
+          room: data,
+        });
+      }
+
+      // 3. Match Started status change
+      if (data.status === 'playing' && prev?.status !== 'playing') {
+        this.emitMessage({
+          type: 'match_started',
+          initialMatchState: data.matchState,
+          room: data,
+        });
+      }
+
+      // 4. Handle incoming lastEvent updates (ticks, tactics, rematch)
+      if (data.lastEvent && data.lastEvent.timestamp > this.lastProcessedEventTime) {
+        this.lastProcessedEventTime = data.lastEvent.timestamp;
+        const { type, senderId, ...rest } = data.lastEvent;
+
+        if (senderId !== myPlayerId) {
+          if (type === 'opponent_in_game_tactics' || type === 'in_game_tactics') {
+            this.emitMessage({
+              type: 'opponent_in_game_tactics',
+              changes: rest.changes,
+              minute: rest.minute,
+            });
+          } else if (type === 'match_tick') {
+            this.emitMessage({
+              type: 'match_tick',
+              matchState: rest.matchState || data.matchState,
+              eventsDelta: rest.eventsDelta || [],
+            });
+          } else if (type === 'match_ended') {
+            this.emitMessage({
+              type: 'match_ended',
+              finalMatchState: rest.finalMatchState || data.matchState,
+            });
+          } else if (type === 'request_rematch') {
+            this.emitMessage({
+              type: 'rematch_requested',
+              byPlayerId: senderId,
+            });
+          } else if (type === 'accept_rematch') {
+            this.emitMessage({
+              type: 'rematch_accepted',
+              room: data,
+            });
+          } else if (type === 'opponent_left' || type === 'guest_left') {
+            this.emitMessage({
+              type: 'opponent_left',
+              message: 'غادر المنافس غرفة التحدي.',
+            });
+          }
+        }
+      }
+    }, (error) => {
+      console.warn('[OnlineChallenge] Firestore room snapshot error:', error);
+    });
+  }
+
+  // ==========================================
+  // WEBSOCKET TRANSMISSION HELPER
+  // ==========================================
+
+  private sendWs(payload: any): boolean {
     if (this.socket && this.socket.readyState === WebSocket.OPEN) {
       try {
         this.socket.send(JSON.stringify(payload));
@@ -201,16 +446,13 @@ class OnlineChallengeClient {
         console.warn('[WS Challenge] Send failed:', err);
         return false;
       }
-    } else {
-      // Try connecting and sending
-      this.connect().then(() => {
-        if (this.socket && this.socket.readyState === WebSocket.OPEN) {
-          this.socket.send(JSON.stringify(payload));
-        }
-      }).catch(() => {});
-      return false;
     }
+    return false;
   }
+
+  // ==========================================
+  // PUBLIC ACTIONS (Room Lifecycle & Match)
+  // ==========================================
 
   public async createRoom(participant: {
     playerName: string;
@@ -221,10 +463,58 @@ class OnlineChallengeClient {
   }) {
     await this.connect();
     const playerId = getOrCreatePlayerId();
-    this.send({
-      type: 'create_room',
+    const code = generateRoomCode();
+
+    if (this.transport === 'websocket' && this.socket?.readyState === WebSocket.OPEN) {
+      this.currentRoomCode = code;
+      this.sendWs({
+        type: 'create_room',
+        code,
+        playerId,
+        ...participant,
+      });
+      return;
+    }
+
+    // Firestore Mode
+    const initialHost: ChallengeParticipant = {
       playerId,
-      ...participant,
+      playerName: participant.playerName,
+      clubName: participant.clubName,
+      clubRating: participant.clubRating,
+      tactics: participant.tactics,
+      squadSummary: participant.squadSummary,
+      isReady: false,
+      isConnected: true,
+    };
+
+    const roomData: ChallengeRoomState = {
+      code,
+      status: 'waiting',
+      createdAt: Date.now(),
+      host: initialHost,
+    };
+
+    const docRef = doc(db, 'challenge_rooms', code);
+    await setDoc(docRef, cleanForFirestore({
+      ...roomData,
+      lastActivity: Date.now(),
+      lastEvent: {
+        type: 'room_created',
+        senderId: playerId,
+        timestamp: Date.now(),
+      },
+    }));
+
+    this.currentRoomCode = code;
+    this.cachedRoomState = roomData;
+    this.lastProcessedEventTime = Date.now();
+    this.subscribeFirestoreRoom(code);
+
+    this.emitMessage({
+      type: 'room_created',
+      code,
+      room: roomData,
     });
   }
 
@@ -237,96 +527,390 @@ class OnlineChallengeClient {
   }) {
     await this.connect();
     const cleanCode = code.trim().toUpperCase();
-    this.currentRoomCode = cleanCode;
     const playerId = getOrCreatePlayerId();
-    this.send({
-      type: 'join_room',
-      code: cleanCode,
+    this.currentRoomCode = cleanCode;
+
+    if (this.transport === 'websocket' && this.socket?.readyState === WebSocket.OPEN) {
+      this.sendWs({
+        type: 'join_room',
+        code: cleanCode,
+        playerId,
+        ...participant,
+      });
+      return;
+    }
+
+    // Firestore Mode
+    const docRef = doc(db, 'challenge_rooms', cleanCode);
+    const snap = await getDoc(docRef);
+
+    if (!snap.exists()) {
+      throw new Error('كود الغرفة غير صحيح أو أن الغرفة غير موجودة.');
+    }
+
+    const currentRoom = snap.data() as any;
+    if (currentRoom.status === 'playing' || currentRoom.status === 'completed') {
+      throw new Error('المباراة في هذه الغرفة بدأت بالفعل أو انتهت.');
+    }
+
+    if (currentRoom.guest && currentRoom.guest.playerId !== playerId) {
+      throw new Error('غرفة التحدي ممتلئة بالفعل بمنافس آخر.');
+    }
+
+    const guestParticipant: ChallengeParticipant = {
       playerId,
-      ...participant,
+      playerName: participant.playerName,
+      clubName: participant.clubName,
+      clubRating: participant.clubRating,
+      tactics: participant.tactics,
+      squadSummary: participant.squadSummary,
+      isReady: false,
+      isConnected: true,
+    };
+
+    const updatedRoom: ChallengeRoomState = {
+      ...currentRoom,
+      guest: guestParticipant,
+      status: 'ready',
+    };
+
+    await updateDoc(docRef, cleanForFirestore({
+      guest: guestParticipant,
+      status: 'ready',
+      lastActivity: Date.now(),
+      lastEvent: {
+        type: 'opponent_joined',
+        guest: guestParticipant,
+        senderId: playerId,
+        timestamp: Date.now(),
+      },
+    }));
+
+    this.cachedRoomState = updatedRoom;
+    this.lastProcessedEventTime = Date.now();
+    this.subscribeFirestoreRoom(cleanCode);
+
+    this.emitMessage({
+      type: 'room_joined',
+      code: cleanCode,
+      room: updatedRoom,
     });
   }
 
-  public toggleReady(code: string, isReady: boolean) {
-    this.currentRoomCode = code;
-    this.send({
-      type: 'toggle_ready',
-      code,
-      playerId: getOrCreatePlayerId(),
-      isReady,
-    });
+  public async toggleReady(code: string, isReady: boolean) {
+    const cleanCode = code.trim().toUpperCase();
+    const playerId = getOrCreatePlayerId();
+
+    if (this.transport === 'websocket' && this.socket?.readyState === WebSocket.OPEN) {
+      this.sendWs({
+        type: 'toggle_ready',
+        code: cleanCode,
+        playerId,
+        isReady,
+      });
+      return;
+    }
+
+    // Firestore Mode
+    const docRef = doc(db, 'challenge_rooms', cleanCode);
+    const snap = await getDoc(docRef);
+    if (!snap.exists()) return;
+
+    const data = snap.data() as any;
+    const isHost = data.host?.playerId === playerId;
+
+    const updatePayload: any = {
+      lastActivity: Date.now(),
+      lastEvent: {
+        type: 'opponent_ready_changed',
+        isReady,
+        senderId: playerId,
+        timestamp: Date.now(),
+      },
+    };
+
+    if (isHost) {
+      updatePayload['host.isReady'] = isReady;
+    } else {
+      updatePayload['guest.isReady'] = isReady;
+    }
+
+    await updateDoc(docRef, updatePayload);
   }
 
-  public sendTactics(code: string, tactics: any) {
-    this.send({
-      type: 'update_tactics',
-      code,
-      playerId: getOrCreatePlayerId(),
-      tactics,
-    });
+  public async sendTactics(code: string, tactics: any) {
+    const cleanCode = code.trim().toUpperCase();
+    const playerId = getOrCreatePlayerId();
+
+    if (this.transport === 'websocket' && this.socket?.readyState === WebSocket.OPEN) {
+      this.sendWs({
+        type: 'update_tactics',
+        code: cleanCode,
+        playerId,
+        tactics,
+      });
+      return;
+    }
+
+    // Firestore Mode
+    const docRef = doc(db, 'challenge_rooms', cleanCode);
+    const snap = await getDoc(docRef);
+    if (!snap.exists()) return;
+
+    const data = snap.data() as any;
+    const isHost = data.host?.playerId === playerId;
+    const updatePayload: any = {
+      lastActivity: Date.now(),
+    };
+    if (isHost) {
+      updatePayload['host.tactics'] = tactics;
+    } else {
+      updatePayload['guest.tactics'] = tactics;
+    }
+    await updateDoc(docRef, cleanForFirestore(updatePayload));
   }
 
-  public startMatch(code: string, initialMatchState: any) {
-    this.send({
-      type: 'start_match',
-      code,
-      playerId: getOrCreatePlayerId(),
-      initialMatchState,
-    });
+  public async startMatch(code: string, initialMatchState: any) {
+    const cleanCode = code.trim().toUpperCase();
+    const playerId = getOrCreatePlayerId();
+
+    if (this.transport === 'websocket' && this.socket?.readyState === WebSocket.OPEN) {
+      this.sendWs({
+        type: 'start_match',
+        code: cleanCode,
+        playerId,
+        initialMatchState,
+      });
+      return;
+    }
+
+    // Firestore Mode
+    const docRef = doc(db, 'challenge_rooms', cleanCode);
+    await updateDoc(docRef, cleanForFirestore({
+      status: 'playing',
+      matchState: initialMatchState,
+      lastActivity: Date.now(),
+      lastEvent: {
+        type: 'match_started',
+        initialMatchState,
+        senderId: playerId,
+        timestamp: Date.now(),
+      },
+    }));
   }
 
   public sendMatchTick(code: string, matchState: any, eventsDelta?: any[]) {
-    this.send({
-      type: 'match_tick',
-      code,
-      playerId: getOrCreatePlayerId(),
-      matchState,
-      eventsDelta,
-    });
+    const cleanCode = code.trim().toUpperCase();
+    const playerId = getOrCreatePlayerId();
+
+    if (this.transport === 'websocket' && this.socket?.readyState === WebSocket.OPEN) {
+      this.sendWs({
+        type: 'match_tick',
+        code: cleanCode,
+        playerId,
+        matchState,
+        eventsDelta,
+      });
+      return;
+    }
+
+    // Firestore Mode: optimize write frequency to protect quotas while delivering live updates
+    const currentMinute = matchState?.minute || 0;
+    const hasSpecialEvents = Array.isArray(eventsDelta) && eventsDelta.length > 0;
+    const isKeyMilestone = currentMinute === 45 || currentMinute >= 90;
+    const isPeriodicTick = currentMinute % 5 === 0 && currentMinute !== this.lastTickMinute;
+
+    if (hasSpecialEvents || isKeyMilestone || isPeriodicTick) {
+      this.lastTickMinute = currentMinute;
+      const docRef = doc(db, 'challenge_rooms', cleanCode);
+      updateDoc(docRef, cleanForFirestore({
+        matchState,
+        lastActivity: Date.now(),
+        lastEvent: {
+          type: 'match_tick',
+          matchState,
+          eventsDelta: eventsDelta || [],
+          senderId: playerId,
+          timestamp: Date.now(),
+        },
+      })).catch((err) => {
+        console.warn('[OnlineChallenge] Firestore tick update warning:', err);
+      });
+    }
   }
 
   public sendInGameTactics(code: string, changes: any, minute: number) {
-    this.send({
-      type: 'in_game_tactics',
-      code,
-      playerId: getOrCreatePlayerId(),
-      changes,
-      minute,
+    const cleanCode = code.trim().toUpperCase();
+    const playerId = getOrCreatePlayerId();
+
+    if (this.transport === 'websocket' && this.socket?.readyState === WebSocket.OPEN) {
+      this.sendWs({
+        type: 'in_game_tactics',
+        code: cleanCode,
+        playerId,
+        changes,
+        minute,
+      });
+      return;
+    }
+
+    // Firestore Mode
+    const docRef = doc(db, 'challenge_rooms', cleanCode);
+    updateDoc(docRef, cleanForFirestore({
+      lastActivity: Date.now(),
+      lastEvent: {
+        type: 'opponent_in_game_tactics',
+        changes,
+        minute,
+        senderId: playerId,
+        timestamp: Date.now(),
+      },
+    })).catch((err) => {
+      console.warn('[OnlineChallenge] In-game tactics update warning:', err);
     });
   }
 
   public endMatch(code: string, finalMatchState: any) {
-    this.send({
-      type: 'match_end',
-      code,
-      playerId: getOrCreatePlayerId(),
-      finalMatchState,
+    const cleanCode = code.trim().toUpperCase();
+    const playerId = getOrCreatePlayerId();
+
+    if (this.transport === 'websocket' && this.socket?.readyState === WebSocket.OPEN) {
+      this.sendWs({
+        type: 'match_end',
+        code: cleanCode,
+        playerId,
+        finalMatchState,
+      });
+      return;
+    }
+
+    // Firestore Mode
+    const docRef = doc(db, 'challenge_rooms', cleanCode);
+    updateDoc(docRef, cleanForFirestore({
+      status: 'completed',
+      matchState: finalMatchState,
+      lastActivity: Date.now(),
+      lastEvent: {
+        type: 'match_ended',
+        finalMatchState,
+        senderId: playerId,
+        timestamp: Date.now(),
+      },
+    })).catch((err) => {
+      console.warn('[OnlineChallenge] Match end update warning:', err);
     });
   }
 
   public requestRematch(code: string) {
-    this.send({
-      type: 'request_rematch',
-      code,
-      playerId: getOrCreatePlayerId(),
-    });
+    const cleanCode = code.trim().toUpperCase();
+    const playerId = getOrCreatePlayerId();
+
+    if (this.transport === 'websocket' && this.socket?.readyState === WebSocket.OPEN) {
+      this.sendWs({
+        type: 'request_rematch',
+        code: cleanCode,
+        playerId,
+      });
+      return;
+    }
+
+    // Firestore Mode
+    const docRef = doc(db, 'challenge_rooms', cleanCode);
+    updateDoc(docRef, {
+      lastActivity: Date.now(),
+      lastEvent: {
+        type: 'request_rematch',
+        senderId: playerId,
+        timestamp: Date.now(),
+      },
+    }).catch(() => {});
   }
 
-  public acceptRematch(code: string) {
-    this.send({
-      type: 'accept_rematch',
-      code,
-      playerId: getOrCreatePlayerId(),
+  public async acceptRematch(code: string) {
+    const cleanCode = code.trim().toUpperCase();
+    const playerId = getOrCreatePlayerId();
+
+    if (this.transport === 'websocket' && this.socket?.readyState === WebSocket.OPEN) {
+      this.sendWs({
+        type: 'accept_rematch',
+        code: cleanCode,
+        playerId,
+      });
+      return;
+    }
+
+    // Firestore Mode: reset room to ready state
+    const docRef = doc(db, 'challenge_rooms', cleanCode);
+    const snap = await getDoc(docRef);
+    if (!snap.exists()) return;
+
+    const data = snap.data() as any;
+    const resetRoom = {
+      ...data,
+      status: 'ready',
+      matchState: null,
+      host: { ...data.host, isReady: false },
+      guest: data.guest ? { ...data.guest, isReady: false } : undefined,
+    };
+
+    await updateDoc(docRef, cleanForFirestore({
+      ...resetRoom,
+      lastActivity: Date.now(),
+      lastEvent: {
+        type: 'accept_rematch',
+        senderId: playerId,
+        timestamp: Date.now(),
+      },
+    }));
+
+    this.emitMessage({
+      type: 'rematch_accepted',
+      room: resetRoom,
     });
   }
 
   public leaveRoom(code: string) {
-    this.send({
-      type: 'leave_room',
-      code,
-      playerId: getOrCreatePlayerId(),
-    });
+    const cleanCode = code.trim().toUpperCase();
+    const playerId = getOrCreatePlayerId();
+
+    if (this.transport === 'websocket' && this.socket?.readyState === WebSocket.OPEN) {
+      this.sendWs({
+        type: 'leave_room',
+        code: cleanCode,
+        playerId,
+      });
+    } else {
+      // Firestore Mode: notify opponent and clean room
+      const docRef = doc(db, 'challenge_rooms', cleanCode);
+      getDoc(docRef).then((snap) => {
+        if (snap.exists()) {
+          const data = snap.data() as any;
+          if (data.host?.playerId === playerId) {
+            // Host left -> delete or close room
+            deleteDoc(docRef).catch(() => {});
+          } else {
+            // Guest left -> mark room waiting
+            updateDoc(docRef, {
+              guest: null,
+              status: 'waiting',
+              lastActivity: Date.now(),
+              lastEvent: {
+                type: 'opponent_left',
+                senderId: playerId,
+                timestamp: Date.now(),
+              },
+            }).catch(() => {});
+          }
+        }
+      }).catch(() => {});
+    }
+
+    if (this.firestoreUnsubscribe) {
+      this.firestoreUnsubscribe();
+      this.firestoreUnsubscribe = null;
+    }
     this.currentRoomCode = null;
+    this.cachedRoomState = null;
   }
 
   public setCurrentRoomCode(code: string | null) {
@@ -337,7 +921,7 @@ class OnlineChallengeClient {
 export const challengeClient = new OnlineChallengeClient();
 
 // ==========================================
-// LOCAL STORAGE HISTORY (Zero Firebase storage)
+// LOCAL STORAGE HISTORY
 // ==========================================
 
 export function getLocalChallengeHistory(): ChallengeHistoryItem[] {
@@ -363,7 +947,7 @@ export function saveLocalChallengeResult(item: Omit<ChallengeHistoryItem, 'id' |
     const updated = [newItem, ...history].slice(0, 30);
     localStorage.setItem(STORAGE_KEY_CHALLENGE_HISTORY, JSON.stringify(updated));
   } catch (err) {
-    console.warn('[WS Challenge] Failed to save local match history:', err);
+    console.warn('[OnlineChallenge] Failed to save local match history:', err);
   }
 }
 

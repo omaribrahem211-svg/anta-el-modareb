@@ -70,6 +70,15 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
+    // Rules for Live Challenge Rooms (RAM/Firestore Realtime Relay for PvP)
+    match /challenge_rooms/{roomCode} {
+      // Allow players on Android and Web to create, join, and sync real-time challenge rooms
+      allow read, get, list: if true;
+      allow create: if request.resource.data.code == roomCode;
+      allow update: if true;
+      allow delete: if isAdmin();
+    }
+
     // Rules for PvP Virtual Coin Transactions Ledger
     match /pvp_transactions/{txId} {
       allow read: if isAuthenticated() && (resource.data.userId == request.auth.uid || isAdmin());
