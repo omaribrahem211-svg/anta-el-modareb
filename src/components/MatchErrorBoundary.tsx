@@ -38,7 +38,7 @@ export class MatchErrorBoundary extends Component<Props, State> {
   }
 
   private handleRecover = () => {
-    console.error('[MatchErrorBoundary] User triggered safe recovery action.');
+    console.log('[MatchErrorBoundary] User triggered safe recovery action.');
     this.setState({ hasError: false, error: null, errorInfo: null });
     if (this.props.onReset) {
       try {

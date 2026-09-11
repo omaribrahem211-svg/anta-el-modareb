@@ -302,10 +302,10 @@ export const MedicalCenterModal: React.FC<MedicalCenterModalProps> = ({
                         <button
                           onClick={() => handleWatchAdToHeal(player)}
                           disabled={adLoadingPlayerId === player.id}
-                          className="w-full sm:w-auto px-3 py-1.5 bg-gradient-to-r from-amber-500 to-emerald-500 hover:from-amber-400 hover:to-emerald-400 text-slate-950 font-black text-xs rounded-lg shadow transition-all active:scale-95 shrink-0 flex items-center justify-center gap-1 cursor-pointer disabled:opacity-50"
+                          className="w-full sm:w-auto px-3.5 py-2 bg-gradient-to-r from-amber-500 to-emerald-500 hover:from-amber-400 hover:to-emerald-400 text-slate-950 font-black text-xs rounded-xl shadow transition-all active:scale-95 shrink-0 flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
                         >
-                          <Play className="w-3 h-3 fill-current" />
-                          <span>{adLoadingPlayerId === player.id ? 'جارٍ التشغيل...' : 'مشاهدة إعلان وشفاء اللاعب فوراً 🎬'}</span>
+                          <Play className="w-3.5 h-3.5 fill-current" />
+                          <span>{adLoadingPlayerId === player.id ? 'جارٍ التشغيل...' : 'شاهد إعلانًا لعلاج اللاعب مجانًا 🎬'}</span>
                         </button>
                       </div>
 

@@ -33,13 +33,13 @@ export interface LocalGameSavePayload {
   seasonEndSummary: any;
   transferHistory: any[];
   clubEconomy: any;
-  calendarDate: string;
+  calendarDate: any;
   activeNegotiations: any[];
   boardSystem: any;
   dailyNews: any[];
   retiredPlayers: any[];
-  worldRankings: any[];
-  scoutedOpponents: any[];
+  worldRankings: any;
+  scoutedOpponents: any;
   deletedMessageIds?: string[];
   pendingCloudSync?: boolean;
 }

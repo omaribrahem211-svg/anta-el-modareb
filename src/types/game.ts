@@ -91,6 +91,7 @@ export interface Player {
   position: Position;
   positionCategory: PositionCategory;
   overallRating: number; // 35 - 99
+  rating?: number; // alias for overallRating
   potentialRating: number;
   attributes: PlayerAttributes;
   salary: number;        // راتب شهري
@@ -222,6 +223,7 @@ export interface ClubFacilities {
   trainingGroundLevel: number;// 1 - 5
   youthAcademyLevel: number;// 1 - 5
   scoutingNetworkLevel: number;// 1 - 5
+  ticketPrice?: number;     // Custom ticket price set by coach (in EGP)
 }
 
 export interface Sponsor {
@@ -273,6 +275,7 @@ export interface ClubManager {
 
 export interface ClubSquadStrength {
   overall: number; // Starting XI average rating (متوسط قوة التشكيل الأساسي)
+  averageStartingRating?: number;
   attack: number;
   midfield: number;
   defense: number;
@@ -300,6 +303,8 @@ export interface Club {
   primaryColor: string;
   secondaryColor: string;
   budget: number; // الرصيد المالي الحالي
+  rating?: number;
+  stats?: any;
   developmentPoints?: number; // نقاط تطوير اللاعبين المتاحة للنادي
   transferBudget: number;
   wageBudgetMonthly: number;
@@ -385,6 +390,8 @@ export interface Fixture {
   cupStage?: string;
   stageName?: string;
   groupId?: string;
+  revenueClaimed?: boolean;
+  matchRevenue?: any;
 }
 
 // ----------------------------------------------------
@@ -428,6 +435,9 @@ export interface SeasonHistoryEntry {
   cupResult?: string;
   managerXpEarned: number;
   seasonEarnings: number;
+  outcome?: string;
+  status?: string;
+  matchesPlayed?: number;
 }
 
 export interface SeasonEndSummary {
@@ -461,6 +471,10 @@ export interface SeasonEndSummary {
   xpEarned: number;
   reputationChange: number;
   finalBudget: number;
+  cupPrizeMoney?: number;
+  cupDevelopmentPoints?: number;
+  leagueDevelopmentPoints?: number;
+  totalDevelopmentPoints?: number;
   developmentPointsEarned?: number;
   developmentPointsBreakdown?: { reason: string; points: number }[];
 }
@@ -471,6 +485,7 @@ export interface LeagueDefinition {
   shortName: string;
   country: string;
   tier: number; // 1 = Premier, 2 = Second, 3 = Third, 4 = Fourth
+  divisionTier?: number; // alias for tier
   reputation: number; // 1 - 100
   promotionSpots: number; // e.g. 1 or 2
   relegationSpots: number; // e.g. 1 or 2
@@ -507,6 +522,7 @@ export interface JobOffer {
   secondaryColor: string;
   managerSalary: number; // راتب المدرب الشهري
   transferBudget: number;
+  clubBudget?: number;
   wageBudgetMonthly: number;
   boardExpectations: string; // e.g. "المنافسة على اللقب والصعود"
   contractDurationYears: number;
@@ -629,6 +645,7 @@ export interface ContinentalTournament {
 }
 
 export interface ManagerProfile {
+  trainerId?: string;
   name: string;
   age: number;
   nationality: string;
@@ -727,6 +744,7 @@ export interface WorldClubRankingItem {
 
 export interface WorldRankingsData {
   lastUpdatedMonth: string; // e.g. '2026-08'
+  rankingMonth?: string;
   managers: ClubManager[];
   clubs: WorldClubRankingItem[];
 }
@@ -807,6 +825,7 @@ export interface ClubEconomySummary {
   sponsorIncomeTotal: number;
   matchIncomeTotal: number;
   facilitySpendingTotal: number;
+  otherExpensesTotal?: number;
   currentSeasonNetProfit: number;
 }
 
@@ -840,6 +859,7 @@ export interface CalendarDate {
   rawDateStr: string; // '2026-08-09'
   formattedArabic: string; // 'الأحد 9 أغسطس 2026'
   formattedArabicDate?: string;
+  formattedDate?: string;
   dayIndexInSeason: number;
 }
 

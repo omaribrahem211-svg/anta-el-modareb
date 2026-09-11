@@ -56,6 +56,7 @@ import {
   ShieldAlert,
   Lightbulb,
   Zap,
+  Home,
 } from 'lucide-react';
 
 export const MatchesTab: React.FC = () => {
@@ -93,6 +94,7 @@ export const MatchesTab: React.FC = () => {
     scoutedOpponents,
     scoutOpponent,
     calendarDate,
+    doubleLiveMatchRevenueWithAd,
   } = useGame();
 
   const { t, language } = useLanguage();
@@ -103,6 +105,29 @@ export const MatchesTab: React.FC = () => {
   const [isScoutingLoading, setIsScoutingLoading] = useState(false);
   const [scoutingToast, setScoutingToast] = useState<{ text: string; isError: boolean } | null>(null);
   const [showScoutingModal, setShowScoutingModal] = useState(false);
+  const [isAdLoading, setIsAdLoading] = useState(false);
+  const [adToast, setAdToast] = useState<{ text: string; isError: boolean } | null>(null);
+
+  const handleDoubleRevenueWithAd = async () => {
+    if (isAdLoading || !liveMatch?.matchRevenue) return;
+    if (liveMatch.matchRevenue.isDoubledWithAd) {
+      setAdToast({ text: 'تمت مضاعفة إيراد هذه المباراة بالفعل!', isError: false });
+      setTimeout(() => setAdToast(null), 3000);
+      return;
+    }
+
+    setIsAdLoading(true);
+    try {
+      const res = await doubleLiveMatchRevenueWithAd();
+      setAdToast({ text: res.message, isError: !res.success });
+      setTimeout(() => setAdToast(null), 4500);
+    } catch (err) {
+      setAdToast({ text: 'حدث خطأ أثناء تشغيل الإعلان.', isError: true });
+      setTimeout(() => setAdToast(null), 4000);
+    } finally {
+      setIsAdLoading(false);
+    }
+  };
   const [subToast, setSubToast] = useState<string | null>(null);
   const [tacticalToast, setTacticalToast] = useState<string | null>(null);
   const [snoozedTacticalAlerts, setSnoozedTacticalAlerts] = useState<Record<string, number>>({});
@@ -287,17 +312,37 @@ export const MatchesTab: React.FC = () => {
       setShowSubModal(false);
     };
 
+    const handleReturnToDashboard = () => {
+      if (liveMatch?.isPlaying) {
+        pauseLiveMatch();
+      }
+      window.dispatchEvent(new CustomEvent('set-active-tab', { detail: { tab: 'dashboard' } }));
+    };
+
     return (
       <div className="space-y-4 pb-20 animate-fade-in">
         
         {/* Sticky-style Compact Scoreboard Header */}
         <div className="bg-slate-900 border border-slate-800 rounded-3xl p-4 shadow-2xl relative overflow-hidden">
           
-          {/* Minute & Status Pill */}
+          {/* Minute & Status Pill with Home Navigation */}
           <div className="flex items-center justify-between text-xs mb-3">
-            <span className="bg-slate-800 px-3 py-1 rounded-full border border-slate-700 font-bold text-slate-300">
-              الجولة {liveMatch.fixture.round} من {totalRounds}
-            </span>
+            <div className="flex items-center gap-2">
+              <button
+                id="btn_live_match_return_home"
+                type="button"
+                onClick={handleReturnToDashboard}
+                className="flex items-center gap-1 px-2.5 py-1 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 text-[11px] font-bold transition-all cursor-pointer shadow-sm active:scale-95"
+                title="العودة إلى لوحة التحكم الرئيسية (المباراة تبقى محفوظة ومستمرة)"
+              >
+                <Home className="w-3.5 h-3.5 text-amber-400" />
+                <span>الرئيسية</span>
+              </button>
+
+              <span className="bg-slate-800 px-3 py-1 rounded-full border border-slate-700 font-bold text-slate-300">
+                الجولة {liveMatch.fixture.round} من {totalRounds}
+              </span>
+            </div>
 
             <div className="flex items-center gap-1.5">
               <span className={`w-2.5 h-2.5 rounded-full ${
@@ -460,12 +505,123 @@ export const MatchesTab: React.FC = () => {
                 </span>
               </div>
 
+              {/* Match Revenue & Double with Ad Card */}
+              {liveMatch.matchRevenue && (
+                <div className="bg-slate-950/80 border border-amber-500/40 rounded-2xl p-4 shadow-xl space-y-3 text-right">
+                  <div className="flex items-center justify-between border-b border-slate-800 pb-2.5">
+                    <div className="flex items-center gap-2">
+                      <Coins className="w-5 h-5 text-amber-400" />
+                      <h4 className="font-black text-sm text-white">كشف إيرادات المباراة (Match Revenue)</h4>
+                    </div>
+                    <span className="text-xs font-bold px-2.5 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                      {liveMatch.matchRevenue.isHome ? '🏟️ داخل الأرض' : '✈️ خارج الأرض'}
+                    </span>
+                  </div>
+
+                  {/* Attendance & Ticket Details */}
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+                    <div className="bg-slate-900/90 p-2.5 rounded-xl border border-slate-800">
+                      <span className="text-[10px] text-slate-400 block">الحضور الجماهيري</span>
+                      <span className="text-xs font-bold text-white">
+                        {liveMatch.matchRevenue.attendance.toLocaleString()} / {liveMatch.matchRevenue.stadiumCapacity.toLocaleString()}
+                      </span>
+                      <span className="text-[10px] text-emerald-400 block font-bold">
+                        نسبة الامتلاء: {liveMatch.matchRevenue.attendancePercentage}%
+                      </span>
+                    </div>
+
+                    <div className="bg-slate-900/90 p-2.5 rounded-xl border border-slate-800">
+                      <span className="text-[10px] text-slate-400 block">سعر التذكرة</span>
+                      <span className="text-xs font-black text-amber-400 font-mono">
+                        {liveMatch.matchRevenue.ticketPrice} ج.م
+                      </span>
+                      <span className="text-[10px] text-slate-500 block">
+                        (المعيار: {liveMatch.matchRevenue.benchmarkTicketPrice} ج.م)
+                      </span>
+                    </div>
+
+                    <div className="bg-slate-900/90 p-2.5 rounded-xl border border-slate-800">
+                      <span className="text-[10px] text-slate-400 block">إيراد بيع التذاكر</span>
+                      <span className="text-xs font-black text-emerald-400 font-mono">
+                        {liveMatch.matchRevenue.ticketRevenue.toLocaleString()} ج.م
+                      </span>
+                    </div>
+
+                    <div className="bg-slate-900/90 p-2.5 rounded-xl border border-slate-800">
+                      <span className="text-[10px] text-slate-400 block">الرعاة والمكافأة</span>
+                      <span className="text-xs font-black text-blue-400 font-mono">
+                        {(liveMatch.matchRevenue.sponsorsRevenue + liveMatch.matchRevenue.resultBonus).toLocaleString()} ج.م
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Breakdown details */}
+                  <div className="bg-slate-900/60 p-2.5 rounded-xl border border-slate-800/80 space-y-1 text-[11px]">
+                    <div className="flex items-center justify-between text-slate-300">
+                      <span>• إيراد التذاكر:</span>
+                      <span className="font-mono text-emerald-400 font-bold">+{liveMatch.matchRevenue.ticketRevenue.toLocaleString()} ج.م</span>
+                    </div>
+                    <div className="flex items-center justify-between text-slate-300">
+                      <span>• رعاة وإعلانات النادي:</span>
+                      <span className="font-mono text-blue-400 font-bold">+{liveMatch.matchRevenue.sponsorsRevenue.toLocaleString()} ج.م</span>
+                    </div>
+                    <div className="flex items-center justify-between text-slate-300">
+                      <span>• مكافأة النتيجة ({liveMatch.matchRevenue.resultType === 'win' ? 'فوز 🏆' : liveMatch.matchRevenue.resultType === 'draw' ? 'تعادل 🤝' : 'مشاركة ⚽'}):</span>
+                      <span className="font-mono text-purple-400 font-bold">+{liveMatch.matchRevenue.resultBonus.toLocaleString()} ج.م</span>
+                    </div>
+                    {liveMatch.matchRevenue.isDoubledWithAd && (
+                      <div className="flex items-center justify-between text-amber-300 font-bold pt-1 border-t border-slate-800">
+                        <span>🎁 مكافأة مشاهدة إعلان AdMob (مضاعفة 2X):</span>
+                        <span className="font-mono text-amber-400">+{liveMatch.matchRevenue.adDoubledBonus?.toLocaleString()} ج.م</span>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Total & Rewarded Button */}
+                  <div className="flex flex-col sm:flex-row items-center justify-between gap-3 bg-gradient-to-r from-amber-950/60 to-emerald-950/60 border border-amber-500/50 p-3 rounded-xl">
+                    <div>
+                      <span className="text-[11px] text-slate-300 block font-medium">إجمالي إيراد المباراة المودع:</span>
+                      <span className="text-xl font-black text-amber-300 font-mono">
+                        {liveMatch.matchRevenue.totalRevenue.toLocaleString()} ج.م
+                      </span>
+                    </div>
+
+                    {liveMatch.matchRevenue.isDoubledWithAd ? (
+                      <div className="flex items-center gap-1.5 bg-emerald-950 border border-emerald-500/60 text-emerald-300 px-3.5 py-2 rounded-xl text-xs font-bold">
+                        <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                        <span>تمت مضاعفة الإيراد بنجاح! (+{liveMatch.matchRevenue.adDoubledBonus?.toLocaleString()} ج.م)</span>
+                      </div>
+                    ) : (
+                      <button
+                        id="btn_double_match_revenue_ad"
+                        type="button"
+                        onClick={handleDoubleRevenueWithAd}
+                        disabled={isAdLoading}
+                        className="w-full sm:w-auto flex items-center justify-center gap-2 bg-gradient-to-r from-amber-500 via-amber-400 to-yellow-500 hover:from-amber-400 hover:to-yellow-400 text-slate-950 font-black text-xs px-4 py-2.5 rounded-xl shadow-lg transition-all active:scale-95 disabled:opacity-60 cursor-pointer animate-pulse"
+                      >
+                        <Sparkles className="w-4 h-4 text-slate-950 fill-slate-950" />
+                        <span>{isAdLoading ? 'جاري تجهيز الإعلان...' : '🎁 شاهد إعلانًا وضاعف إيراد المباراة'}</span>
+                      </button>
+                    )}
+                  </div>
+
+                  {adToast && (
+                    <div className={`p-2.5 rounded-xl text-xs font-bold flex items-center gap-2 animate-fade-in ${
+                      adToast.isError ? 'bg-rose-950/90 text-rose-200 border border-rose-600' : 'bg-emerald-950/90 text-emerald-200 border border-emerald-600'
+                    }`}>
+                      <AlertTriangle className="w-4 h-4 shrink-0" />
+                      <span>{adToast.text}</span>
+                    </div>
+                  )}
+                </div>
+              )}
+
               <button
                 id="finish_match_and_advance_btn"
                 disabled={isSimulationRunning}
                 onClick={() => {
                   console.log('[DIAG] FINISH_BUTTON_CLICKED');
-                  console.error('[MatchesTab] User clicked Confirm Result & Advance button');
+                  console.log('[MatchesTab] User clicked Confirm Result & Advance button');
                   try {
                     finishLiveMatchAndAdvance();
                   } catch (err) {

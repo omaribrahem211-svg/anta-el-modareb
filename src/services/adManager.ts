@@ -157,20 +157,7 @@ class AdManagerService {
             testingDevices: ADMOB_CONFIG.IS_TEST_MODE ? ['EMULATOR'] : undefined,
             initializeForTesting: ADMOB_CONFIG.IS_TEST_MODE,
           });
-          console.log('[ADMOB] SDK initialized');
-
-          if (ADMOB_CONFIG.ENABLE_BANNER) {
-            await this.attachBannerListeners();
-            this.ensureBannerActive().catch((err) => {
-              console.warn('[ADMOB] Initial banner notice:', err);
-            });
-          }
-
-          // Preload Interstitial and Rewarded in background so they are ready
-          setTimeout(() => {
-            this.loadInterstitial().catch(() => {});
-            this.loadRewarded().catch(() => {});
-          }, 2000);
+          console.log('[ADMOB] Native SDK initialized successfully');
         } else {
           console.log('[ADMOB] SDK initialized (web simulation mode)');
         }
@@ -178,6 +165,23 @@ class AdManagerService {
         this.isInitialized = true;
         this.isInitializing = false;
         console.log('[STARTUP] AdManager initialized', Math.round(performance.now()) + 'ms');
+
+        if (ADMOB_CONFIG.ENABLE_BANNER && this.isNative) {
+          await this.attachBannerListeners();
+          setTimeout(() => {
+            this.ensureBannerActive().catch((err) => {
+              console.warn('[ADMOB] Initial banner notice:', err);
+            });
+          }, 150);
+        }
+
+        if (this.isNative) {
+          // Preload Interstitial and Rewarded in background so they are ready
+          setTimeout(() => {
+            this.loadInterstitial().catch(() => {});
+            this.loadRewarded().catch(() => {});
+          }, 2000);
+        }
 
         return true;
       } catch (error) {
@@ -281,7 +285,11 @@ class AdManagerService {
 
     try {
       if (!this.isInitialized) {
-        await this.initialize();
+        if (this.initPromise) {
+          await this.initPromise;
+        } else {
+          await this.initialize();
+        }
       }
 
       await this.attachBannerListeners();
@@ -883,15 +891,21 @@ class AdManagerService {
   }
 
   /**
-   * Action-specific Rewarded Ads (e.g. heal injured player, cancel suspension)
+   * Action-specific Rewarded Ads (e.g. heal injured player, cancel suspension, double match revenue)
    */
   public async showRewardedForAction(params: {
-    actionType: 'heal_player' | 'cancel_suspension';
+    actionType: 'heal_player' | 'cancel_suspension' | 'double_match_revenue';
     onUserEarnedReward: () => void;
     onDismiss?: (rewardEarned: boolean) => void;
     onFailure?: (error: any) => void;
   }): Promise<boolean> {
-    const label = params.actionType === 'heal_player' ? 'تسريع علاج اللاعب المصاب' : 'إلغاء عقوبة إيقاف اللاعب';
+    const label =
+      params.actionType === 'heal_player'
+        ? 'علاج اللاعب المصاب مجاناً'
+        : params.actionType === 'double_match_revenue'
+        ? 'مضاعفة إيراد المباراة بالكامل (2X)'
+        : 'إلغاء عقوبة إيقاف اللاعب';
+
     return this.executeRewardedAd({
       rewardTypeLabel: label,
       onRewardEarned: params.onUserEarnedReward,

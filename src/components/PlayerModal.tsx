@@ -318,7 +318,7 @@ export const PlayerModal: React.FC<PlayerModalProps> = ({ player, onClose, onSta
                 className="w-full sm:w-auto px-4 py-2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold flex items-center justify-center gap-2 shadow-md transition-all active:scale-95 shrink-0 border border-emerald-400/40 disabled:opacity-60 cursor-pointer"
               >
                 <Sparkles className="w-4 h-4 text-amber-300 shrink-0" />
-                <span>{isAdLoading ? 'جاري تجهيز الإعلان...' : 'شاهد إعلان لتسريع العلاج'}</span>
+                <span>{isAdLoading ? 'جاري تجهيز الإعلان...' : 'شاهد إعلانًا لعلاج اللاعب مجانًا'}</span>
               </button>
             )}
           </div>

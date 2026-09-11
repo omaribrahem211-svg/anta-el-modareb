@@ -88,6 +88,7 @@ import {
 import { generateImmersiveNewsBatch, getInitialFootballNews } from '../services/footballNewsEngine';
 import { evaluateMatchImpactOnConfidence, updateDailyBoardConfidence, getClubLeagueTarget } from '../utils/boardEngine';
 import { EGYPT_TIER_4_LEAGUE, getLeagueById, GLOBAL_LEAGUES, findClubInWorld, getClubDisplayName } from '../data/leaguesData';
+import { calculateMatchRevenue, MatchRevenueBreakdown, getBenchmarkTicketPrice } from '../utils/matchRevenue';
 import { AdManager } from '../services/adManager';
 import { ADMOB_CONFIG } from '../config/admobConfig';
 import { DIAGNOSTIC_CONFIG } from '../config/diagnosticConfig';
@@ -163,6 +164,9 @@ interface GameContextType {
   showSeasonTransitionModal: boolean;
   jobOffers: JobOffer[];
   cupTournament: CupTournament | null;
+  africanChampionsLeague?: any;
+  uefaChampionsLeague?: any;
+  deletedMessageIds?: string[];
 
   // Calendar, Daily Simulation & Career Systems
   calendarDate: CalendarDate;
@@ -255,6 +259,8 @@ interface GameContextType {
   treatPlayerInHospital: (playerId: string, treatmentType: 'physio' | 'specialist' | 'prp') => { success: boolean; message: string };
   healPlayerWithAd: (playerId: string) => { success: boolean; message: string };
   cancelPlayerSuspensionWithAd: (playerId: string) => { success: boolean; message: string };
+  doubleLiveMatchRevenueWithAd: () => Promise<{ success: boolean; message: string }>;
+  setClubTicketPrice: (price: number) => { success: boolean; message: string };
   transferBudgetToWageBudget: (cashAmount: number) => { success: boolean; message: string };
   transferWageToCashBudget: (monthlyAmount: number) => { success: boolean; message: string };
   
@@ -1310,12 +1316,30 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         }
 
         if (next.currentMinute >= 90 || next.isFinished) {
+          const userIsInFixture = userClub && (next.fixture?.homeTeamId === userClub.id || next.fixture?.awayTeamId === userClub.id);
+          const isUserHome = userClub ? next.fixture?.homeTeamId === userClub.id : true;
+          const oppClub = isUserHome ? next.awayTeam : next.homeTeam;
+          const userScore = isUserHome ? next.homeScore : next.awayScore;
+          const oppScore = isUserHome ? next.awayScore : next.homeScore;
+
+          const calculatedRevenue = (userIsInFixture && userClub) ? calculateMatchRevenue({
+            userClub,
+            opponentClub: oppClub,
+            isHome: isUserHome,
+            userScore,
+            opponentScore: oppScore,
+            leagueTier: activeLeague?.tier || 1,
+            isCupMatch: next.fixture?.competitionType === 'cup',
+            customTicketPrice: userClub.facilities?.ticketPrice,
+          }) : undefined;
+
           const finishedNext = {
             ...next,
             currentMinute: 90,
             isFinished: true,
             isPlaying: false,
             isHalfTime: false,
+            matchRevenue: next.matchRevenue || calculatedRevenue,
           };
 
           isMatchFinishedRef.current = true;
@@ -1715,15 +1739,36 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           }
           state = simulateMatchStep(state, userClub?.tactics);
         }
+        const userIsInFixture = userClub && (state.fixture?.homeTeamId === userClub.id || state.fixture?.awayTeamId === userClub.id);
+        const isUserHome = userClub ? state.fixture?.homeTeamId === userClub.id : true;
+        const oppClub = isUserHome ? state.awayTeam : state.homeTeam;
+        const userScore = isUserHome ? state.homeScore : state.awayScore;
+        const oppScore = isUserHome ? state.awayScore : state.homeScore;
+
+        const calculatedRevenue = (userIsInFixture && userClub) ? calculateMatchRevenue({
+          userClub,
+          opponentClub: oppClub,
+          isHome: isUserHome,
+          userScore,
+          opponentScore: oppScore,
+          leagueTier: activeLeague?.tier || 1,
+          isCupMatch: state.fixture?.competitionType === 'cup',
+          customTicketPrice: userClub.facilities?.ticketPrice,
+        }) : undefined;
+
+        isMatchFinishedRef.current = true;
+
         return {
           ...state,
           currentMinute: 90,
           isPlaying: false,
           isFinished: true,
           isHalfTime: false,
+          matchRevenue: state.matchRevenue || calculatedRevenue,
         };
       } catch (err) {
         console.error('Error during skipLiveMatchToEnd:', err);
+        isMatchFinishedRef.current = true;
         return {
           ...prev,
           currentMinute: 90,
@@ -1738,7 +1783,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const finishLiveMatchAndAdvance = () => {
     console.log('[DIAG] ADVANCE_STARTED');
     console.log('[MatchEndingFlow] END_MATCH_STARTED');
-    console.error('[MatchEndingFlow] finishLiveMatchAndAdvance called. State:', liveMatch ? {
+    console.log('[MatchEndingFlow] finishLiveMatchAndAdvance called. State:', liveMatch ? {
       fixtureId: liveMatch.fixture?.id,
       isFinished: liveMatch.isFinished,
       minute: liveMatch.currentMinute,
@@ -1746,30 +1791,30 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     } : 'null');
 
     if (isFinishingMatchRef.current || isSimulationRunningRef.current) {
-      console.error('[MatchEndingFlow] Blocked: match finalization or simulation already running');
+      console.warn('[MatchEndingFlow] Blocked: match finalization or simulation already running');
       return;
     }
     if (!liveMatch || !liveMatch.isFinished) {
-      console.error('[MatchEndingFlow] Blocked: liveMatch is not active or not finished');
+      console.warn('[MatchEndingFlow] Blocked: liveMatch is not active or not finished');
       return;
     }
 
     const currentFixtureId = liveMatch.fixture?.id;
     if (!currentFixtureId) {
-      console.error('[MatchEndingFlow] Blocked: liveMatch has no fixture ID. Clearing state.');
+      console.warn('[MatchEndingFlow] Blocked: liveMatch has no fixture ID. Clearing state.');
       setLiveMatch(null);
       return;
     }
 
     if (completedMatchFixtureIdRef.current === currentFixtureId) {
-      console.error('[MatchEndingFlow] Idempotency catch: fixture', currentFixtureId, 'already finalized');
+      console.log('[MatchEndingFlow] Idempotency catch: fixture', currentFixtureId, 'already finalized');
       setLiveMatch(null);
       return;
     }
 
     const targetFixtureInList = fixtures.find(f => f && f.id === currentFixtureId);
     if (targetFixtureInList && targetFixtureInList.isPlayed) {
-      console.error('[MatchEndingFlow] Fixture', currentFixtureId, 'is already marked isPlayed in list. Clearing liveMatch.');
+      console.log('[MatchEndingFlow] Fixture', currentFixtureId, 'is already marked isPlayed in list. Clearing liveMatch.');
       completedMatchFixtureIdRef.current = currentFixtureId;
       setLiveMatch(null);
       return;
@@ -1782,13 +1827,13 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     completedMatchFixtureIdRef.current = currentFixtureId;
 
     if (liveMatchTimerRef.current) {
-      console.error('[MatchEndingFlow] Cleared liveMatchTimerRef interval immediately');
+      console.log('[MatchEndingFlow] Cleared liveMatchTimerRef interval immediately');
       clearInterval(liveMatchTimerRef.current);
       liveMatchTimerRef.current = null;
     }
 
     try {
-      console.error('[MatchEndingFlow] Processing match finalization for fixture:', currentFixtureId);
+      console.log('[MatchEndingFlow] Processing match finalization for fixture:', currentFixtureId);
       const { fixture, homeTeam, awayTeam, homeScore, awayScore, events, stats } = liveMatch;
       const homeTeamId = homeTeam?.id || fixture?.homeTeamId;
       const awayTeamId = awayTeam?.id || fixture?.awayTeamId;
@@ -1809,6 +1854,45 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       );
     };
 
+    // Calculate official realistic match revenue breakdown
+    const isUserHome = userClub ? homeTeam?.id === userClub.id : false;
+    const userScore = isUserHome ? homeScore : awayScore;
+    const oppScore = isUserHome ? awayScore : homeScore;
+    const isUserWin = userScore > oppScore;
+    const isUserDraw = userScore === oppScore;
+
+    const resolvedRevenue: MatchRevenueBreakdown = (liveMatch.matchRevenue) || (userClub ? calculateMatchRevenue({
+      userClub,
+      opponentClub: isUserHome ? awayTeam : homeTeam,
+      isHome: isUserHome,
+      userScore,
+      opponentScore: oppScore,
+      leagueTier: activeLeague?.tier || 1,
+      isCupMatch: fixture?.competitionType === 'cup',
+      customTicketPrice: userClub.facilities?.ticketPrice,
+    }) : {
+      isHome: isUserHome,
+      stadiumCapacity: 5000,
+      attendance: 3500,
+      attendancePercentage: 70,
+      ticketPrice: 20,
+      benchmarkTicketPrice: 20,
+      ticketRevenue: 70000,
+      sponsorsRevenue: 15000,
+      sponsorsWinBonus: 0,
+      sponsorsMatchdayAd: 15000,
+      resultBonus: 5000,
+      resultType: 'draw',
+      baseTotalRevenue: 90000,
+      totalRevenue: 90000,
+      isDoubledWithAd: false,
+      adDoubledBonus: 0,
+      isClaimedToBudget: false,
+    });
+
+    resolvedRevenue.isClaimedToBudget = true;
+    const totalMatchRevenue = resolvedRevenue.totalRevenue;
+
     // 1. Update this fixture
     let updatedFixtures = fixtures.map(f => {
       if (f.id === fixture.id) {
@@ -1819,6 +1903,8 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           isPlayed: true,
           events: persistentEvents,
           stats,
+          revenueClaimed: true,
+          matchRevenue: resolvedRevenue,
         };
       }
       return f;
@@ -2070,21 +2156,27 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
 
     // 4. Update User Club finances
-    const isUserHome = userClub ? homeTeam?.id === userClub.id : false;
-    const userScore = isUserHome ? homeScore : awayScore;
-    const oppScore = isUserHome ? awayScore : homeScore;
-    const isUserWin = userScore > oppScore;
-    const isUserDraw = userScore === oppScore;
-
-    // Realistic tier-based ticket price (Tier 4: ~6 EGP, Tier 3: ~12 EGP, Tier 2: ~25 EGP, Tier 1: ~50 EGP)
-    const ticketPrice = activeLeague.tier === 4 ? 6 : activeLeague.tier === 3 ? 12 : activeLeague.tier === 2 ? 25 : 50;
-    const stadiumAttendance = userClub ? Math.round(userClub.facilities.stadiumCapacity * (isUserWin ? 0.95 : 0.75)) : 0;
-    const ticketRevenue = (isUserHome && userClub) ? (stadiumAttendance * ticketPrice) : 0;
-    const sponsorWinBonus = (isUserWin && userClub) ? (userClub.sponsors || []).reduce((sum, sp) => sum + sp.bonusForWin, 0) : 0;
-    const totalMatchRevenue = ticketRevenue + sponsorWinBonus;
-
     // Round wages expense (approx 1/4 of monthly wage bill)
     const roundWages = userClub ? Math.round((userClub.players || []).reduce((sum, p) => sum + (p.salary || 1000), 0) / 4) : 0;
+
+    // Financial breakdown message for user club
+    if (userClub && resolvedRevenue) {
+      cupRewardMessages.push({
+        id: `msg_match_rev_${fixture.id}_${Date.now()}`,
+        title: `💰 تقرير إيراد مباراة الجولة ${currentRound}: +${totalMatchRevenue.toLocaleString()} ج.م`,
+        sender: 'الإدارة المالية للنادي',
+        date: `الجولة ${currentRound}`,
+        type: 'board',
+        read: false,
+        content: `كشف الإيرادات المالية الرسمية لمباراة الجولة ${currentRound}:\n\n` +
+          `🏟️ الحضور الجماهيري: ${resolvedRevenue.attendance.toLocaleString()} مشجع من أصل ${resolvedRevenue.stadiumCapacity.toLocaleString()} مقعد (${resolvedRevenue.attendancePercentage}%)\n` +
+          `🎟️ سعر التذكرة: ${resolvedRevenue.ticketPrice} ج.م • إجمالي دخل التذاكر: ${resolvedRevenue.ticketRevenue.toLocaleString()} ج.م\n` +
+          `📢 رعاة النادي والإعلانات: ${resolvedRevenue.sponsorsRevenue.toLocaleString()} ج.م (مكافأة الفوز: ${resolvedRevenue.sponsorsWinBonus.toLocaleString()} ج.م)\n` +
+          `🏆 مكافأة النتيجة الرسمية (${resolvedRevenue.resultType === 'win' ? 'فوز' : resolvedRevenue.resultType === 'draw' ? 'تعادل' : 'مشاركة'}): ${resolvedRevenue.resultBonus.toLocaleString()} ج.م\n` +
+          (resolvedRevenue.isDoubledWithAd ? `🎁 مكافأة مضاعفة الإعلان (2X): +${resolvedRevenue.adDoubledBonus?.toLocaleString()} ج.م\n` : '') +
+          `\n✅ الإجمالي النهائي المودع في رصيد النادي: ${totalMatchRevenue.toLocaleString()} جنيه مصري.`,
+      });
+    }
 
     // Update club economy tracking
     if (DIAGNOSTIC_CONFIG.ENABLE_BOARD_AND_ECONOMY && userClub) {
@@ -2441,7 +2533,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
 
     // Commit changes
-    console.error('[MatchEndingFlow] Committing updated states to React: fixtures, standings, manager, cup, inbox, teams, currentRound');
+    console.log('[MatchEndingFlow] Committing updated states to React: fixtures, standings, manager, cup, inbox, teams, currentRound');
     setFixtures(updatedFixtures);
     if (DIAGNOSTIC_CONFIG.ENABLE_STANDINGS_UPDATE) {
       setStandings(updatedStandings);
@@ -2533,7 +2625,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         isFinishingMatchRef.current = false;
         isSimulationRunningRef.current = false;
         setIsSimulationRunning(false);
-        console.error('[MatchEndingFlow] Concurrency locks released successfully');
+        console.log('[MatchEndingFlow] Concurrency locks released successfully');
       }, 150);
     }
   };
@@ -3139,7 +3231,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     AdManager.consumeTrainingBoost();
     // Interstitial Check (non-blocking background preload & show if ready)
     AdManager.onMatchCompleted();
-    console.error('[MatchEndingFlow] Instant simulate round completed successfully');
+    console.log('[MatchEndingFlow] Instant simulate round completed successfully');
     } catch (error) {
       console.error('[MatchEndingFlow] CRITICAL UNCAUGHT EXCEPTION in instantSimulateCurrentRound:', error);
     } finally {
@@ -4082,6 +4174,128 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     return { success: true, message: successMessage };
   };
 
+  // AdMob Rewarded: Double Match Revenue after match ends
+  const doubleLiveMatchRevenueWithAd = async (): Promise<{ success: boolean; message: string }> => {
+    if (!userClub) {
+      return { success: false, message: 'أنت غير مرتبط بأي نادٍ حالياً!' };
+    }
+
+    if (!liveMatch || !liveMatch.matchRevenue) {
+      return { success: false, message: 'لا توجد بيانات إيراد للمباراة الحالية!' };
+    }
+
+    if (liveMatch.matchRevenue.isDoubledWithAd) {
+      return { success: false, message: 'تمت مضاعفة إيراد هذه المباراة بالفعل!' };
+    }
+
+    const currentRev = liveMatch.matchRevenue;
+    const bonusAmount = currentRev.baseTotalRevenue;
+
+    return new Promise((resolve) => {
+      AdManager.showRewardedForAction({
+        actionType: 'double_match_revenue',
+        onUserEarnedReward: () => {
+          const updatedRev: MatchRevenueBreakdown = {
+            ...currentRev,
+            isDoubledWithAd: true,
+            adDoubledBonus: bonusAmount,
+            totalRevenue: currentRev.baseTotalRevenue + bonusAmount,
+          };
+
+          // Update live match state
+          setLiveMatch(prev => {
+            if (!prev) return prev;
+            return {
+              ...prev,
+              matchRevenue: updatedRev,
+            };
+          });
+
+          // If match was already finalized and deposited, add bonus difference to club budget
+          if (currentRev.isClaimedToBudget) {
+            setTeams(prev => prev.map(t => {
+              if (!t.isUserClub && t.id !== userClub.id) return t;
+              return {
+                ...t,
+                budget: (t.budget || 0) + bonusAmount,
+              };
+            }));
+
+            if (DIAGNOSTIC_CONFIG.ENABLE_BOARD_AND_ECONOMY) {
+              setClubEconomy(prev => ({
+                ...prev,
+                matchIncomeTotal: prev.matchIncomeTotal + bonusAmount,
+                currentSeasonNetProfit: prev.currentSeasonNetProfit + bonusAmount,
+              }));
+            }
+          }
+
+          // Update fixture match revenue in fixtures list if present
+          if (liveMatch.fixture?.id) {
+            setFixtures(prev => prev.map(f => {
+              if (f.id === liveMatch.fixture?.id && f.matchRevenue) {
+                return {
+                  ...f,
+                  matchRevenue: updatedRev,
+                };
+              }
+              return f;
+            }));
+          }
+
+          const bonusMsg: InboxMessage = {
+            id: `msg_ad_rev_double_${Date.now()}`,
+            title: `🎁 مكافأة مشاهدة الإعلان: مضاعفة إيراد المباراة (+${bonusAmount.toLocaleString()} ج.م)`,
+            sender: 'إدارة الرعاية والتسويق',
+            date: calendarDate.formattedArabic || `الجولة ${currentRound}`,
+            type: 'board',
+            read: false,
+            content: `تهانينا! بفضل مشاهدتك لإعلان الرعاية الإضافي عبر AdMob، تم مضاعفة كامل إيرادات مباراتك بنجاح.\n\n💰 الإيراد الإضافي الممنوح: +${bonusAmount.toLocaleString()} جنيه مصري.\n📈 الإجمالي الجديد لإيراد المباراة: ${(currentRev.baseTotalRevenue + bonusAmount).toLocaleString()} جنيه مصري.`,
+          };
+          setInbox(prev => [bonusMsg, ...prev]);
+
+          resolve({
+            success: true,
+            message: `🎉 مبروك! تمت مضاعفة إيراد المباراة بنجاح وحصلت على +${bonusAmount.toLocaleString()} ج.م إضافية!`,
+          });
+        },
+        onDismiss: (earned) => {
+          if (!earned) {
+            resolve({ success: false, message: 'لم تكتمل مشاهدة الإعلان حتى نهايته، لم يتم منح المضاعفة.' });
+          }
+        },
+        onFailure: () => {
+          resolve({ success: false, message: 'تعذر تحميل الإعلان حالياً، يرجى المحاولة بعد قليل.' });
+        },
+      });
+    });
+  };
+
+  // Adjust Club Match Ticket Price
+  const setClubTicketPrice = (price: number): { success: boolean; message: string } => {
+    if (!userClub) {
+      return { success: false, message: 'أنت غير مرتبط بأي نادٍ حالياً!' };
+    }
+
+    const safePrice = Math.max(5, Math.min(500, Math.round(price)));
+
+    setTeams(prev => prev.map(t => {
+      if (!t.isUserClub && t.id !== userClub.id) return t;
+      return {
+        ...t,
+        facilities: {
+          ...t.facilities,
+          ticketPrice: safePrice,
+        },
+      };
+    }));
+
+    return {
+      success: true,
+      message: `تم ضبط سعر تذكرة مباريات الفريق على ${safePrice} جنيه مصري بنجاح!`,
+    };
+  };
+
   const transferBudgetToWageBudget = (cashAmount: number): { success: boolean; message: string } => {
     if (!userClub || manager.isUnemployed) {
       return { success: false, message: 'أنت غير مرتبط بأي نادٍ حالياً!' };
@@ -4661,6 +4875,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     // Reset club economy for the new club so old club's transactions don't leak
     setClubEconomy({
+      clubBudget: appointedTeams.find(t => t.isUserClub)?.budget || offer.transferBudget || 250000,
       transferSpendingTotal: 0,
       transferIncomeTotal: 0,
       salaryExpensesTotal: 0,
@@ -4750,6 +4965,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       // If manager switched clubs, reset economy to pristine state for the new club
       if (acceptedOffer) {
         setClubEconomy({
+          clubBudget: acceptedOffer.clubBudget || 250000,
           transferSpendingTotal: 0,
           transferIncomeTotal: 0,
           salaryExpensesTotal: 0,
@@ -5159,7 +5375,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     setCalendarDate(newDate);
     setDayAdvanceSummary(summary);
     setShowDaySummaryModal(true);
-    console.error('[DailyProgression] Day advanced successfully to:', newDate.formattedArabic);
+    console.log('[DailyProgression] Day advanced successfully to:', newDate.formattedArabic);
     } catch (error) {
       console.error('[DailyProgression] CRITICAL UNCAUGHT EXCEPTION in advanceToNextDay:', error);
     } finally {
@@ -6347,6 +6563,8 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         treatPlayerInHospital,
         healPlayerWithAd,
         cancelPlayerSuspensionWithAd,
+        doubleLiveMatchRevenueWithAd,
+        setClubTicketPrice,
         promoteYouthProspect,
         sellYouthProspect,
         scoutNewYouthBatch,
@@ -6379,6 +6597,9 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         boostPlayerCondition,
         grantDevelopmentPoints,
         claimAdReward,
+        deletedMessageIds,
+        africanChampionsLeague: null,
+        uefaChampionsLeague: null,
       }}
     >
       {children}

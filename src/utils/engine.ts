@@ -1,6 +1,7 @@
 import { Club, Fixture, LeagueStanding, MatchEvent, MatchStats, Player, TeamTactics, ClubManager, ManagerProfile, ActiveTrainingBoost } from '../types/game';
 import { AdManager } from '../services/adManager';
 import { getClubStaffBonuses, executeSmartAutoSub } from './staffEngine';
+import { MatchRevenueBreakdown } from './matchRevenue';
 
 // Egyptian football commentary phrases pool
 const GOAL_COMMENTARIES = [
@@ -84,6 +85,7 @@ export interface LiveSimulationState {
   awayFatigueMap: Record<string, number>;
   aiSubstitutionsCount: number;
   autoSubsEnabled?: boolean;
+  matchRevenue?: MatchRevenueBreakdown;
 }
 
 export function calculateTeamStrength(

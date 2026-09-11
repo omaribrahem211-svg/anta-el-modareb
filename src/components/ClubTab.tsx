@@ -1,7 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useGame } from '../context/GameContext';
 import { ClubFacilities } from '../types/game';
 import { calculateClubMonthlyIncome, calculateClubTotalMonthlyWages } from '../services/economyService';
+import { getBenchmarkTicketPrice } from '../utils/matchRevenue';
 import { MedicalCenterModal } from './MedicalCenterModal';
 import { YouthAcademyModal } from './YouthAcademyModal';
 import {
@@ -28,6 +29,7 @@ import {
   Target,
   PiggyBank,
   Heart,
+  Ticket,
 } from 'lucide-react';
 
 export const ClubTab: React.FC = () => {
@@ -40,9 +42,18 @@ export const ClubTab: React.FC = () => {
     transferBudgetToWageBudget, 
     transferWageToCashBudget,
     donateToClubFromPersonalWallet,
+    setClubTicketPrice,
+    activeLeague,
   } = useGame();
   const [notification, setNotification] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
   const [isMedicalModalOpen, setIsMedicalModalOpen] = useState<boolean>(false);
+  const [ticketPriceInput, setTicketPriceInput] = useState<number>(userClub?.facilities?.ticketPrice || 20);
+
+  useEffect(() => {
+    if (userClub?.facilities?.ticketPrice) {
+      setTicketPriceInput(userClub.facilities.ticketPrice);
+    }
+  }, [userClub?.facilities?.ticketPrice]);
   const [isYouthAcademyModalOpen, setIsYouthAcademyModalOpen] = useState<boolean>(false);
   const [transferMode, setTransferMode] = useState<'cash_to_wage' | 'wage_to_cash'>('cash_to_wage');
   const [cashAmountToTransfer, setCashAmountToTransfer] = useState<number | string>(60000);
@@ -315,6 +326,149 @@ export const ClubTab: React.FC = () => {
           </div>
         </div>
       </div>
+
+      {/* 🎟️ MATCHDAY TICKET PRICING & STADIUM CAPACITY (إدارة أسعار تذاكر المباريات والاستاد) */}
+      {(() => {
+        const currentCap = userClub.facilities?.stadiumCapacity || 5000;
+        const benchmark = getBenchmarkTicketPrice(activeLeague?.tier || 1);
+        const ratio = ticketPriceInput / benchmark;
+        // Elasticity simulation
+        let expectedAttendancePct = 80;
+        if (ratio <= 0.8) expectedAttendancePct = 95;
+        else if (ratio <= 1.0) expectedAttendancePct = 85;
+        else if (ratio <= 1.2) expectedAttendancePct = 72;
+        else if (ratio <= 1.5) expectedAttendancePct = 55;
+        else if (ratio <= 2.0) expectedAttendancePct = 38;
+        else expectedAttendancePct = 20;
+
+        const estCrowd = Math.round(currentCap * (expectedAttendancePct / 100));
+        const estGateRev = estCrowd * ticketPriceInput;
+
+        const handleSaveTicketPrice = () => {
+          const res = setClubTicketPrice(ticketPriceInput);
+          setNotification({
+            text: res.message,
+            type: res.success ? 'success' : 'error',
+          });
+          setTimeout(() => setNotification(null), 4000);
+        };
+
+        return (
+          <div className="bg-gradient-to-br from-slate-900 via-slate-900 to-emerald-950/40 border-2 border-emerald-500/40 rounded-3xl p-4 space-y-3.5 shadow-xl">
+            <div className="flex items-center justify-between flex-wrap gap-2">
+              <div className="flex items-center gap-2.5">
+                <div className="w-10 h-10 rounded-2xl bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 flex items-center justify-center font-bold">
+                  <Ticket className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-sm text-white flex items-center gap-2">
+                    <span>تسعير تذاكر المباريات والاستاد 🎟️</span>
+                    <span className="text-[10px] bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 px-2 py-0.2 rounded-full font-normal">
+                      مباريات داخل الأرض
+                    </span>
+                  </h3>
+                  <p className="text-[11px] text-slate-400">
+                    حدد سعر التذكرة لجماهير النادي. السعر المنخفض يزيد الحضور والامتلاء، بينما السعر المرتفع يعظم دخل المقعد الواحد لكنه يقلل عدد المشجعين
+                  </p>
+                </div>
+              </div>
+
+              <div className="bg-slate-950/80 border border-emerald-500/30 px-3 py-1.5 rounded-xl text-left">
+                <span className="text-[10px] text-slate-400 block">سعة الاستاد الحالية</span>
+                <span className="font-black text-xs text-emerald-400 font-mono">
+                  {currentCap.toLocaleString()} مقعد (مستوى {userClub.facilities?.stadiumLevel || 1})
+                </span>
+              </div>
+            </div>
+
+            {/* Pricing Controls & Presets */}
+            <div className="bg-slate-950/70 p-3.5 rounded-2xl border border-slate-800 space-y-3 text-xs">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <span className="text-slate-300 font-bold">سعر التذكرة المختار:</span>
+                  <span className="text-base font-black text-amber-400 font-mono">{ticketPriceInput} ج.م</span>
+                  <span className="text-[10px] text-slate-500">(سعر المعيار لدوريك: {benchmark} ج.م)</span>
+                </div>
+
+                <div className="flex items-center gap-1.5">
+                  <span className="text-[11px] text-slate-400">خيارات سريعة:</span>
+                  {[10, 15, 20, 25, 35, 50, 75].map(preset => (
+                    <button
+                      key={preset}
+                      type="button"
+                      onClick={() => setTicketPriceInput(preset)}
+                      className={`px-2.5 py-1 rounded-lg text-xs font-bold font-mono transition-all cursor-pointer ${
+                        ticketPriceInput === preset
+                          ? 'bg-amber-400 text-slate-950 shadow-md font-black'
+                          : 'bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700'
+                      }`}
+                    >
+                      {preset}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Slider / Range */}
+              <div className="space-y-1">
+                <div className="flex items-center justify-between text-[10px] text-slate-400 font-mono">
+                  <span>5 ج.م (تذاكر شعبية مخفضة)</span>
+                  <span>100 ج.م (تذاكر VIP ومباريات كبرى)</span>
+                </div>
+                <input
+                  type="range"
+                  min={5}
+                  max={100}
+                  step={1}
+                  value={ticketPriceInput}
+                  onChange={(e) => setTicketPriceInput(Number(e.target.value))}
+                  className="w-full accent-emerald-500 cursor-pointer"
+                />
+              </div>
+
+              {/* Live Impact Preview */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-1 text-center font-mono">
+                <div className="bg-slate-900 p-2 rounded-xl border border-slate-800">
+                  <span className="text-[10px] text-slate-400 block font-sans">الحضور المتوقع</span>
+                  <span className="text-xs font-black text-white">
+                    ~{estCrowd.toLocaleString()} مشجع ({expectedAttendancePct}%)
+                  </span>
+                </div>
+
+                <div className="bg-slate-900 p-2 rounded-xl border border-slate-800">
+                  <span className="text-[10px] text-slate-400 block font-sans">تأثير السعر على الجمهور</span>
+                  <span className={`text-xs font-black font-sans ${ratio <= 1 ? 'text-emerald-400' : ratio <= 1.4 ? 'text-amber-400' : 'text-rose-400'}`}>
+                    {ratio <= 0.8 ? '🔥 إقبال جماهيري قياسي' : ratio <= 1 ? '✅ إقبال طبيعي ومثالي' : ratio <= 1.4 ? '⚠️ عزوف جزئي لارتفاع السعر' : '❌ مقاطعة وعزوف كبير'}
+                  </span>
+                </div>
+
+                <div className="bg-slate-900 p-2 rounded-xl border border-slate-800">
+                  <span className="text-[10px] text-slate-400 block font-sans">إيراد التذاكر المتوقع بالمباراة</span>
+                  <span className="text-xs font-black text-emerald-400">
+                    +{estGateRev.toLocaleString()} ج.م
+                  </span>
+                </div>
+              </div>
+
+              {/* Save Button */}
+              <div className="flex flex-col sm:flex-row items-center justify-between gap-2 pt-1">
+                <span className="text-[11px] text-slate-400">
+                  💡 تلميح: تطوير مدرجات الاستاد يزيد السعة الجماهيرية وتضاعف إيراداتك في كل جولة تلعبها على أرضك.
+                </span>
+                <button
+                  id="btn_save_ticket_price"
+                  type="button"
+                  onClick={handleSaveTicketPrice}
+                  className="w-full sm:w-auto px-4 py-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-xs rounded-xl shadow-md transition-all active:scale-95 cursor-pointer flex items-center justify-center gap-1.5 shrink-0"
+                >
+                  <CheckCircle2 className="w-3.5 h-3.5" />
+                  <span>اعتماد سعر التذكرة</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Budget Adjustment / Transfer to Wage Budget Section */}
       <div className="bg-slate-900 border border-slate-800 rounded-3xl p-4 space-y-3.5">

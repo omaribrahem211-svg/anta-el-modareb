@@ -59,7 +59,7 @@ export interface SmartSyncInput {
   boardSystem?: any;
   dailyNews?: any[];
   retiredPlayers?: any[];
-  worldRankings?: any[];
+  worldRankings?: any;
   scoutedOpponents?: any;
   deletedMessageIds?: string[];
 }

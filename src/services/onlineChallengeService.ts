@@ -52,8 +52,9 @@ export function getOrCreatePlayerId(): string {
 }
 
 export function getWebSocketServerUrl(): string {
-  if (import.meta.env.VITE_WS_URL) {
-    return import.meta.env.VITE_WS_URL;
+  const metaEnv = (import.meta as any).env;
+  if (metaEnv && metaEnv.VITE_WS_URL) {
+    return metaEnv.VITE_WS_URL;
   }
   const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
   if (isLocal && (window as any).Capacitor?.isNativePlatform?.()) {
