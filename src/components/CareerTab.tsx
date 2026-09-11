@@ -79,7 +79,8 @@ export const CareerTab: React.FC = () => {
 
   // Financial system state
   const [showDonateModal, setShowDonateModal] = useState(false);
-  const [donateAmount, setDonateAmount] = useState<number>(50000);
+  const [donateAmount, setDonateAmount] = useState<number | string>(50000);
+  const numDonateAmount = typeof donateAmount === 'number' ? donateAmount : (parseInt(donateAmount) || 0);
   const [financeNotification, setFinanceNotification] = useState<{ text: string; success: boolean } | null>(null);
   const [activeCourseCategory, setActiveCourseCategory] = useState<'all' | 'license' | 'tactical'>('all');
   const [showAllTransactions, setShowAllTransactions] = useState(false);
@@ -112,7 +113,8 @@ export const CareerTab: React.FC = () => {
   };
 
   const handleExecuteDonation = () => {
-    const res = donateToClubFromPersonalWallet(donateAmount);
+    if (numDonateAmount <= 0) return;
+    const res = donateToClubFromPersonalWallet(numDonateAmount);
     setFinanceNotification({ text: res.message, success: res.success });
     if (res.success) {
       setTimeout(() => {
@@ -872,7 +874,7 @@ export const CareerTab: React.FC = () => {
                     type="button"
                     onClick={() => setDonateAmount(amt)}
                     className={`py-2 rounded-xl font-bold border transition-all ${
-                      donateAmount === amt
+                      numDonateAmount === amt
                         ? 'bg-emerald-500 text-slate-950 border-emerald-400 shadow-md'
                         : 'bg-slate-950 border-slate-800 text-slate-300 hover:bg-slate-850'
                     }`}
@@ -887,7 +889,10 @@ export const CareerTab: React.FC = () => {
                 min="5000"
                 step="5000"
                 value={donateAmount}
-                onChange={(e) => setDonateAmount(Math.max(0, parseInt(e.target.value) || 0))}
+                onChange={(e) => setDonateAmount(e.target.value === '' ? '' : Math.max(0, parseInt(e.target.value) || 0))}
+                onBlur={() => {
+                  if (donateAmount === '' || Number(donateAmount) <= 0) setDonateAmount(10000);
+                }}
                 className="w-full bg-slate-950 border border-slate-800 rounded-2xl px-3 py-2.5 text-xs text-white font-mono text-center focus:outline-none focus:border-emerald-500"
                 placeholder="أو أدخل مبلغاً مخصصاً بالجنيه المصري..."
               />
@@ -896,7 +901,7 @@ export const CareerTab: React.FC = () => {
             <div className="bg-emerald-950/40 p-3 rounded-2xl border border-emerald-800/50 text-xs space-y-1.5 text-emerald-200/90">
               <span className="font-bold text-emerald-300 block">🌟 المكاسب الإدارية الناتجة عن تبرعك:</span>
               <ul className="list-disc list-inside space-y-0.5 text-[11px] text-slate-300 mr-1">
-                <li>إضافة فورية بقيمة {donateAmount.toLocaleString()} ج.م إلى ميزانية النادي.</li>
+                <li>إضافة فورية بقيمة {numDonateAmount.toLocaleString()} ج.م إلى ميزانية النادي.</li>
                 <li>زيادة فورية في ثقة مجلس الإدارة بمقدار (+15%).</li>
                 <li>رفع سمعتك التدريبية (+2 ⭐) وزيادة شعبية المدرب الجارفة بين جماهير النادي.</li>
               </ul>
@@ -905,16 +910,16 @@ export const CareerTab: React.FC = () => {
             <div className="flex items-center gap-2 pt-2">
               <button
                 onClick={handleExecuteDonation}
-                disabled={(manager.personalWallet || 0) < donateAmount || donateAmount <= 0}
+                disabled={(manager.personalWallet || 0) < numDonateAmount || numDonateAmount <= 0}
                 className={`flex-1 py-3 rounded-2xl font-black text-xs transition-all flex items-center justify-center gap-2 shadow-lg ${
-                  (manager.personalWallet || 0) >= donateAmount && donateAmount > 0
+                  (manager.personalWallet || 0) >= numDonateAmount && numDonateAmount > 0
                     ? 'bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-slate-950 active:scale-98 cursor-pointer'
                     : 'bg-slate-800 text-slate-500 cursor-not-allowed'
                 }`}
               >
                 <PiggyBank className="w-4 h-4" />
                 <span>
-                  {(manager.personalWallet || 0) >= donateAmount ? 'تأكيد ودفع التبرع للنادي فوراً' : 'رصيدك الشخصي غير كافٍ'}
+                  {(manager.personalWallet || 0) >= numDonateAmount ? 'تأكيد ودفع التبرع للنادي فوراً' : 'رصيدك الشخصي غير كافٍ'}
                 </span>
               </button>
               <button

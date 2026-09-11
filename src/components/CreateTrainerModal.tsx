@@ -44,8 +44,8 @@ const COMMON_NATIONALITIES = [
 
 export const CreateTrainerModal: React.FC<CreateTrainerModalProps> = ({ onProfileCreated }) => {
   const [step, setStep] = useState<'profile' | 'club'>('profile');
-  const [name, setName] = useState('الكابتن الجديد');
-  const [age, setAge] = useState<number>(35);
+  const [name, setName] = useState('');
+  const [age, setAge] = useState<number | string>(35);
   const [nationality, setNationality] = useState('مصري');
   const [customNationality, setCustomNationality] = useState('');
   const [isCustomNat, setIsCustomNat] = useState(false);
@@ -77,6 +77,7 @@ export const CreateTrainerModal: React.FC<CreateTrainerModalProps> = ({ onProfil
     e.preventDefault();
     const trimmedName = name.trim();
     const finalNat = isCustomNat ? customNationality.trim() : nationality.trim();
+    const numAge = typeof age === 'number' ? age : (parseInt(age) || 0);
 
     if (!trimmedName) {
       setError('يرجى كتابة اسم المدرب.');
@@ -88,7 +89,7 @@ export const CreateTrainerModal: React.FC<CreateTrainerModalProps> = ({ onProfil
       return;
     }
 
-    if (age < 20 || age > 80) {
+    if (numAge < 20 || numAge > 80) {
       setError('عمر المدرب يجب أن يكون بين 20 و 80 عاماً.');
       return;
     }
@@ -100,10 +101,11 @@ export const CreateTrainerModal: React.FC<CreateTrainerModalProps> = ({ onProfil
   const handleFinalSubmit = () => {
     const trimmedName = name.trim();
     const finalNat = isCustomNat ? customNationality.trim() : nationality.trim();
+    const finalAge = typeof age === 'number' ? age : (parseInt(age as string) || 35);
 
     const newProfile = saveLocalTrainerProfile({
       name: trimmedName,
-      age,
+      age: finalAge,
       nationality: finalNat,
     });
 
@@ -187,8 +189,13 @@ export const CreateTrainerModal: React.FC<CreateTrainerModalProps> = ({ onProfil
                   max="80"
                   value={age}
                   onChange={(e) => {
-                    setAge(parseInt(e.target.value) || 35);
+                    const val = e.target.value;
+                    setAge(val === '' ? '' : parseInt(val) || '');
                     if (error) setError(null);
+                  }}
+                  onBlur={() => {
+                    if (age === '' || Number(age) < 20) setAge(20);
+                    else if (Number(age) > 80) setAge(80);
                   }}
                   className="w-28 bg-slate-950 border border-slate-700/80 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 rounded-2xl px-4 py-3 text-sm text-white font-mono font-bold text-center outline-none"
                   required

@@ -137,7 +137,7 @@ export const BottomNav: React.FC<BottomNavProps> = ({ activeTab, setActiveTab })
           {mainTabs.map((tab) => {
             const Icon = tab.icon;
             const isActive = activeTab === tab.id;
-            const isMatchPlaying = tab.id === 'matches' && liveMatch && liveMatch.isPlaying;
+            const isMatchPlaying = tab.id === 'matches' && liveMatch && !liveMatch.isFinished;
 
             return (
               <button

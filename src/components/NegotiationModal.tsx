@@ -69,8 +69,8 @@ export const NegotiationModal: React.FC<NegotiationModalProps> = ({
   const minRequiredFee = isFreeAgent ? Math.max(25000, Math.round(fairVal.fairMarketValue * 0.75)) : Math.max(25000, fairVal.fairMarketValue);
 
   // Initial Form State
-  const [fee, setFee] = useState<number>(existingNegotiation?.bidFee || minRequiredFee);
-  const [salary, setSalary] = useState<number>(
+  const [fee, setFee] = useState<number | string>(existingNegotiation?.bidFee || minRequiredFee);
+  const [salary, setSalary] = useState<number | string>(
     existingNegotiation?.offeredSalary || Math.max(minRequiredSalary, fairVal.recommendedMonthlyWage)
   );
   const [years, setYears] = useState<number>(existingNegotiation?.contractYears || 3);
@@ -78,17 +78,20 @@ export const NegotiationModal: React.FC<NegotiationModalProps> = ({
     existingNegotiation?.squadRole || 'first_team'
   );
 
+  const numFee = typeof fee === 'number' ? fee : (Number(fee) || 0);
+  const numSalary = typeof salary === 'number' ? salary : (Number(salary) || 0);
+
   // Financial calculations
   const clubMonthlyIncome = userClub ? calculateClubMonthlyIncome(userClub) : 0;
   const clubCurrentWages = userClub ? calculateClubTotalMonthlyWages(userClub) : 0;
   const remainingWageBudget = Math.max(0, clubMonthlyIncome - clubCurrentWages);
   
-  const isSalaryBelowCurrent = salary < (targetPlayer.salary || 0);
-  const isFeeExceedingBudget = userClub ? fee > userClub.budget : false;
-  const isSalaryExceedingCap = salary > remainingWageBudget;
+  const isSalaryBelowCurrent = numSalary < (targetPlayer.salary || 0);
+  const isFeeExceedingBudget = userClub ? numFee > userClub.budget : false;
+  const isSalaryExceedingCap = numSalary > remainingWageBudget;
 
   const transferValidation = userClub
-    ? validateTransferFinancials(userClub, targetPlayer, fee, salary, isFreeAgent)
+    ? validateTransferFinancials(userClub, targetPlayer, numFee, numSalary, isFreeAgent)
     : { allowed: false, canAffordFee: false, canAffordWage: false, reason: 'يجب تولي تدريب نادٍ أولاً' };
 
   // Counter offer validations
@@ -102,8 +105,8 @@ export const NegotiationModal: React.FC<NegotiationModalProps> = ({
 
     onSubmitProposal({
       playerId: targetPlayer.id,
-      transferFee: fee,
-      monthlySalary: salary,
+      transferFee: numFee,
+      monthlySalary: numSalary,
       contractYears: years,
       squadRole: role,
     });
@@ -262,14 +265,17 @@ export const NegotiationModal: React.FC<NegotiationModalProps> = ({
                   min={25000}
                   step={5000}
                   value={fee}
-                  onChange={e => setFee(Number(e.target.value))}
+                  onChange={e => setFee(e.target.value === '' ? '' : Number(e.target.value))}
+                  onBlur={() => {
+                    if (fee === '' || Number(fee) < 25000) setFee(minRequiredFee);
+                  }}
                   className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2.5 text-emerald-400 font-mono font-bold text-sm focus:outline-none focus:border-emerald-500"
                 />
                 <div className="flex items-center justify-between text-[11px] pt-1">
                   <span className="text-slate-400">
                     ميزانية ناديك المتاحة: <strong className="text-emerald-400 font-mono">{(userClub?.budget || 0).toLocaleString()} ج.م</strong>
                   </span>
-                  {fee > (userClub?.budget || 0) && (
+                  {numFee > (userClub?.budget || 0) && (
                     <span className="text-rose-400 font-bold flex items-center gap-1">
                       <AlertCircle className="w-3 h-3" />
                       العرض يتجاوز ميزانيتك الحالية!
@@ -294,7 +300,10 @@ export const NegotiationModal: React.FC<NegotiationModalProps> = ({
                   min={minRequiredSalary}
                   step={1000}
                   value={salary}
-                  onChange={e => setSalary(Number(e.target.value))}
+                  onChange={e => setSalary(e.target.value === '' ? '' : Number(e.target.value))}
+                  onBlur={() => {
+                    if (salary === '' || Number(salary) < minRequiredSalary) setSalary(minRequiredSalary);
+                  }}
                   className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2.5 text-amber-400 font-mono font-bold text-sm focus:outline-none focus:border-amber-500"
                 />
                 <div className="flex items-center justify-between text-[11px] pt-1">
@@ -307,7 +316,7 @@ export const NegotiationModal: React.FC<NegotiationModalProps> = ({
                       لا يمكن عرض راتب أقل من راتبه الحالي!
                     </span>
                   )}
-                  {!isSalaryBelowCurrent && salary > remainingWageBudget && (
+                  {!isSalaryBelowCurrent && numSalary > remainingWageBudget && (
                     <span className="text-rose-400 font-bold flex items-center gap-1">
                       <AlertCircle className="w-3 h-3" />
                       الراتب يتجاوز سقف دخل النادي!

@@ -64,7 +64,8 @@ export const PlayerModal: React.FC<PlayerModalProps> = ({ player, onClose, onSta
   const [isAdLoading, setIsAdLoading] = useState(false);
 
   // Direct Player Bonus State
-  const [bonusInputAmount, setBonusInputAmount] = useState<number>(10000);
+  const [bonusInputAmount, setBonusInputAmount] = useState<number | string>(10000);
+  const numBonusInput = typeof bonusInputAmount === 'number' ? bonusInputAmount : (parseInt(bonusInputAmount) || 0);
   const [bonusFundingSource, setBonusFundingSource] = useState<'club' | 'manager'>('club');
   const [showBonusRow, setShowBonusRow] = useState(false);
 
@@ -515,7 +516,7 @@ export const PlayerModal: React.FC<PlayerModalProps> = ({ player, onClose, onSta
                       key={amt}
                       onClick={() => setBonusInputAmount(amt)}
                       className={`py-1.5 rounded-lg font-bold border transition-all text-[11px] ${
-                        bonusInputAmount === amt 
+                        numBonusInput === amt 
                           ? 'bg-amber-500 text-slate-950 border-amber-400' 
                           : 'bg-slate-950 border-slate-800 text-slate-300 hover:bg-slate-800'
                       }`}
@@ -531,20 +532,25 @@ export const PlayerModal: React.FC<PlayerModalProps> = ({ player, onClose, onSta
                     min="1000"
                     step="1000"
                     value={bonusInputAmount}
-                    onChange={(e) => setBonusInputAmount(Math.max(0, parseInt(e.target.value) || 0))}
+                    onChange={(e) => setBonusInputAmount(e.target.value === '' ? '' : Math.max(0, parseInt(e.target.value) || 0))}
+                    onBlur={() => {
+                      if (bonusInputAmount === '' || Number(bonusInputAmount) <= 0) setBonusInputAmount(5000);
+                    }}
                     className="flex-1 bg-slate-950 border border-slate-800 rounded-xl px-2.5 py-1.5 text-xs text-white font-mono text-center focus:outline-none focus:border-amber-500"
                     placeholder="مبلغ مخصص..."
                   />
                   <button
+                    disabled={numBonusInput <= 0}
                     onClick={() => {
-                      const res = addBonusToPlayer(player.id, bonusInputAmount, bonusFundingSource);
+                      if (numBonusInput <= 0) return;
+                      const res = addBonusToPlayer(player.id, numBonusInput, bonusFundingSource);
                       setNotification({ text: res.message, type: res.success ? 'success' : 'error' });
                       if (res.success) {
                         setShowBonusRow(false);
                       }
                       setTimeout(() => setNotification(null), 3000);
                     }}
-                    className="px-4 py-1.5 bg-gradient-to-r from-amber-500 to-emerald-500 hover:from-amber-600 hover:to-emerald-600 text-slate-950 font-bold rounded-xl text-xs transition-all shadow-md active:scale-95"
+                    className="px-4 py-1.5 bg-gradient-to-r from-amber-500 to-emerald-500 hover:from-amber-600 hover:to-emerald-600 disabled:opacity-50 text-slate-950 font-bold rounded-xl text-xs transition-all shadow-md active:scale-95"
                   >
                     صرف الآن 💰
                   </button>

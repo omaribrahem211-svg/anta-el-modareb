@@ -52,7 +52,7 @@ export const InboxTab: React.FC = () => {
   const [feedbackToast, setFeedbackToast] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
 
   // Renewal Form local states keyed by playerId
-  const [renewalWages, setRenewalWages] = useState<Record<string, number>>({});
+  const [renewalWages, setRenewalWages] = useState<Record<string, number | string>>({});
   const [renewalYears, setRenewalYears] = useState<Record<string, number>>({});
   const [activeRenewalPlayerId, setActiveRenewalPlayerId] = useState<string | null>(null);
 
@@ -72,7 +72,8 @@ export const InboxTab: React.FC = () => {
 
   // Get active wage for a player
   const getSelectedWage = (player: Player): number => {
-    if (renewalWages[player.id]) return renewalWages[player.id];
+    const custom = renewalWages[player.id];
+    if (custom !== undefined && custom !== '') return Number(custom);
     return calculateSuggestedRenewalWage(player);
   };
 
@@ -681,15 +682,24 @@ export const InboxTab: React.FC = () => {
                                   min={1000}
                                   value={renewalWages[contractDetails.playerId] ?? contractDetails.suggestedWage}
                                   onChange={e => {
-                                    const val = Math.max(1000, Number(e.target.value) || 1000);
+                                    const val = e.target.value === '' ? '' : Number(e.target.value);
                                     setRenewalWages(prev => ({ ...prev, [contractDetails.playerId]: val }));
+                                  }}
+                                  onBlur={() => {
+                                    const current = renewalWages[contractDetails.playerId];
+                                    if (current === '' || current === undefined || Number(current) < 1000) {
+                                      setRenewalWages(prev => ({ ...prev, [contractDetails.playerId]: contractDetails.suggestedWage }));
+                                    }
                                   }}
                                   className="w-full bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-white font-bold font-mono focus:outline-none focus:border-amber-500 text-center"
                                 />
                                 <button
                                   type="button"
                                   onClick={() => {
-                                    const base = renewalWages[contractDetails.playerId] ?? contractDetails.suggestedWage;
+                                    const currentVal = renewalWages[contractDetails.playerId];
+                                    const base = (typeof currentVal === 'number' && currentVal > 0)
+                                      ? currentVal
+                                      : (Number(currentVal) || contractDetails.suggestedWage);
                                     setRenewalWages(prev => ({ ...prev, [contractDetails.playerId]: Math.round(base * 1.15 / 500) * 500 }));
                                   }}
                                   className="px-2 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold rounded-lg border border-slate-700 shrink-0 cursor-pointer"
@@ -710,7 +720,7 @@ export const InboxTab: React.FC = () => {
                             >
                               <FileSignature className="w-4 h-4" />
                               <span>
-                                تجديد العقد فوراً ({getSelectedYears(targetPlayer)} سنوات - {(renewalWages[contractDetails.playerId] ?? contractDetails.suggestedWage).toLocaleString()} ج.م)
+                                تجديد العقد فوراً ({getSelectedYears(targetPlayer)} سنوات - {getSelectedWage(targetPlayer).toLocaleString()} ج.م)
                               </span>
                             </button>
 

@@ -223,10 +223,9 @@ class AdManagerService {
         this.isBannerLoading = false;
         this.isBannerCreated = false;
 
-        // If production banner failed (e.g. Code 3: No Fill or test environment),
-        // automatically fallback to official Google test banner so the banner is visible during testing!
-        if (!this.isUsingTestBannerFallback && (ADMOB_CONFIG.IS_TEST_MODE || String(errCode) === '3' || String(errCode) === '0' || String(errCode).includes('NO_FILL'))) {
-          console.log('[ADMOB_BANNER] Production banner returned no fill / test build. Requesting Google test banner fallback...');
+        // Only fallback to Google test banner when in test mode (never for real production users)
+        if (ADMOB_CONFIG.IS_TEST_MODE && !this.isUsingTestBannerFallback && (String(errCode) === '3' || String(errCode) === '0' || String(errCode).includes('NO_FILL'))) {
+          console.log('[ADMOB_BANNER] Test mode fallback to test banner...');
           this.isUsingTestBannerFallback = true;
           if (this.bannerRetryTimer) clearTimeout(this.bannerRetryTimer);
           this.bannerRetryTimer = setTimeout(() => {
@@ -235,7 +234,7 @@ class AdManagerService {
           return;
         }
 
-        // Schedule retry for production ad after 60s
+        // In production mode, never use test ads. Schedule retry for production ad after 60s
         if (this.bannerRetryTimer) clearTimeout(this.bannerRetryTimer);
         this.bannerRetryTimer = setTimeout(() => {
           this.isUsingTestBannerFallback = false;
@@ -288,7 +287,7 @@ class AdManagerService {
       await this.attachBannerListeners();
 
       if (this.isNative) {
-        const isTest = ADMOB_CONFIG.IS_TEST_MODE || this.isUsingTestBannerFallback;
+        const isTest = ADMOB_CONFIG.IS_TEST_MODE ? (this.isUsingTestBannerFallback || true) : false;
         const bannerAdId = isTest
           ? TEST_AD_IDS.BANNER_ID
           : (ADMOB_CONFIG.BANNER_ID || ADMOB_CONFIG.BOTTOM_BANNER_ID || 'ca-app-pub-5272866425919152/4077924883');

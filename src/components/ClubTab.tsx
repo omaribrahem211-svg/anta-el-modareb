@@ -45,9 +45,13 @@ export const ClubTab: React.FC = () => {
   const [isMedicalModalOpen, setIsMedicalModalOpen] = useState<boolean>(false);
   const [isYouthAcademyModalOpen, setIsYouthAcademyModalOpen] = useState<boolean>(false);
   const [transferMode, setTransferMode] = useState<'cash_to_wage' | 'wage_to_cash'>('cash_to_wage');
-  const [cashAmountToTransfer, setCashAmountToTransfer] = useState<number>(60000);
-  const [wageAmountToTransfer, setWageAmountToTransfer] = useState<number>(5000);
-  const [personalDonationAmount, setPersonalDonationAmount] = useState<number>(50000);
+  const [cashAmountToTransfer, setCashAmountToTransfer] = useState<number | string>(60000);
+  const [wageAmountToTransfer, setWageAmountToTransfer] = useState<number | string>(5000);
+  const [personalDonationAmount, setPersonalDonationAmount] = useState<number | string>(50000);
+
+  const numCashAmount = typeof cashAmountToTransfer === 'number' ? cashAmountToTransfer : (Number(cashAmountToTransfer) || 0);
+  const numWageAmount = typeof wageAmountToTransfer === 'number' ? wageAmountToTransfer : (Number(wageAmountToTransfer) || 0);
+  const numPersonalDonation = typeof personalDonationAmount === 'number' ? personalDonationAmount : (Number(personalDonationAmount) || 0);
 
 
   if (!userClub || manager.isUnemployed) {
@@ -83,19 +87,22 @@ export const ClubTab: React.FC = () => {
   };
 
   const handleTransferBudgetToWage = () => {
-    const res = transferBudgetToWageBudget(cashAmountToTransfer);
+    if (numCashAmount <= 0) return;
+    const res = transferBudgetToWageBudget(numCashAmount);
     setNotification({ text: res.message, type: res.success ? 'success' : 'error' });
     setTimeout(() => setNotification(null), 4000);
   };
 
   const handleTransferWageToCash = () => {
-    const res = transferWageToCashBudget(wageAmountToTransfer);
+    if (numWageAmount <= 0) return;
+    const res = transferWageToCashBudget(numWageAmount);
     setNotification({ text: res.message, type: res.success ? 'success' : 'error' });
     setTimeout(() => setNotification(null), 4000);
   };
 
   const handleDonatePersonal = () => {
-    const res = donateToClubFromPersonalWallet(personalDonationAmount);
+    if (numPersonalDonation <= 0) return;
+    const res = donateToClubFromPersonalWallet(numPersonalDonation);
     setNotification({ text: res.message, type: res.success ? 'success' : 'error' });
     setTimeout(() => setNotification(null), 4000);
   };
@@ -281,15 +288,18 @@ export const ClubTab: React.FC = () => {
               min={5000}
               step={5000}
               value={personalDonationAmount}
-              onChange={e => setPersonalDonationAmount(Math.max(0, Number(e.target.value)))}
+              onChange={e => setPersonalDonationAmount(e.target.value === '' ? '' : Math.max(0, Number(e.target.value)))}
+              onBlur={() => {
+                if (personalDonationAmount === '' || Number(personalDonationAmount) <= 0) setPersonalDonationAmount(10000);
+              }}
               className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2 text-amber-300 font-mono font-bold text-xs focus:outline-none focus:border-amber-500"
               placeholder="المبلغ بالجنيه..."
             />
             <button
               onClick={handleDonatePersonal}
-              disabled={(manager.personalWallet || 0) < personalDonationAmount || personalDonationAmount <= 0}
+              disabled={(manager.personalWallet || 0) < numPersonalDonation || numPersonalDonation <= 0}
               className={`px-5 py-2 rounded-xl text-xs font-bold transition-all shrink-0 flex items-center gap-1.5 shadow-md ${
-                (manager.personalWallet || 0) >= personalDonationAmount && personalDonationAmount > 0
+                (manager.personalWallet || 0) >= numPersonalDonation && numPersonalDonation > 0
                   ? 'bg-gradient-to-r from-amber-500 to-emerald-500 text-slate-950 hover:brightness-110 active:scale-95 cursor-pointer'
                   : 'bg-slate-800 text-slate-500 cursor-not-allowed'
               }`}
@@ -300,7 +310,7 @@ export const ClubTab: React.FC = () => {
           </div>
 
           <div className="flex items-center justify-between text-[11px] text-slate-400 pt-1 border-t border-slate-800/80">
-            <span>⚡ الأثر: +{personalDonationAmount.toLocaleString()} ج.م لخزينة النادي</span>
+            <span>⚡ الأثر: +{numPersonalDonation.toLocaleString()} ج.م لخزينة النادي</span>
             <span className="text-emerald-400 font-semibold">+15% ثقة مجلس الإدارة • +2 ⭐ سمعة للمدرب</span>
           </div>
         </div>
@@ -361,7 +371,10 @@ export const ClubTab: React.FC = () => {
                 min={1200}
                 step={6000}
                 value={cashAmountToTransfer}
-                onChange={e => setCashAmountToTransfer(Math.max(0, Number(e.target.value)))}
+                onChange={e => setCashAmountToTransfer(e.target.value === '' ? '' : Math.max(0, Number(e.target.value)))}
+                onBlur={() => {
+                  if (cashAmountToTransfer === '' || Number(cashAmountToTransfer) <= 0) setCashAmountToTransfer(24000);
+                }}
                 className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2.5 text-emerald-400 font-mono font-bold text-sm focus:outline-none focus:border-emerald-500"
               />
             </div>
@@ -387,20 +400,20 @@ export const ClubTab: React.FC = () => {
             <div className="p-2.5 bg-emerald-950/40 border border-emerald-800/60 rounded-xl flex items-center justify-between text-xs">
               <span className="text-slate-300">الزيادة الناتجة في سقف الرواتب الشهري:</span>
               <strong className="text-emerald-400 font-mono text-sm">
-                +{Math.round(cashAmountToTransfer / 12).toLocaleString()} ج.م/شهرياً
+                +{Math.round(numCashAmount / 12).toLocaleString()} ج.م/شهرياً
               </strong>
             </div>
 
             <button
               onClick={handleTransferBudgetToWage}
-              disabled={userClub.budget < cashAmountToTransfer || cashAmountToTransfer <= 0}
+              disabled={userClub.budget < numCashAmount || numCashAmount <= 0}
               className="w-full bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 disabled:opacity-40 text-white font-bold text-xs py-2.5 px-4 rounded-xl shadow-md transition-all active:scale-95 flex items-center justify-center gap-1.5 cursor-pointer"
             >
               <Coins className="w-4 h-4" />
               <span>
-                {userClub.budget < cashAmountToTransfer
+                {userClub.budget < numCashAmount
                   ? 'الميزانية النقدية الحالية لا تكفي'
-                  : `تأكيد تحويل ${cashAmountToTransfer.toLocaleString()} ج.م إلى سقف الرواتب`}
+                  : `تأكيد تحويل ${numCashAmount.toLocaleString()} ج.م إلى سقف الرواتب`}
               </span>
             </button>
           </div>
@@ -416,7 +429,10 @@ export const ClubTab: React.FC = () => {
                 min={100}
                 step={500}
                 value={wageAmountToTransfer}
-                onChange={e => setWageAmountToTransfer(Math.max(0, Number(e.target.value)))}
+                onChange={e => setWageAmountToTransfer(e.target.value === '' ? '' : Math.max(0, Number(e.target.value)))}
+                onBlur={() => {
+                  if (wageAmountToTransfer === '' || Number(wageAmountToTransfer) <= 0) setWageAmountToTransfer(5000);
+                }}
                 className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2.5 text-cyan-400 font-mono font-bold text-sm focus:outline-none focus:border-cyan-500"
               />
             </div>
@@ -442,20 +458,20 @@ export const ClubTab: React.FC = () => {
             <div className="p-2.5 bg-cyan-950/40 border border-cyan-800/60 rounded-xl flex items-center justify-between text-xs">
               <span className="text-slate-300">السيولة النقدية المستردة لميزانية النادي:</span>
               <strong className="text-cyan-400 font-mono text-sm">
-                +{(wageAmountToTransfer * 12).toLocaleString()} ج.م
+                +{(numWageAmount * 12).toLocaleString()} ج.م
               </strong>
             </div>
 
             <button
               onClick={handleTransferWageToCash}
-              disabled={currentWageBonus < wageAmountToTransfer || wageAmountToTransfer <= 0}
+              disabled={currentWageBonus < numWageAmount || numWageAmount <= 0}
               className="w-full bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 disabled:opacity-40 text-white font-bold text-xs py-2.5 px-4 rounded-xl shadow-md transition-all active:scale-95 flex items-center justify-center gap-1.5 cursor-pointer"
             >
               <ArrowLeftRight className="w-4 h-4" />
               <span>
-                {currentWageBonus < wageAmountToTransfer
+                {currentWageBonus < numWageAmount
                   ? 'فائض سقف الرواتب المخصص أقل من هذا المبلغ'
-                  : `تأكيد استرداد ${(wageAmountToTransfer * 12).toLocaleString()} ج.م للميزانية النقدية`}
+                  : `تأكيد استرداد ${(numWageAmount * 12).toLocaleString()} ج.م للميزانية النقدية`}
               </span>
             </button>
           </div>

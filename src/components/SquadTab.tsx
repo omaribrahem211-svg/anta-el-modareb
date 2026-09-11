@@ -40,7 +40,8 @@ export const SquadTab: React.FC<SquadTabProps> = ({ onSelectPlayer }) => {
   const [bonusModalOpen, setBonusModalOpen] = useState(false);
   const [bonusMode, setBonusMode] = useState<'single' | 'all'>('all');
   const [selectedPlayerForBonus, setSelectedPlayerForBonus] = useState<Player | null>(null);
-  const [bonusAmount, setBonusAmount] = useState<number>(10000);
+  const [bonusAmount, setBonusAmount] = useState<number | string>(10000);
+  const numBonusAmount = typeof bonusAmount === 'number' ? bonusAmount : (parseInt(bonusAmount) || 0);
   const [bonusSource, setBonusSource] = useState<'club' | 'manager'>('club');
   const [bonusFeedback, setBonusFeedback] = useState<{ text: string; success: boolean } | null>(null);
 
@@ -102,8 +103,9 @@ export const SquadTab: React.FC<SquadTabProps> = ({ onSelectPlayer }) => {
   };
 
   const handleExecuteBonus = () => {
+    if (numBonusAmount <= 0) return;
     if (bonusMode === 'single' && selectedPlayerForBonus) {
-      const res = addBonusToPlayer(selectedPlayerForBonus.id, bonusAmount, bonusSource);
+      const res = addBonusToPlayer(selectedPlayerForBonus.id, numBonusAmount, bonusSource);
       setBonusFeedback({ text: res.message, success: res.success });
       if (res.success) {
         setTimeout(() => {
@@ -112,7 +114,7 @@ export const SquadTab: React.FC<SquadTabProps> = ({ onSelectPlayer }) => {
         }, 2200);
       }
     } else {
-      const res = addBonusToAllPlayers(bonusAmount, bonusSource);
+      const res = addBonusToAllPlayers(numBonusAmount, bonusSource);
       setBonusFeedback({ text: res.message, success: res.success });
       if (res.success) {
         setTimeout(() => {
@@ -123,7 +125,7 @@ export const SquadTab: React.FC<SquadTabProps> = ({ onSelectPlayer }) => {
     }
   };
 
-  const totalCalculatedCost = bonusMode === 'all' ? bonusAmount * squadPlayers.length : bonusAmount;
+  const totalCalculatedCost = bonusMode === 'all' ? numBonusAmount * squadPlayers.length : numBonusAmount;
   const currentFundingAvailable = bonusSource === 'club' ? (userClub.budget || 0) : (manager.personalWallet || 0);
   const canAffordBonus = currentFundingAvailable >= totalCalculatedCost;
 
@@ -513,7 +515,7 @@ export const SquadTab: React.FC<SquadTabProps> = ({ onSelectPlayer }) => {
                     key={amt}
                     onClick={() => setBonusAmount(amt)}
                     className={`py-2 rounded-xl text-xs font-bold transition-all border ${
-                      bonusAmount === amt
+                      numBonusAmount === amt
                         ? 'bg-amber-500 text-slate-950 border-amber-400'
                         : 'bg-slate-950 border-slate-800 text-slate-300 hover:bg-slate-800'
                     }`}
@@ -530,7 +532,10 @@ export const SquadTab: React.FC<SquadTabProps> = ({ onSelectPlayer }) => {
                   min="1000"
                   step="1000"
                   value={bonusAmount}
-                  onChange={(e) => setBonusAmount(Math.max(0, parseInt(e.target.value) || 0))}
+                  onChange={(e) => setBonusAmount(e.target.value === '' ? '' : Math.max(0, parseInt(e.target.value) || 0))}
+                  onBlur={() => {
+                    if (bonusAmount === '' || Number(bonusAmount) <= 0) setBonusAmount(5000);
+                  }}
                   className="w-full bg-slate-950 border border-slate-800 rounded-2xl px-3 py-2 text-xs text-white font-mono text-center focus:outline-none focus:border-amber-500"
                   placeholder="أو أدخل مبلغاً مخصصاً بالجنيه المصري..."
                 />
@@ -541,7 +546,7 @@ export const SquadTab: React.FC<SquadTabProps> = ({ onSelectPlayer }) => {
             <div className="bg-slate-950 p-3 rounded-2xl border border-slate-800 space-y-2 text-xs">
               <div className="flex items-center justify-between text-slate-400">
                 <span>المبلغ لكل لاعب:</span>
-                <span className="font-mono text-white font-bold">{bonusAmount.toLocaleString()} ج.م</span>
+                <span className="font-mono text-white font-bold">{numBonusAmount.toLocaleString()} ج.م</span>
               </div>
               {bonusMode === 'all' && (
                 <div className="flex items-center justify-between text-slate-400">
@@ -577,9 +582,9 @@ export const SquadTab: React.FC<SquadTabProps> = ({ onSelectPlayer }) => {
             <div className="flex items-center gap-2 pt-1">
               <button
                 onClick={handleExecuteBonus}
-                disabled={!canAffordBonus || bonusAmount <= 0}
+                disabled={!canAffordBonus || numBonusAmount <= 0}
                 className={`flex-1 py-3 rounded-2xl font-black text-xs transition-all flex items-center justify-center gap-2 shadow-lg ${
-                  canAffordBonus && bonusAmount > 0
+                  canAffordBonus && numBonusAmount > 0
                     ? 'bg-gradient-to-r from-amber-500 to-emerald-500 hover:from-amber-600 hover:to-emerald-600 text-slate-950 active:scale-98'
                     : 'bg-slate-800 text-slate-500 cursor-not-allowed'
                 }`}

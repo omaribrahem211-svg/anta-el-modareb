@@ -74,7 +74,7 @@ export const TransfersTab: React.FC<TransfersTabProps> = ({ onSelectPlayer }) =>
 
   // Counter proposal state for sell negotiations
   const [counteringNegId, setCounteringNegId] = useState<string | null>(null);
-  const [counterPriceInput, setCounterPriceInput] = useState<number>(0);
+  const [counterPriceInput, setCounterPriceInput] = useState<number | string>('');
 
   // Negotiation Modal State
   const [negotiatingPlayer, setNegotiatingPlayer] = useState<Player | null>(null);
@@ -90,10 +90,10 @@ export const TransfersTab: React.FC<TransfersTabProps> = ({ onSelectPlayer }) =>
   const [selectedNationality, setSelectedNationality] = useState<string>('ALL');
   const [selectedCategory, setSelectedCategory] = useState<PositionCategory | 'ALL'>('ALL');
   const [selectedExactPos, setSelectedExactPos] = useState<string>('ALL');
-  const [minAge, setMinAge] = useState<number>(15);
-  const [maxAge, setMaxAge] = useState<number>(42);
-  const [minOverall, setMinOverall] = useState<number>(45);
-  const [maxOverall, setMaxOverall] = useState<number>(99);
+  const [minAge, setMinAge] = useState<number | string>(15);
+  const [maxAge, setMaxAge] = useState<number | string>(42);
+  const [minOverall, setMinOverall] = useState<number | string>(45);
+  const [maxOverall, setMaxOverall] = useState<number | string>(99);
   const [maxMarketValue, setMaxMarketValue] = useState<number>(0); // 0 = unlimited
   const [maxSalary, setMaxSalary] = useState<number>(0); // 0 = unlimited
   const [sortBy, setSortBy] = useState<'overall' | 'value' | 'salary' | 'age' | 'name'>('overall');
@@ -202,10 +202,14 @@ export const TransfersTab: React.FC<TransfersTabProps> = ({ onSelectPlayer }) =>
       }
 
       // Age Range
-      if (p.age < minAge || p.age > maxAge) return false;
+      const parsedMinAge = typeof minAge === 'number' ? minAge : (parseInt(minAge) || 15);
+      const parsedMaxAge = typeof maxAge === 'number' ? maxAge : (parseInt(maxAge) || 45);
+      if (p.age < parsedMinAge || p.age > parsedMaxAge) return false;
 
       // Overall Rating Range
-      if (p.overallRating < minOverall || p.overallRating > maxOverall) return false;
+      const parsedMinOverall = typeof minOverall === 'number' ? minOverall : (parseInt(minOverall) || 40);
+      const parsedMaxOverall = typeof maxOverall === 'number' ? maxOverall : (parseInt(maxOverall) || 99);
+      if (p.overallRating < parsedMinOverall || p.overallRating > parsedMaxOverall) return false;
 
       // Market Value
       if (maxMarketValue > 0 && p.marketValue > maxMarketValue) return false;
@@ -575,18 +579,24 @@ export const TransfersTab: React.FC<TransfersTabProps> = ({ onSelectPlayer }) =>
                       <input
                         type="number"
                         min={15}
-                        max={maxAge}
+                        max={typeof maxAge === 'number' ? maxAge : 45}
                         value={minAge}
-                        onChange={e => setMinAge(Number(e.target.value))}
+                        onChange={e => setMinAge(e.target.value === '' ? '' : Number(e.target.value))}
+                        onBlur={() => {
+                          if (minAge === '' || Number(minAge) < 15) setMinAge(15);
+                        }}
                         className="w-1/2 bg-slate-950 border border-slate-800 rounded-lg px-2 py-1 text-slate-200 text-center font-mono"
                       />
                       <span className="text-slate-500">-</span>
                       <input
                         type="number"
-                        min={minAge}
+                        min={typeof minAge === 'number' ? minAge : 15}
                         max={45}
                         value={maxAge}
-                        onChange={e => setMaxAge(Number(e.target.value))}
+                        onChange={e => setMaxAge(e.target.value === '' ? '' : Number(e.target.value))}
+                        onBlur={() => {
+                          if (maxAge === '' || Number(maxAge) > 45) setMaxAge(45);
+                        }}
                         className="w-1/2 bg-slate-950 border border-slate-800 rounded-lg px-2 py-1 text-slate-200 text-center font-mono"
                       />
                     </div>
@@ -600,18 +610,24 @@ export const TransfersTab: React.FC<TransfersTabProps> = ({ onSelectPlayer }) =>
                       <input
                         type="number"
                         min={40}
-                        max={maxOverall}
+                        max={typeof maxOverall === 'number' ? maxOverall : 99}
                         value={minOverall}
-                        onChange={e => setMinOverall(Number(e.target.value))}
+                        onChange={e => setMinOverall(e.target.value === '' ? '' : Number(e.target.value))}
+                        onBlur={() => {
+                          if (minOverall === '' || Number(minOverall) < 40) setMinOverall(40);
+                        }}
                         className="w-1/2 bg-slate-950 border border-slate-800 rounded-lg px-2 py-1 text-emerald-400 font-bold text-center font-mono"
                       />
                       <span className="text-slate-500">-</span>
                       <input
                         type="number"
-                        min={minOverall}
+                        min={typeof minOverall === 'number' ? minOverall : 40}
                         max={99}
                         value={maxOverall}
-                        onChange={e => setMaxOverall(Number(e.target.value))}
+                        onChange={e => setMaxOverall(e.target.value === '' ? '' : Number(e.target.value))}
+                        onBlur={() => {
+                          if (maxOverall === '' || Number(maxOverall) > 99) setMaxOverall(99);
+                        }}
                         className="w-1/2 bg-slate-950 border border-slate-800 rounded-lg px-2 py-1 text-emerald-400 font-bold text-center font-mono"
                       />
                     </div>
@@ -1118,15 +1134,23 @@ export const TransfersTab: React.FC<TransfersTabProps> = ({ onSelectPlayer }) =>
                         <div className="flex items-center gap-2">
                           <input
                             type="number"
-                            value={counterPriceInput || Math.round(neg.bidFee * 1.15)}
-                            onChange={e => setCounterPriceInput(Number(e.target.value))}
+                            value={counterPriceInput}
+                            onChange={e => setCounterPriceInput(e.target.value === '' ? '' : Number(e.target.value))}
+                            onBlur={() => {
+                              if (counterPriceInput === '' || Number(counterPriceInput) < neg.bidFee) {
+                                setCounterPriceInput(Math.round(neg.bidFee * 1.15));
+                              }
+                            }}
                             className="bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-white flex-1 font-mono focus:outline-none focus:border-amber-400"
                             min={neg.bidFee}
                             step={10000}
+                            placeholder={`مثال: ${Math.round(neg.bidFee * 1.15)}`}
                           />
                           <button
                             onClick={() => {
-                              const targetVal = counterPriceInput || Math.round(neg.bidFee * 1.15);
+                              const targetVal = typeof counterPriceInput === 'number' && counterPriceInput > 0
+                                ? counterPriceInput
+                                : (Number(counterPriceInput) || Math.round(neg.bidFee * 1.15));
                               const res = counterSellNegotiation(neg.id, targetVal);
                               setNotification({ text: res.message, type: res.success ? 'success' : 'error' });
                               setTimeout(() => setNotification(null), 3500);

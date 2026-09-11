@@ -716,7 +716,33 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   });
 
   const [showSeasonTransitionModal, setShowSeasonTransitionModal] = useState<boolean>(false);
-  const [liveMatch, setLiveMatch] = useState<LiveMatchState | null>(null);
+  const [liveMatch, setLiveMatch] = useState<LiveMatchState | null>(() => {
+    try {
+      const saved = localStorage.getItem(`${STORAGE_KEY}_active_live_match`);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed && parsed.fixture) {
+          // When restoring an in-progress match from storage, start paused so player can resume when ready
+          return { ...parsed, isPlaying: false };
+        }
+      }
+    } catch (e) {
+      console.warn('[GameContext] Failed to restore active live match from storage:', e);
+    }
+    return null;
+  });
+
+  useEffect(() => {
+    try {
+      if (liveMatch) {
+        localStorage.setItem(`${STORAGE_KEY}_active_live_match`, JSON.stringify(liveMatch));
+      } else {
+        localStorage.removeItem(`${STORAGE_KEY}_active_live_match`);
+      }
+    } catch (e) {
+      console.warn('[GameContext] Failed to save active live match to storage:', e);
+    }
+  }, [liveMatch]);
 
   // 7. Transfer History & Club Economy Summary
   const [transferHistory, setTransferHistory] = useState<TransferHistoryEntry[]>(() => {
@@ -1494,6 +1520,15 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   // Match management
   const startLiveMatch = (fixtureId?: string) => {
     if (isSimulationRunningRef.current || seasonFinished) return;
+
+    // If already in progress, resume match rather than creating duplicate
+    if (liveMatch && !liveMatch.isFinished) {
+      resumeLiveMatch();
+      return;
+    }
+    if (liveMatch && liveMatch.isFinished) {
+      return;
+    }
 
     const roundFixtures = fixtures.filter(f => f.round === currentRound);
     const targetFixture = fixtureId
@@ -2505,6 +2540,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   const instantSimulateCurrentRound = () => {
     if (isSimulationRunningRef.current || seasonFinished) return;
+    if (liveMatch) return;
 
     const roundFixtures = fixtures.filter(f => f.round === currentRound && !f.isPlayed);
     const userPlaysThisRound = userClub && roundFixtures.some(f => f.homeTeamId === userClub.id || f.awayTeamId === userClub.id);

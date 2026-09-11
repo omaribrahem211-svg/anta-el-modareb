@@ -67,6 +67,7 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({ setActiveTab, onSele
     worldRankings,
     userSquadStrength,
     userDynamicManagerRating,
+    liveMatch,
   } = useGame();
 
   // If Manager is unemployed
@@ -254,9 +255,14 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({ setActiveTab, onSele
     ? roundFixtures.find(f => f && (f.homeTeamId === userClub.id || f.awayTeamId === userClub.id))
     : undefined;
   
-  const isHome = userClub?.id ? nextFixture?.homeTeamId === userClub.id : false;
+  const isHome = liveMatch
+    ? liveMatch.homeTeam?.id === userClub?.id
+    : (userClub?.id ? nextFixture?.homeTeamId === userClub.id : false);
   const oppTeamId = isHome ? nextFixture?.awayTeamId : nextFixture?.homeTeamId;
-  const oppTeam = oppTeamId ? safeTeams.find(t => t && t.id === oppTeamId) : undefined;
+  const oppTeamFromLiveMatch = liveMatch
+    ? (isHome ? liveMatch.awayTeam : liveMatch.homeTeam)
+    : undefined;
+  const oppTeam = oppTeamFromLiveMatch || (oppTeamId ? safeTeams.find(t => t && t.id === oppTeamId) : undefined);
 
   // Next upcoming fixture for user club across future rounds (when user has no match in this current round)
   const nextUpcomingUserFixture = userClub?.id
@@ -443,12 +449,31 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({ setActiveTab, onSele
               <span className="text-[10px] text-slate-400 mt-0.5">المركز #{userRank}</span>
             </div>
 
-            {/* VS Badge */}
+            {/* VS or Live Score Badge */}
             <div className="col-span-1 flex flex-col items-center justify-center">
-              <div className="w-8 h-8 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center font-black text-xs text-amber-400 shadow-inner">
-                VS
-              </div>
-              <span className="text-[10px] text-slate-500 mt-1">90 دقيقة</span>
+              {liveMatch ? (
+                <div className="flex flex-col items-center">
+                  <div className="px-2.5 py-1 rounded-xl bg-slate-950 border border-slate-700/80 flex items-center gap-1 font-mono font-black text-sm text-white shadow-inner">
+                    <span className={isHome ? (liveMatch.homeScore > liveMatch.awayScore ? 'text-emerald-400' : '') : (liveMatch.awayScore > liveMatch.homeScore ? 'text-emerald-400' : '')}>
+                      {isHome ? liveMatch.homeScore : liveMatch.awayScore}
+                    </span>
+                    <span className="text-slate-500">:</span>
+                    <span className={!isHome ? (liveMatch.homeScore > liveMatch.awayScore ? 'text-emerald-400' : '') : (liveMatch.awayScore > liveMatch.homeScore ? 'text-emerald-400' : '')}>
+                      {isHome ? liveMatch.awayScore : liveMatch.homeScore}
+                    </span>
+                  </div>
+                  <span className={`text-[10px] font-bold mt-1 ${liveMatch.isFinished ? 'text-amber-400' : 'text-rose-400 animate-pulse'}`}>
+                    {liveMatch.isFinished ? 'نهائي' : `${liveMatch.currentMinute}' دقيقة`}
+                  </span>
+                </div>
+              ) : (
+                <>
+                  <div className="w-8 h-8 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center font-black text-xs text-amber-400 shadow-inner">
+                    VS
+                  </div>
+                  <span className="text-[10px] text-slate-500 mt-1">90 دقيقة</span>
+                </>
+              )}
             </div>
 
             {/* Opponent */}
@@ -466,7 +491,45 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({ setActiveTab, onSele
 
           {/* Match Actions */}
           <div className="mt-4 pt-3 border-t border-slate-800/80">
-            {isMatchDay ? (
+            {liveMatch ? (
+              /* ACTIVE OR FINISHED LIVE MATCH IN PROGRESS */
+              <div className="space-y-2.5">
+                <div className={`p-3 rounded-2xl border flex items-center justify-between gap-2 ${
+                  liveMatch.isFinished 
+                    ? 'bg-amber-950/60 border-amber-500/50' 
+                    : 'bg-rose-950/60 border-rose-500/60 shadow-lg shadow-rose-950/30'
+                }`}>
+                  <div className="flex items-center gap-2 text-xs font-bold">
+                    <span className={`w-2.5 h-2.5 rounded-full ${
+                      liveMatch.isFinished 
+                        ? 'bg-amber-400' 
+                        : 'bg-rose-500 animate-ping'
+                    }`} />
+                    <span className={liveMatch.isFinished ? 'text-amber-300' : 'text-rose-200'}>
+                      {liveMatch.isFinished 
+                        ? 'انتهت المباراة! بانتظار اعتماد النتيجة 📋' 
+                        : `مباراة جارية الآن ⚽ (الدقيقة ${liveMatch.currentMinute}')`}
+                    </span>
+                  </div>
+                  <span className="font-mono font-black text-sm text-white px-2.5 py-0.5 bg-slate-900/80 rounded-lg border border-slate-800">
+                    {liveMatch.homeScore} - {liveMatch.awayScore}
+                  </span>
+                </div>
+
+                <button
+                  id="dashboard_continue_live_match_btn"
+                  onClick={() => setActiveTab('matches')}
+                  className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-rose-600 via-rose-500 to-amber-600 hover:from-rose-500 hover:to-amber-500 text-white font-black text-sm py-3.5 px-4 rounded-xl shadow-lg shadow-rose-950/50 transition-all active:scale-95 cursor-pointer"
+                >
+                  <Play className="w-4 h-4 fill-white" />
+                  <span>
+                    {liveMatch.isFinished 
+                      ? 'عرض نتيجة المباراة واعتمادها 📋' 
+                      : 'متابعة المباراة الجارية (Continue Match) 🔴'}
+                  </span>
+                </button>
+              </div>
+            ) : isMatchDay ? (
               <div className="grid grid-cols-2 gap-2.5">
                 <button
                   id="dashboard_play_live_btn"
