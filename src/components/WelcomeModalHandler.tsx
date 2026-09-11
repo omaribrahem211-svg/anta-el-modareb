@@ -16,6 +16,10 @@ export const WelcomeModalHandler: React.FC = () => {
   useEffect(() => {
     // 1. Check if trainer profile already exists locally
     if (hasLocalTrainerProfile()) {
+      const existing = getLocalTrainerProfile();
+      if (existing && existing.name && (!manager.name || manager.name === 'الكابتن الجديد' || manager.name === 'المدرب الجديد')) {
+        updateTrainerProfile(existing.name, existing.age, existing.nationality);
+      }
       setNeedsProfileCreation(false);
       setIsReady(true);
       return;

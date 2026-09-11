@@ -32,6 +32,7 @@ class AdManagerService {
   private isBannerLoading = false;
   private bannerListenersAttached = false;
   private bannerListenerHandles: PluginListenerHandle[] = [];
+  private isUsingTestBannerFallback = false;
 
   // Top In-Content Banner State
   private isTopBannerActive = true;
@@ -222,9 +223,22 @@ class AdManagerService {
         this.isBannerLoading = false;
         this.isBannerCreated = false;
 
+        // If production banner failed (e.g. Code 3: No Fill or test environment),
+        // automatically fallback to official Google test banner so the banner is visible during testing!
+        if (!this.isUsingTestBannerFallback && (ADMOB_CONFIG.IS_TEST_MODE || String(errCode) === '3' || String(errCode) === '0' || String(errCode).includes('NO_FILL'))) {
+          console.log('[ADMOB_BANNER] Production banner returned no fill / test build. Requesting Google test banner fallback...');
+          this.isUsingTestBannerFallback = true;
+          if (this.bannerRetryTimer) clearTimeout(this.bannerRetryTimer);
+          this.bannerRetryTimer = setTimeout(() => {
+            this.ensureBannerActive();
+          }, 1000);
+          return;
+        }
+
         // Schedule retry for production ad after 60s
         if (this.bannerRetryTimer) clearTimeout(this.bannerRetryTimer);
         this.bannerRetryTimer = setTimeout(() => {
+          this.isUsingTestBannerFallback = false;
           this.ensureBannerActive();
         }, 60000);
       });
@@ -238,8 +252,8 @@ class AdManagerService {
 
   /**
    * Ensures the persistent Bottom Banner Ad is active.
-   * - Strictly uses production unit ID: ca-app-pub-5272866425919152/4077924883
-   * - No test ad fallback used.
+   * - Uses production unit ID: ca-app-pub-5272866425919152/4077924883
+   * - Gracefully falls back to Google Test Unit if no-fill is encountered during testing.
    * - Position: BOTTOM_CENTER, Size: BANNER
    * - Positioned right above the bottom navigation bar (margin: 58dp)
    */
@@ -274,24 +288,26 @@ class AdManagerService {
       await this.attachBannerListeners();
 
       if (this.isNative) {
-        // Strictly use production Banner ID (No test ads)
-        const bannerAdId = ADMOB_CONFIG.BANNER_ID || ADMOB_CONFIG.BOTTOM_BANNER_ID || 'ca-app-pub-5272866425919152/4077924883';
+        const isTest = ADMOB_CONFIG.IS_TEST_MODE || this.isUsingTestBannerFallback;
+        const bannerAdId = isTest
+          ? TEST_AD_IDS.BANNER_ID
+          : (ADMOB_CONFIG.BANNER_ID || ADMOB_CONFIG.BOTTOM_BANNER_ID || 'ca-app-pub-5272866425919152/4077924883');
 
         const options: BannerAdOptions = {
           adId: bannerAdId,
           adSize: BannerAdSize.BANNER,
           position: BannerAdPosition.BOTTOM_CENTER,
           margin: BOTTOM_NAV_MARGIN_DP,
-          isTesting: false,
+          isTesting: isTest,
         };
 
-        console.log('[ADMOB_BANNER] Requesting production banner ad:', bannerAdId, 'position: BOTTOM_CENTER');
+        console.log(`[ADMOB_BANNER] Requesting ${isTest ? 'TEST' : 'PRODUCTION'} banner ad:`, bannerAdId, 'position: BOTTOM_CENTER');
         await AdMob.showBanner(options);
         this.isBannerCreated = true;
         this.isBannerVisible = true;
         this.isBannerActive = true;
         this.isBannerLoading = false;
-        this.log('Native Production AdMob Banner requested successfully');
+        this.log('Native AdMob Banner requested successfully');
       } else {
         this.isBannerCreated = true;
         this.isBannerVisible = true;

@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { ManagerProfile, Club, WorldRankingsData } from '../types/game';
+import { getLocalTrainerProfile } from '../services/trainerProfileService';
 import {
   generateCoachCardImage,
   downloadCoachCardFile,
@@ -58,6 +59,11 @@ export const CoachCardModal: React.FC<CoachCardModalProps> = ({
       console.warn('Error reading coach photo:', e);
     }
   }, []);
+
+  // 0. Effective Coach Name resolution
+  const effectiveCoachName = (manager?.name && manager.name !== 'الكابتن الجديد' && manager.name !== 'المدرب الجديد')
+    ? manager.name
+    : (getLocalTrainerProfile()?.name || manager?.name || 'المدرب');
 
   // 1. Matches & Record stats
   const totalMatches = Math.max(manager?.matchesManaged || 0, userClub?.stats?.played || 0);
@@ -191,7 +197,10 @@ export const CoachCardModal: React.FC<CoachCardModalProps> = ({
    */
   const prepareCardImage = async (): Promise<GeneratedCardResult> => {
     return await generateCoachCardImage({
-      manager,
+      manager: {
+        ...manager,
+        name: effectiveCoachName,
+      },
       userClub,
       globalRank,
       rankingPoints,
@@ -238,8 +247,8 @@ export const CoachCardModal: React.FC<CoachCardModalProps> = ({
     setToastMessage('جاري تجهيز الكارت للمشاركة...');
     try {
       const imageResult = await prepareCardImage();
-      const shareTitle = `كارت المدرب: ${manager.name} • أنت المدرب`;
-      const shareText = `🏆 كارت المدرب: ${manager.name}\n🌍 الترتيب العالمي: #${globalRank}\n📊 المباريات: ${totalMatches} | نسبة الفوز: ${winRate}%\n⚡ أسلوب اللعب: ${tacticalProfile.styleTitle}\n⚽ لعبة أنت المدرب`;
+      const shareTitle = `كارت المدرب: ${effectiveCoachName} • أنت المدرب`;
+      const shareText = `🏆 كارت المدرب: ${effectiveCoachName}\n🌍 الترتيب العالمي: #${globalRank}\n📊 المباريات: ${totalMatches} | نسبة الفوز: ${winRate}%\n⚡ أسلوب اللعب: ${tacticalProfile.styleTitle}\n⚽ لعبة أنت المدرب`;
 
       const res = await shareCoachCardImage(imageResult, shareTitle, shareText);
       if (res.shared) {
@@ -334,7 +343,7 @@ export const CoachCardModal: React.FC<CoachCardModalProps> = ({
             <div className="relative w-20 h-20 sm:w-22 sm:h-22 shrink-0">
               <div className="w-full h-full rounded-2xl overflow-hidden border-2 border-amber-400/60 shadow-lg bg-slate-800 flex items-center justify-center relative group">
                 {photoUrl ? (
-                  <img src={photoUrl} alt={manager.name} className="w-full h-full object-cover" />
+                  <img src={photoUrl} alt={effectiveCoachName} className="w-full h-full object-cover" />
                 ) : (
                   <div className="flex flex-col items-center justify-center text-slate-400 p-1 text-center">
                     <UserCheck className="w-7 h-7 text-amber-400 mb-0.5" />
@@ -383,7 +392,7 @@ export const CoachCardModal: React.FC<CoachCardModalProps> = ({
             {/* Coach Name & Club Information */}
             <div className="flex-1 min-w-0">
               <h3 className="text-lg sm:text-xl font-black text-white truncate tracking-wide">
-                {manager.name}
+                {effectiveCoachName}
               </h3>
               <div className="text-xs text-amber-400 font-bold mt-0.5 truncate">
                 المدير الفني لنادي {userClub?.name || 'دوري الدرجة الرابعة'}

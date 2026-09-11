@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useGame } from '../context/GameContext';
 import { COACHING_COURSES, CoachingCourse } from '../utils/managerFinancesEngine';
+import { getLocalTrainerProfile } from '../services/trainerProfileService';
 import {
   UserCheck,
   Award,
@@ -59,8 +60,18 @@ export const CareerTab: React.FC = () => {
     donateToClubFromPersonalWallet,
   } = useGame();
 
+  const effectiveCoachName = (manager.name && manager.name !== 'الكابتن الجديد' && manager.name !== 'المدرب الجديد')
+    ? manager.name
+    : (getLocalTrainerProfile()?.name || manager.name || 'المدرب');
+
   const [isEditingName, setIsEditingName] = useState(false);
-  const [newName, setNewName] = useState(manager.name);
+  const [newName, setNewName] = useState(effectiveCoachName);
+
+  useEffect(() => {
+    if (effectiveCoachName) {
+      setNewName(effectiveCoachName);
+    }
+  }, [effectiveCoachName]);
   const [showResetModal, setShowResetModal] = useState(false);
   const [showResetSuccess, setShowResetSuccess] = useState(false);
   const [showCoachCardModal, setShowCoachCardModal] = useState(false);
@@ -192,7 +203,7 @@ export const CareerTab: React.FC = () => {
         <div className="flex items-start justify-between">
           <div className="flex items-center gap-3">
             <div className="w-16 h-16 rounded-2xl bg-purple-950 text-purple-300 border-2 border-purple-600/60 flex items-center justify-center font-black text-2xl shadow-xl">
-              {manager.name.slice(0, 2)}
+              {effectiveCoachName.slice(0, 2)}
             </div>
 
             <div>
@@ -214,7 +225,7 @@ export const CareerTab: React.FC = () => {
                   </div>
                 ) : (
                   <>
-                    <h2 className="font-black text-base text-white">{manager.name}</h2>
+                    <h2 className="font-black text-base text-white">{effectiveCoachName}</h2>
                     <button 
                       onClick={() => setIsEditingName(true)}
                       className="text-slate-400 hover:text-white p-1"

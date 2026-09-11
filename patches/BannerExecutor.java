@@ -9,6 +9,8 @@ import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.WindowManager;
+import android.webkit.WebView;
+import android.widget.FrameLayout;
 import android.widget.RelativeLayout;
 import androidx.annotation.NonNull;
 import androidx.coordinatorlayout.widget.CoordinatorLayout;
@@ -52,7 +54,11 @@ public class BannerExecutor extends Executor {
             ViewGroup root = act.findViewById(android.R.id.content);
             if (root != null) {
                 View child = root.getChildAt(0);
-                mViewGroup = (child instanceof ViewGroup) ? (ViewGroup) child : root;
+                if (child instanceof CoordinatorLayout || (child instanceof FrameLayout && !(child instanceof WebView))) {
+                    mViewGroup = (ViewGroup) child;
+                } else {
+                    mViewGroup = root;
+                }
             }
         }
     }
@@ -98,65 +104,73 @@ public class BannerExecutor extends Executor {
             final RelativeLayout adViewLayout = new RelativeLayout(contextSupplier.get());
             adViewLayout.setHorizontalGravity(Gravity.CENTER_HORIZONTAL);
 
-            final CoordinatorLayout.LayoutParams mAdViewLayoutParams = new CoordinatorLayout.LayoutParams(
-                CoordinatorLayout.LayoutParams.WRAP_CONTENT,
-                CoordinatorLayout.LayoutParams.WRAP_CONTENT
-            );
-
-            switch (adOptions.position) {
+            int gravity;
+            switch (adOptions.position != null ? adOptions.position : "BOTTOM_CENTER") {
                 case "TOP_CENTER":
-                    mAdViewLayoutParams.gravity = Gravity.TOP | Gravity.CENTER_HORIZONTAL;
+                    gravity = Gravity.TOP | Gravity.CENTER_HORIZONTAL;
                     adViewLayout.setVerticalGravity(Gravity.TOP);
                     break;
                 case "CENTER":
-                    mAdViewLayoutParams.gravity = Gravity.CENTER;
+                    gravity = Gravity.CENTER;
                     adViewLayout.setVerticalGravity(Gravity.CENTER_VERTICAL);
                     break;
                 default:
-                    mAdViewLayoutParams.gravity = Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL;
+                    gravity = Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL;
                     adViewLayout.setVerticalGravity(Gravity.BOTTOM);
                     break;
             }
 
-            adViewLayout.setLayoutParams(mAdViewLayoutParams);
-
             int densityMargin = (int) (adOptions.margin * density);
-            int[] margins = new int[] { 0, densityMargin, 0, densityMargin };
+            int topMargin = "TOP_CENTER".equals(adOptions.position) ? densityMargin : 0;
+            int bottomMargin = ("BOTTOM_CENTER".equals(adOptions.position) || adOptions.position == null || adOptions.position.isEmpty()) ? densityMargin : 0;
 
             int adWidth = (int) (adOptions.adSize.getSize().getWidth() * density);
+            int sideMargin = 0;
+            if (adWidth > 0 && !adOptions.adSize.toString().equals("ADAPTIVE_BANNER")) {
+                sideMargin = Math.max(0, ((int) defaultWidthPixels - adWidth) / 2);
+            }
+            if (fullscreen) {
+                sideMargin = Math.max(sideMargin, (realWidthPixels - defaultWidthPixels) / 2);
+            }
 
-            if (adWidth <= 0 || adOptions.adSize.toString().equals("ADAPTIVE_BANNER")) {
-                int margin = 0;
-                if (fullscreen) {
-                    margin = (realWidthPixels - defaultWidthPixels) / 2;
-                }
-                margins[0] = margin;
-                margins[2] = margin;
-                mAdViewLayoutParams.setMargins(margin, densityMargin, margin, densityMargin);
+            if (mViewGroup instanceof CoordinatorLayout) {
+                CoordinatorLayout.LayoutParams clp = new CoordinatorLayout.LayoutParams(
+                    CoordinatorLayout.LayoutParams.WRAP_CONTENT,
+                    CoordinatorLayout.LayoutParams.WRAP_CONTENT
+                );
+                clp.gravity = gravity;
+                clp.setMargins(sideMargin, topMargin, sideMargin, bottomMargin);
+                adViewLayout.setLayoutParams(clp);
             } else {
-                int sideMargin = ((int) defaultWidthPixels - adWidth) / 2;
-                if (fullscreen) {
-                    sideMargin = (realWidthPixels - adWidth) / 2;
-                }
-                margins[0] = sideMargin;
-                margins[2] = sideMargin;
-                mAdViewLayoutParams.setMargins(sideMargin, densityMargin, sideMargin, densityMargin);
+                FrameLayout.LayoutParams flp = new FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.WRAP_CONTENT,
+                    FrameLayout.LayoutParams.WRAP_CONTENT
+                );
+                flp.gravity = gravity;
+                flp.setMargins(sideMargin, topMargin, sideMargin, bottomMargin);
+                adViewLayout.setLayoutParams(flp);
             }
 
             // set Safe Area only for Android 15+
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.VANILLA_ICE_CREAM) {
+                final int finalSideMargin = sideMargin;
+                final int finalTopMargin = topMargin;
+                final int finalBottomMargin = bottomMargin;
                 View rootView = activitySupplier.get().getWindow().getDecorView();
                 rootView.setOnApplyWindowInsetsListener((v, insets) -> {
                     int bottomInset = insets.getSystemWindowInsetBottom();
                     int topInset = insets.getSystemWindowInsetTop();
 
-                    if ("TOP_CENTER".equals(adOptions.position)) {
-                        mAdViewLayoutParams.setMargins(margins[0], margins[1] + topInset, margins[2], margins[3]);
-                    } else {
-                        mAdViewLayoutParams.setMargins(margins[0], margins[1], margins[2], margins[3] + bottomInset);
+                    ViewGroup.LayoutParams lp = adViewLayout.getLayoutParams();
+                    if (lp instanceof ViewGroup.MarginLayoutParams) {
+                        ViewGroup.MarginLayoutParams mlp = (ViewGroup.MarginLayoutParams) lp;
+                        if ("TOP_CENTER".equals(adOptions.position)) {
+                            mlp.setMargins(finalSideMargin, finalTopMargin + topInset, finalSideMargin, finalBottomMargin);
+                        } else {
+                            mlp.setMargins(finalSideMargin, finalTopMargin, finalSideMargin, finalBottomMargin + bottomInset);
+                        }
+                        adViewLayout.setLayoutParams(mlp);
                     }
-
-                    adViewLayout.setLayoutParams(mAdViewLayoutParams);
                     return insets;
                 });
             }
@@ -280,6 +294,12 @@ public class BannerExecutor extends Executor {
                         @Override
                         public void onAdLoaded() {
                             Log.d("AdMobBanner", "onAdLoaded");
+                            activitySupplier.get().runOnUiThread(() -> {
+                                adViewLayout.bringToFront();
+                                if (mViewGroup != null) {
+                                    mViewGroup.bringChildToFront(adViewLayout);
+                                }
+                            });
                             final BannerAdSizeInfo sizeInfo = new BannerAdSizeInfo(adView);
                             notifyListeners(BannerAdPluginEvents.SizeChanged.getWebEventName(), sizeInfo);
                             notifyListeners(BannerAdPluginEvents.Loaded.getWebEventName(), emptyObject);
@@ -342,7 +362,12 @@ public class BannerExecutor extends Executor {
                 });
 
                 if (mViewGroup != null) {
+                    if (adViewLayout.getParent() != null) {
+                        ((ViewGroup) adViewLayout.getParent()).removeView(adViewLayout);
+                    }
                     mViewGroup.addView(adViewLayout);
+                    adViewLayout.bringToFront();
+                    mViewGroup.bringChildToFront(adViewLayout);
                 }
             });
     }

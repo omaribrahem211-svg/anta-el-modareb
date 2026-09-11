@@ -96,6 +96,7 @@ import { MIGRATION_STORAGE_KEY, runOneTimeWorldMigration, inferClubCountry } fro
 import { validateWorldDatabase, sanitizeWorldPlayerOwnership } from '../utils/worldValidation';
 import { isRealClub, loadRealClubSquad } from '../data/realPlayersData';
 import { useAuth } from './AuthContext';
+import { getLocalTrainerProfile, saveLocalTrainerProfile } from '../services/trainerProfileService';
 import { gameStateRepository } from '../services/gameStateRepository';
 import { smartSyncManager, SmartSyncInput } from '../services/smartSyncManager';
 import { canPlayerJoinClub, DEFAULT_ECONOMY_CONFIG, calculateClubMonthlyIncome, calculateClubTotalMonthlyWages, validateTransferFinancials } from '../services/economyService';
@@ -480,30 +481,52 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     played: s?.played ?? 0,
   });
 
-  const normalizeManagerProfile = (parsed: any): ManagerProfile => ({
-    ...INITIAL_MANAGER,
-    ...parsed,
-    isUnemployed: false,
-    employmentStatus: 'employed',
-    monthlySalary: parsed?.monthlySalary ?? 25000,
-    personalWallet: parsed?.personalWallet !== undefined ? parsed.personalWallet : (parsed?.careerEarnings ? Math.round(parsed.careerEarnings * 0.8) : 65000),
-    financialTransactions: Array.isArray(parsed?.financialTransactions) && parsed.financialTransactions.length > 0
-      ? parsed.financialTransactions
-      : INITIAL_MANAGER.financialTransactions,
-    completedCourses: Array.isArray(parsed?.completedCourses) ? parsed.completedCourses : [],
-    license: (parsed?.license && ['D', 'C', 'B', 'A', 'PRO'].includes(parsed.license)) ? parsed.license : 'D',
-    totalClubDonations: parsed?.totalClubDonations ?? 0,
-    totalBonusesEarned: parsed?.totalBonusesEarned ?? 0,
-    trophies: Array.isArray(parsed?.trophies) ? parsed.trophies : [],
-    history: Array.isArray(parsed?.history)
-      ? parsed.history.map((h: any) => ({
-          ...h,
-          trophiesWon: Array.isArray(h?.trophiesWon) ? h.trophiesWon : [],
-        }))
-      : [],
-    clubsManaged: Array.isArray(parsed?.clubsManaged) ? parsed.clubsManaged : INITIAL_MANAGER.clubsManaged,
-    countriesManaged: Array.isArray(parsed?.countriesManaged) ? parsed.countriesManaged : INITIAL_MANAGER.countriesManaged,
-  });
+  const normalizeManagerProfile = (parsed: any): ManagerProfile => {
+    let effectiveName = parsed?.name || INITIAL_MANAGER.name;
+    let effectiveAge = parsed?.age || INITIAL_MANAGER.age;
+    let effectiveNationality = parsed?.nationality || INITIAL_MANAGER.nationality;
+
+    try {
+      const localTrainer = getLocalTrainerProfile();
+      if (localTrainer?.name && (!parsed?.name || parsed.name === 'الكابتن الجديد' || parsed.name === 'المدرب الجديد')) {
+        effectiveName = localTrainer.name;
+      }
+      if (localTrainer?.age && (!parsed?.age || parsed.age === 34 || parsed.age === 35)) {
+        effectiveAge = localTrainer.age;
+      }
+      if (localTrainer?.nationality && (!parsed?.nationality || parsed.nationality === 'مصري')) {
+        effectiveNationality = localTrainer.nationality;
+      }
+    } catch {}
+
+    return {
+      ...INITIAL_MANAGER,
+      ...parsed,
+      name: effectiveName,
+      age: effectiveAge,
+      nationality: effectiveNationality,
+      isUnemployed: false,
+      employmentStatus: 'employed',
+      monthlySalary: parsed?.monthlySalary ?? 25000,
+      personalWallet: parsed?.personalWallet !== undefined ? parsed.personalWallet : (parsed?.careerEarnings ? Math.round(parsed.careerEarnings * 0.8) : 65000),
+      financialTransactions: Array.isArray(parsed?.financialTransactions) && parsed.financialTransactions.length > 0
+        ? parsed.financialTransactions
+        : INITIAL_MANAGER.financialTransactions,
+      completedCourses: Array.isArray(parsed?.completedCourses) ? parsed.completedCourses : [],
+      license: (parsed?.license && ['D', 'C', 'B', 'A', 'PRO'].includes(parsed.license)) ? parsed.license : 'D',
+      totalClubDonations: parsed?.totalClubDonations ?? 0,
+      totalBonusesEarned: parsed?.totalBonusesEarned ?? 0,
+      trophies: Array.isArray(parsed?.trophies) ? parsed.trophies : [],
+      history: Array.isArray(parsed?.history)
+        ? parsed.history.map((h: any) => ({
+            ...h,
+            trophiesWon: Array.isArray(h?.trophiesWon) ? h.trophiesWon : [],
+          }))
+        : [],
+      clubsManaged: Array.isArray(parsed?.clubsManaged) ? parsed.clubsManaged : INITIAL_MANAGER.clubsManaged,
+      countriesManaged: Array.isArray(parsed?.countriesManaged) ? parsed.countriesManaged : INITIAL_MANAGER.countriesManaged,
+    };
+  };
 
   const normalizeCup = (cup: any): CupTournament | null => {
     if (!cup) return null;
@@ -524,6 +547,14 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       const saved = localStorage.getItem(`${STORAGE_KEY}_manager`);
       if (saved) {
         return normalizeManagerProfile(JSON.parse(saved));
+      }
+      const localTrainer = getLocalTrainerProfile();
+      if (localTrainer?.name) {
+        return normalizeManagerProfile({
+          name: localTrainer.name,
+          age: localTrainer.age || 35,
+          nationality: localTrainer.nationality || 'مصري',
+        });
       }
       return INITIAL_MANAGER;
     } catch {
@@ -5885,11 +5916,17 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       isUserClub: t.id === clubId,
     }));
     setTeams(updatedTeams);
-    setManager(prev => ({
-      ...prev,
-      currentClubId: target.id,
-      clubsManaged: Array.from(new Set([...(prev.clubsManaged || []), target.name])),
-    }));
+    setManager(prev => {
+      const updated = {
+        ...prev,
+        currentClubId: target.id,
+        clubsManaged: Array.from(new Set([...(prev.clubsManaged || []), target.name])),
+      };
+      try {
+        localStorage.setItem(`${STORAGE_KEY}_manager`, JSON.stringify(updated));
+      } catch {}
+      return updated;
+    });
     setClubEconomy(prev => ({
       ...prev,
       clubBudget: target.budget,
@@ -5899,16 +5936,71 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   const updateManagerName = (name: string) => {
-    setManager(prev => ({ ...prev, name }));
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    setManager(prev => {
+      const updated = { ...prev, name: trimmed };
+      try {
+        localStorage.setItem(`${STORAGE_KEY}_manager`, JSON.stringify(updated));
+      } catch {}
+      return updated;
+    });
+
+    saveLocalTrainerProfile({
+      name: trimmed,
+      age: manager.age || 35,
+      nationality: manager.nationality || 'مصري',
+    });
+
+    try {
+      const currentPayload = exportCurrentSavePayload();
+      gameStateRepository.saveLocalGameState({
+        ...(currentPayload as any),
+        manager: { ...currentPayload.manager, name: trimmed },
+        lastLocalSaveAt: Date.now(),
+      });
+    } catch (err) {
+      console.warn('[GameContext] Failed to immediately save updated manager name:', err);
+    }
   };
 
   const updateTrainerProfile = (name: string, age: number, nationality: string) => {
-    setManager(prev => ({
-      ...prev,
-      name: name.trim() || prev.name,
-      age: age || prev.age,
-      nationality: nationality.trim() || prev.nationality,
-    }));
+    const trimmed = name.trim();
+    const finalNat = nationality.trim();
+    setManager(prev => {
+      const updated = {
+        ...prev,
+        name: trimmed || prev.name,
+        age: age || prev.age,
+        nationality: finalNat || prev.nationality,
+      };
+      try {
+        localStorage.setItem(`${STORAGE_KEY}_manager`, JSON.stringify(updated));
+      } catch {}
+      return updated;
+    });
+
+    saveLocalTrainerProfile({
+      name: trimmed || manager.name,
+      age: age || manager.age || 35,
+      nationality: finalNat || manager.nationality || 'مصري',
+    });
+
+    try {
+      const currentPayload = exportCurrentSavePayload();
+      gameStateRepository.saveLocalGameState({
+        ...(currentPayload as any),
+        manager: {
+          ...currentPayload.manager,
+          name: trimmed || currentPayload.manager?.name,
+          age: age || currentPayload.manager?.age,
+          nationality: finalNat || currentPayload.manager?.nationality,
+        },
+        lastLocalSaveAt: Date.now(),
+      });
+    } catch (err) {
+      console.warn('[GameContext] Failed to immediately save updated trainer profile:', err);
+    }
   };
 
   const exportCurrentSavePayload = useCallback(() => {

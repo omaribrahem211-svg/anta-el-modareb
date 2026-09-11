@@ -15,7 +15,6 @@ window.addEventListener('error', (event) => {
   console.warn('[SystemGuard] Handled global runtime error:', event.message);
 });
 
-console.log('[BANNER_TEST] Banner completely disabled');
 console.log('[STARTUP] React mounting', Math.round(performance.now()) + 'ms');
 
 createRoot(document.getElementById('root')!).render(
