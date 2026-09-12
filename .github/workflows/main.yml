@@ -47,10 +47,10 @@ jobs:
         run: |
           echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 --decode > my-release-key.p12
 
-      # أمر بناء الـ AAB
+      # بناء الـ AAB مع تمرير رقم الإصدار التلقائي
       - name: Build Release AAB
         working-directory: android
-        run: chmod +x gradlew && ./gradlew bundleRelease
+        run: chmod +x gradlew && ./gradlew bundleRelease -PautoVersionCode=${{ github.run_number }}
 
       # توقيع الـ AAB
       - name: Sign AAB
@@ -70,3 +70,4 @@ jobs:
         with:
           name: anta-el-modareb-googleplay-aab
           path: android/app/build/outputs/bundle/release/app-release.aab
+          
