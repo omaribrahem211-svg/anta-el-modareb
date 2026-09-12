@@ -58,7 +58,7 @@ jobs:
               padding = 0
           cleaned += '=' * padding
           data = base64.b64decode(cleaned)
-          with open('my-release-key.p12', 'wb') as f:
+          with open('my-release-key.jks', 'wb') as f:
               f.write(data)
           "
 
@@ -72,9 +72,9 @@ jobs:
             -verbose \
             -sigalg SHA256withRSA \
             -digestalg SHA-256 \
-            -keystore my-release-key.p12 \
-            -storetype PKCS12 \
+            -keystore my-release-key.jks \
             -storepass "${{ secrets.KEYSTORE_PASSWORD }}" \
+            -keypass "${{ secrets.KEY_PASSWORD }}" \
             android/app/build/outputs/bundle/release/app-release.aab \
             "${{ secrets.KEY_ALIAS }}"
 
