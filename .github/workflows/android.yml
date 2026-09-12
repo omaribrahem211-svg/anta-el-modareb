@@ -62,24 +62,9 @@ jobs:
               f.write(data)
           "
 
-      - name: Build and Sign APK
-        working-directory: android
+      - name: Check Keystore Details
         env:
           KS_PASS: ${{ secrets.KEYSTORE_PASSWORD }}
-          KEY_PASS: ${{ secrets.KEY_PASSWORD }}
-          ALIAS: ${{ secrets.KEY_ALIAS }}
         run: |
-          chmod +x gradlew
-          ./gradlew assembleRelease \
-            -PautoVersionCode=${{ github.run_number }} \
-            -Pandroid.injected.signing.store.file="${{ github.workspace }}/release.keystore" \
-            -Pandroid.injected.signing.store.password="$KS_PASS" \
-            -Pandroid.injected.signing.key.alias="$ALIAS" \
-            -Pandroid.injected.signing.key.password="$KEY_PASS"
-
-      - name: Upload Signed APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: anta-el-modareb-test-apk
-          path: android/app/build/outputs/apk/release/*.apk
+          keytool -list -v -keystore "${{ github.workspace }}/release.keystore" -storepass "$KS_PASS"
           
