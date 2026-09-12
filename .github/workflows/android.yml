@@ -1,4 +1,4 @@
-name: Build Android APK (Test)
+name: Check Keystore Info
 
 on:
   workflow_dispatch:
@@ -7,41 +7,15 @@ on:
       - main
 
 jobs:
-  build:
+  inspect:
     runs-on: ubuntu-latest
 
-    env:
-      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 24
-
-      - name: Install dependencies
-        run: npm install
-
-      - name: Build Web Assets
-        run: npm run build
-
-      - name: Sync Capacitor Android
-        run: npx cap sync android
-
       - name: Setup Java 21
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '21'
-
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Accept Android licenses
-        run: yes | sdkmanager --licenses || true
 
       - name: Decode Keystore
         env:
@@ -58,13 +32,18 @@ jobs:
               padding = 0
           cleaned += '=' * padding
           data = base64.b64decode(cleaned)
-          with open('${{ github.workspace }}/release.keystore', 'wb') as f:
+          with open('release.keystore', 'wb') as f:
               f.write(data)
+          print('File written successfully, size:', len(data))
           "
 
-      - name: Check Keystore Details
+      - name: Inspect Keystore Details
         env:
           KS_PASS: ${{ secrets.KEYSTORE_PASSWORD }}
         run: |
-          keytool -list -v -keystore "${{ github.workspace }}/release.keystore" -storepass "$KS_PASS"
+          echo "=== 1. محاولة قراءة المفتاح بكلمة المرور ==="
+          keytool -list -v -keystore release.keystore -storepass "$KS_PASS" || true
+          
+          echo "=== 2. عرض أسماء الـ Aliases مباشرة ==="
+          keytool -list -keystore release.keystore -storepass "$KS_PASS" || true
           
