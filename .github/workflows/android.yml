@@ -47,12 +47,12 @@ jobs:
         run: |
           echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 --decode > my-release-key.p12
 
-      # أمر بناء الـ APK
+      # بناء الـ APK مع تمرير رقم الإصدار التلقائي
       - name: Build Release APK
         working-directory: android
-        run: chmod +x gradlew && ./gradlew assembleRelease
+        run: chmod +x gradlew && ./gradlew assembleRelease -PautoVersionCode=${{ github.run_number }}
 
-      # توقيع الـ APK بنفس المفتاح
+      # توقيع الـ APK بنفس مفتاحك
       - name: Sign APK
         run: |
           jarsigner \
