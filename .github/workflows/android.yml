@@ -49,7 +49,7 @@ jobs:
         run: |
           python3 -c "
           import os, base64, re
-          raw = os.environ.get('ENCODED_KEY', '')
+          raw = os.environ.get('ENCODED_KEY', '').strip()
           cleaned = re.sub(r'[^A-Za-z0-9+/=]', '', raw)
           cleaned = cleaned.rstrip('=')
           padding = (4 - len(cleaned) % 4) % 4
@@ -58,7 +58,7 @@ jobs:
               padding = 0
           cleaned += '=' * padding
           data = base64.b64decode(cleaned)
-          with open('my-release-key.keystore', 'wb') as f:
+          with open('${{ github.workspace }}/my-release-key.jks', 'wb') as f:
               f.write(data)
           "
 
@@ -76,7 +76,7 @@ jobs:
             -verbose \
             -sigalg SHA256withRSA \
             -digestalg SHA-256 \
-            -keystore my-release-key.keystore \
+            -keystore "${{ github.workspace }}/my-release-key.jks" \
             -storepass "$KS_PASS" \
             -keypass "$KEY_PASS" \
             android/app/build/outputs/apk/release/app-release-unsigned.apk \
