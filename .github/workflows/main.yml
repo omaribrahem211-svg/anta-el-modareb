@@ -45,27 +45,10 @@ jobs:
       - name: Accept Android licenses
         run: yes | sdkmanager --licenses || true
 
-      - name: Create signing keystore
+      # استخراج مفتاحك الأصلي من الـ Secrets
+      - name: Decode Keystore
         run: |
-          if [ ! -f anta-el-modareb-upload.jks ]; then
-            keytool -genkeypair \
-              -v \
-              -keystore anta-el-modareb-upload.jks \
-              -alias anta-upload \
-              -keyalg RSA \
-              -keysize 2048 \
-              -validity 10000 \
-              -storepass "AntaElModareb2026!" \
-              -keypass "AntaElModareb2026!" \
-              -dname "CN=Anta El Modareb, OU=Asomy Games, O=Asomy Games, L=Egypt, ST=Egypt, C=EG"
-
-            git config user.name "github-actions[bot]"
-            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-
-            git add anta-el-modareb-upload.jks
-            git commit -m "Add Android signing key"
-            git push
-          fi
+          echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 --decode > my-release-key.p12
 
       - name: Build Release AAB
         working-directory: android
@@ -73,16 +56,18 @@ jobs:
           chmod +x gradlew
           ./gradlew bundleRelease
 
+      # توقيع الملف بمفتاحك الأصلي (debugging)
       - name: Sign AAB
         run: |
           jarsigner \
             -verbose \
             -sigalg SHA256withRSA \
             -digestalg SHA-256 \
-            -keystore anta-el-modareb-upload.jks \
-            -storepass "AntaElModareb2026!" \
+            -keystore my-release-key.p12 \
+            -storetype PKCS12 \
+            -storepass "${{ secrets.KEYSTORE_PASSWORD }}" \
             android/app/build/outputs/bundle/release/app-release.aab \
-            anta-upload
+            "${{ secrets.KEY_ALIAS }}"
 
       - name: Verify AAB signature
         run: |
@@ -94,3 +79,4 @@ jobs:
         with:
           name: anta-el-modareb-signed-aab
           path: android/app/build/outputs/bundle/release/app-release.aab
+          
