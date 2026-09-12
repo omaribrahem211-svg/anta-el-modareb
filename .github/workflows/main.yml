@@ -43,10 +43,9 @@ jobs:
       - name: Accept Android licenses
         run: yes | sdkmanager --licenses || true
 
-      - name: Decode Keystore & Inspect
+      - name: Decode Keystore
         env:
           ENCODED_KEY: ${{ secrets.KEYSTORE_BASE64 }}
-          KS_PASS: ${{ secrets.KEYSTORE_PASSWORD }}
         run: |
           python3 -c "
           import os, base64, re
@@ -59,11 +58,9 @@ jobs:
               padding = 0
           cleaned += '=' * padding
           data = base64.b64decode(cleaned)
-          with open('my-release-key.jks', 'wb') as f:
+          with open('${{ github.workspace }}/my-release-key.jks', 'wb') as f:
               f.write(data)
-          print(f'Keystore file size: {len(data)} bytes')
           "
-          keytool -list -v -keystore my-release-key.jks -storepass "$KS_PASS" || true
 
       - name: Build Release AAB
         working-directory: android
@@ -76,11 +73,10 @@ jobs:
           ALIAS: ${{ secrets.KEY_ALIAS }}
         run: |
           jarsigner \
-            -J-Dkeystore.pkcs12.legacy \
             -verbose \
             -sigalg SHA256withRSA \
             -digestalg SHA-256 \
-            -keystore my-release-key.jks \
+            -keystore "${{ github.workspace }}/my-release-key.jks" \
             -storepass "$KS_PASS" \
             -keypass "$KEY_PASS" \
             android/app/build/outputs/bundle/release/app-release.aab \
