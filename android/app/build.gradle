@@ -7,8 +7,12 @@ android {
         applicationId "com.modareb.game"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1
-        versionName "1.0"
+
+        // تعديل الإصدار التلقائي
+        def autoCode = project.hasProperty('autoVersionCode') ? project.property('autoVersionCode').toInteger() : 1
+        versionCode autoCode
+        versionName "1.0." + autoCode
+
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
