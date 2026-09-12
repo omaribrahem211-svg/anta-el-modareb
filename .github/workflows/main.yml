@@ -31,11 +31,11 @@ jobs:
       - name: Sync Capacitor Android
         run: npx cap sync android
 
-      - name: Setup Java 21
+      - name: Setup Java 17
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: '21'
+          java-version: '17'
 
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
@@ -43,13 +43,14 @@ jobs:
       - name: Accept Android licenses
         run: yes | sdkmanager --licenses || true
 
-      - name: Decode Keystore
+      - name: Decode Keystore & Inspect
         env:
           ENCODED_KEY: ${{ secrets.KEYSTORE_BASE64 }}
+          KS_PASS: ${{ secrets.KEYSTORE_PASSWORD }}
         run: |
           python3 -c "
           import os, base64, re
-          raw = os.environ.get('ENCODED_KEY', '')
+          raw = os.environ.get('ENCODED_KEY', '').strip()
           cleaned = re.sub(r'[^A-Za-z0-9+/=]', '', raw)
           cleaned = cleaned.rstrip('=')
           padding = (4 - len(cleaned) % 4) % 4
@@ -58,9 +59,12 @@ jobs:
               padding = 0
           cleaned += '=' * padding
           data = base64.b64decode(cleaned)
-          with open('my-release-key.keystore', 'wb') as f:
+          with open('my-release-key.jks', 'wb') as f:
               f.write(data)
+          print(f'Keystore file size: {len(data)} bytes')
           "
+          # فحص المفتاح وقراءة محتواه لمعرفة نوعه وسبب المشكلة
+          keytool -list -v -keystore my-release-key.jks -storepass "$KS_PASS" || true
 
       - name: Build Release AAB
         working-directory: android
@@ -74,9 +78,7 @@ jobs:
         run: |
           jarsigner \
             -verbose \
-            -sigalg SHA256withRSA \
-            -digestalg SHA-256 \
-            -keystore my-release-key.keystore \
+            -keystore my-release-key.jks \
             -storepass "$KS_PASS" \
             -keypass "$KEY_PASS" \
             android/app/build/outputs/bundle/release/app-release.aab \
