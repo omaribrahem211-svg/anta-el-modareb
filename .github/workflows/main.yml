@@ -58,33 +58,28 @@ jobs:
               padding = 0
           cleaned += '=' * padding
           data = base64.b64decode(cleaned)
-          with open('${{ github.workspace }}/my-release-key.jks', 'wb') as f:
+          with open('${{ github.workspace }}/release.keystore', 'wb') as f:
               f.write(data)
           "
 
-      - name: Build Release AAB
+      - name: Build and Sign AAB
         working-directory: android
-        run: chmod +x gradlew && ./gradlew bundleRelease -PautoVersionCode=${{ github.run_number }}
-
-      - name: Sign AAB
         env:
           KS_PASS: ${{ secrets.KEYSTORE_PASSWORD }}
           KEY_PASS: ${{ secrets.KEY_PASSWORD }}
           ALIAS: ${{ secrets.KEY_ALIAS }}
         run: |
-          jarsigner \
-            -verbose \
-            -sigalg SHA256withRSA \
-            -digestalg SHA-256 \
-            -keystore "${{ github.workspace }}/my-release-key.jks" \
-            -storepass "$KS_PASS" \
-            -keypass "$KEY_PASS" \
-            android/app/build/outputs/bundle/release/app-release.aab \
-            "$ALIAS"
+          chmod +x gradlew
+          ./gradlew bundleRelease \
+            -PautoVersionCode=${{ github.run_number }} \
+            -Pandroid.injected.signing.store.file="${{ github.workspace }}/release.keystore" \
+            -Pandroid.injected.signing.store.password="$KS_PASS" \
+            -Pandroid.injected.signing.key.alias="$ALIAS" \
+            -Pandroid.injected.signing.key.password="$KEY_PASS"
 
       - name: Upload Signed AAB
         uses: actions/upload-artifact@v4
         with:
           name: anta-el-modareb-googleplay-aab
-          path: android/app/build/outputs/bundle/release/app-release.aab
+          path: android/app/build/outputs/bundle/release/*.aab
           
