@@ -1,4 +1,4 @@
-name: Test APK-Signer Passwords
+name: Build Android APK (Test)
 
 on:
   workflow_dispatch:
@@ -7,15 +7,41 @@ on:
       - main
 
 jobs:
-  test:
+  build:
     runs-on: ubuntu-latest
 
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Build Web Assets
+        run: npm run build
+
+      - name: Sync Capacitor Android
+        run: npx cap sync android
+
       - name: Setup Java 21
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '21'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Accept Android licenses
+        run: yes | sdkmanager --licenses || true
 
       - name: Decode Keystore
         env:
@@ -24,33 +50,28 @@ jobs:
           python3 -c "
           import os, base64
           raw = os.environ['ENCODED_KEY'].strip()
-          with open('release.p12', 'wb') as f:
+          with open('${{ github.workspace }}/release.p12', 'wb') as f:
               f.write(base64.b64decode(raw))
           "
 
-      - name: Test Passwords
+      - name: Build and Sign APK
+        working-directory: android
+        env:
+          KS_PASS: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_PASS: ${{ secrets.KEY_PASSWORD }}
+          ALIAS: ${{ secrets.KEY_ALIAS }}
         run: |
-          passwords=(
-            "testkey"
-            "media"
-            "shared"
-            "platform"
-            "12345678"
-            "000000"
-            "112233"
-            "admin"
-            "root"
-          )
-          for p in "${passwords[@]}"; do
-            echo "Testing password: [$p]"
-            if keytool -list -keystore release.p12 -storepass "$p" 2>/dev/null; then
-              echo "========================================"
-              echo "FOUND CORRECT PASSWORD: [$p]"
-              echo "========================================"
-              keytool -list -v -keystore release.p12 -storepass "$p"
-              exit 0
-            fi
-          done
-          echo "None of the APK-Signer default passwords matched."
-          exit 1
+          chmod +x gradlew
+          ./gradlew assembleRelease \
+            -PautoVersionCode=${{ github.run_number }} \
+            -Pandroid.injected.signing.store.file="${{ github.workspace }}/release.p12" \
+            -Pandroid.injected.signing.store.password="$KS_PASS" \
+            -Pandroid.injected.signing.key.alias="$ALIAS" \
+            -Pandroid.injected.signing.key.password="$KEY_PASS"
+
+      - name: Upload Signed APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: anta-el-modareb-test-apk
+          path: android/app/build/outputs/apk/release/*.apk
           
