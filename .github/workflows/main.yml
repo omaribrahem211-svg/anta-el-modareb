@@ -58,7 +58,7 @@ jobs:
               padding = 0
           cleaned += '=' * padding
           data = base64.b64decode(cleaned)
-          with open('my-release-key.jks', 'wb') as f:
+          with open('my-release-key.keystore', 'wb') as f:
               f.write(data)
           "
 
@@ -67,16 +67,20 @@ jobs:
         run: chmod +x gradlew && ./gradlew bundleRelease -PautoVersionCode=${{ github.run_number }}
 
       - name: Sign AAB
+        env:
+          KS_PASS: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_PASS: ${{ secrets.KEY_PASSWORD }}
+          ALIAS: ${{ secrets.KEY_ALIAS }}
         run: |
           jarsigner \
             -verbose \
             -sigalg SHA256withRSA \
             -digestalg SHA-256 \
-            -keystore my-release-key.jks \
-            -storepass "${{ secrets.KEYSTORE_PASSWORD }}" \
-            -keypass "${{ secrets.KEY_PASSWORD }}" \
+            -keystore my-release-key.keystore \
+            -storepass "$KS_PASS" \
+            -keypass "$KEY_PASS" \
             android/app/build/outputs/bundle/release/app-release.aab \
-            "${{ secrets.KEY_ALIAS }}"
+            "$ALIAS"
 
       - name: Upload Signed AAB
         uses: actions/upload-artifact@v4
