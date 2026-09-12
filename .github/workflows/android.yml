@@ -43,12 +43,41 @@ jobs:
       - name: Accept Android licenses
         run: yes | sdkmanager --licenses || true
 
+      # 1. استخراج مفتاح التوقيع من Secrets
+      - name: Decode Keystore
+        run: |
+          echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 --decode > my-release-key.p12
+
+      # 2. بناء الـ AAB مع تمرير رقم الإصدار التلقائي
       - name: Build Release AAB
         working-directory: android
-        run: chmod +x gradlew && ./gradlew bundleRelease
+        run: |
+          chmod +x gradlew
+          ./gradlew bundleRelease -PversionCode=${{ github.run_number }}
 
-      - name: Upload AAB
+      # 3. توقيع الـ AAB بمفتاحك الأصلي
+      - name: Sign AAB
+        run: |
+          jarsigner \
+            -verbose \
+            -sigalg SHA256withRSA \
+            -digestalg SHA-256 \
+            -keystore my-release-key.p12 \
+            -storetype PKCS12 \
+            -storepass "${{ secrets.KEYSTORE_PASSWORD }}" \
+            android/app/build/outputs/bundle/release/*.aab \
+            "${{ secrets.KEY_ALIAS }}"
+
+      # 4. التأكد من صحة التوقيع
+      - name: Verify AAB signature
+        run: |
+          jarsigner -verify -verbose -certs \
+          android/app/build/outputs/bundle/release/*.aab
+
+      # 5. رفع النسخة الموقعة لتنزيلها
+      - name: Upload Signed AAB
         uses: actions/upload-artifact@v4
         with:
-          name: anta-el-modareb-aab
+          name: anta-el-modareb-signed-aab
           path: android/app/build/outputs/bundle/release/*.aab
+          
