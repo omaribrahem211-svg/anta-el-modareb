@@ -1,4 +1,4 @@
-name: Test Passwords
+name: Test APK-Signer Passwords
 
 on:
   workflow_dispatch:
@@ -28,18 +28,29 @@ jobs:
               f.write(base64.b64decode(raw))
           "
 
-      - name: Try Known Passwords
-        env:
-          SECRET_PASS: ${{ secrets.KEYSTORE_PASSWORD }}
+      - name: Test Passwords
         run: |
-          passwords=("$SECRET_PASS" "android" "123456" "password" "omar" "")
+          passwords=(
+            "testkey"
+            "media"
+            "shared"
+            "platform"
+            "12345678"
+            "000000"
+            "112233"
+            "admin"
+            "root"
+          )
           for p in "${passwords[@]}"; do
             echo "Testing password: [$p]"
             if keytool -list -keystore release.p12 -storepass "$p" 2>/dev/null; then
-              echo "===> FOUND CORRECT PASSWORD: [$p] <==="
+              echo "========================================"
+              echo "FOUND CORRECT PASSWORD: [$p]"
+              echo "========================================"
+              keytool -list -v -keystore release.p12 -storepass "$p"
               exit 0
             fi
           done
-          echo "None of the common passwords worked."
+          echo "None of the APK-Signer default passwords matched."
           exit 1
           
