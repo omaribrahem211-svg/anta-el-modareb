@@ -22,11 +22,10 @@ jobs:
         with:
           node-version: 24
 
-          - name: Install dependencies and Build
-      run: |
-        npm install
-        npm run build
-
+      - name: Install dependencies and Build
+        run: |
+          npm install
+          npm run build
 
       - name: Sync Capacitor Android
         run: npx cap sync android
@@ -36,9 +35,6 @@ jobs:
         with:
           distribution: temurin
           java-version: '21'
-
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
 
       - name: Accept Android licenses
         run: yes | sdkmanager --licenses || true
