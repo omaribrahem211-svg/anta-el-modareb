@@ -124,9 +124,33 @@
         "lastEvent": { "type": "object" }
       },
       "required": ["code", "status", "createdAt", "host"]
+    },
+    "PromoCode": {
+      "title": "PromoCode",
+      "description": "Administrative gift and promo reward codes for coaches with anti-tamper usage tracking and limits",
+      "type": "object",
+      "properties": {
+        "code": { "type": "string", "maxLength": 32 },
+        "rewardAmount": { "type": "number" },
+        "rewardCoins": { "type": "number" },
+        "maxUses": { "type": "number" },
+        "usedCount": { "type": "number" },
+        "usedByManagerIds": { "type": "array" },
+        "redeemedBy": { "type": "array" },
+        "description": { "type": "string", "maxLength": 256 },
+        "isActive": { "type": "boolean" },
+        "createdAt": { "type": "number" },
+        "createdBy": { "type": "string", "maxLength": 128 },
+        "expiresAt": { "type": "number" }
+      },
+      "required": ["code", "rewardAmount", "maxUses", "usedCount", "isActive", "createdAt"]
     }
   },
   "firestore": {
+    "/promo_codes/{codeId}": {
+      "schema": "PromoCode",
+      "description": "Promo codes redeemable by managers for club budget funds"
+    },
     "/users/{userId}": {
       "schema": "UserProfile",
       "description": "Users profile collection"

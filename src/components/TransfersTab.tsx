@@ -279,42 +279,49 @@ export const TransfersTab: React.FC<TransfersTabProps> = ({ onSelectPlayer }) =>
     setDisplayCount(30);
   };
 
-  const handleBuy = (player: Player) => {
+  const handleBuy = (player: Player, overrideFee?: number) => {
+    if (!player) return;
     if (!userClub) {
       setNotification({ text: 'يجب تولي تدريب نادٍ أولاً لتتمكن من إبرام الصفقات!', type: 'error' });
       setTimeout(() => setNotification(null), 3500);
       return;
     }
 
-    const joinCheck = canPlayerJoinClub(player, userClub);
-    if (!joinCheck.canJoin) {
-      setNotification({ text: joinCheck.reason || 'اللاعب يرفض الانتقال إلى ناديك.', type: 'error' });
-      setTimeout(() => setNotification(null), 4000);
-      return;
-    }
+    try {
+      const joinCheck = canPlayerJoinClub(player, userClub);
+      if (!joinCheck.canJoin) {
+        setNotification({ text: joinCheck.reason || 'اللاعب يرفض الانتقال إلى ناديك.', type: 'error' });
+        setTimeout(() => setNotification(null), 4000);
+        return;
+      }
 
-    const safeClub = resolveClubInfo(player.currentClubId, (player as any).currentClubName, teams);
-    const clubDisplayName = safeClub.clubName;
-    const { askingPrice } = calculateAskingPrice(player, safeClub.club);
-    const effectiveFee = Math.max(25000, askingPrice || player.marketValue || 50000);
-    const effectiveSalary = Math.max(2500, player.salary || 2500);
+      const safeClub = resolveClubInfo(player.currentClubId, (player as any).currentClubName, teams);
+      const { askingPrice } = calculateAskingPrice(player, safeClub.club);
+      const effectiveFee = overrideFee != null ? overrideFee : Math.max(25000, askingPrice || player.marketValue || 50000);
+      const effectiveSalary = Math.max(2500, player.salary || 2500);
 
-    if (userClub.budget < effectiveFee) {
-      setNotification({
-        text: `ميزانية ناديك (${userClub.budget.toLocaleString()} ج.م) لا تكفي لدفع قيمة الصفقة (${effectiveFee.toLocaleString()} ج.م)!`,
-        type: 'error',
+      const clubBudget = userClub.budget || 0;
+      if (clubBudget < effectiveFee) {
+        setNotification({
+          text: `ميزانية ناديك (${clubBudget.toLocaleString()} ج.م) لا تكفي لدفع قيمة الصفقة (${effectiveFee.toLocaleString()} ج.م)!`,
+          type: 'error',
+        });
+        setTimeout(() => setNotification(null), 4000);
+        return;
+      }
+
+      const res = buyPlayer({
+        ...player,
+        marketValue: effectiveFee,
+        salary: effectiveSalary,
       });
+      setNotification({ text: res.message, type: res.success ? 'success' : 'error' });
+      setTimeout(() => setNotification(null), 3500);
+    } catch (err: any) {
+      console.error('Error in handleBuy:', err);
+      setNotification({ text: err?.message || 'حدث خطأ أثناء محاولة إتمام الشراء', type: 'error' });
       setTimeout(() => setNotification(null), 4000);
-      return;
     }
-
-    const res = buyPlayer({
-      ...player,
-      marketValue: effectiveFee,
-      salary: effectiveSalary,
-    });
-    setNotification({ text: res.message, type: res.success ? 'success' : 'error' });
-    setTimeout(() => setNotification(null), 3500);
   };
 
   const handleStartNegotiation = (player: Player) => {
@@ -844,18 +851,21 @@ export const TransfersTab: React.FC<TransfersTabProps> = ({ onSelectPlayer }) =>
                           </button>
 
                           {(() => {
-                            const isAffordableFee = userClub ? userClub.budget >= player.marketValue : false;
-                            const isAffordableWage = userClub ? (clubTotalWages + player.salary <= clubMonthlyIncome) : false;
-                            const canDirectBuy = userClub && isAffordableFee && isAffordableWage;
+                            const effectiveAskingPrice = item.askingPrice || player.marketValue || 50000;
+                            const effectiveSalary = player.salary || 2500;
+                            const clubBudget = userClub?.budget || 0;
+                            const isAffordableFee = userClub ? clubBudget >= effectiveAskingPrice : false;
+                            const isAffordableWage = userClub ? (clubTotalWages + effectiveSalary <= clubMonthlyIncome) : false;
+                            const canDirectBuy = Boolean(userClub && isAffordableFee && isAffordableWage);
 
                             return (
                               <button
-                                onClick={() => handleBuy(player)}
+                                onClick={() => handleBuy(player, effectiveAskingPrice)}
                                 disabled={!canDirectBuy}
                                 title={
                                   !userClub ? 'يجب تولي تدريب نادٍ' :
-                                  !isAffordableFee ? `الميزانية غير كافية (${userClub.budget.toLocaleString()} / ${player.marketValue.toLocaleString()} ج.م)` :
-                                  !isAffordableWage ? `الراتب (${player.salary.toLocaleString()} ج.م) يتجاوز سقف دخل النادي` :
+                                  !isAffordableFee ? `الميزانية غير كافية (${clubBudget.toLocaleString()} / ${effectiveAskingPrice.toLocaleString()} ج.م)` :
+                                  !isAffordableWage ? `الراتب (${effectiveSalary.toLocaleString()} ج.م) يتجاوز سقف دخل النادي` :
                                   'شراء مباشر'
                                 }
                                 className="bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 disabled:opacity-40 disabled:cursor-not-allowed text-white font-bold text-xs py-2.5 rounded-xl shadow-md transition-all active:scale-95 flex items-center justify-center gap-1"

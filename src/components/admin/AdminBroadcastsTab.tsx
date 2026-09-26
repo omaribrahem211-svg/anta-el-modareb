@@ -254,7 +254,7 @@ export const AdminBroadcastsTab: React.FC = () => {
                   <input
                     type="number"
                     min="0"
-                    step="50"
+                    step="any"
                     value={rewardCoins}
                     onChange={e => setRewardCoins(Number(e.target.value))}
                     className="w-full bg-slate-950 border border-slate-800 rounded-xl pr-9 pl-3 py-2.5 text-sm text-amber-400 font-bold focus:outline-none focus:border-indigo-500"

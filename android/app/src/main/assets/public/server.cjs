@@ -29,7 +29,113 @@ var import_vite = require("vite");
 
 // server/challengeRelay.ts
 var import_ws = require("ws");
+function broadcastDailyRanking(wss, ranking) {
+  const payload = JSON.stringify({
+    type: "daily_ranking_updated",
+    date: activeDayKey,
+    ranking: ranking || getTop50DailyRanking()
+  });
+  wss.clients.forEach((client) => {
+    if (client.readyState === import_ws.WebSocket.OPEN) {
+      try {
+        client.send(payload);
+      } catch {
+      }
+    }
+  });
+}
 var rooms = /* @__PURE__ */ new Map();
+var matchmakingQueue = [];
+var dailyCoachesMap = /* @__PURE__ */ new Map();
+var recordedMatchKeys = /* @__PURE__ */ new Set();
+function getTodayDateKey() {
+  try {
+    return new Intl.DateTimeFormat("en-CA", { timeZone: "Africa/Cairo" }).format(/* @__PURE__ */ new Date());
+  } catch {
+    return (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
+  }
+}
+var activeDayKey = getTodayDateKey();
+function checkAndResetIfNewDay() {
+  const currentToday = getTodayDateKey();
+  if (currentToday !== activeDayKey) {
+    console.log(`[Daily Ranking] Date rolled over from ${activeDayKey} to ${currentToday}. Resetting RAM leaderboard to 0.`);
+    activeDayKey = currentToday;
+    dailyCoachesMap.clear();
+    recordedMatchKeys.clear();
+  }
+}
+function getTop50DailyRanking() {
+  checkAndResetIfNewDay();
+  const all = Array.from(dailyCoachesMap.values());
+  all.sort((a, b) => {
+    if (b.wins !== a.wins) return b.wins - a.wins;
+    if (a.matchesPlayed !== b.matchesPlayed) return a.matchesPlayed - b.matchesPlayed;
+    return b.lastActiveTimestamp - a.lastActiveTimestamp;
+  });
+  return all.slice(0, 50).map((entry, idx) => ({
+    ...entry,
+    rank: idx + 1
+  }));
+}
+function recordMatchResultInRAM(data) {
+  checkAndResetIfNewDay();
+  const matchKey = `${activeDayKey}_${data.roomCode || `${data.host.playerId}_${data.guest.playerId}_${data.homeScore}_${data.awayScore}`}`;
+  if (recordedMatchKeys.has(matchKey)) {
+    return getTop50DailyRanking();
+  }
+  recordedMatchKeys.add(matchKey);
+  const isHomeWin = data.homeScore > data.awayScore;
+  const isAwayWin = data.awayScore > data.homeScore;
+  const isDraw = data.homeScore === data.awayScore;
+  if (data.host && data.host.playerId) {
+    const hostEntry = dailyCoachesMap.get(data.host.playerId) || {
+      playerId: data.host.playerId,
+      coachName: data.host.playerName || "\u0645\u062F\u0631\u0628",
+      avatar: data.host.avatar,
+      clubName: data.host.clubName || "\u0646\u0627\u062F\u064A \u0627\u0644\u062A\u062D\u062F\u064A",
+      clubRating: data.host.clubRating || 70,
+      wins: 0,
+      losses: 0,
+      draws: 0,
+      matchesPlayed: 0,
+      lastActiveTimestamp: Date.now()
+    };
+    hostEntry.matchesPlayed += 1;
+    if (isHomeWin) hostEntry.wins += 1;
+    else if (isDraw) hostEntry.draws += 1;
+    else hostEntry.losses += 1;
+    hostEntry.lastActiveTimestamp = Date.now();
+    if (data.host.playerName) hostEntry.coachName = data.host.playerName;
+    if (data.host.avatar) hostEntry.avatar = data.host.avatar;
+    if (data.host.clubName) hostEntry.clubName = data.host.clubName;
+    dailyCoachesMap.set(data.host.playerId, hostEntry);
+  }
+  if (data.guest && data.guest.playerId && !data.guest.playerId.startsWith("bot_")) {
+    const guestEntry = dailyCoachesMap.get(data.guest.playerId) || {
+      playerId: data.guest.playerId,
+      coachName: data.guest.playerName || "\u0645\u062F\u0631\u0628",
+      avatar: data.guest.avatar,
+      clubName: data.guest.clubName || "\u0646\u0627\u062F\u064A \u0627\u0644\u062A\u062D\u062F\u064A",
+      clubRating: data.guest.clubRating || 70,
+      wins: 0,
+      losses: 0,
+      draws: 0,
+      matchesPlayed: 0,
+      lastActiveTimestamp: Date.now()
+    };
+    guestEntry.matchesPlayed += 1;
+    if (isAwayWin) guestEntry.wins += 1;
+    else if (isDraw) guestEntry.draws += 1;
+    else guestEntry.losses += 1;
+    guestEntry.lastActiveTimestamp = Date.now();
+    if (data.guest.playerName) guestEntry.coachName = data.guest.playerName;
+    if (data.guest.avatar) guestEntry.avatar = data.guest.avatar;
+    if (data.guest.clubName) guestEntry.clubName = data.guest.clubName;
+    dailyCoachesMap.set(data.guest.playerId, guestEntry);
+  }
+  return getTop50DailyRanking();
+}
 var CODE_CHARS = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ";
 function generateRoomCode() {
   let code = "";
@@ -221,6 +327,163 @@ function setupChallengeWebSocketServer(server) {
         });
         return;
       }
+      if (type === "get_daily_ranking") {
+        return safeSend(ws, {
+          type: "daily_ranking",
+          date: activeDayKey,
+          ranking: getTop50DailyRanking()
+        });
+      }
+      if (type === "record_match_result") {
+        if (data.result) {
+          const updatedRanking = recordMatchResultInRAM(data.result);
+          broadcastDailyRanking(wss, updatedRanking);
+          return safeSend(ws, {
+            type: "match_result_recorded",
+            ranking: updatedRanking
+          });
+        }
+        return;
+      }
+      if (type === "find_random_match") {
+        const { participant } = data;
+        if (!participant || !participant.playerId) {
+          return safeSend(ws, { type: "error", message: "\u0628\u064A\u0627\u0646\u0627\u062A \u0627\u0644\u0645\u062F\u0631\u0628 \u0645\u0637\u0644\u0648\u0628\u0629 \u0644\u062F\u062E\u0648\u0644 \u0627\u0644\u062A\u062D\u062F\u064A \u0627\u0644\u0639\u0634\u0648\u0627\u0626\u064A" });
+        }
+        currentRoomCode = null;
+        currentPlayerId = participant.playerId;
+        for (let i = matchmakingQueue.length - 1; i >= 0; i--) {
+          const waiter = matchmakingQueue[i];
+          if (waiter.ws.readyState !== import_ws.WebSocket.OPEN || waiter.playerId === participant.playerId) {
+            matchmakingQueue.splice(i, 1);
+          }
+        }
+        if (matchmakingQueue.length > 0) {
+          const opponent = matchmakingQueue.shift();
+          const code2 = generateRoomCode();
+          currentRoomCode = code2;
+          const room2 = {
+            code: code2,
+            createdAt: Date.now(),
+            lastActivity: Date.now(),
+            status: "playing",
+            host: {
+              ...opponent.participant,
+              ws: opponent.ws,
+              isReady: true,
+              disconnectedAt: null
+            },
+            guest: {
+              ...participant,
+              ws,
+              isReady: true,
+              disconnectedAt: null
+            },
+            matchState: {
+              minute: 0,
+              homeScore: 0,
+              awayScore: 0,
+              status: "playing"
+            }
+          };
+          rooms.set(code2, room2);
+          console.log(`[WS Relay] Random Match Paired! Room: ${code2} between [${opponent.participant.playerName} (${opponent.participant.clubName})] vs [${participant.playerName} (${participant.clubName})]`);
+          safeSend(opponent.ws, {
+            type: "random_match_matched",
+            code: code2,
+            role: "host",
+            room: sanitizeRoom(room2),
+            opponent: sanitizeParticipant(room2.guest)
+          });
+          safeSend(ws, {
+            type: "random_match_matched",
+            code: code2,
+            role: "guest",
+            room: sanitizeRoom(room2),
+            opponent: sanitizeParticipant(room2.host)
+          });
+          return;
+        }
+        matchmakingQueue.push({
+          ws,
+          playerId: participant.playerId,
+          participant,
+          timestamp: Date.now()
+        });
+        console.log(`[WS Relay] Player entered matchmaking queue: ${participant.playerName} (${participant.clubName}). Queue size: ${matchmakingQueue.length}`);
+        return safeSend(ws, {
+          type: "matchmaking_searching",
+          queueSize: matchmakingQueue.length,
+          message: "\u062C\u0627\u0631\u0650 \u0627\u0644\u0628\u062D\u062B \u0639\u0646 \u0645\u0646\u0627\u0641\u0633 \u0623\u0648\u0646\u0644\u0627\u064A\u0646 \u0645\u062A\u0627\u062D..."
+        });
+      }
+      if (type === "cancel_matchmaking") {
+        const pId = data.playerId || currentPlayerId;
+        const idx = matchmakingQueue.findIndex((q) => q.playerId === pId || q.ws === ws);
+        if (idx !== -1) {
+          matchmakingQueue.splice(idx, 1);
+          console.log(`[WS Relay] Player cancelled matchmaking: ${pId}`);
+        }
+        return safeSend(ws, { type: "matchmaking_cancelled" });
+      }
+      if (type === "request_bot_match") {
+        const pId = data.playerId || currentPlayerId;
+        const idx = matchmakingQueue.findIndex((q) => q.playerId === pId || q.ws === ws);
+        if (idx !== -1) matchmakingQueue.splice(idx, 1);
+        const { participant } = data;
+        if (!participant) return;
+        const code2 = generateRoomCode();
+        currentRoomCode = code2;
+        currentPlayerId = participant.playerId;
+        const botClubNames = ["\u0646\u0627\u062F\u064A \u0627\u0644\u0646\u062C\u0648\u0645 \u0627\u0644\u062F\u0648\u0644\u064A", "\u0623\u0643\u0627\u062F\u064A\u0645\u064A\u0629 \u0627\u0644\u0641\u0631\u0633\u0627\u0646", "\u0627\u062A\u062D\u0627\u062F \u0627\u0644\u0623\u0628\u0637\u0627\u0644", "\u0646\u0627\u062F\u064A \u0627\u0644\u0635\u0642\u0648\u0631 \u0623\u0648\u0646\u0644\u0627\u064A\u0646", "\u0643\u062A\u064A\u0628\u0629 \u0627\u0644\u0623\u0633\u0627\u0637\u064A\u0631"];
+        const botCoachNames = ["\u0643\u0627\u0628\u062A\u0646 \u0637\u0627\u0631\u0642 \u0627\u0644\u0633\u0639\u064A\u062F", "\u0627\u0644\u0645\u062F\u0631\u0628 \u062D\u0633\u0627\u0645 \u0627\u0644\u0628\u062F\u0631\u064A", "\u0643\u0627\u0628\u062A\u0646 \u0623\u062D\u0645\u062F \u0633\u0627\u0645\u064A", "\u0627\u0644\u0645\u062F\u0631\u0628 \u0625\u064A\u0647\u0627\u0628 \u062C\u0644\u0627\u0644", "\u0643\u0627\u0628\u062A\u0646 \u0639\u0644\u064A \u0645\u0627\u0647\u0631"];
+        const randomBotClub = botClubNames[Math.floor(Math.random() * botClubNames.length)];
+        const randomBotCoach = botCoachNames[Math.floor(Math.random() * botCoachNames.length)];
+        const room2 = {
+          code: code2,
+          createdAt: Date.now(),
+          lastActivity: Date.now(),
+          status: "playing",
+          host: {
+            ...participant,
+            ws,
+            isReady: true,
+            disconnectedAt: null
+          },
+          guest: {
+            playerId: "bot_" + Date.now(),
+            playerName: randomBotCoach,
+            clubName: randomBotClub,
+            clubRating: Math.max(65, Math.min(88, (participant.clubRating || 75) + Math.floor(Math.random() * 7 - 3))),
+            tactics: {
+              formation: "4-3-3",
+              mentality: "balanced",
+              passingStyle: "mixed",
+              pressingIntensity: "balanced",
+              tempo: "balanced"
+            },
+            squadSummary: [],
+            benchSummary: [],
+            ws: null,
+            isReady: true,
+            disconnectedAt: null
+          },
+          matchState: {
+            minute: 0,
+            homeScore: 0,
+            awayScore: 0,
+            status: "playing"
+          }
+        };
+        rooms.set(code2, room2);
+        return safeSend(ws, {
+          type: "random_match_matched",
+          code: code2,
+          role: "host",
+          room: sanitizeRoom(room2),
+          opponent: sanitizeParticipant(room2.guest)
+        });
+      }
       const code = (data.code || currentRoomCode || "").trim().toUpperCase();
       const room = rooms.get(code);
       if (!room) {
@@ -311,10 +574,32 @@ function setupChallengeWebSocketServer(server) {
       if (type === "match_end") {
         room.status = "completed";
         room.matchState = data.finalMatchState;
+        const homeScore = data.finalMatchState?.homeScore ?? room.matchState?.homeScore ?? 0;
+        const awayScore = data.finalMatchState?.awayScore ?? room.matchState?.awayScore ?? 0;
+        const updatedRanking = recordMatchResultInRAM({
+          roomCode: code,
+          host: {
+            playerId: room.host.playerId,
+            playerName: room.host.playerName,
+            clubName: room.host.clubName,
+            avatar: room.host.avatar,
+            clubRating: room.host.clubRating
+          },
+          guest: {
+            playerId: room.guest?.playerId || "guest_unknown",
+            playerName: room.guest?.playerName || "\u0627\u0644\u0645\u0646\u0627\u0641\u0633",
+            clubName: room.guest?.clubName || "\u0627\u0644\u0646\u0627\u062F\u064A \u0627\u0644\u0645\u0646\u0627\u0641\u0633",
+            avatar: room.guest?.avatar,
+            clubRating: room.guest?.clubRating || 70
+          },
+          homeScore,
+          awayScore
+        });
         safeSend(opponentWs, {
           type: "match_ended",
           finalMatchState: data.finalMatchState
         });
+        broadcastDailyRanking(wss, updatedRanking);
         return;
       }
       if (type === "leave_room") {
@@ -343,6 +628,10 @@ function setupChallengeWebSocketServer(server) {
       }
     });
     ws.on("close", () => {
+      const qIdx = matchmakingQueue.findIndex((q) => q.ws === ws || currentPlayerId && q.playerId === currentPlayerId);
+      if (qIdx !== -1) {
+        matchmakingQueue.splice(qIdx, 1);
+      }
       if (!currentRoomCode) return;
       const room = rooms.get(currentRoomCode);
       if (!room) return;
@@ -381,9 +670,25 @@ async function startServer() {
   const app = (0, import_express.default)();
   const PORT = 3e3;
   const server = import_http.default.createServer(app);
+  app.use(import_express.default.json());
   setupChallengeWebSocketServer(server);
   app.get("/api/health", (req, res) => {
     res.json({ status: "ok", time: Date.now() });
+  });
+  app.get("/api/pvp/daily-ranking", (req, res) => {
+    res.json({
+      success: true,
+      date: getTodayDateKey(),
+      ranking: getTop50DailyRanking()
+    });
+  });
+  app.post("/api/pvp/record-result", (req, res) => {
+    const result = req.body;
+    if (!result || !result.host || !result.guest) {
+      return res.status(400).json({ success: false, error: "\u0628\u064A\u0627\u0646\u0627\u062A \u0646\u062A\u064A\u062C\u0629 \u0627\u0644\u0645\u0628\u0627\u0631\u0627\u0629 \u063A\u064A\u0631 \u0645\u0643\u062A\u0645\u0644\u0629" });
+    }
+    const updatedRanking = recordMatchResultInRAM(result);
+    res.json({ success: true, ranking: updatedRanking });
   });
   if (process.env.NODE_ENV !== "production") {
     const vite = await (0, import_vite.createServer)({

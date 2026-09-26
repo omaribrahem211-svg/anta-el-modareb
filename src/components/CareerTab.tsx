@@ -43,6 +43,7 @@ import {
 } from 'lucide-react';
 import { CoachCardModal } from './CoachCardModal';
 import { ClubSelectionModal } from './ClubSelectionModal';
+import { CareerProgressionJourney } from './CareerProgressionJourney';
 
 export const CareerTab: React.FC = () => {
   const {
@@ -326,6 +327,9 @@ export const CareerTab: React.FC = () => {
         </button>
       </div>
 
+      {/* 🚀 COACHING LICENSES & CAREER PROGRESSION JOURNEY */}
+      <CareerProgressionJourney />
+
       {/* 💼 MANAGER FINANCIAL WEALTH & PERSONAL LEDGER (الذمة المالية والمحفظة الشخصية للمدرب) */}
       <div className="bg-gradient-to-br from-slate-900 via-slate-900 to-amber-950/30 border-2 border-amber-500/40 rounded-3xl p-5 space-y-4 shadow-xl">
         <div className="flex items-center justify-between flex-wrap gap-2">
@@ -470,6 +474,7 @@ export const CareerTab: React.FC = () => {
               'B': 3,
               'A': 4,
               'PRO': 5,
+              'ELITE': 6,
             };
             const currentLicense = (manager.license && licenseRankMap[manager.license]) ? manager.license : 'D';
             const currentRank = licenseRankMap[currentLicense] || 1;

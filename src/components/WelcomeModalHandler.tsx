@@ -65,5 +65,9 @@ export const WelcomeModalHandler: React.FC = () => {
     setNeedsProfileCreation(false);
   };
 
-  return <CreateTrainerModal onProfileCreated={handleProfileCreated} />;
+  const handleSaveImported = () => {
+    setNeedsProfileCreation(false);
+  };
+
+  return <CreateTrainerModal onProfileCreated={handleProfileCreated} onSaveImported={handleSaveImported} />;
 };

@@ -13,8 +13,8 @@ export interface CoachingCourse {
   title: string;
   category: 'license' | 'tactic' | 'psychology' | 'fitness' | 'fellowship';
   cost: number;
-  requiredLicense?: 'D' | 'C' | 'B' | 'A';
-  grantsLicense?: 'D' | 'C' | 'B' | 'A' | 'PRO';
+  requiredLicense?: 'D' | 'C' | 'B' | 'A' | 'PRO';
+  grantsLicense?: 'D' | 'C' | 'B' | 'A' | 'PRO' | 'ELITE';
   description: string;
   xpReward: number;
   reputationReward: number;
@@ -86,6 +86,19 @@ export const COACHING_COURSES: CoachingCourse[] = [
     xpReward: 3200,
     reputationReward: 35,
     specialBenefit: 'ترقية الرخصة لأعلى مستوى PRO دولي، زيادة قدرة الحسم في النهائيات، وقفزة كبرى في التصنيف العالمي (+250 نقطة).',
+    iconName: 'Award',
+  },
+  {
+    id: 'license_elite',
+    title: 'رخصة النخبة العالمية للمدربين (World Elite Master)',
+    category: 'license',
+    cost: 2000000,
+    requiredLicense: 'PRO',
+    grantsLicense: 'ELITE',
+    description: 'أسمى وأرفع رخصة تدريبية في تاريخ كرة القدم لصفوة مدربي العالم لقيادة نخبة أندية أوروبا وكبرى المنتخبات العالمية.',
+    xpReward: 5000,
+    reputationReward: 50,
+    specialBenefit: 'ترقية رتبتك إلى رخصة ELITE العالمية، فتح عروض نخبة أندية العالم التاريخية، وقفزة هائلة في التصنيف العالمي (+400 نقطة).',
     iconName: 'Award',
   },
 

@@ -287,9 +287,9 @@ export const SeasonTransitionModal: React.FC = () => {
             <div className="space-y-4">
               <div className="flex items-center justify-between">
                 <div>
-                  <h3 className="font-bold text-slate-100 text-base">العروض التدريبية الجديدة</h3>
+                  <h3 className="font-bold text-slate-100 text-base">سوق المدربين والعروض التدريبية الواقعية</h3>
                   <p className="text-xs text-slate-400">
-                    يمكنك اختيار الانتقال إلى نادٍ جديد لقيادة مشروعه، أو البقاء مع ناديك الحالي ومواصلة المسيرة.
+                    عروض واقعية مبنية على رخصتك التدريبية، سمعتك، إنجازاتك وألقابك، أسلوبك التكتيكي، وتدرج مسيرتك المهنية.
                   </p>
                 </div>
                 {acceptedOffer && (
@@ -300,6 +300,36 @@ export const SeasonTransitionModal: React.FC = () => {
                     إلغاء اختيار العقد
                   </button>
                 )}
+              </div>
+
+              {/* Manager Market Profile Status Card */}
+              <div className="bg-slate-900/90 p-3.5 rounded-2xl border border-slate-700/60 flex flex-wrap items-center justify-between gap-3 text-xs">
+                <div className="flex items-center gap-3">
+                  <div className="bg-amber-500/20 text-amber-300 px-2.5 py-1 rounded-xl border border-amber-500/30 font-bold flex items-center gap-1.5">
+                    <Award className="w-4 h-4 text-amber-400" />
+                    <span>رخصة {manager.license || 'D'}</span>
+                  </div>
+                  <div className="text-slate-300">
+                    السمعة: <span className="text-amber-400 font-bold">⭐ {manager.reputation || 15}/100</span>
+                  </div>
+                  <div className="text-slate-300">
+                    المستوى: <span className="text-blue-400 font-bold">{manager.level || 1}</span>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-3 text-slate-400">
+                  <span>
+                    الألقاب: <strong className="text-slate-200">{(manager.leagueTitles || 0) + (manager.cupTitles || 0)} 🏆</strong>
+                  </span>
+                  <span>•</span>
+                  <span>
+                    نسبة الانتصارات: <strong className="text-emerald-400">
+                      {manager.matchesManaged && manager.matchesManaged > 0
+                        ? `${Math.round(((manager.wins || 0) / manager.matchesManaged) * 100)}%`
+                        : '—'}
+                    </strong>
+                  </span>
+                </div>
               </div>
 
               {/* Current Club Option Card */}
@@ -383,7 +413,12 @@ export const SeasonTransitionModal: React.FC = () => {
               onClick={() => startNextSeason(acceptedOffer?.id)}
               className="flex-1 sm:flex-initial py-3.5 px-8 rounded-2xl bg-gradient-to-r from-amber-500 via-amber-600 to-amber-700 hover:from-amber-400 hover:to-amber-600 text-slate-950 font-black text-sm sm:text-base flex items-center justify-center gap-2 shadow-xl shadow-amber-500/20 active:scale-95 transition-all cursor-pointer"
             >
-              <Sparkles className="w-5 h-5 text-slate-950" /> بدء الموسم الجديد (الموسم {nextSeasonNum})
+              <Sparkles className="w-5 h-5 text-slate-950" />
+              <span>
+                {acceptedOffer
+                  ? `الانتقال وبدء الموسم الجديد مع ${acceptedOffer.clubName} ✍️`
+                  : `بدء الموسم الجديد مع ${userClub?.name || 'فريقك'} 🚀`}
+              </span>
             </button>
           </div>
         </div>

@@ -37,7 +37,15 @@ import {
   TrainingBoostType,
   StaffMember,
   StaffRole,
+  Sponsor,
+  SponsorshipOffer,
+  SponsorCategory,
 } from '../types/game';
+import {
+  generateIncomingSponsorshipOffers,
+  negotiateSponsorshipOffer as negotiateSponsorService,
+  getSponsorCategoryLabel,
+} from '../services/sponsorshipService';
 import { hireStaffMember, getClubStaffBonuses } from '../utils/staffEngine';
 import { processPostMatchPlayerUpdates, buildMatchStatsMap } from '../utils/playerFatigueEngine';
 import { simulateMultipleLeagueRounds } from '../utils/batchSimulationEngine';
@@ -63,6 +71,7 @@ import {
   updateLeagueStandings,
   createInitialLiveMatchState,
   simulateMatchStep,
+  simulatePenaltyShootout,
   LiveSimulationState,
 } from '../utils/engine';
 import {
@@ -72,7 +81,9 @@ import {
   generateSeasonJobOffers,
   initNationalCupTournament,
   processNewSeasonAdvancement,
+  repairCupProgressionIntegrity,
 } from '../utils/seasonEngine';
+import { evaluateLicenseEligibility } from '../utils/careerProgressionEngine';
 import { simulateKnockoutMatch } from '../utils/continentalEngine';
 import {
   addDaysToDate,
@@ -82,6 +93,7 @@ import {
   generateDailyWorldNews,
   generateInitialBoardSystem,
   getInitialSeasonDate,
+  normalizeCalendarDate,
   simulateDailyNegotiations,
   simulateDailySquadTraining,
 } from '../utils/calendarEngine';
@@ -99,9 +111,11 @@ import { isRealClub, loadRealClubSquad } from '../data/realPlayersData';
 import { useAuth } from './AuthContext';
 import { getLocalTrainerProfile, saveLocalTrainerProfile } from '../services/trainerProfileService';
 import { gameStateRepository } from '../services/gameStateRepository';
+import { migrateSavePayload, CURRENT_SAVE_FORMAT_VERSION } from '../services/saveBackupService';
 import { smartSyncManager, SmartSyncInput } from '../services/smartSyncManager';
 import { canPlayerJoinClub, DEFAULT_ECONOMY_CONFIG, calculateClubMonthlyIncome, calculateClubTotalMonthlyWages, validateTransferFinancials } from '../services/economyService';
 import { fetchActiveBroadcasts, applyWorldOverridesToClubs, applyWorldOverridesToMarket, isPlayerDeletedInOverrides } from '../services/adminService';
+import { redeemPromoCode } from '../services/promoCodeService';
 import { isQuotaExceededError, markQuotaExceeded, isRecentQuotaExceeded } from '../utils/firestoreErrorHelper';
 import { validateCareerState, resignManagerFromClub, appointManagerToClub } from '../utils/careerValidator';
 import {
@@ -212,6 +226,7 @@ interface GameContextType {
   resumeSecondHalf: (teamTalkMoraleBoost?: boolean) => void;
   makeLiveSubstitution: (outPlayerId: string, inPlayerId: string) => { success: boolean; message: string };
   toggleLiveAutoSubs: () => void;
+  recordUserMatchAction: (actionType: 'goal' | 'save' | 'chance' | 'tackle', description?: string, playerName?: string) => void;
   changeLiveMentality: (mentality: TeamTactics['mentality']) => void;
   changeLivePressing: (pressing: TeamTactics['pressingIntensity']) => void;
 
@@ -297,7 +312,8 @@ interface GameContextType {
   updateManagerName: (name: string) => void;
   updateTrainerProfile: (name: string, age: number, nationality: string) => void;
   exportCurrentSavePayload: () => any;
-  applyLoadedSave: (save: any) => void;
+  applyLoadedSave: (save: any) => Promise<void> | void;
+  runSaveDataMigration: (rawSave: any) => { migratedPayload: any; upgraded: boolean; fromVersion: number; toVersion: number };
 
   // Scouting & Opponent Spy System
   scoutedOpponents: Record<string, OpponentScoutingReport>;
@@ -313,6 +329,17 @@ interface GameContextType {
 
   // AdMob Rewarded Economy System (نظام مكافآت الإعلانات الآمن)
   claimAdReward: (rewardType: AdRewardType, boostSubtype?: TrainingBoostType) => { success: boolean; message: string };
+
+  // Promo / Gift Codes System (نظام استرداد أكواد الهدايا والمكافآت)
+  redeemGiftCode: (code: string) => Promise<{ success: boolean; message: string; rewardAmount?: number; rewardCoins?: number }>;
+
+  // Sponsorship System (نظام عقود الرعاية والشراكات التجارية)
+  availableSponsorOffers: SponsorshipOffer[];
+  signSponsorshipContract: (offer: SponsorshipOffer) => { success: boolean; message: string };
+  terminateSponsorshipContract: (sponsorId: string) => { success: boolean; message: string };
+  negotiateSponsorshipOffer: (offerId: string) => { success: boolean; message: string };
+  renewSponsorshipContract: (sponsorId: string) => { success: boolean; message: string };
+  refreshSponsorshipOffers: () => void;
 }
 
 const STORAGE_KEY = 'anta_el_modareb_save_v1';
@@ -505,6 +532,18 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       }
     } catch {}
 
+    const matches = parsed?.matchesManaged ?? parsed?.careerMatches ?? 0;
+    const completedSeasons = parsed?.totalSeasonsCompleted ?? Math.max(0, (parsed?.totalSeasons || 1) - 1);
+    const existingMinutes = typeof parsed?.totalPlayTimeMinutes === 'number' ? parsed.totalPlayTimeMinutes : 0;
+    const migratedPlayTimeMinutes = existingMinutes > 0
+      ? existingMinutes
+      : (matches > 0 ? (matches * 4 + completedSeasons * 20) : 0);
+
+    const existingDeveloped = typeof parsed?.totalPlayersDeveloped === 'number' ? parsed.totalPlayersDeveloped : 0;
+    const migratedPlayersDeveloped = existingDeveloped > 0
+      ? existingDeveloped
+      : Math.max(0, Math.floor((parsed?.developmentPoints || 0) / 15));
+
     return {
       ...INITIAL_MANAGER,
       ...parsed,
@@ -519,9 +558,21 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         ? parsed.financialTransactions
         : INITIAL_MANAGER.financialTransactions,
       completedCourses: Array.isArray(parsed?.completedCourses) ? parsed.completedCourses : [],
-      license: (parsed?.license && ['D', 'C', 'B', 'A', 'PRO'].includes(parsed.license)) ? parsed.license : 'D',
+      license: (parsed?.license && ['D', 'C', 'B', 'A', 'PRO', 'ELITE'].includes(parsed.license)) ? parsed.license : 'D',
       totalClubDonations: parsed?.totalClubDonations ?? 0,
       totalBonusesEarned: parsed?.totalBonusesEarned ?? 0,
+      matchesManaged: matches,
+      wins: parsed?.wins ?? parsed?.careerWins ?? 0,
+      draws: parsed?.draws ?? parsed?.careerDraws ?? 0,
+      losses: parsed?.losses ?? parsed?.careerLosses ?? 0,
+      totalPlayTimeMinutes: migratedPlayTimeMinutes,
+      totalPlayersDeveloped: migratedPlayersDeveloped,
+      tacticalExperience: parsed?.tacticalExperience && typeof parsed.tacticalExperience === 'object'
+        ? { ...INITIAL_MANAGER.tacticalExperience, ...parsed.tacticalExperience }
+        : (INITIAL_MANAGER.tacticalExperience || {}),
+      tacticalKnowledge: Array.isArray(parsed?.tacticalKnowledge)
+        ? parsed.tacticalKnowledge
+        : (INITIAL_MANAGER.tacticalKnowledge || []),
       trophies: Array.isArray(parsed?.trophies) ? parsed.trophies : [],
       history: Array.isArray(parsed?.history)
         ? parsed.history.map((h: any) => ({
@@ -791,10 +842,13 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const [calendarDate, setCalendarDate] = useState<CalendarDate>(() => {
     try {
       const saved = localStorage.getItem(`${STORAGE_KEY}_calendarDate`);
-      if (saved) return JSON.parse(saved);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        return normalizeCalendarDate(parsed, season.seasonNumber || 1);
+      }
       return getInitialSeasonDate(season.seasonNumber || 1);
     } catch {
-      return getInitialSeasonDate(1);
+      return getInitialSeasonDate(season?.seasonNumber || 1);
     }
   });
 
@@ -916,7 +970,10 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     try {
       const saved = localStorage.getItem(`${STORAGE_KEY}_worldRankings`);
       if (saved) {
-        return JSON.parse(saved);
+        const parsed = JSON.parse(saved);
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed) && Array.isArray(parsed.managers) && Array.isArray(parsed.clubs)) {
+          return parsed;
+        }
       }
       return generateMonthlyWorldRankings(manager, userClub, calendarDate?.rawDateStr?.slice(0, 7) || '2026-08');
     } catch {
@@ -934,8 +991,35 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
   });
 
+  // Sponsorship Offers Market State (سوق وعروض الرعاية الواردة)
+  const [availableSponsorOffers, setAvailableSponsorOffers] = useState<SponsorshipOffer[]>(() => {
+    try {
+      const saved = localStorage.getItem(`${STORAGE_KEY}_sponsorOffers`);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+      return userClub ? generateIncomingSponsorshipOffers(userClub, 4) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(`${STORAGE_KEY}_sponsorOffers`, JSON.stringify(availableSponsorOffers));
+    } catch {}
+  }, [availableSponsorOffers]);
+
+  useEffect(() => {
+    if (userClub && (!availableSponsorOffers || availableSponsorOffers.length === 0)) {
+      setAvailableSponsorOffers(generateIncomingSponsorshipOffers(userClub, 4));
+    }
+  }, [userClub?.id]);
+
   const recalculateWorldRankings = (monthStr?: string) => {
-    const updated = generateMonthlyWorldRankings(manager, userClub, monthStr || calendarDate.rawDateStr.slice(0, 7));
+    const targetMonth = monthStr || (calendarDate?.rawDateStr ? calendarDate.rawDateStr.slice(0, 7) : '2026-08');
+    const updated = generateMonthlyWorldRankings(manager, userClub, targetMonth);
     setWorldRankings(updated);
     const userEntry = (updated?.managers || []).find(m => m && (m.id === 'user_manager' || (m.name && m.name.includes('(أنت)'))));
     if (userEntry) {
@@ -963,7 +1047,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   // Calendar & Next Match Helpers
   const nextMatchInfo = userClub ? calculateDaysUntilNextMatch(
-    calendarDate.rawDateStr,
+    calendarDate?.rawDateStr,
     currentRound,
     getInitialSeasonDate(season.seasonNumber).rawDateStr
   ) : { daysRemaining: 0, isMatchDay: false, scheduledDateStr: '', formattedScheduledDate: '' };
@@ -1008,33 +1092,128 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   // Track initial load completion to avoid overwriting saves on cold mount
   const isInitialLoadDoneRef = useRef(false);
 
-  // Helper to safely apply loaded save data into React state
-  const applyLoadedSave = useCallback((save: any) => {
-    if (!save) return;
-    if (save.season) setSeason(save.season);
-    if (save.activeLeague) setActiveLeague(save.activeLeague);
-    if (Array.isArray(save.teams) && save.teams.length > 0) setTeams(save.teams.map(normalizeClub));
-    if (Array.isArray(save.standings) && save.standings.length > 0) setStandings(save.standings.map(normalizeStanding));
-    if (Array.isArray(save.fixtures) && save.fixtures.length > 0) setFixtures(save.fixtures);
-    if (typeof save.currentRound === 'number') setCurrentRound(save.currentRound);
-    if (save.manager) setManager(normalizeManagerProfile(save.manager));
-    if (Array.isArray(save.transferMarket)) setTransferMarket(save.transferMarket);
-    if (Array.isArray(save.incomingBids)) setIncomingBids(save.incomingBids);
-    if (Array.isArray(save.inbox)) setInbox(save.inbox);
-    if (save.cupTournament) setCupTournament(save.cupTournament);
-    if (Array.isArray(save.jobOffers)) setJobOffers(save.jobOffers);
-    if (save.seasonEndSummary !== undefined) setSeasonEndSummary(save.seasonEndSummary);
-    if (Array.isArray(save.transferHistory)) setTransferHistory(save.transferHistory);
-    if (save.clubEconomy) setClubEconomy(save.clubEconomy);
-    if (save.calendarDate) setCalendarDate(save.calendarDate);
-    if (Array.isArray(save.activeNegotiations)) setActiveNegotiations(save.activeNegotiations);
-    if (save.boardSystem) setBoardSystem(save.boardSystem);
-    if (Array.isArray(save.dailyNews)) setDailyNews(save.dailyNews);
-    if (Array.isArray(save.retiredPlayers)) setRetiredPlayers(save.retiredPlayers);
-    if (save.worldRankings) setWorldRankings(save.worldRankings);
-    if (save.scoutedOpponents) setScoutedOpponents(save.scoutedOpponents);
-    if (Array.isArray(save.deletedMessageIds)) setDeletedMessageIds(save.deletedMessageIds);
+  /**
+   * Save Data Migration Manager (نظام إدارة ترقية إصدارات البيانات المحفوظة)
+   * Evaluates the schemaVersion & saveVersion of incoming save data (local or cloud),
+   * detects any structural differences or outdated schema versions, and automatically
+   * upgrades the payload to the latest schema without losing any career progress.
+   */
+  const runSaveDataMigration = useCallback((rawSave: any): { migratedPayload: any; upgraded: boolean; fromVersion: number; toVersion: number } => {
+    if (!rawSave) {
+      return { migratedPayload: null, upgraded: false, fromVersion: 0, toVersion: CURRENT_SAVE_FORMAT_VERSION };
+    }
+
+    const unwrapSource = rawSave?.payload || rawSave?.current_save || rawSave?.data || rawSave?.save || rawSave;
+    const detectedSchemaVersion = typeof unwrapSource?.schemaVersion === 'number' 
+      ? unwrapSource.schemaVersion 
+      : 1;
+
+    // Check if structure requires upgrade
+    const needsStructuralUpgrade = 
+      detectedSchemaVersion < CURRENT_SAVE_FORMAT_VERSION ||
+      !unwrapSource?.calendarDate ||
+      !unwrapSource?.clubEconomy ||
+      !Array.isArray(unwrapSource?.transferHistory) ||
+      !Array.isArray(unwrapSource?.teams) ||
+      !unwrapSource?.manager?.favoriteFormation ||
+      unwrapSource?.manager?.tacticalFamiliarity === undefined ||
+      (unwrapSource?.teams?.length > 0 && !unwrapSource.teams.some((t: any) => t && t.isUserClub));
+
+    // Execute comprehensive normalization and schema migration
+    const migratedPayload = migrateSavePayload(rawSave);
+
+    const upgraded = Boolean(
+      needsStructuralUpgrade || 
+      detectedSchemaVersion !== CURRENT_SAVE_FORMAT_VERSION ||
+      migratedPayload.schemaVersion !== detectedSchemaVersion
+    );
+
+    if (upgraded) {
+      console.info(`[MigrationManager] Automatically migrated save data from Schema v${detectedSchemaVersion} to Schema v${CURRENT_SAVE_FORMAT_VERSION}. Career integrity preserved.`);
+    }
+
+    return {
+      migratedPayload,
+      upgraded,
+      fromVersion: detectedSchemaVersion,
+      toVersion: CURRENT_SAVE_FORMAT_VERSION,
+    };
   }, []);
+
+  // Helper to safely apply loaded save data into React state, update profile, and persist to local storage
+  const applyLoadedSave = useCallback(async (save: any) => {
+    if (!save) return;
+    isInitialLoadDoneRef.current = true;
+
+    // Migrate and standardize payload via Migration Manager
+    const { migratedPayload: migrated, upgraded } = runSaveDataMigration(save);
+    if (!migrated) return;
+
+    // Self-healing: Repair any cup qualification/progression integrity issues
+    const resolvedUserClubId = migrated.manager?.userClubId || migrated.teams?.find((t: any) => t.isUserClub)?.id;
+    if (migrated.cupTournament && resolvedUserClubId) {
+      const repaired = repairCupProgressionIntegrity(migrated.cupTournament, migrated.fixtures || [], resolvedUserClubId);
+      if (repaired.repaired) {
+        migrated.cupTournament = repaired.updatedCup;
+        if (repaired.updatedFixtures?.length) {
+          migrated.fixtures = repaired.updatedFixtures;
+        }
+      }
+    }
+
+    if (migrated.season) setSeason(migrated.season);
+    if (migrated.activeLeague) setActiveLeague(migrated.activeLeague);
+    if (Array.isArray(migrated.teams) && migrated.teams.length > 0) setTeams(migrated.teams.map(normalizeClub));
+    if (Array.isArray(migrated.standings) && migrated.standings.length > 0) setStandings(migrated.standings.map(normalizeStanding));
+    if (Array.isArray(migrated.fixtures) && migrated.fixtures.length > 0) setFixtures(migrated.fixtures);
+    if (typeof migrated.currentRound === 'number') setCurrentRound(migrated.currentRound);
+    if (migrated.manager) {
+      const normalizedMgr = normalizeManagerProfile(migrated.manager);
+      setManager(normalizedMgr);
+      if (normalizedMgr.name) {
+        saveLocalTrainerProfile({
+          name: normalizedMgr.name,
+          age: normalizedMgr.age || 35,
+          nationality: normalizedMgr.nationality || 'مصري',
+          trainerId: normalizedMgr.trainerId || 'TRN-RESTORED',
+        });
+      }
+    }
+    if (Array.isArray(migrated.transferMarket)) setTransferMarket(migrated.transferMarket);
+    if (Array.isArray(migrated.incomingBids)) setIncomingBids(migrated.incomingBids);
+    if (Array.isArray(migrated.inbox)) setInbox(migrated.inbox);
+    if (migrated.cupTournament) setCupTournament(migrated.cupTournament);
+    if (Array.isArray(migrated.jobOffers)) setJobOffers(migrated.jobOffers);
+    if (migrated.seasonEndSummary !== undefined) setSeasonEndSummary(migrated.seasonEndSummary);
+    if (Array.isArray(migrated.transferHistory)) setTransferHistory(migrated.transferHistory);
+    if (migrated.clubEconomy) setClubEconomy(migrated.clubEconomy);
+    if (migrated.calendarDate) {
+      setCalendarDate(normalizeCalendarDate(migrated.calendarDate, migrated.season?.seasonNumber || 1));
+    }
+    if (Array.isArray(migrated.activeNegotiations)) setActiveNegotiations(migrated.activeNegotiations);
+    if (migrated.boardSystem) setBoardSystem(migrated.boardSystem);
+    if (Array.isArray(migrated.dailyNews)) setDailyNews(migrated.dailyNews);
+    if (Array.isArray(migrated.retiredPlayers)) setRetiredPlayers(migrated.retiredPlayers);
+    if (migrated.worldRankings) {
+      if (typeof migrated.worldRankings === 'object' && !Array.isArray(migrated.worldRankings) && Array.isArray(migrated.worldRankings.managers) && Array.isArray(migrated.worldRankings.clubs)) {
+        setWorldRankings(migrated.worldRankings);
+      } else {
+        const resolvedClub = migrated.teams?.find(t => t && t.isUserClub) || userClub;
+        setWorldRankings(generateMonthlyWorldRankings(migrated.manager || manager, resolvedClub, migrated.calendarDate?.rawDateStr?.slice(0, 7) || '2026-08'));
+      }
+    }
+    if (migrated.scoutedOpponents && typeof migrated.scoutedOpponents === 'object' && !Array.isArray(migrated.scoutedOpponents)) {
+      setScoutedOpponents(migrated.scoutedOpponents);
+    }
+    if (Array.isArray(migrated.deletedMessageIds)) setDeletedMessageIds(migrated.deletedMessageIds);
+
+    // Save immediately to local IndexedDB and localStorage so reload retains this save
+    try {
+      await gameStateRepository.saveLocalGameState(migrated);
+    } catch (err) {
+      console.warn('[GameContext] Notice saving applied save state:', err);
+    }
+  }, [runSaveDataMigration]);
 
   // 1. Local-First Hydration on App Mount (IndexedDB primary + localStorage fallback)
   useEffect(() => {
@@ -1266,6 +1445,53 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     syncBroadcasts();
   }, [deletedMessageIds]);
+
+  // ----------------------------------------------------
+  // Anti-AFK Active Play Time Tracking Engine
+  // ----------------------------------------------------
+  const lastUserInteractionRef = useRef<number>(Date.now());
+  const activeSecondsBufferRef = useRef<number>(0);
+
+  useEffect(() => {
+    // Record user interactions on window with lightweight throttling
+    let lastThrottled = 0;
+    const registerInteraction = () => {
+      const now = Date.now();
+      if (now - lastThrottled > 1000) {
+        lastThrottled = now;
+        lastUserInteractionRef.current = now;
+      }
+    };
+
+    const events = ['pointerdown', 'keydown', 'touchstart', 'scroll', 'pointermove', 'mousemove', 'wheel'];
+    events.forEach(evt => window.addEventListener(evt, registerInteraction, { passive: true }));
+
+    // Heartbeat ticker running every 10 seconds
+    const interval = setInterval(() => {
+      // If tab is hidden in background, STOP counting immediately
+      if (document.hidden) return;
+      const idleMs = Date.now() - lastUserInteractionRef.current;
+      // Smart idle window: 180s (3 minutes) allows thoughtful tactical planning,
+      // reading match & scout reports, and watching live simulations without AFK exploits.
+      if (idleMs > 180000) return; // User is genuinely idle/AFK!
+
+      // Active play time increment: 10 seconds of verified gameplay
+      activeSecondsBufferRef.current += 10;
+
+      if (activeSecondsBufferRef.current >= 60) {
+        activeSecondsBufferRef.current -= 60;
+        setManager(prev => ({
+          ...prev,
+          totalPlayTimeMinutes: (prev.totalPlayTimeMinutes || 0) + 1,
+        }));
+      }
+    }, 10000);
+
+    return () => {
+      clearInterval(interval);
+      events.forEach(evt => window.removeEventListener(evt, registerInteraction));
+    };
+  }, []);
 
   // Live match playback timer ticker (Real event-by-event simulation)
   useEffect(() => {
@@ -1692,6 +1918,68 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     });
   };
 
+  const recordUserMatchAction = (
+    actionType: 'goal' | 'save' | 'chance' | 'tackle',
+    description?: string,
+    playerName?: string
+  ) => {
+    setLiveMatch(prev => {
+      if (!prev || prev.isFinished) return prev;
+      const isHome = userClub ? prev.homeTeam.id === userClub.id : true;
+      const userTeam = isHome ? prev.homeTeam : prev.awayTeam;
+      const currentMin = Math.max(1, prev.currentMinute);
+
+      const resolvedPlayerName = playerName || userClub?.players?.[0]?.name || (isHome ? prev.homeTeam.name : prev.awayTeam.name);
+
+      let eventType: MatchEvent['type'] = 'chance';
+      let defaultDesc = `⚡ فرصة خطيرة بعد جملة تكتيكية وبناء هجومي رائع!`;
+
+      if (actionType === 'goal') {
+        eventType = 'goal';
+        defaultDesc = `⚽ هـــــــــدف! (${resolvedPlayerName}) يسجل ببراعة بفضل التحكم اليدوي المباشر المتقن!`;
+      } else if (actionType === 'save') {
+        eventType = 'save';
+        defaultDesc = `🧤 تصدي خيالي من حارس المرمى بعد تسديدة قوية محكمة!`;
+      } else if (actionType === 'tackle') {
+        eventType = 'chance';
+        defaultDesc = `🛡️ استخلاص دفاعي بطولي وافتكاك للكرة في توقيت مثالي!`;
+      }
+
+      const newEvent: MatchEvent = {
+        minute: currentMin,
+        type: eventType,
+        teamId: userTeam.id,
+        playerName: actionType === 'goal' ? resolvedPlayerName : undefined,
+        description: description || defaultDesc,
+      };
+
+      const newHomeScore = isHome && actionType === 'goal' ? prev.homeScore + 1 : prev.homeScore;
+      const newAwayScore = !isHome && actionType === 'goal' ? prev.awayScore + 1 : prev.awayScore;
+
+      return {
+        ...prev,
+        homeScore: newHomeScore,
+        awayScore: newAwayScore,
+        events: [...prev.events, newEvent].sort((a, b) => a.minute - b.minute),
+        homeXg: isHome ? prev.homeXg + (actionType === 'goal' ? 0.72 : 0.25) : prev.homeXg,
+        awayXg: !isHome ? prev.awayXg + (actionType === 'goal' ? 0.72 : 0.25) : prev.awayXg,
+        homeDangerousAttacks: isHome ? prev.homeDangerousAttacks + 1 : prev.homeDangerousAttacks,
+        awayDangerousAttacks: !isHome ? prev.awayDangerousAttacks + 1 : prev.awayDangerousAttacks,
+        stats: {
+          ...prev.stats,
+          homeShots: isHome ? prev.stats.homeShots + 1 : prev.stats.homeShots,
+          awayShots: !isHome ? prev.stats.awayShots + 1 : prev.stats.awayShots,
+          homeShotsOnTarget: isHome && (actionType === 'goal' || actionType === 'save')
+            ? prev.stats.homeShotsOnTarget + 1
+            : prev.stats.homeShotsOnTarget,
+          awayShotsOnTarget: !isHome && (actionType === 'goal' || actionType === 'save')
+            ? prev.stats.awayShotsOnTarget + 1
+            : prev.stats.awayShotsOnTarget,
+        }
+      };
+    });
+  };
+
   const hireClubStaff = (staffMember: StaffMember) => {
     if (!userClub) return;
     const updatedClub = hireStaffMember(userClub, staffMember);
@@ -1745,6 +2033,30 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         const userScore = isUserHome ? state.homeScore : state.awayScore;
         const oppScore = isUserHome ? state.awayScore : state.homeScore;
 
+        const isCup = 
+          state.fixture?.competitionType === 'cup' || 
+          Boolean(state.fixture?.cupStage) || 
+          Boolean(state.fixture?.stageName?.includes('نهائي')) ||
+          Boolean(state.fixture?.stageName?.includes('كأس')) ||
+          Boolean(state.fixture?.stageName?.includes('الكأس')) ||
+          Boolean(state.fixture?.stageName?.includes('دور الـ')) ||
+          Boolean(state.fixture?.competitionName?.includes('كأس')) ||
+          Boolean(state.fixture?.competitionName?.includes('الكأس')) ||
+          Boolean(state.fixture?.competitionName?.toLowerCase()?.includes('cup')) ||
+          Boolean(state.fixture?.id?.toLowerCase()?.includes('cup'));
+        let finalHomePenalties = state.homePenalties;
+        let finalAwayPenalties = state.awayPenalties;
+        let penaltyEvents = state.events || [];
+
+        if (isCup && state.homeScore === state.awayScore) {
+          if (finalHomePenalties === undefined || finalAwayPenalties === undefined || finalHomePenalties === finalAwayPenalties) {
+            const shoot = simulatePenaltyShootout(state.homeTeam, state.awayTeam, state.homeTactics, state.awayTactics);
+            finalHomePenalties = shoot.homePenalties;
+            finalAwayPenalties = shoot.awayPenalties;
+            penaltyEvents = [...penaltyEvents, ...shoot.penaltyEvents];
+          }
+        }
+
         const calculatedRevenue = (userIsInFixture && userClub) ? calculateMatchRevenue({
           userClub,
           opponentClub: oppClub,
@@ -1752,7 +2064,9 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           userScore,
           opponentScore: oppScore,
           leagueTier: activeLeague?.tier || 1,
-          isCupMatch: state.fixture?.competitionType === 'cup',
+          isCupMatch: isCup,
+          userPenalties: isCup ? (isUserHome ? finalHomePenalties : finalAwayPenalties) : undefined,
+          opponentPenalties: isCup ? (isUserHome ? finalAwayPenalties : finalHomePenalties) : undefined,
           customTicketPrice: userClub.facilities?.ticketPrice,
           isSkipped: true, // 50% revenue penalty for skipping the match
         }) : undefined;
@@ -1765,6 +2079,9 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           isPlaying: false,
           isFinished: true,
           isHalfTime: false,
+          homePenalties: finalHomePenalties,
+          awayPenalties: finalAwayPenalties,
+          events: penaltyEvents,
           matchRevenue: calculatedRevenue,
         };
       } catch (err) {
@@ -1859,8 +2176,62 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const isUserHome = userClub ? homeTeam?.id === userClub.id : false;
     const userScore = isUserHome ? homeScore : awayScore;
     const oppScore = isUserHome ? awayScore : homeScore;
-    const isUserWin = userScore > oppScore;
-    const isUserDraw = userScore === oppScore;
+    const isCup = 
+      fixture?.competitionType === 'cup' || 
+      Boolean(fixture?.cupStage) || 
+      Boolean(fixture?.stageName?.includes('نهائي')) ||
+      Boolean(fixture?.stageName?.includes('كأس')) ||
+      Boolean(fixture?.stageName?.includes('الكأس')) ||
+      Boolean(fixture?.stageName?.includes('دور الـ')) ||
+      Boolean(fixture?.stageName?.includes('ثمن')) ||
+      Boolean(fixture?.stageName?.includes('ربع')) ||
+      Boolean(fixture?.stageName?.includes('نصف')) ||
+      Boolean(fixture?.competitionName?.includes('كأس')) ||
+      Boolean(fixture?.competitionName?.includes('الكأس')) ||
+      Boolean(fixture?.competitionName?.toLowerCase()?.includes('cup')) ||
+      Boolean(fixture?.id?.toLowerCase()?.includes('cup')) ||
+      (liveMatch.homePenalties !== undefined && liveMatch.awayPenalties !== undefined) ||
+      Boolean(cupTournament?.matches?.some(m => m.id === fixture?.id || (userClub && (m.homeTeamId === userClub.id || m.awayTeamId === userClub.id) && (m.roundTrigger === fixture?.round || m.roundTrigger === currentRound))));
+
+    const resolvedCupStage = fixture?.cupStage || (
+      fixture?.stageName?.includes('64') ? 'round_of_64' :
+      fixture?.stageName?.includes('32') ? 'round_of_32' :
+      fixture?.stageName?.includes('16') || fixture?.stageName?.includes('ثمن') ? 'round_of_16' :
+      fixture?.stageName?.includes('ربع') || fixture?.stageName?.includes('quarter') ? 'quarter' :
+      fixture?.stageName?.includes('نصف') || fixture?.stageName?.includes('semi') ? 'semi' :
+      fixture?.stageName?.includes('نهائي') || fixture?.stageName?.includes('final') ? 'final' :
+      undefined
+    );
+
+    // Handle penalty shootout resolution for tied cup matches
+    let finalHomePenalties = liveMatch.homePenalties;
+    let finalAwayPenalties = liveMatch.awayPenalties;
+    if (isCup && homeScore === awayScore) {
+      if (finalHomePenalties === undefined || finalAwayPenalties === undefined || finalHomePenalties === finalAwayPenalties) {
+        const shoot = simulatePenaltyShootout(homeTeam, awayTeam, liveMatch.homeTactics, liveMatch.awayTactics);
+        finalHomePenalties = shoot.homePenalties;
+        finalAwayPenalties = shoot.awayPenalties;
+      }
+    }
+
+    const hasPenalties = isCup && finalHomePenalties !== undefined && finalAwayPenalties !== undefined;
+    const userPenalties = isUserHome ? finalHomePenalties : finalAwayPenalties;
+    const oppPenalties = isUserHome ? finalAwayPenalties : finalHomePenalties;
+
+    // In cup matches, a draw does not exist - progression is decided by penalty shootout
+    const isUserWin = isCup
+      ? (hasPenalties ? (userPenalties! > oppPenalties!) : userScore > oppScore)
+      : userScore > oppScore;
+    const isUserDraw = isCup
+      ? false
+      : userScore === oppScore;
+    const isUserLoss = isCup
+      ? (hasPenalties ? (userPenalties! < oppPenalties!) : userScore < oppScore)
+      : userScore < oppScore;
+
+    const matchWinner = isCup
+      ? (hasPenalties ? (finalHomePenalties! > finalAwayPenalties! ? homeTeamId : awayTeamId) : (homeScore > awayScore ? homeTeamId : awayTeamId))
+      : undefined;
 
     const resolvedRevenue: MatchRevenueBreakdown = (liveMatch.matchRevenue) || (userClub ? calculateMatchRevenue({
       userClub,
@@ -1869,7 +2240,9 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       userScore,
       opponentScore: oppScore,
       leagueTier: activeLeague?.tier || 1,
-      isCupMatch: fixture?.competitionType === 'cup',
+      isCupMatch: isCup,
+      userPenalties: isCup ? userPenalties : undefined,
+      opponentPenalties: isCup ? oppPenalties : undefined,
       customTicketPrice: userClub.facilities?.ticketPrice,
     }) : {
       isHome: isUserHome,
@@ -1882,8 +2255,8 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       sponsorsRevenue: 15000,
       sponsorsWinBonus: 0,
       sponsorsMatchdayAd: 15000,
-      resultBonus: 5000,
-      resultType: 'draw',
+      resultBonus: isUserWin ? 20000 : isUserDraw ? 5000 : 0,
+      resultType: isUserWin ? 'win' : isUserDraw ? 'draw' : 'loss',
       baseTotalRevenue: 90000,
       totalRevenue: 90000,
       isDoubledWithAd: false,
@@ -1901,6 +2274,9 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           ...f,
           homeScore,
           awayScore,
+          homePenalties: finalHomePenalties,
+          awayPenalties: finalAwayPenalties,
+          winnerTeamId: matchWinner,
           isPlayed: true,
           events: persistentEvents,
           stats,
@@ -1924,51 +2300,89 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     // Update cup tournament matches if this was a cup match
     let updatedCupTournament = cupTournament;
-    if (fixture.competitionType === 'cup' && updatedCupTournament) {
-      let matchWinner = '';
-      let hp = liveMatch.homePenalties;
-      let ap = liveMatch.awayPenalties;
-      if (homeScore > awayScore) {
-        matchWinner = homeTeam.id;
-      } else if (awayScore > homeScore) {
-        matchWinner = awayTeam.id;
-      } else {
-        // Tied in knockout cup match -> penalty shootout
-        if (hp === undefined || ap === undefined || hp === ap) {
-          hp = 5;
-          ap = 4;
-        }
-        matchWinner = hp > ap ? homeTeam.id : awayTeam.id;
+    if (isCup && updatedCupTournament) {
+      const resolvedMatchWinner = matchWinner || (hasPenalties ? (finalHomePenalties! > finalAwayPenalties! ? homeTeamId : awayTeamId) : (homeScore > awayScore ? homeTeamId : awayTeamId));
+      const isFinal = resolvedCupStage === 'final' || fixture.cupStage === 'final' || fixture.stageName?.includes('النهائي');
+
+      if (userClub && resolvedMatchWinner === userClub.id) {
+        updatedCupTournament.userEliminatedStage = undefined;
       }
 
-      const isFinal = fixture.cupStage === 'final' || fixture.stageName?.includes('النهائي');
+      let cupMatchFoundAndUpdated = false;
+      const updatedMatches = updatedCupTournament.matches.map(m => {
+        const isSameId = m.id === fixture.id;
+        const isSameStage = !resolvedCupStage || m.stage === resolvedCupStage;
+        const isUserMatch = Boolean(userClub && (m.homeTeamId === userClub.id || m.awayTeamId === userClub.id) && (homeTeamId === userClub.id || awayTeamId === userClub.id));
+        const isSameTwoClubs = (m.homeTeamId === homeTeamId && m.awayTeamId === awayTeamId) || (m.homeTeamId === awayTeamId && m.awayTeamId === homeTeamId);
+
+        if (isSameId || (isSameStage && (isUserMatch || isSameTwoClubs))) {
+          cupMatchFoundAndUpdated = true;
+          const isMatchInverted = m.homeTeamId === awayTeamId;
+          return {
+            ...m,
+            homeTeamId: m.homeTeamId || (isUserHome ? homeTeamId : awayTeamId),
+            awayTeamId: m.awayTeamId || (isUserHome ? awayTeamId : homeTeamId),
+            homeScore: isMatchInverted ? awayScore : homeScore,
+            awayScore: isMatchInverted ? homeScore : awayScore,
+            homePenalties: isMatchInverted ? finalAwayPenalties : finalHomePenalties,
+            awayPenalties: isMatchInverted ? finalHomePenalties : finalAwayPenalties,
+            winnerTeamId: resolvedMatchWinner,
+            isPlayed: true,
+            events: persistentEvents,
+            stats,
+          };
+        }
+        return m;
+      });
+
+      // If placeholder match in this stage had not yet recorded user club, assign it now
+      if (!cupMatchFoundAndUpdated && resolvedCupStage) {
+        const targetIdx = updatedMatches.findIndex(m => m.stage === resolvedCupStage && !m.isPlayed);
+        if (targetIdx !== -1) {
+          updatedMatches[targetIdx] = {
+            ...updatedMatches[targetIdx],
+            homeTeamId: homeTeamId,
+            awayTeamId: awayTeamId,
+            homeScore,
+            awayScore,
+            homePenalties: finalHomePenalties,
+            awayPenalties: finalAwayPenalties,
+            winnerTeamId: resolvedMatchWinner,
+            isPlayed: true,
+            events: persistentEvents,
+            stats,
+          };
+        } else {
+          updatedMatches.push({
+            id: fixture.id || `cup_${resolvedCupStage}_user_${currentRound}`,
+            stage: resolvedCupStage as any,
+            stageName: fixture.stageName || 'مباراة الكأس',
+            roundTrigger: currentRound,
+            homeTeamId,
+            awayTeamId,
+            homeScore,
+            awayScore,
+            homePenalties: finalHomePenalties,
+            awayPenalties: finalAwayPenalties,
+            winnerTeamId: resolvedMatchWinner,
+            isPlayed: true,
+            events: persistentEvents,
+            stats,
+          });
+        }
+      }
 
       updatedCupTournament = {
         ...updatedCupTournament,
-        matches: updatedCupTournament.matches.map(m => {
-          if (m.id === fixture.id || (m.stage === fixture.cupStage && (m.homeTeamId === homeTeam.id || m.awayTeamId === awayTeam.id))) {
-            return {
-              ...m,
-              homeScore,
-              awayScore,
-              homePenalties: hp,
-              awayPenalties: ap,
-              winnerTeamId: matchWinner,
-              isPlayed: true,
-              events: persistentEvents,
-              stats,
-            };
-          }
-          return m;
-        }),
+        matches: updatedMatches,
       };
 
       if (isFinal) {
         updatedCupTournament.isCompleted = true;
-        updatedCupTournament.winnerClubId = matchWinner;
-        updatedCupTournament.runnerUpClubId = matchWinner === homeTeam.id ? awayTeam.id : homeTeam.id;
+        updatedCupTournament.winnerClubId = resolvedMatchWinner;
+        updatedCupTournament.runnerUpClubId = resolvedMatchWinner === homeTeam.id ? awayTeam.id : homeTeam.id;
 
-        if (userClub && matchWinner === userClub.id) {
+        if (userClub && resolvedMatchWinner === userClub.id) {
           updatedCupTournament.userEliminatedStage = undefined;
           const cupTrophy = updatedCupTournament.trophyName || updatedCupTournament.name || 'كأس مصر';
           setManager(prev => {
@@ -2003,8 +2417,28 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
 
     // 2. Simulate other matches in the same round
-    const allRoundMatches: { homeTeamId: string; awayTeamId: string; homeScore: number; awayScore: number; events: MatchEvent[] }[] = [
-      { homeTeamId: homeTeam.id, awayTeamId: awayTeam.id, homeScore, awayScore, events: persistentEvents }
+    const allRoundMatches: {
+      homeTeamId: string;
+      awayTeamId: string;
+      homeScore: number;
+      awayScore: number;
+      events: MatchEvent[];
+      isCup?: boolean;
+      homePenalties?: number;
+      awayPenalties?: number;
+      winnerTeamId?: string;
+    }[] = [
+      {
+        homeTeamId: homeTeam.id,
+        awayTeamId: awayTeam.id,
+        homeScore,
+        awayScore,
+        events: persistentEvents,
+        isCup,
+        homePenalties: finalHomePenalties,
+        awayPenalties: finalAwayPenalties,
+        winnerTeamId: matchWinner,
+      }
     ];
 
     if (DIAGNOSTIC_CONFIG.ENABLE_CPU_SIMULATION) {
@@ -2074,23 +2508,6 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         if (DIAGNOSTIC_CONFIG.ENABLE_STANDINGS_UPDATE) {
           if (!otherFix.competitionType || otherFix.competitionType === 'league') {
             updatedStandings = updateLeagueStandings(updatedStandings, otherHome.id, otherAway.id, otherResult.homeScore, otherResult.awayScore);
-          } else if (otherFix.competitionType === 'cup' && updatedCupTournament) {
-            updatedCupTournament = {
-              ...updatedCupTournament,
-              matches: updatedCupTournament.matches.map(m => {
-                if (m.id === otherFix.id || (m.stage === otherFix.cupStage && (m.homeTeamId === otherHome.id || m.awayTeamId === otherAway.id))) {
-                  return {
-                    ...m,
-                    homeScore: otherResult.homeScore,
-                    awayScore: otherResult.awayScore,
-                    isPlayed: true,
-                    events: prunedOtherEvents,
-                    stats: otherResult.stats,
-                  };
-                }
-                return m;
-              }),
-            };
           }
         }
       });
@@ -2106,7 +2523,15 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const cupRewardMessages: InboxMessage[] = [];
 
     if (updatedCupTournament) {
-      const cupAdv = advanceCupTournament(updatedCupTournament, currentRound, teams, userClub);
+      const isContinentalActive = Boolean(fixtures?.some(f => f.competitionType === 'continental'));
+      const cupAdv = advanceCupTournament(
+        updatedCupTournament,
+        currentRound,
+        teams,
+        userClub,
+        isContinentalActive,
+        totalRounds
+      );
       updatedCupTournament = cupAdv.updatedCup;
       cupNewsMessage = cupAdv.cupNewsMessage;
 
@@ -2133,11 +2558,12 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         const cupStages = ['round_of_64', 'round_of_32', 'round_of_16', 'quarter', 'semi', 'final'];
         cupStages.forEach(stage => {
           const stageMatches = updatedCupTournament!.matches.filter(m => m.stage === stage);
-          const stageFixes = updatedFixtures.filter(f => f.competitionType === 'cup' && f.cupStage === stage);
-          stageFixes.forEach((f, idx) => {
-            const cm = stageMatches[idx] || stageMatches.find(m => m.id === f.id || (f.homeTeamId && (m.homeTeamId === f.homeTeamId || m.awayTeamId === f.awayTeamId)));
-            if (cm) {
-              const fIndex = updatedFixtures.findIndex(existingF => existingF.id === f.id);
+          const stageFixes = updatedFixtures.filter(f => (f.competitionType === 'cup' || f.cupStage === stage) && (f.cupStage === stage || (!f.cupStage && f.stageName?.includes(stage))));
+          
+          stageMatches.forEach((cm, idx) => {
+            const targetFix = stageFixes.find(f => f.id === cm.id || (cm.homeTeamId && (f.homeTeamId === cm.homeTeamId || f.awayTeamId === cm.homeTeamId))) || stageFixes[idx];
+            if (targetFix) {
+              const fIndex = updatedFixtures.findIndex(existingF => existingF.id === targetFix.id);
               if (fIndex !== -1) {
                 updatedFixtures[fIndex] = {
                   ...updatedFixtures[fIndex],
@@ -2145,6 +2571,9 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                   awayTeamId: cm.awayTeamId || updatedFixtures[fIndex].awayTeamId,
                   homeScore: cm.homeScore !== undefined ? cm.homeScore : updatedFixtures[fIndex].homeScore,
                   awayScore: cm.awayScore !== undefined ? cm.awayScore : updatedFixtures[fIndex].awayScore,
+                  homePenalties: cm.homePenalties !== undefined ? cm.homePenalties : updatedFixtures[fIndex].homePenalties,
+                  awayPenalties: cm.awayPenalties !== undefined ? cm.awayPenalties : updatedFixtures[fIndex].awayPenalties,
+                  winnerTeamId: cm.winnerTeamId || updatedFixtures[fIndex].winnerTeamId,
                   isPlayed: cm.isPlayed !== undefined ? cm.isPlayed : updatedFixtures[fIndex].isPlayed,
                   events: cm.events || updatedFixtures[fIndex].events,
                   stats: cm.stats || updatedFixtures[fIndex].stats,
@@ -2153,6 +2582,16 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             }
           });
         });
+
+        // Run self-healing to guarantee that if user won in Round of 16 (or any cup match),
+        // they are 100% placed into the next stage fixture and match
+        if (userClub?.id) {
+          const rep = repairCupProgressionIntegrity(updatedCupTournament, updatedFixtures, userClub.id);
+          if (rep.repaired) {
+            updatedCupTournament = rep.updatedCup;
+            updatedFixtures = rep.updatedFixtures;
+          }
+        }
       }
     }
 
@@ -2173,6 +2612,9 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           `🏟️ الحضور الجماهيري: ${resolvedRevenue.attendance.toLocaleString()} مشجع من أصل ${resolvedRevenue.stadiumCapacity.toLocaleString()} مقعد (${resolvedRevenue.attendancePercentage}%)\n` +
           `🎟️ سعر التذكرة: ${resolvedRevenue.ticketPrice} ج.م • دخل التذاكر الأساسي: ${resolvedRevenue.ticketRevenue.toLocaleString()} ج.م\n` +
           `📢 رعاة النادي والإعلانات: ${resolvedRevenue.sponsorsRevenue.toLocaleString()} ج.م (مكافأة الفوز: ${resolvedRevenue.sponsorsWinBonus.toLocaleString()} ج.م)\n` +
+          (resolvedRevenue.sponsorsBreakdown && resolvedRevenue.sponsorsBreakdown.length > 0
+            ? resolvedRevenue.sponsorsBreakdown.map(b => `  • ${b}`).join('\n') + '\n'
+            : '') +
           `🏆 مكافأة النتيجة الرسمية (${resolvedRevenue.resultType === 'win' ? 'فوز' : resolvedRevenue.resultType === 'draw' ? 'تعادل' : 'مشاركة'}): ${resolvedRevenue.resultBonus.toLocaleString()} ج.م\n` +
           (resolvedRevenue.isSkippedMatch ? `\n⚠️ خصم تخطي المباراة (50%): -${resolvedRevenue.skipPenaltyAmount?.toLocaleString()} ج.م\n(تم منحك نصف الإيرادات فقط كخصم لتخطي المباراة، تشجيعاً لخوض المباريات كاملة)\n` : '') +
           (resolvedRevenue.isDoubledWithAd ? `🎁 مكافأة مضاعفة الإعلان (2X): +${resolvedRevenue.adDoubledBonus?.toLocaleString()} ج.م\n` : '') +
@@ -2295,11 +2737,30 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           };
         });
 
+        let processedSponsors = t.sponsors;
+        if (t.isUserClub && Array.isArray(t.sponsors) && t.sponsors.length > 0) {
+          const isMonthTick = currentRound % 4 === 0;
+          processedSponsors = t.sponsors.map(sp => {
+            const months = isMonthTick
+              ? Math.max(0, (sp.contractMonthsRemaining ?? 12) - 1)
+              : (sp.contractMonthsRemaining ?? 12);
+            let sat = sp.satisfaction ?? 85;
+            if (isUserWin) sat = Math.min(100, sat + 2);
+            else if (isUserLoss) sat = Math.max(30, sat - 3);
+            return {
+              ...sp,
+              contractMonthsRemaining: months,
+              satisfaction: sat,
+            };
+          });
+        }
+
         return {
           ...t,
           budget: t.isUserClub ? t.budget + totalMatchRevenue + cupBonusPrize + extraTransferIncome : t.budget,
           developmentPoints: t.isUserClub ? (t.developmentPoints || 0) + cupBonusDevPoints : t.developmentPoints,
           players: updatedPlayers,
+          sponsors: processedSponsors,
         };
       });
       console.log('[DIAG] PLAYER_PROCESSING_COMPLETED');
@@ -2319,10 +2780,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       newLevel += 1;
       newXp = newXp - newXpToNext;
       newXpToNext = Math.round(newXpToNext * 1.35); // Challenging geometric XP curve
-      if (newLevel >= 5 && newLicense === 'D') newLicense = 'C';
-      if (newLevel >= 12 && newLicense === 'C') newLicense = 'B';
-      if (newLevel >= 22 && newLicense === 'B') newLicense = 'A';
-      if (newLevel >= 35 && newLicense === 'A') newLicense = 'PRO';
+      // Note: Licenses are never skipped automatically by level; they require rigorous exam & performance criteria
     }
 
     const oppTier = activeLeague.tier || 1;
@@ -2364,6 +2822,8 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       });
     }
 
+    lastUserInteractionRef.current = Date.now();
+
     const initialUpdatedManager: ManagerProfile = {
       ...manager,
       level: newLevel,
@@ -2375,6 +2835,8 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       wins: manager.wins + (isUserWin ? 1 : 0),
       draws: manager.draws + (isUserDraw ? 1 : 0),
       losses: manager.losses + (!isUserWin && !isUserDraw ? 1 : 0),
+      totalPlayTimeMinutes: (manager.totalPlayTimeMinutes || 0) + 2,
+      totalPlayersDeveloped: manager.totalPlayersDeveloped || 0,
       goalsScored: manager.goalsScored + userScore,
       goalsConceded: manager.goalsConceded + oppScore,
       careerEarnings: manager.careerEarnings + (isUserWin ? 2000 : 800) + cupBonusPrize,
@@ -2422,6 +2884,11 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           oppClub: matchOppClub,
           round: currentRound,
           totalRounds,
+          isCupMatch: isCup,
+          userWonOnPenalties: hasPenalties && isUserWin,
+          userLostOnPenalties: hasPenalties && isUserLoss,
+          homePenalties: finalHomePenalties,
+          awayPenalties: finalAwayPenalties,
         }
       );
       setBoardSystem(evalResult.updatedBoardSystem);
@@ -2429,19 +2896,45 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     // 7. Generate Match & Cup Inbox Messages
     const oppName = isUserHome ? (awayTeam?.name || 'المنافس') : (homeTeam?.name || 'المنافس');
-    const matchOutcomeTitle = isUserWin
-      ? `فوز مستحق على ${oppName}! 🎉 (${userScore}-${oppScore})`
-      : isUserDraw
-      ? `تعادل مثير أمام ${oppName} 🤝 (${userScore}-${oppScore})`
-      : `هزيمة أمام ${oppName} 😔 (${userScore}-${oppScore})`;
+    let matchOutcomeTitle = '';
+    if (isCup) {
+      if (hasPenalties) {
+        matchOutcomeTitle = isUserWin
+          ? `تأهل ملحمي بركلات الترجيح أمام ${oppName}! 🏆 (${userScore}-${oppScore}) [${userPenalties}-${oppPenalties} ركلات]`
+          : `وداع مؤلم للكأس بركلات الترجيح أمام ${oppName} 😔 (${userScore}-${oppScore}) [${userPenalties}-${oppPenalties} ركلات]`;
+      } else {
+        matchOutcomeTitle = isUserWin
+          ? `فوز وتأهل في مسابقة الكأس على ${oppName}! 🏆 (${userScore}-${oppScore})`
+          : `هزيمة ووداع مسابقة الكأس أمام ${oppName} 😔 (${userScore}-${oppScore})`;
+      }
+    } else {
+      matchOutcomeTitle = isUserWin
+        ? `فوز مستحق على ${oppName}! 🎉 (${userScore}-${oppScore})`
+        : isUserDraw
+        ? `تعادل مثير أمام ${oppName} 🤝 (${userScore}-${oppScore})`
+        : `هزيمة أمام ${oppName} 😔 (${userScore}-${oppScore})`;
+    }
 
-    const matchOutcomeContent = evalResult
-      ? `أحداث الجولة ${currentRound}:\n\n👔 ${evalResult.boardFeedback}\n\n📣 ${evalResult.fanFeedback}\n\nالهدف المطلوب: ${evalResult.updatedBoardSystem.targetLeaguePositionText} | المركز الحالي: ${evalResult.updatedBoardSystem.currentStandingPosition || 1} | نسبة ثقة الإدارة: ${evalResult.updatedBoardSystem.confidence}% | نسبة رضا الجمهور: ${evalResult.updatedBoardSystem.fanConfidence || 80}%`
-      : isUserWin
-      ? `ألف مبروك يا كابتن! جماهير النادي في قمة السعادة بعد الانتصار الرائع. مكافأة الفوز وتذاكر المباراة أضافت ${totalMatchRevenue.toLocaleString()} جنيه لخزينة النادي.`
-      : isUserDraw
-      ? `نقطة ثمينة خارج الديار أو في ملعبنا. يجب مواصلة العمل في التدريبات وتصحيح الأخطاء الدفاعية في الجولة القادمة.`
-      : `مجلس الإدارة يطالبك بمراجعة الخطة والتكتيك سريعاً والتعويض في المباراة القادمة لتفادي تراجع الفريق في جدول الترتيب.`;
+    let matchOutcomeContent = '';
+    if (isCup) {
+      if (hasPenalties) {
+        matchOutcomeContent = isUserWin
+          ? `ملحمة كروية حبست الأنفاس! نجح فريقك في حسم بطاقة التأهل بركلات الترجيح (${userPenalties}-${oppPenalties}) بعد التعادل في الوقت الأصلي (${userScore}-${oppScore}). مكافأة التأهل وتذاكر المباراة أضافت ${totalMatchRevenue.toLocaleString()} جنيه لخزينة النادي.`
+          : `وداع مؤسف لمسابقة الكأس بعد الاحتكام لركلات الترجيح (${userPenalties}-${oppPenalties}). قدم اللاعبون أداءً بطولياً والتركيز الآن ينصب بالكامل على بطولة الدوري.`;
+      } else {
+        matchOutcomeContent = isUserWin
+          ? `ألف مبروك التأهل المستحق في مسابقة الكأس! جماهير النادي فخورة بالأداء القوي ومواصلة المشوار نحو منصة التتويج.`
+          : `هزيمة أدت لتوديع مسابقة الكأس. يجب استخلاص الدروس والتركيز على منافسات الدوري.`;
+      }
+    } else if (evalResult) {
+      matchOutcomeContent = `أحداث الجولة ${currentRound}:\n\n👔 ${evalResult.boardFeedback}\n\n📣 ${evalResult.fanFeedback}\n\nالهدف المطلوب: ${evalResult.updatedBoardSystem.targetLeaguePositionText} | المركز الحالي: ${evalResult.updatedBoardSystem.currentStandingPosition || 1} | نسبة ثقة الإدارة: ${evalResult.updatedBoardSystem.confidence}% | نسبة رضا الجمهور: ${evalResult.updatedBoardSystem.fanConfidence || 80}%`;
+    } else if (isUserWin) {
+      matchOutcomeContent = `ألف مبروك يا كابتن! جماهير النادي في قمة السعادة بعد الانتصار الرائع. مكافأة الفوز وتذاكر المباراة أضافت ${totalMatchRevenue.toLocaleString()} جنيه لخزينة النادي.`;
+    } else if (isUserDraw) {
+      matchOutcomeContent = `نقطة ثمينة خارج الديار أو في ملعبنا. يجب مواصلة العمل في التدريبات وتصحيح الأخطاء الدفاعية في الجولة القادمة.`;
+    } else {
+      matchOutcomeContent = `مجلس الإدارة يطالبك بمراجعة الخطة والتكتيك سريعاً والتعويض في المباراة القادمة لتفادي تراجع الفريق في جدول الترتيب.`;
+    }
 
     const newInboxMsgs: InboxMessage[] = [
       {
@@ -2516,6 +3009,43 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         activeLeague,
         summary.finalPosition
       );
+
+      // Sponsor League Champion / Top 4 Milestone Bonuses
+      if (summary.finalPosition === 1) {
+        const leagueTrophyBonus = (summaryClub.sponsors || []).reduce(
+          (sum, sp) => sum + (sp.milestoneBonus?.leagueChampionBonus || 0),
+          0
+        );
+        if (leagueTrophyBonus > 0) {
+          summaryClub.budget = (summaryClub.budget || 0) + leagueTrophyBonus;
+          newInboxMsgs.unshift({
+            id: `msg_sponsor_league_trophy_${Date.now()}`,
+            title: `🏆 مكافأة الرعاة للتتويج بالدوري: +${leagueTrophyBonus.toLocaleString()} ج.م!`,
+            sender: 'تحالف الرعاة والشركاء التجاريين',
+            date: 'ختام الموسم',
+            type: 'board',
+            read: false,
+            content: `تهانينا الحارة بالتتويج بلقب الدوري الممتاز! تقديراً لهذا الإنجاز العظيم، قرر رعاة النادي تفعيل بند مكافأة التتويج وصرف +${leagueTrophyBonus.toLocaleString()} جنيه مصري لحساب النادي فوراً!`,
+          });
+        }
+      } else if (summary.finalPosition <= 4) {
+        const topFourBonus = (summaryClub.sponsors || []).reduce(
+          (sum, sp) => sum + (sp.milestoneBonus?.topFourFinishBonus || 0),
+          0
+        );
+        if (topFourBonus > 0) {
+          summaryClub.budget = (summaryClub.budget || 0) + topFourBonus;
+          newInboxMsgs.unshift({
+            id: `msg_sponsor_top4_bonus_${Date.now()}`,
+            title: `⭐ مكافأة الرعاة للمربع الذهبي: +${topFourBonus.toLocaleString()} ج.م!`,
+            sender: 'لجنة الرعاة الرسميين',
+            date: 'ختام الموسم',
+            type: 'board',
+            read: false,
+            content: `تقديراً لإنهاء الموسم في المربع الذهبي وحجز مقعد قاري في بطولات إفريقيا، تم إيداع حافز المربع الذهبي +${topFourBonus.toLocaleString()} ج.م في خزينة النادي!`,
+          });
+        }
+      }
 
       setSeasonEndSummary(summary);
       setJobOffers(generatedOffers);
@@ -2683,7 +3213,17 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     let updatedFixtures = [...fixtures];
     let updatedStandings = [...standings];
     let updatedCupTournament = cupTournament;
-    const allRoundMatches: { homeTeamId: string; awayTeamId: string; homeScore: number; awayScore: number; events: MatchEvent[] }[] = [];
+    const allRoundMatches: {
+      homeTeamId: string;
+      awayTeamId: string;
+      homeScore: number;
+      awayScore: number;
+      events: MatchEvent[];
+      isCup?: boolean;
+      homePenalties?: number;
+      awayPenalties?: number;
+      winnerTeamId?: string;
+    }[] = [];
     let userSimMatchRevenue: MatchRevenueBreakdown | undefined = undefined;
 
     roundFixtures.forEach(fix => {
@@ -2754,6 +3294,10 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         homeScore: matchResult.homeScore,
         awayScore: matchResult.awayScore,
         events: matchEvents,
+        isCup,
+        homePenalties: isCup ? (matchResult as any).homePenalties : undefined,
+        awayPenalties: isCup ? (matchResult as any).awayPenalties : undefined,
+        winnerTeamId: isCup ? (matchResult as any).winnerTeamId : undefined,
       });
 
       if (!fix.competitionType || fix.competitionType === 'league') {
@@ -2828,7 +3372,15 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const simCupRewardMessages: InboxMessage[] = [];
 
     if (updatedCupTournament) {
-      const cupAdv = advanceCupTournament(updatedCupTournament, currentRound, teams, userClub || undefined);
+      const isContinentalActive = Boolean(fixtures?.some(f => f.competitionType === 'continental'));
+      const cupAdv = advanceCupTournament(
+        updatedCupTournament,
+        currentRound,
+        teams,
+        userClub || undefined,
+        isContinentalActive,
+        totalRounds
+      );
       updatedCupTournament = cupAdv.updatedCup;
       cupNewsMessage = cupAdv.cupNewsMessage;
 
@@ -2855,18 +3407,22 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         const cupStages = ['round_of_64', 'round_of_32', 'round_of_16', 'quarter', 'semi', 'final'];
         cupStages.forEach(stage => {
           const stageMatches = updatedCupTournament!.matches.filter(m => m.stage === stage);
-          const stageFixes = updatedFixtures.filter(f => f.competitionType === 'cup' && f.cupStage === stage);
-          stageFixes.forEach((f, idx) => {
-            const cm = stageMatches[idx] || stageMatches.find(m => m.id === f.id || (f.homeTeamId && (m.homeTeamId === f.homeTeamId || m.awayTeamId === f.awayTeamId)));
-            if (cm) {
-              const fIndex = updatedFixtures.findIndex(existingF => existingF.id === f.id);
+          const stageFixes = updatedFixtures.filter(f => (f.competitionType === 'cup' || f.cupStage === stage) && (f.cupStage === stage || (!f.cupStage && f.stageName?.includes(stage))));
+          stageMatches.forEach((cm, idx) => {
+            const targetFix = stageFixes.find(f => f.id === cm.id || (cm.homeTeamId && (f.homeTeamId === cm.homeTeamId || f.awayTeamId === cm.homeTeamId))) || stageFixes[idx];
+            if (targetFix) {
+              const fIndex = updatedFixtures.findIndex(existingF => existingF.id === targetFix.id);
               if (fIndex !== -1) {
                 updatedFixtures[fIndex] = {
                   ...updatedFixtures[fIndex],
+                  cupStage: stage as any,
                   homeTeamId: cm.homeTeamId || updatedFixtures[fIndex].homeTeamId,
                   awayTeamId: cm.awayTeamId || updatedFixtures[fIndex].awayTeamId,
                   homeScore: cm.homeScore !== undefined ? cm.homeScore : updatedFixtures[fIndex].homeScore,
                   awayScore: cm.awayScore !== undefined ? cm.awayScore : updatedFixtures[fIndex].awayScore,
+                  homePenalties: cm.homePenalties !== undefined ? cm.homePenalties : updatedFixtures[fIndex].homePenalties,
+                  awayPenalties: cm.awayPenalties !== undefined ? cm.awayPenalties : updatedFixtures[fIndex].awayPenalties,
+                  winnerTeamId: cm.winnerTeamId || updatedFixtures[fIndex].winnerTeamId,
                   isPlayed: cm.isPlayed !== undefined ? cm.isPlayed : updatedFixtures[fIndex].isPlayed,
                   events: cm.events || updatedFixtures[fIndex].events,
                   stats: cm.stats || updatedFixtures[fIndex].stats,
@@ -2875,6 +3431,16 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             }
           });
         });
+
+        // Run self-healing to guarantee that if user won in Round of 16 (or any cup match),
+        // they are 100% placed into the next stage fixture and match
+        if (userClub?.id) {
+          const rep = repairCupProgressionIntegrity(updatedCupTournament, updatedFixtures, userClub.id);
+          if (rep.repaired) {
+            updatedCupTournament = rep.updatedCup;
+            updatedFixtures = rep.updatedFixtures;
+          }
+        }
       }
     }
 
@@ -2998,8 +3564,20 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         const isUserHome = userMatch.homeTeamId === userClub.id;
         const userScore = isUserHome ? userMatch.homeScore : userMatch.awayScore;
         const oppScore = isUserHome ? userMatch.awayScore : userMatch.homeScore;
-        const isUserWin = userScore > oppScore;
-        const isUserDraw = userScore === oppScore;
+        const isCup = Boolean((userMatch as any).isCup);
+        const userPenalties = isUserHome ? (userMatch as any).homePenalties : (userMatch as any).awayPenalties;
+        const oppPenalties = isUserHome ? (userMatch as any).awayPenalties : (userMatch as any).homePenalties;
+        const hasPenalties = isCup && userPenalties !== undefined && oppPenalties !== undefined;
+
+        const isUserWin = isCup
+          ? (hasPenalties ? userPenalties > oppPenalties : userScore > oppScore)
+          : userScore > oppScore;
+        const isUserDraw = isCup
+          ? false
+          : userScore === oppScore;
+        const isUserLoss = isCup
+          ? (hasPenalties ? userPenalties < oppPenalties : userScore < oppScore)
+          : userScore < oppScore;
 
         const xpGained = isUserWin ? 60 : isUserDraw ? 25 : 10;
         const repGained = isUserWin ? 3 : isUserDraw ? 0 : -1;
@@ -3012,9 +3590,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           newLevel += 1;
           newXp = newXp - newXpToNext;
           newXpToNext = Math.round(newXpToNext * 1.5);
-          if (newLevel >= 3 && newLicense === 'D') newLicense = 'C';
-          if (newLevel >= 6 && newLicense === 'C') newLicense = 'B';
-          if (newLevel >= 10 && newLicense === 'B') newLicense = 'A';
+          // Note: Licenses are never skipped automatically by level; they require rigorous exam & performance criteria
         }
 
         // Daily points calculation
@@ -3072,6 +3648,8 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           });
         }
 
+        lastUserInteractionRef.current = Date.now();
+
         const initialUpdatedManager: ManagerProfile = {
           ...manager,
           level: newLevel,
@@ -3083,6 +3661,8 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           wins: manager.wins + (isUserWin ? 1 : 0),
           draws: manager.draws + (isUserDraw ? 1 : 0),
           losses: manager.losses + (!isUserWin && !isUserDraw ? 1 : 0),
+          totalPlayTimeMinutes: (manager.totalPlayTimeMinutes || 0) + 2,
+          totalPlayersDeveloped: manager.totalPlayersDeveloped || 0,
           goalsScored: manager.goalsScored + userScore,
           goalsConceded: manager.goalsConceded + oppScore,
           careerEarnings: manager.careerEarnings + simCupBonusPrize,
@@ -3121,25 +3701,53 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
               oppClub,
               round: currentRound,
               totalRounds,
+              isCupMatch: isCup,
+              userWonOnPenalties: hasPenalties && isUserWin,
+              userLostOnPenalties: hasPenalties && isUserLoss,
+              homePenalties: (userMatch as any).homePenalties,
+              awayPenalties: (userMatch as any).awayPenalties,
             }
           );
           setBoardSystem(simEval.updatedBoardSystem);
         }
 
-        newInboxMsgs.push({
-          id: `msg_round_sim_${currentRound}_${Date.now()}`,
-          title: `نتيجة الجولة ${currentRound}: ${userClub.shortName} (${userScore}-${oppScore}) ${oppClub?.shortName || ''}`,
-          sender: 'سكرتارية النادي ومجلس الإدارة',
-          date: `الجولة ${currentRound}`,
-          type: isUserWin ? 'fan' : 'board',
-          read: false,
-          content: simEval 
+        let roundInboxTitle = '';
+        let roundInboxContent = '';
+        if (isCup) {
+          if (hasPenalties) {
+            roundInboxTitle = isUserWin
+              ? `تأهل ملحمي بركلات الترجيح: ${userClub.shortName} (${userScore}-${oppScore}) [${userPenalties}-${oppPenalties} ركلات] ${oppClub?.shortName || ''} 🏆`
+              : `وداع مؤلم للكأس بركلات الترجيح: ${userClub.shortName} (${userScore}-${oppScore}) [${userPenalties}-${oppPenalties} ركلات] ${oppClub?.shortName || ''} 😔`;
+            roundInboxContent = isUserWin
+              ? `ملحمة كروية قوية في مسابقة الكأس! انتهت بالتعادل (${userScore}-${oppScore}) وحسمها فريقك بركلات الترجيح الأعصاب (${userPenalties}-${oppPenalties}) ليتأهل للدور القادم بنجاح.`
+              : `وداع غير موفق لبطولة الكأس بركلات الترجيح (${userPenalties}-${oppPenalties}) بعد التعادل في الوقت الأصلي (${userScore}-${oppScore}). التركيز الآن بالكامل على بطولة الدوري.`;
+          } else {
+            roundInboxTitle = isUserWin
+              ? `فوز وتأهل في مسابقة الكأس: ${userClub.shortName} (${userScore}-${oppScore}) ${oppClub?.shortName || ''} 🏆`
+              : `خسارة ووداع مسابقة الكأس: ${userClub.shortName} (${userScore}-${oppScore}) ${oppClub?.shortName || ''} 😔`;
+            roundInboxContent = isUserWin
+              ? `فوز مستحق وتأهل للدور القادم في مسابقة الكأس بنتيجة (${userScore}-${oppScore})!`
+              : `خسارة أدت لتوديع مسابقة الكأس بنتيجة (${userScore}-${oppScore}). حان وقت التركيز على بطولة الدوري.`;
+          }
+        } else {
+          roundInboxTitle = `نتيجة الجولة ${currentRound}: ${userClub.shortName} (${userScore}-${oppScore}) ${oppClub?.shortName || ''}`;
+          roundInboxContent = simEval 
             ? `أحداث الجولة ${currentRound}:\n\n👔 ${simEval.boardFeedback}\n\n📣 ${simEval.fanFeedback}\n\nالهدف المطلوب: ${simEval.updatedBoardSystem.targetLeaguePositionText} | المركز الحالي: ${simEval.updatedBoardSystem.currentStandingPosition || 1} | نسبة ثقة الإدارة: ${simEval.updatedBoardSystem.confidence}% | نسبة رضا الجمهور: ${simEval.updatedBoardSystem.fanConfidence || 80}%`
             : isUserWin 
             ? `فوز مستحق لفريقنا بنتيجة (${userScore}-${oppScore})! واصلوا الأداء القوي في المباريات المقبلة.`
             : isUserDraw 
             ? `انتهت المباراة بالتعادل (${userScore}-${oppScore}). حصدنا نقطة واحدة ونستعد للجولة القادمة.`
-            : `هزيمة مؤسفة بنتيجة (${userScore}-${oppScore}). الإدارة تأمل في تعديل المسار والتعويض سريعاً.`,
+            : `هزيمة مؤسفة بنتيجة (${userScore}-${oppScore}). الإدارة تأمل في تعديل المسار والتعويض سريعاً.`;
+        }
+
+        newInboxMsgs.push({
+          id: `msg_round_sim_${currentRound}_${Date.now()}`,
+          title: roundInboxTitle,
+          sender: 'سكرتارية النادي ومجلس الإدارة',
+          date: `الجولة ${currentRound}`,
+          type: isUserWin ? 'fan' : 'board',
+          read: false,
+          content: roundInboxContent,
         });
 
         if (userSimMatchRevenue) {
@@ -3247,6 +3855,43 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         activeLeague,
         summary.finalPosition
       );
+
+      // Sponsor League Champion / Top 4 Milestone Bonuses
+      if (summary.finalPosition === 1) {
+        const leagueTrophyBonus = (summaryClub.sponsors || []).reduce(
+          (sum, sp) => sum + (sp.milestoneBonus?.leagueChampionBonus || 0),
+          0
+        );
+        if (leagueTrophyBonus > 0) {
+          summaryClub.budget = (summaryClub.budget || 0) + leagueTrophyBonus;
+          newInboxMsgs.unshift({
+            id: `msg_sponsor_league_trophy_sim_${Date.now()}`,
+            title: `🏆 مكافأة الرعاة للتتويج بالدوري: +${leagueTrophyBonus.toLocaleString()} ج.م!`,
+            sender: 'تحالف الرعاة والشركاء التجاريين',
+            date: 'ختام الموسم',
+            type: 'board',
+            read: false,
+            content: `تهانينا الحارة بالتتويج بلقب الدوري الممتاز! تقديراً لهذا الإنجاز، قرر رعاة النادي تفعيل بند مكافأة التتويج وصرف +${leagueTrophyBonus.toLocaleString()} جنيه مصري لحساب النادي فوراً!`,
+          });
+        }
+      } else if (summary.finalPosition <= 4) {
+        const topFourBonus = (summaryClub.sponsors || []).reduce(
+          (sum, sp) => sum + (sp.milestoneBonus?.topFourFinishBonus || 0),
+          0
+        );
+        if (topFourBonus > 0) {
+          summaryClub.budget = (summaryClub.budget || 0) + topFourBonus;
+          newInboxMsgs.unshift({
+            id: `msg_sponsor_top4_bonus_sim_${Date.now()}`,
+            title: `⭐ مكافأة الرعاة للمربع الذهبي: +${topFourBonus.toLocaleString()} ج.م!`,
+            sender: 'لجنة الرعاة الرسميين',
+            date: 'ختام الموسم',
+            type: 'board',
+            read: false,
+            content: `تقديراً لإنهاء الموسم في المربع الذهبي وحجز مقعد قاري في بطولات إفريقيا، تم إيداع حافز المربع الذهبي +${topFourBonus.toLocaleString()} ج.م في خزينة النادي!`,
+          });
+        }
+      }
 
       setSeasonEndSummary(summary);
       setJobOffers(generatedOffers);
@@ -3394,50 +4039,58 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     if (!userClub) {
       return { success: false, message: 'يجب أن تتولى تدريب نادٍ أولاً لإجراء التعاقدات!' };
     }
-
-    const joinCheck = canPlayerJoinClub(player, userClub);
-    if (!joinCheck.canJoin) {
-      return { success: false, message: joinCheck.reason || 'اللاعب يرفض الانضمام للنادي في الوقت الحالي!' };
+    if (!player || !player.id) {
+      return { success: false, message: 'بيانات اللاعب غير صالحة!' };
     }
 
-    const { fairMarketValue, recommendedMonthlyWage } = calculatePlayerFairValue(player);
-    const transferFee = player.marketValue || fairMarketValue;
-    const salary = player.salary || recommendedMonthlyWage;
+    try {
+      const joinCheck = canPlayerJoinClub(player, userClub);
+      if (!joinCheck.canJoin) {
+        return { success: false, message: joinCheck.reason || 'اللاعب يرفض الانضمام للنادي في الوقت الحالي!' };
+      }
 
-    const transferResult = executeAtomicTransfer({
-      player,
-      sellingClubId: player.currentClubId,
-      buyingClubId: userClub.id,
-      allTeams: teams,
-      transferFee,
-      salary,
-      contractYears: 2,
-      currentRound,
-      seasonNumber: season.seasonNumber,
-    });
+      const { fairMarketValue, recommendedMonthlyWage } = calculatePlayerFairValue(player, userClub);
+      const transferFee = Math.max(25000, Number(player.marketValue) || fairMarketValue || 50000);
+      const salary = Math.max(2500, Number(player.salary) || recommendedMonthlyWage || 2500);
 
-    if (!transferResult.success) {
-      return { success: false, message: transferResult.message };
+      const transferResult = executeAtomicTransfer({
+        player,
+        sellingClubId: player.currentClubId,
+        buyingClubId: userClub.id,
+        allTeams: teams,
+        transferFee,
+        salary,
+        contractYears: 2,
+        currentRound,
+        seasonNumber: season.seasonNumber,
+      });
+
+      if (!transferResult.success) {
+        return { success: false, message: transferResult.message };
+      }
+
+      setTeams(transferResult.updatedTeams);
+      setTransferMarket(prev => (Array.isArray(prev) ? prev : []).filter(p => p && p.id && p.id !== player.id));
+
+      if (transferResult.transferEntry) {
+        setTransferHistory(prev => [transferResult.transferEntry!, ...(Array.isArray(prev) ? prev : [])]);
+      }
+
+      if (transferResult.inboxMessage) {
+        setInbox(prev => [transferResult.inboxMessage!, ...(Array.isArray(prev) ? prev : [])]);
+      }
+
+      setClubEconomy(prev => ({
+        ...prev,
+        transferSpendingTotal: (prev.transferSpendingTotal || 0) + transferFee,
+        currentSeasonNetProfit: (prev.currentSeasonNetProfit || 0) - transferFee,
+      }));
+
+      return { success: true, message: transferResult.message };
+    } catch (err: any) {
+      console.error('[GameContext] buyPlayer failed unexpectedly:', err);
+      return { success: false, message: err?.message || 'حدث خطأ غير متوقع أثناء إتمام عملية الشراء.' };
     }
-
-    setTeams(transferResult.updatedTeams);
-    setTransferMarket(prev => prev.filter(p => p.id !== player.id));
-
-    if (transferResult.transferEntry) {
-      setTransferHistory(prev => [transferResult.transferEntry!, ...prev]);
-    }
-
-    if (transferResult.inboxMessage) {
-      setInbox(prev => [transferResult.inboxMessage!, ...prev]);
-    }
-
-    setClubEconomy(prev => ({
-      ...prev,
-      transferSpendingTotal: prev.transferSpendingTotal + transferFee,
-      currentSeasonNetProfit: prev.currentSeasonNetProfit - transferFee,
-    }));
-
-    return { success: true, message: transferResult.message };
   };
 
   const negotiatePlayerTransfer = (
@@ -3756,8 +4409,8 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     setClubEconomy(prev => ({
       ...prev,
-      transferIncomeTotal: prev.transferIncomeTotal + neg.bidFee,
-      currentSeasonNetProfit: prev.currentSeasonNetProfit + neg.bidFee,
+      transferIncomeTotal: (prev.transferIncomeTotal || 0) + neg.bidFee,
+      currentSeasonNetProfit: (prev.currentSeasonNetProfit || 0) + neg.bidFee,
     }));
 
     // Remove negotiation immediately so it disappears from negotiations hub
@@ -3895,8 +4548,8 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     setClubEconomy(prev => ({
       ...prev,
-      transferIncomeTotal: prev.transferIncomeTotal + bid.bidAmount,
-      currentSeasonNetProfit: prev.currentSeasonNetProfit + bid.bidAmount,
+      transferIncomeTotal: (prev.transferIncomeTotal || 0) + bid.bidAmount,
+      currentSeasonNetProfit: (prev.currentSeasonNetProfit || 0) + bid.bidAmount,
     }));
 
     const acceptMsg: InboxMessage = {
@@ -4512,6 +5165,13 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       currentSeasonNetProfit: prev.currentSeasonNetProfit - promotionCost,
     }));
 
+    lastUserInteractionRef.current = Date.now();
+
+    setManager(prev => ({
+      ...prev,
+      totalPlayersDeveloped: (prev.totalPlayersDeveloped || 0) + 1,
+    }));
+
     const promoMsg: InboxMessage = {
       id: `msg_youth_promote_${Date.now()}`,
       title: `تصعيد موهبة شابة: ${prospect.name} إلى الفريق الأول 🌟`,
@@ -4625,6 +5285,168 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     };
   };
 
+  // --- Sponsorship Contracts System (نظام عقود الرعاية المتطورة) ---
+  const signSponsorshipContract = (offer: SponsorshipOffer): { success: boolean; message: string } => {
+    if (!userClub) return { success: false, message: 'أنت غير مرتبط بنادٍ حالياً!' };
+
+    const category = (offer.category || offer.type || 'shirt') as SponsorCategory;
+    const catInfo = getSponsorCategoryLabel(category);
+    const signingBonus = offer.signingBonus || 50000;
+
+    const currentSponsors = Array.isArray(userClub.sponsors) ? userClub.sponsors : [];
+    const updatedSponsors = currentSponsors.filter(
+      s => (s.category || s.type) !== category
+    );
+
+    const newSponsor: Sponsor = {
+      ...offer,
+      id: `sp_${category}_${userClub.id}_${Date.now()}`,
+      category,
+      type: category,
+      contractMonthsRemaining: offer.totalDurationMonths || 12,
+      satisfaction: 90,
+    };
+
+    updatedSponsors.push(newSponsor);
+
+    setTeams(prev => prev.map(t => {
+      if (t.id === userClub.id) {
+        return {
+          ...t,
+          budget: (t.budget || 0) + signingBonus,
+          sponsors: updatedSponsors,
+        };
+      }
+      return t;
+    }));
+
+    setAvailableSponsorOffers(prev => prev.filter(o => o.id !== offer.id));
+
+    // Official celebratory board message
+    const sponsorContractMsg: InboxMessage = {
+      id: `msg_sponsor_signed_${Date.now()}`,
+      title: `🤝 إبرام عقد رعاية رسمي مع ${offer.name} (+${signingBonus.toLocaleString()} ج.م)`,
+      sender: 'مجلس إدارة النادي - لجنة التسويق',
+      date: `الجولة ${currentRound}`,
+      type: 'board',
+      read: false,
+      content: `يسعد مجلس إدارة النادي الإعلان رسمياً عن توقيع عقد رعاية وشراكة تجارية مع "${offer.name}" كـ ${catInfo.label} لمدة ${offer.totalDurationMonths || 12} شهراً.\n\n` +
+        `💼 تفاصيل العقد المالي:\n` +
+        `💵 مكافأة توقيع فورية: +${signingBonus.toLocaleString()} ج.م تم إيداعها مباشرة في خزينة النادي.\n` +
+        `📅 الدفعة الشهرية الثابتة: +${offer.monthlyPayment.toLocaleString()} ج.م تُصرف بانتظام.\n` +
+        `⚽ مكافأة الفوز في الدوري: +${offer.bonusForWin.toLocaleString()} ج.م لكل انتصار.\n` +
+        `🏆 مكافأة مباريات الكأس: +${(offer.bonusCupWin || offer.bonusForWin * 1.5).toLocaleString()} ج.م.\n` +
+        `🌍 حافز الانتصارات القارية والإفريقية: +${(offer.bonusContinentalWin || offer.bonusForWin * 2.5).toLocaleString()} ج.م.\n\n` +
+        `نتمنى أن تسهم هذه الشراكة الاستراتيجية في دعم مسيرة الفريق نحو منصات التتويج!`,
+    };
+    setInbox(prev => [sponsorContractMsg, ...prev]);
+
+    return {
+      success: true,
+      message: `تم توقيع العقد بنجاح مع ${offer.name} وأودعت مكافأة التوقيع (+${signingBonus.toLocaleString()} ج.م) في خزينة النادي!`,
+    };
+  };
+
+  const terminateSponsorshipContract = (sponsorId: string): { success: boolean; message: string } => {
+    if (!userClub) return { success: false, message: 'أنت غير مرتبط بنادٍ حالياً!' };
+
+    const currentSponsors = Array.isArray(userClub.sponsors) ? userClub.sponsors : [];
+    const targetSponsor = currentSponsors.find(s => s.id === sponsorId);
+    if (!targetSponsor) return { success: false, message: 'لم يتم العثور على عقد الرعاية المطلوب!' };
+
+    const penalty = targetSponsor.penaltyClause || Math.round(targetSponsor.monthlyPayment * 1.5);
+    const updatedSponsors = currentSponsors.filter(s => s.id !== sponsorId);
+
+    setTeams(prev => prev.map(t => {
+      if (t.id === userClub.id) {
+        return {
+          ...t,
+          budget: Math.max(0, (t.budget || 0) - penalty),
+          sponsors: updatedSponsors,
+        };
+      }
+      return t;
+    }));
+
+    return {
+      success: true,
+      message: `تم فسخ العقد مع ${targetSponsor.name}. تم تطبيق شرط جزائي قدره -${penalty.toLocaleString()} ج.م وأصبحت الخانة شاغرة للتعاقد الجديد.`,
+    };
+  };
+
+  const renewSponsorshipContract = (sponsorId: string): { success: boolean; message: string } => {
+    if (!userClub) return { success: false, message: 'أنت غير مرتبط بنادٍ حالياً!' };
+
+    const currentSponsors = Array.isArray(userClub.sponsors) ? userClub.sponsors : [];
+    const targetSponsor = currentSponsors.find(s => s.id === sponsorId);
+    if (!targetSponsor) return { success: false, message: 'لم يتم العثور على عقد الرعاية المطلوب!' };
+
+    if ((targetSponsor.satisfaction || 80) < 65) {
+      return {
+        success: false,
+        message: `يرفض ممثلو شركة ${targetSponsor.name} التجديد المبكر حالياً بسبب تراجع نتائج الفريق (نسبة الرضا: ${targetSponsor.satisfaction}%). حسن النتائج أولاً!`,
+      };
+    }
+
+    const boostRatio = 1.10;
+    const newMonthly = Math.round((targetSponsor.monthlyPayment * boostRatio) / 1000) * 1000;
+    const renewalBonus = Math.round(newMonthly * 1.5);
+
+    const updatedSponsors = currentSponsors.map(s => {
+      if (s.id === sponsorId) {
+        return {
+          ...s,
+          monthlyPayment: newMonthly,
+          contractMonthsRemaining: (s.contractMonthsRemaining || 0) + 12,
+          totalDurationMonths: (s.totalDurationMonths || 12) + 12,
+          satisfaction: Math.min(100, (s.satisfaction || 80) + 10),
+        };
+      }
+      return s;
+    });
+
+    setTeams(prev => prev.map(t => {
+      if (t.id === userClub.id) {
+        return {
+          ...t,
+          budget: (t.budget || 0) + renewalBonus,
+          sponsors: updatedSponsors,
+        };
+      }
+      return t;
+    }));
+
+    return {
+      success: true,
+      message: `تم تمديد الشراكة بنجاح مع ${targetSponsor.name} لـ 12 شهراً إضافياً وزيادة الدفعة الشهرية بنسبة 10% مع صرف مكافأة ولاء +${renewalBonus.toLocaleString()} ج.م!`,
+    };
+  };
+
+  const negotiateSponsorshipOffer = (offerId: string): { success: boolean; message: string } => {
+    if (!userClub) return { success: false, message: 'أنت غير مرتبط بنادٍ حالياً!' };
+
+    const targetOffer = availableSponsorOffers.find(o => o.id === offerId);
+    if (!targetOffer) return { success: false, message: 'العرض غير متاح حالياً!' };
+
+    const managerRep = manager?.reputation || 50;
+    const result = negotiateSponsorService(targetOffer, userClub, managerRep);
+
+    setAvailableSponsorOffers(prev =>
+      prev.map(o => (o.id === offerId ? result.updatedOffer : o))
+    );
+
+    return {
+      success: result.success,
+      message: result.message,
+    };
+  };
+
+  const refreshSponsorshipOffers = () => {
+    if (!userClub) return;
+    const freshOffers = generateIncomingSponsorshipOffers(userClub, 4);
+    setAvailableSponsorOffers(freshOffers);
+  };
+
   // --- Player Development & Rewards System (تطوير اللاعبين بنقاط المكافآت) ---
   const currentDevPoints = userClub?.developmentPoints ?? manager?.developmentPoints ?? 0;
 
@@ -4648,9 +5470,12 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       };
     }));
 
+    lastUserInteractionRef.current = Date.now();
+
     setManager(prev => ({
       ...prev,
       developmentPoints: remaining,
+      totalPlayersDeveloped: (prev.totalPlayersDeveloped || 0) + 1,
     }));
 
     return { success: true, message: res.message };
@@ -4676,9 +5501,12 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       };
     }));
 
+    lastUserInteractionRef.current = Date.now();
+
     setManager(prev => ({
       ...prev,
       developmentPoints: remaining,
+      totalPlayersDeveloped: (prev.totalPlayersDeveloped || 0) + 1,
     }));
 
     return { success: true, message: res.message };
@@ -4704,9 +5532,12 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       };
     }));
 
+    lastUserInteractionRef.current = Date.now();
+
     setManager(prev => ({
       ...prev,
       developmentPoints: remaining,
+      totalPlayersDeveloped: (prev.totalPlayersDeveloped || 0) + 1,
     }));
 
     return { success: true, message: res.message };
@@ -5011,10 +5842,17 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       );
 
       const overriddenNextTeams = applyWorldOverridesToClubs(result.nextTeams);
+      const targetUserClubId = result.updatedManager.currentClubId;
+      const finalNextTeams = overriddenNextTeams.map(t => {
+        if (t.id === targetUserClubId) {
+          return { ...t, isUserClub: true };
+        }
+        return { ...t, isUserClub: false };
+      });
 
       setSeason(result.nextSeason);
       setActiveLeague(result.nextActiveLeague);
-      setTeams(overriddenNextTeams);
+      setTeams(finalNextTeams);
       setStandings(result.nextStandings);
       setFixtures(result.nextFixtures);
       setManager(result.updatedManager);
@@ -5026,8 +5864,9 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       setLiveMatch(null);
 
       // If manager switched clubs, reset economy to pristine state for the new club
+      let initialEconomy = clubEconomy;
       if (acceptedOffer) {
-        setClubEconomy({
+        initialEconomy = {
           clubBudget: acceptedOffer.clubBudget || 250000,
           transferSpendingTotal: 0,
           transferIncomeTotal: 0,
@@ -5036,15 +5875,18 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           matchIncomeTotal: 0,
           facilitySpendingTotal: 0,
           currentSeasonNetProfit: 0,
-        });
+        };
+        setClubEconomy(initialEconomy);
       }
 
       const newSeasonInitialDate = getInitialSeasonDate(result.nextSeason.seasonNumber);
       setCalendarDate(newSeasonInitialDate);
 
-      const nextUserClubObj = overriddenNextTeams.find(t => t.isUserClub) || overriddenNextTeams[0];
+      const nextUserClubObj = finalNextTeams.find(t => t.id === targetUserClubId) || finalNextTeams.find(t => t.isUserClub) || finalNextTeams[0];
+      let initialBoard = boardSystem;
       if (nextUserClubObj) {
-        setBoardSystem(generateInitialBoardSystem(nextUserClubObj, result.nextActiveLeague.tier, overriddenNextTeams.length, overriddenNextTeams, nextUserClubObj.isNewlyPromoted));
+        initialBoard = generateInitialBoardSystem(nextUserClubObj, result.nextActiveLeague.tier, finalNextTeams.length, finalNextTeams, nextUserClubObj.isNewlyPromoted);
+        setBoardSystem(initialBoard);
       }
 
       const startMsg: InboxMessage = {
@@ -5058,21 +5900,22 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       };
 
       const nextClubPlayerIds = new Set((nextUserClubObj?.players || []).map(p => p.id));
-      setInbox(prev => {
-        const filtered = prev.filter(m => {
-          if (m.type === 'contract' && m.contractDetails?.playerId) {
-            return nextClubPlayerIds.has(m.contractDetails.playerId);
-          }
-          if (m.type === 'offer' && m.offerDetails?.playerId) {
-            return nextClubPlayerIds.has(m.offerDetails.playerId);
-          }
-          return true;
-        });
-        return [startMsg, ...filtered];
+      const filteredInbox = inbox.filter(m => {
+        if (m.type === 'contract' && m.contractDetails?.playerId) {
+          return nextClubPlayerIds.has(m.contractDetails.playerId);
+        }
+        if (m.type === 'offer' && m.offerDetails?.playerId) {
+          return nextClubPlayerIds.has(m.offerDetails.playerId);
+        }
+        return true;
       });
+      const newInbox = [startMsg, ...filteredInbox];
+      setInbox(newInbox);
 
+      let nextRetired = retiredPlayers;
       if (Array.isArray(result.newRetiredPlayers) && result.newRetiredPlayers.length > 0) {
-        setRetiredPlayers(prev => [...result.newRetiredPlayers, ...prev].slice(0, 150));
+        nextRetired = [...result.newRetiredPlayers, ...retiredPlayers].slice(0, 150);
+        setRetiredPlayers(nextRetired);
         const userClubRetired = result.newRetiredPlayers.filter(rp => rp.clubId === nextUserClubObj?.id || rp.clubName === nextUserClubObj?.name);
         if (userClubRetired.length > 0) {
           const retireMsg: InboxMessage = {
@@ -5087,23 +5930,84 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           setInbox(prev => [retireMsg, ...prev]);
         }
       }
+
+      // Immediately synchronize and save state to disk/storage
+      try {
+        gameStateRepository.saveLocalGameState({
+          schemaVersion: 2,
+          saveVersion: 1,
+          lastLocalSaveAt: Date.now(),
+          season: result.nextSeason,
+          activeLeague: result.nextActiveLeague,
+          teams: finalNextTeams,
+          standings: result.nextStandings,
+          fixtures: result.nextFixtures,
+          currentRound: 1,
+          manager: result.updatedManager,
+          transferMarket,
+          incomingBids: [],
+          inbox: newInbox,
+          cupTournament: result.nextCup,
+          jobOffers: [],
+          seasonEndSummary: null,
+          transferHistory,
+          clubEconomy: initialEconomy,
+          calendarDate: newSeasonInitialDate,
+          activeNegotiations: [],
+          boardSystem: initialBoard,
+          dailyNews: [],
+          retiredPlayers: nextRetired,
+          worldRankings,
+          scoutedOpponents,
+          deletedMessageIds,
+        } as any);
+      } catch (saveErr) {
+        console.warn('Immediate save on season transition:', saveErr);
+      }
     } catch (err) {
       console.error('Error starting next season:', err);
       // Failsafe recovery: bump season number, reset round and regenerate fresh fixtures and standings so game never locks
       const safeNextSeasonNum = season.seasonNumber + 1;
-      const safeTeams = teams.map(t => ({
-        ...t,
-        players: (t.players || []).map(p => ({
-          ...p,
-          age: p.age + 1,
-          fitness: 100,
-          morale: Math.max(70, p.morale),
-        }))
-      }));
+      const safeJobOffers = Array.isArray(jobOffers) ? jobOffers : [];
+      const acceptedOffer = chosenOfferId 
+        ? safeJobOffers.find(o => o.id === chosenOfferId)
+        : safeJobOffers.find(o => o.status === 'accepted');
+
+      const safeNextLeague = acceptedOffer ? getLeagueById(acceptedOffer.leagueId) : activeLeague;
+      let safeTeams = acceptedOffer && Array.isArray(safeNextLeague.teams) && safeNextLeague.teams.length > 0 
+        ? [...safeNextLeague.teams] 
+        : teams;
+
+      const targetClubId = acceptedOffer ? acceptedOffer.clubId : (userClub?.id || teams[0]?.id);
+      safeTeams = safeTeams.map(t => {
+        const isTarget = t.id === targetClubId || (acceptedOffer && t.name === acceptedOffer.clubName);
+        return {
+          ...t,
+          isUserClub: isTarget,
+          players: (t.players || []).map(p => ({
+            ...p,
+            age: p.age + 1,
+            fitness: 100,
+            morale: Math.max(70, p.morale),
+          }))
+        };
+      });
+
+      const safeUserClub = safeTeams.find(t => t.isUserClub) || safeTeams[0];
       const safeStandings = generateInitialStandings(safeTeams);
-      const safeCup = initNationalCupTournament(safeNextSeasonNum, activeLeague.country, safeTeams, userClub);
-      const safeFixtures = generateMasterSeasonAgenda(safeNextSeasonNum, activeLeague, safeTeams, safeCup, undefined, userClub);
-      
+      const safeCup = initNationalCupTournament(safeNextSeasonNum, safeNextLeague.country, safeTeams, safeUserClub);
+      const safeFixtures = generateMasterSeasonAgenda(safeNextSeasonNum, safeNextLeague, safeTeams, safeCup, undefined, safeUserClub);
+
+      const safeManager: ManagerProfile = acceptedOffer ? {
+        ...manager,
+        currentClubId: safeUserClub.id,
+        currentClubName: safeUserClub.name,
+        totalSeasons: manager.totalSeasons + 1,
+      } : {
+        ...manager,
+        totalSeasons: manager.totalSeasons + 1,
+      };
+
       setSeason({
         seasonId: `season_${safeNextSeasonNum}_${Date.now()}`,
         seasonNumber: safeNextSeasonNum,
@@ -5112,13 +6016,15 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         currentRound: 1,
         totalRounds: safeFixtures.length > 0 ? Math.max(...safeFixtures.map(f => f.round)) : 34,
         status: 'active',
-        leagueId: activeLeague.id,
-        leagueName: activeLeague.name,
-        divisionTier: activeLeague.tier,
+        leagueId: safeNextLeague.id,
+        leagueName: safeNextLeague.name,
+        divisionTier: safeNextLeague.tier,
       });
+      setActiveLeague(safeNextLeague);
       setTeams(safeTeams);
       setStandings(safeStandings);
       setFixtures(safeFixtures);
+      setManager(safeManager);
       setCupTournament(safeCup);
       setCurrentRound(1);
       setShowSeasonTransitionModal(false);
@@ -5631,33 +6537,34 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       };
 
       // Add to userClub squad & deduct transfer fee
-      setTeams(prevTeams => prevTeams.map(t => {
+      setTeams(prevTeams => (Array.isArray(prevTeams) ? prevTeams : []).map(t => {
+        if (!t) return t;
         if (t.isUserClub || t.id === userClub.id) {
-          const filtered = (t.players || []).filter(p => p.id !== neg.playerId);
+          const filtered = (t.players || []).filter(p => p && p.id && p.id !== neg.playerId);
           return {
             ...t,
-            budget: Math.max(0, t.budget - neg.bidFee),
+            budget: Math.max(0, (t.budget || 0) - neg.bidFee),
             players: [...filtered, signedPlayer],
           };
         }
         if (neg.playerClubId && t.id === neg.playerClubId) {
           return {
             ...t,
-            budget: t.budget + neg.bidFee,
-            players: (t.players || []).filter(p => p.id !== neg.playerId),
+            budget: (t.budget || 0) + neg.bidFee,
+            players: (t.players || []).filter(p => p && p.id && p.id !== neg.playerId),
           };
         }
-        if (t.players && t.players.some(p => p.id === neg.playerId)) {
+        if (t.players && t.players.some(p => p && p.id === neg.playerId)) {
           return {
             ...t,
-            players: t.players.filter(p => p.id !== neg.playerId),
+            players: (t.players || []).filter(p => p && p.id && p.id !== neg.playerId),
           };
         }
         return t;
       }));
 
       // Remove from market
-      setTransferMarket(prev => prev.filter(p => p.id !== neg.playerId));
+      setTransferMarket(prev => (Array.isArray(prev) ? prev : []).filter(p => p && p.id && p.id !== neg.playerId));
 
       // Transfer history entry
       const historyEntry: TransferHistoryEntry = {
@@ -5675,13 +6582,13 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         type: 'buy',
         timestamp: Date.now(),
       };
-      setTransferHistory(prev => [historyEntry, ...prev]);
+      setTransferHistory(prev => [historyEntry, ...(Array.isArray(prev) ? prev : [])]);
 
       // Update club economy
       setClubEconomy(prev => ({
         ...prev,
-        transferSpendingTotal: prev.transferSpendingTotal + neg.bidFee,
-        currentSeasonNetProfit: prev.currentSeasonNetProfit - neg.bidFee,
+        transferSpendingTotal: (prev.transferSpendingTotal || 0) + neg.bidFee,
+        currentSeasonNetProfit: (prev.currentSeasonNetProfit || 0) - neg.bidFee,
       }));
 
       // Remove completed negotiation immediately from active negotiations list
@@ -6014,6 +6921,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       'B': 3,
       'A': 4,
       'PRO': 5,
+      'ELITE': 6,
     };
     const currentLicense = (manager.license && licenseRanks[manager.license]) ? manager.license : 'D';
     const currentRank = licenseRanks[currentLicense] || 1;
@@ -6037,6 +6945,20 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
       if (isAlreadyCompleted) {
         return { success: false, message: 'أنت حاصل بالفعل على هذه الرخصة التدريبية أو مؤهل أعلى منها.' };
+      }
+
+      // Check real in-game milestones & criteria (Anti-AFK, genuine career progression)
+      const currentClub = userClub || null;
+      const evalResult = evaluateLicenseEligibility(manager, currentClub);
+      if (evalResult.nextLicense && course.grantsLicense === evalResult.nextLicense) {
+        const unmet = evalResult.checklist.filter(c => !c.isMet && c.key !== 'exam_fee');
+        if (unmet.length > 0) {
+          const unmetLabels = unmet.map(u => `${u.label}: الحالي (${u.current}) / المطلوب (${u.target}${u.unit ? ' ' + u.unit : ''})`).join(' | ');
+          return {
+            success: false,
+            message: `لم تستوفِ بعد الشروط الميدانية للرخصة (${evalResult.nextLicense})! المتطلبات غير المكتملة: ${unmetLabels}. يمكنك متابعة مسيرتك التدريبية في قسم المسيرة.`,
+          };
+        }
       }
     }
 
@@ -6531,6 +7453,75 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     return { success: false, message: 'نوع المكافأة غير معروف' };
   };
 
+  // ----------------------------------------------------
+  // PROMO / GIFT CODES SYSTEM (نظام أكواد الهدايا والمكافآت)
+  // ----------------------------------------------------
+  const redeemGiftCode = async (
+    code: string
+  ): Promise<{ success: boolean; message: string; rewardAmount?: number; rewardCoins?: number }> => {
+    if (!userClub) {
+      return { 
+        success: false, 
+        message: 'يجب أن تكون مرتبطاً بنادٍ أولاً لتتمكن من استرداد الكود وإيداع المكافأة المالية في ميزانيته!' 
+      };
+    }
+
+    try {
+      const res = await redeemPromoCode(code, {
+        userId: user?.uid || manager.trainerId || 'local_user',
+        managerName: manager.name || 'المدرب',
+        clubName: userClub.name || 'النادي',
+        trainerId: manager.trainerId,
+      });
+
+      if (res.success && res.rewardAmount > 0) {
+        // 1. Inject cash directly into user club budget
+        setTeams(prev => prev.map(t => {
+          if (!t.isUserClub && t.id !== userClub.id) return t;
+          return {
+            ...t,
+            budget: (t.budget || 0) + res.rewardAmount,
+          };
+        }));
+
+        // 2. Add to manager career earnings and personal wallet if coins given
+        setManager(prev => ({
+          ...prev,
+          careerEarnings: (prev.careerEarnings || 0) + res.rewardAmount,
+          personalWallet: res.rewardCoins ? (prev.personalWallet || 0) + (res.rewardCoins * 100) : prev.personalWallet,
+        }));
+
+        // 3. Official banking inbox notification for the manager
+        const bonusMsg: InboxMessage = {
+          id: `msg_promo_${Date.now()}_${Math.random()}`,
+          title: `🎁 استرداد كود هدية: إيداع (+${res.rewardAmount.toLocaleString()} ج.م) في الخزينة`,
+          sender: 'إدارة اللعبة والمسابقات',
+          date: `الجولة ${currentRound}`,
+          type: 'board',
+          read: false,
+          content: `تهانينا يا كابتن ${manager.name}!\n\nتم التحقق من كود الهدية [${res.code}] بنجاح وإيداع مبلغ قدره (${res.rewardAmount.toLocaleString()} جنيه مصري) مباشرة في ميزانية نادي ${userClub.name}.${res.rewardCoins ? `\nبالإضافة إلى منحك (${res.rewardCoins}) كوينز ذهبية!` : ''}\n\nبيان المكافأة: ${res.description}\n\nنتمنى لك كل التوفيق والانتصارات في قيادة ناديك!`,
+        };
+        setInbox(prev => [bonusMsg, ...prev]);
+
+        // 4. Save game automatically
+        setTimeout(() => {
+          saveToCloud(false).catch(() => {});
+        }, 500);
+
+        return {
+          success: true,
+          message: res.message,
+          rewardAmount: res.rewardAmount,
+          rewardCoins: res.rewardCoins,
+        };
+      }
+
+      return { success: false, message: res.message || 'فشل استرداد الكود.' };
+    } catch (err: any) {
+      return { success: false, message: err?.message || 'حدث خطأ أثناء محاولة استرداد الكود.' };
+    }
+  };
+
   return (
     <GameContext.Provider
       value={{
@@ -6597,6 +7588,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         resumeSecondHalf,
         makeLiveSubstitution,
         toggleLiveAutoSubs,
+        recordUserMatchAction,
         changeLiveMentality,
         changeLivePressing,
         hireClubStaff,
@@ -6651,6 +7643,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         updateTrainerProfile,
         exportCurrentSavePayload,
         applyLoadedSave,
+        runSaveDataMigration,
         scoutedOpponents,
         scoutOpponent,
         developmentPoints: currentDevPoints,
@@ -6660,6 +7653,13 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         boostPlayerCondition,
         grantDevelopmentPoints,
         claimAdReward,
+        redeemGiftCode,
+        availableSponsorOffers,
+        signSponsorshipContract,
+        terminateSponsorshipContract,
+        negotiateSponsorshipOffer,
+        renewSponsorshipContract,
+        refreshSponsorshipOffers,
         deletedMessageIds,
         africanChampionsLeague: null,
         uefaChampionsLeague: null,

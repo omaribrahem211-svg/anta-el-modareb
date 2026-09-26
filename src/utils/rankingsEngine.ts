@@ -110,6 +110,7 @@ export function calculateDynamicManagerRating(manager: ManagerProfile): number {
     case 'B': base += 9; break;
     case 'A': base += 14; break;
     case 'PRO': base += 20; break;
+    case 'ELITE': base += 28; break;
     default: break;
   }
 

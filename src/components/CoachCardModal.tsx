@@ -76,7 +76,7 @@ export const CoachCardModal: React.FC<CoachCardModalProps> = ({
   const winRate = totalMatches > 0 ? Math.round((totalWins / totalMatches) * 100) : 0;
 
   // 2. World Ranking & Points
-  const userRankFromList = (worldRankings?.managers || []).find(
+  const userRankFromList = (Array.isArray(worldRankings?.managers) ? worldRankings.managers : []).find(
     (m) => m && (m.id === 'user_manager' || m.id === (manager as any)?.id || (m as any)?.isUser)
   )?.worldRank;
 

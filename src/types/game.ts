@@ -172,7 +172,14 @@ export type FormationType =
   | '3-4-1-2'
   | '5-2-3'
   | '4-1-3-2'
-  | '3-3-3-1';
+  | '3-3-3-1'
+  | '3-2-4-1'
+  | '4-4-1-1'
+  | '3-2-2-3'
+  | '2-3-5'
+  | '4-2-1-3'
+  | '4-2-3-1-asym'
+  | '3-4-3-diamond';
 
 export type TacticalMentality = 'ultra_defensive' | 'defensive' | 'balanced' | 'attacking' | 'ultra_attacking';
 export type PassingStyle = 'short' | 'direct' | 'long_balls' | 'tiki_taka_short' | 'through_balls';
@@ -187,7 +194,15 @@ export type TacticalStyle =
   | 'wing_play'
   | 'direct_play'
   | 'total_football'
-  | 'catenaccio';
+  | 'catenaccio'
+  | 'possession_control'
+  | 'transition_control'
+  | 'fluid_creative'
+  | 'long_ball'
+  | 'build_up_from_back'
+  | 'fast_transition'
+  | 'fluid_positional_play'
+  | 'tactical_mastermind';
 
 export type TeamWidth = 'wide' | 'balanced' | 'narrow';
 export type DefensiveLine = 'high' | 'balanced' | 'deep';
@@ -211,6 +226,37 @@ export interface TeamTactics {
   penaltyTakerId: string;
   freeKickTakerId: string;
   cornerTakerId: string;
+
+  // Advanced Tactical Knowledge Unlocks (Coaching License Progressive Systems)
+  buildUpStyle?: 'from_back' | 'direct_pivot' | 'channel_balls' | 'patient' | 'standard';
+  pressingTrap?: 'trap_wings' | 'trap_center' | 'zonal_trap' | 'none';
+  fullbackRole?: 'standard' | 'overlapping' | 'inverted' | 'stay_back';
+  strikerRole?: 'advanced_forward' | 'target_man' | 'false_9' | 'poacher' | 'pressing_forward';
+  midfieldRole?: 'balanced' | 'deep_playmaker' | 'box_to_box' | 'ball_winner' | 'mezzala' | 'shadow_striker';
+  attackingPattern?: 'balanced' | 'overload_isolate' | 'switch_play' | 'third_man_runs' | 'rotational';
+  pressingTriggers?: ('heavy_touch' | 'back_pass' | 'touchline')[];
+  defensiveBlock?: 'low' | 'mid' | 'high' | 'hybrid';
+  matchStatePreset?: 'normal' | 'protect_lead' | 'chase_game' | 'counter_risk';
+  customPhilosophyName?: string;
+}
+
+export interface TacticalMatchReport {
+  pressingRating: number;          // 0 - 100
+  buildUpRating: number;          // 0 - 100
+  defensiveOrgRating: number;     // 0 - 100
+  chanceCreationRating: number;   // 0 - 100
+  adjustmentsRating: number;      // 0 - 100
+  overallTacticalScore: number;   // 0 - 100
+  primaryInsightArabic: string;
+  secondaryInsightArabic: string;
+  staminaWarningArabic?: string;
+  tacticalExpGained: {
+    styleId: string;
+    styleNameArabic: string;
+    expGained: number;
+    newTotal: number;
+  }[];
+  tacticalSynergyBonus: number;   // percentage e.g. +8%
 }
 
 export type Tactics = TeamTactics;
@@ -226,13 +272,46 @@ export interface ClubFacilities {
   ticketPrice?: number;     // Custom ticket price set by coach (in EGP)
 }
 
+export type SponsorCategory = 'shirt' | 'stadium' | 'sleeve' | 'kit_apparel' | 'commercial_partner';
+
+export interface SponsorMilestoneBonus {
+  leagueChampionBonus?: number;
+  cupChampionBonus?: number;
+  continentalChampionBonus?: number;
+  topFourFinishBonus?: number;
+}
+
 export interface Sponsor {
   id: string;
   name: string;
-  type: 'shirt' | 'stadium' | 'sleeve';
+  type: SponsorCategory | 'shirt' | 'stadium' | 'sleeve';
   monthlyPayment: number;
   contractMonthsRemaining: number;
   bonusForWin: number;
+  // Extended realistic properties
+  category?: SponsorCategory;
+  industry?: string;
+  tagline?: string;
+  brandColor?: string;
+  accentColor?: string;
+  signingBonus?: number;
+  totalDurationMonths?: number;
+  satisfaction?: number; // 0 - 100
+  reputationMinRequired?: number;
+  // Competition-specific clauses
+  bonusForDraw?: number;
+  bonusCupWin?: number;
+  bonusContinentalWin?: number;
+  bonusCleanSheet?: number;
+  bonusDerbyWin?: number;
+  milestoneBonus?: SponsorMilestoneBonus;
+  penaltyClause?: number;
+}
+
+export interface SponsorshipOffer extends Sponsor {
+  offerExpiryRounds?: number;
+  isNegotiated?: boolean;
+  negotiationCount?: number;
 }
 
 export interface FinancialReport {
@@ -499,7 +578,13 @@ export type JobOfferCategory =
   | 'european_leap' 
   | 'global_elite' 
   | 'rebuild_project' 
-  | 'continental_champions';
+  | 'continental_champions'
+  // 5 Specific Realism Archetypes:
+  | 'higher_competition'    // نادي أكبر ومنافسة أعلى
+  | 'mid_table_project'      // نادي متوسط يريد بناء مشروع
+  | 'relegation_salvage'     // نادي في خطر ويحتاج إنقاذه من الهبوط
+  | 'title_challenger'       // نادي لديه ميزانية كبيرة ويريد المنافسة على البطولات
+  | 'youth_foundation';      // نادي أصغر يعطي المدرب فرصة أكبر لبناء الفريق
 
 export interface JobOffer {
   id: string;
@@ -518,6 +603,9 @@ export interface JobOffer {
   interestReason?: string; // سبب اهتمام النادي بالمدرب باللغة العربية
   minimumLevelRequired?: number;
   minimumReputationRequired?: number;
+  requiredLicense?: 'D' | 'C' | 'B' | 'A' | 'PRO' | 'ELITE';
+  difficultyRating?: 'easy' | 'medium' | 'hard' | 'extreme';
+  taskDifficultyArabic?: string; // e.g. "تحدي متوازن" | "مهمة شاقة" | "مشروع أسطوري"
   primaryColor: string;
   secondaryColor: string;
   managerSalary: number; // راتب المدرب الشهري
@@ -530,6 +618,17 @@ export interface JobOffer {
   stadiumCapacity: number;
   currentPositionInLeague?: number;
   status: 'pending' | 'accepted' | 'rejected';
+
+  // Realistic Multi-Factor Job Market Additions
+  pressureLevel?: 'low' | 'moderate' | 'high' | 'extreme';
+  pressureLevelArabic?: string; // مستوى الضغط والتوقعات
+  offerType?: 'higher_competition' | 'mid_table_project' | 'relegation_salvage' | 'title_challenger' | 'youth_foundation';
+  offerTypeArabic?: string; // نوع العرض بالعربية
+  squadQualityRating?: number; // متوسط جودة وقوة التشكيلة
+  tacticalFitReason?: string; // التوافق مع الأسلوب التكتيكي للمدرب
+  clubAmbitionText?: string; // طموح إدارة النادي
+  freedomLevelArabic?: string; // حرية بناء الفريق وسوق الانتقالات
+  clubSituationDescription?: string; // وضع النادي الحالي والظروف التي دفعتهم للتفاوض
 }
 
 export interface YouthProspect {
@@ -649,11 +748,12 @@ export interface ManagerProfile {
   name: string;
   age: number;
   nationality: string;
+  avatar?: string;
   level: number;
   xp: number;
   xpToNextLevel: number;
   reputation: number; // 1 - 100
-  license: 'D' | 'C' | 'B' | 'A' | 'PRO';
+  license: 'D' | 'C' | 'B' | 'A' | 'PRO' | 'ELITE';
   matchesManaged: number;
   wins: number;
   draws: number;
@@ -683,6 +783,14 @@ export interface ManagerProfile {
   totalSeasonsCompleted?: number;
   history: SeasonHistoryEntry[];
 
+  // Career Progression, Continuous Milestones & Dynamic Challenges
+  completedMilestones?: string[]; // IDs of unlocked career milestones
+  unlockedBadges?: string[]; // Badges earned along the journey
+  activeChallenges?: CareerDynamicChallenge[]; // Current dynamic challenges
+  totalPlayersDeveloped?: number; // Total players trained / leveled up
+  totalPlayTimeMinutes?: number; // Real active in-game minutes
+  bestClubManaged?: string; // Best club managed
+
   // Global Manager Ranking, Daily Points & Monthly Points
   rankingPoints?: number;
   managerRating?: number; // 50 - 99 (قوة وخبرة وتصنيف المدرب)
@@ -707,6 +815,20 @@ export interface ManagerProfile {
   completedCourses?: string[]; // الدورات والرخص التدريبية الحاصل عليها
   totalClubDonations?: number; // إجمالي المبالغ المتبرع بها للنادي
   totalBonusesEarned?: number; // إجمالي مكافآت الفوز والبطولات
+
+  // Deep Tactical Knowledge & Mastery (الخبرة والمعرفة التكتيكية التراكمية)
+  tacticalExperience?: Record<string, number>; // e.g. { high_press: 72, tiki_taka: 55, low_block: 85 }
+  tacticalKnowledge?: string[]; // IDs of unlocked tactical capabilities
+  customPhilosophies?: {
+    id: string;
+    name: string;
+    description: string;
+    formation: FormationType;
+    style: TacticalStyle;
+    buildUp: string;
+    pressing: PressingIntensity;
+    createdDate: string;
+  }[];
 }
 
 export interface ManagerTransaction {
@@ -715,6 +837,41 @@ export interface ManagerTransaction {
   amount: number;
   type: 'salary' | 'trophy_bonus' | 'course_license' | 'club_donation' | 'player_bonus' | 'match_bonus';
   description: string;
+}
+
+export type CoachingLicenseTier = 'D' | 'C' | 'B' | 'A' | 'PRO' | 'ELITE';
+
+export type ClubPrestigeTier = 'tier_dc' | 'tier_cb' | 'tier_ba' | 'tier_apro' | 'tier_pro' | 'tier_elite';
+
+export interface CareerMilestone {
+  id: string;
+  title: string;
+  description: string;
+  category: 'short' | 'mid' | 'long';
+  targetValue: number;
+  currentValue: number;
+  unit?: string;
+  rewardReputation: number;
+  rewardXp: number;
+  rewardCash: number;
+  badgeIcon: string;
+  isCompleted: boolean;
+  unlockedAt?: string;
+}
+
+export interface CareerDynamicChallenge {
+  id: string;
+  title: string;
+  description: string;
+  difficulty: 'normal' | 'hard' | 'extreme';
+  targetType: 'win_streak' | 'beat_stronger' | 'clean_sheets' | 'top_position' | 'undefeated_month' | 'player_rating';
+  targetValue: number;
+  currentValue: number;
+  rewardReputation: number;
+  rewardCash: number;
+  expiresInRounds: number;
+  isCompleted: boolean;
+  isFailed?: boolean;
 }
 
 export interface WorldClubRankingItem {

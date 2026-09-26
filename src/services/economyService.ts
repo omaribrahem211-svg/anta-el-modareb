@@ -245,8 +245,9 @@ export function calculateRealisticSalary(
  * Calculate club's total monthly revenue/income from all sources (Sponsors + Tickets + Commercial/TV rights).
  */
 export function calculateClubMonthlyIncome(club: Club): number {
+  if (!club) return 0;
   const sponsors = Array.isArray(club.sponsors) ? club.sponsors : [];
-  let sponsorIncome = sponsors.reduce((sum, sp) => sum + (sp.monthlyPayment || 0), 0);
+  let sponsorIncome = sponsors.filter(Boolean).reduce((sum, sp) => sum + (sp?.monthlyPayment || 0), 0);
   
   const tier = club.division || 4;
   // If no sponsors attached yet, use standard tier baseline
@@ -279,8 +280,9 @@ export function calculateClubMonthlyIncome(club: Club): number {
  * Calculate total current monthly wages for all players currently contracted to the club.
  */
 export function calculateClubTotalMonthlyWages(club: Club): number {
+  if (!club) return 0;
   const players = Array.isArray(club.players) ? club.players : [];
-  return players.reduce((sum, p) => sum + (p.salary || 0), 0);
+  return players.filter(Boolean).reduce((sum, p) => sum + (p?.salary || 0), 0);
 }
 
 /**
@@ -307,12 +309,28 @@ export function validateTransferFinancials(
   offeredSalary?: number,
   isFreeAgent: boolean = false
 ): TransferFinancialValidation {
+  if (!userClub) {
+    return {
+      canAffordFee: false,
+      canAffordWage: false,
+      allowed: false,
+      currentBudget: 0,
+      requiredFee: 0,
+      currentWages: 0,
+      newSalary: 0,
+      projectedWages: 0,
+      monthlyIncome: 0,
+      remainingWageBudget: 0,
+      reason: 'يجب تولي تدريب نادٍ أولاً لإجراء التعاقدات!',
+    };
+  }
+
   const currentBudget = userClub.budget || 0;
-  const requiredFee = isFreeAgent ? 0 : (offeredFee ?? player.marketValue ?? 0);
+  const requiredFee = isFreeAgent ? 0 : (offeredFee ?? player?.marketValue ?? 0);
   const canAffordFee = currentBudget >= requiredFee;
 
   const currentWages = calculateClubTotalMonthlyWages(userClub);
-  const newSalary = offeredSalary ?? player.salary ?? 2000;
+  const newSalary = offeredSalary ?? player?.salary ?? 2000;
   const projectedWages = currentWages + newSalary;
   const monthlyIncome = calculateClubMonthlyIncome(userClub);
   const remainingWageBudget = Math.max(0, monthlyIncome - currentWages);
@@ -321,9 +339,9 @@ export function validateTransferFinancials(
   let reason: string | undefined = undefined;
 
   if (!canAffordFee) {
-    reason = `ميزانية النادي (${currentBudget.toLocaleString()} ج.م) لا تكفي لدفع قيمة شراء اللاعب المطلوبة (${requiredFee.toLocaleString()} ج.م). يجب توفير سعر اللاعب أولاً!`;
+    reason = `ميزانية النادي (${(currentBudget || 0).toLocaleString()} ج.م) لا تكفي لدفع قيمة شراء اللاعب المطلوبة (${(requiredFee || 0).toLocaleString()} ج.م). يجب توفير سعر اللاعب أولاً!`;
   } else if (!canAffordWage) {
-    reason = `الراتب المطلوب (${newSalary.toLocaleString()} ج.م/ش) سيجعل إجمالي رواتب الفريق (${projectedWages.toLocaleString()} ج.م) يتجاوز سقف الدخل الشهري (${monthlyIncome.toLocaleString()} ج.م). المتبقي لسقف الرواتب: ${remainingWageBudget.toLocaleString()} ج.م فقط!`;
+    reason = `الراتب المطلوب (${(newSalary || 0).toLocaleString()} ج.م/ش) سيجعل إجمالي رواتب الفريق (${(projectedWages || 0).toLocaleString()} ج.م) يتجاوز سقف الدخل الشهري (${(monthlyIncome || 0).toLocaleString()} ج.م). المتبقي لسقف الرواتب: ${(remainingWageBudget || 0).toLocaleString()} ج.م فقط!`;
   }
 
   return {
@@ -345,6 +363,13 @@ export function canPlayerJoinClub(
   player: Player,
   userClub: Club
 ): { canJoin: boolean; reason?: string } {
+  if (!userClub) {
+    return { canJoin: false, reason: 'يجب تولي تدريب نادٍ أولاً لإجراء التعاقدات!' };
+  }
+  if (!player) {
+    return { canJoin: false, reason: 'بيانات اللاعب غير صالحة!' };
+  }
+
   const clubTier = userClub.division || 4;
   const clubRep = userClub.reputation || 25;
   const ovr = player.overallRating || 60;
@@ -352,10 +377,12 @@ export function canPlayerJoinClub(
   const age = player.age || 25;
 
   // 1. Budget validation
-  if (player.marketValue > 0 && userClub.budget < player.marketValue) {
+  const playerValue = player.marketValue || 0;
+  const clubBudget = userClub.budget || 0;
+  if (playerValue > 0 && clubBudget < playerValue) {
     return {
       canJoin: false,
-      reason: `ميزانية ناديك الحالية (${userClub.budget.toLocaleString()} ج.م) لا تكفي لدفع قيمة شراء اللاعب (${player.marketValue.toLocaleString()} ج.م). يجب توفير سعر اللاعب أولاً!`,
+      reason: `ميزانية ناديك الحالية (${clubBudget.toLocaleString()} ج.م) لا تكفي لدفع قيمة شراء اللاعب (${playerValue.toLocaleString()} ج.م). يجب توفير سعر اللاعب أولاً!`,
     };
   }
 

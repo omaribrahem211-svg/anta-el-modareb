@@ -4,6 +4,7 @@ import {
   CupTournament,
   Fixture,
   JobOffer,
+  JobOfferCategory,
   LeagueDefinition,
   LeagueStanding,
   ManagerProfile,
@@ -13,6 +14,7 @@ import {
   SeasonHistoryEntry,
   SeasonInfo,
   RetiredPlayer,
+  TeamTactics,
 } from '../types/game';
 import { getLeagueByCountryAndTier, getLeagueById, GLOBAL_LEAGUES, updateLeagueRosterInWorld, getCustomLeagues, getAllClubsForCountry, findClubInWorld, createClub } from '../data/leaguesData';
 import { generateLeagueSchedule, generateInitialStandings } from '../data/initialData';
@@ -21,6 +23,7 @@ import { simulateKnockoutMatch } from './continentalEngine';
 import { generateYouthAcademyBatch } from './youthAcademyEngine';
 import { checkCupStageAdvancementRewards, StageRewardInfo } from './rewardsEngine';
 import { isRealClub, loadRealClubSquad } from '../data/realPlayersData';
+import { getClubPrestigeTier, isClubEligibleToMakeJobOffer } from './careerProgressionEngine';
 
 // ----------------------------------------------------
 // 1. END OF SEASON RESULT CALCULATION
@@ -276,33 +279,116 @@ export function calculateSeasonEndSummary(
  * Tier 6: Major Regional / European Challenger (Rep: 75-88, Min Level: 8, License: PRO)
  * Tier 7: Global Elite Giants (Real Madrid, Man City, Bayern, Rep: 88-99, Min Level: 10, License: PRO)
  */
+/**
+ * Realistic Squad Quality Calculation (متوسط قوة وجودة التشكيلة)
+ */
+function calculateSquadQuality(club: Club, league: LeagueDefinition): number {
+  if (Array.isArray(club.players) && club.players.length >= 11) {
+    const sorted = [...club.players].sort((a, b) => (b.overallRating || 60) - (a.overallRating || 60));
+    const top14 = sorted.slice(0, 14);
+    const avg = top14.reduce((sum, p) => sum + (p.overallRating || 60), 0) / top14.length;
+    return Math.round(avg);
+  }
+  // Base derivation according to league tier & club reputation
+  const tierBase = league.tier === 4 ? 56 : league.tier === 3 ? 66 : league.tier === 2 ? 74 : 80;
+  const repBonus = Math.round((club.reputation / 100) * 12);
+  return Math.max(52, Math.min(93, tierBase + repBonus));
+}
+
+/**
+ * Derives the manager's tactical profile and description in Arabic
+ */
+function getManagerTacticalProfile(tactics?: TeamTactics): {
+  styleNameArabic: string;
+  focusArabic: string;
+  isHighPress: boolean;
+  isAttacking: boolean;
+  isDefensive: boolean;
+  isPossession: boolean;
+} {
+  const mentality = tactics?.mentality || 'balanced';
+  const pressing = tactics?.pressingIntensity || 'balanced';
+  const passing = tactics?.passingStyle || 'short';
+  const buildUp = tactics?.buildUpStyle || 'standard';
+
+  const isHighPress = pressing === 'high' || pressing === 'gegenpress';
+  const isAttacking = mentality === 'attacking' || mentality === 'ultra_attacking';
+  const isDefensive = mentality === 'defensive' || mentality === 'ultra_defensive';
+  const isPossession = passing === 'short' || buildUp === 'from_back' || buildUp === 'patient';
+
+  let styleNameArabic = 'نهج تكتيكي متوازن وشامل';
+  let focusArabic = 'المرونة التكتيكية والانضباط الميداني وفق متطلبات كل مباراة';
+
+  if (isHighPress && isAttacking) {
+    styleNameArabic = 'الضغط العالي والتحولات السريعة (Gegenpress)';
+    focusArabic = 'استخلاص الكرة في الثلث الهجومي للخصم وتكثيف الهجمات المباشرة';
+  } else if (isPossession && isAttacking) {
+    styleNameArabic = 'الاستحواذ المنظم والتمرير القصير (Tiki-Taka)';
+    focusArabic = 'البناء المتدرج من الخلف وفرض السيطرة الفنية على وسط الملعب';
+  } else if (isDefensive) {
+    styleNameArabic = 'التنظيم الدفاعي والارتداد السريع (Catenaccio & Counter)';
+    focusArabic = 'تأمين العمق الدفاعي وغلق المساحات والاعتماد على الكرات المرتدة الحاسمة';
+  } else if (passing === 'direct' || passing === 'long_balls') {
+    styleNameArabic = 'اللعب العمودي المباشر والكرات الطولية';
+    focusArabic = 'نقل الكرة بأسرع وقت لخط الهجوم واستغلال القوة البدنية والعرضيات';
+  }
+
+  return { styleNameArabic, focusArabic, isHighPress, isAttacking, isDefensive, isPossession };
+}
+
+/**
+ * ----------------------------------------------------
+ * REALISTIC JOB MARKET & OFFER GENERATION ENGINE
+ * ----------------------------------------------------
+ * Generates realistic, non-random job offers evaluating all 10 factors:
+ * 1. Coaching License (D, C, B, A, PRO, ELITE)
+ * 2. Manager Reputation (0-100)
+ * 3. Career Achievements & Trophies (League, Cup, Win Rate, Matches)
+ * 4. Current Club Level & Division Ladder
+ * 5. Manager's Tactical Style & Philosophy Match
+ * 6. Previous League/Club Experience
+ * 7. Club's Current Situation (Crisis, Ambition, Rebuild, Stability)
+ * 8. Club Budget & Ambitions
+ * 9. Squad Quality & Potential
+ * 10. Competition Level & Tier
+ *
+ * Produces diverse, strategic offers spanning the 5 core archetypes:
+ * - 🏆 higher_competition: نادي أكبر ومنافسة أعلى
+ * - 🛠️ mid_table_project: نادي متوسط يريد بناء مشروع
+ * - 🛟 relegation_salvage: نادي في خطر ويحتاج إنقاذه من الهبوط
+ * - 💰 title_challenger: نادي لديه ميزانية كبيرة ويريد المنافسة على البطولات
+ * - 🌱 youth_foundation: نادي أصغر يعطي المدرب فرصة أكبر لبناء الفريق
+ */
 export function generateSeasonJobOffers(
   manager: ManagerProfile,
   currentClub: Club,
   currentLeague: LeagueDefinition,
-  finalPosition: number
+  finalPosition: number = 1
 ): JobOffer[] {
   const offers: JobOffer[] = [];
   const rep = manager.reputation || 15;
   const level = manager.level || 1;
   const totalTeams = currentLeague.teams.length;
 
-  // Performance classification
+  // Performance classification in recent season
   const isChampion = finalPosition === 1;
   const isPromoted = finalPosition <= currentLeague.promotionSpots && currentLeague.tier > 1;
   const isTopThree = finalPosition <= 3;
   const isTopHalf = finalPosition <= Math.ceil(totalTeams / 2);
   const isRelegated = currentLeague.relegationSpots > 0 && finalPosition > (totalTeams - currentLeague.relegationSpots);
 
-  // Compute effective manager appeal & momentum
-  let effectiveAppeal = rep;
-  if (isChampion) effectiveAppeal += 18;
-  else if (isPromoted) effectiveAppeal += 12;
-  else if (isTopThree) effectiveAppeal += 7;
-  else if (isTopHalf) effectiveAppeal += 3;
-  else if (isRelegated) effectiveAppeal -= 12;
+  // Career achievements & experience stats
+  const trophiesCount =
+    (manager.leagueTitles || 0) + (manager.cupTitles || 0) ||
+    (Array.isArray(manager.trophies) ? manager.trophies.length : 0);
+  const matchesManaged = manager.matchesManaged || 0;
+  const wins = manager.wins || 0;
+  const winRate = matchesManaged > 0 ? Math.round((wins / matchesManaged) * 100) : 0;
 
-  // Gather all potential clubs across global leagues
+  // Manager tactical profile
+  const tacticalProfile = getManagerTacticalProfile(currentClub.tactics);
+
+  // Collect all potential candidate clubs across all registered leagues
   const allClubsWithLeagues: { club: Club; league: LeagueDefinition }[] = [];
   Object.values(GLOBAL_LEAGUES).forEach(league => {
     league.teams.forEach(c => {
@@ -312,167 +398,326 @@ export function generateSeasonJobOffers(
     });
   });
 
-  // Offer Pool Builders for Diverse Tiers:
-  // 1. Domestic Step-Up / Same Country
-  const domesticCandidates = allClubsWithLeagues.filter(({ club, league }) => {
-    if (league.country !== currentLeague.country) return false;
-    // If promoted, look for higher tier or same tier with higher reputation
-    if (isChampion || isPromoted) {
-      return league.tier <= currentLeague.tier && club.reputation <= effectiveAppeal + 18;
-    }
-    if (isTopThree || isTopHalf) {
-      return Math.abs(club.reputation - effectiveAppeal) <= 22;
-    }
-    return league.tier >= currentLeague.tier && club.reputation <= effectiveAppeal + 8;
-  });
-
-  // 2. Arab Region Contenders (Saudi Arabia, UAE, Qatar, Morocco, Tunisia, Algeria)
-  const arabCountryNames = ['المملكة العربية السعودية', 'الإمارات العربية المتحدة', 'قطر', 'المغرب', 'تونس', 'الجزائر'];
-  const arabCandidates = allClubsWithLeagues.filter(({ club, league }) => {
-    if (!arabCountryNames.includes(league.country)) return false;
-    if (league.country === currentLeague.country) return false; // Cross-border
-
-    // Tier matching
-    if (currentLeague.tier >= 3 && rep < 40) {
-      // Lower tier manager can get Saudi Tier 2 (Yellow League) or rising Arab clubs
-      return league.tier === 2 || (league.tier === 1 && club.reputation <= 68);
-    }
-    if (currentLeague.tier >= 2 && rep < 60) {
-      return club.reputation <= effectiveAppeal + 18;
-    }
-    // Premier/Higher tier manager
-    return club.reputation <= effectiveAppeal + 22;
-  });
-
-  // 3. European Gateway & Giants (Spain La Liga 2/1, England Championship/Premier, France, Italy, Germany)
-  const europeanCountryNames = ['إسبانيا', 'إنجلترا', 'فرنسا', 'إيطاليا', 'ألمانيا'];
-  const europeanCandidates = allClubsWithLeagues.filter(({ club, league }) => {
-    if (!europeanCountryNames.includes(league.country)) return false;
-
-    // Progression rules for Europe:
-    // - Rep 35-55: Tier 2 Europe (Championship, La Liga 2) or lower-mid
-    // - Rep 56-75: Upper Tier 2 or mid-table Tier 1
-    // - Rep 76+: Top European Giants
-    if (effectiveAppeal < 35 && !isChampion && !isPromoted) return false;
-
-    if (effectiveAppeal < 55) {
-      return league.tier === 2 || (league.tier === 1 && club.reputation <= 70);
-    }
-    if (effectiveAppeal < 75) {
-      return (league.tier === 2 && club.reputation >= 65) || (league.tier === 1 && club.reputation <= 84);
-    }
-    return league.tier === 1 && club.reputation <= effectiveAppeal + 14;
-  });
-
-  // 4. Latin America & Exotic Challenges (Brazil, Argentina)
-  const latamCountryNames = ['البرازيل', 'الأرجنتين'];
-  const latamCandidates = allClubsWithLeagues.filter(({ club, league }) => {
-    if (!latamCountryNames.includes(league.country)) return false;
-    return club.reputation <= effectiveAppeal + 20;
-  });
-
-  // 5. High Budget / Ambitious Revival Projects
-  const rebuildCandidates = allClubsWithLeagues.filter(({ club, league }) => {
-    return club.reputation <= effectiveAppeal + 12 && club.reputation >= 35;
-  });
-
-  // Pick balanced selections to create a thrilling 3-5 offers menu
-  const selectedPicks: { club: Club; league: LeagueDefinition; category: JobOffer['offerCategory']; badge: string }[] = [];
-  const usedClubIds = new Set<string>();
-
-  const pickCandidate = (
-    pool: { club: Club; league: LeagueDefinition }[],
-    category: JobOffer['offerCategory'],
-    badge: string
+  // Evaluate candidate club suitability for a specific offer archetype
+  const evaluateOfferMatch = (
+    c: Club,
+    l: LeagueDefinition,
+    archetype: JobOfferCategory
   ) => {
-    const available = pool.filter(p => !usedClubIds.has(p.club.id));
-    if (available.length === 0) return;
-    const item = available[Math.floor(Math.random() * available.length)];
-    usedClubIds.add(item.club.id);
-    selectedPicks.push({ ...item, category, badge });
+    return isClubEligibleToMakeJobOffer(
+      manager,
+      currentClub,
+      currentLeague,
+      c,
+      l,
+      isChampion,
+      isPromoted,
+      archetype,
+      currentClub.tactics
+    );
   };
 
-  // Domestic Step-up (Always available unless relegated badly)
-  if (domesticCandidates.length > 0) {
-    const badge = currentLeague.country === 'مصر' ? 'عملاق محلي 🇪🇬' : `تحدي محلي 📌`;
-    pickCandidate(domesticCandidates, 'domestic_stepup', badge);
+  const usedClubIds = new Set<string>();
+  const selectedArchetypes: {
+    club: Club;
+    league: LeagueDefinition;
+    archetype: 'higher_competition' | 'mid_table_project' | 'relegation_salvage' | 'title_challenger' | 'youth_foundation';
+    evalScore: number;
+    tacticalFit: number;
+  }[] = [];
+
+  // --------------------------------------------------------------------------
+  // POOL 1: 🏆 higher_competition (نادي أكبر ومنافسة أعلى)
+  // Step up to a higher division or significantly more prestigious club
+  // --------------------------------------------------------------------------
+  const higherCompCandidates = allClubsWithLeagues
+    .filter(({ club, league }) => {
+      if (usedClubIds.has(club.id)) return false;
+      const res = evaluateOfferMatch(club, league, 'higher_competition');
+      if (!res.eligible) return false;
+
+      // Must be higher reputation or higher tier
+      const isStepUp = league.tier < currentLeague.tier || club.reputation >= (currentClub.reputation + 4);
+      return isStepUp;
+    })
+    .sort((a, b) => b.club.reputation - a.club.reputation);
+
+  if (higherCompCandidates.length > 0) {
+    const pick = higherCompCandidates[0];
+    usedClubIds.add(pick.club.id);
+    const evalRes = evaluateOfferMatch(pick.club, pick.league, 'higher_competition');
+    selectedArchetypes.push({
+      club: pick.club,
+      league: pick.league,
+      archetype: 'higher_competition',
+      evalScore: evalRes.score,
+      tacticalFit: evalRes.tacticalFit,
+    });
   }
 
-  // Arab Regional Opportunity
-  if (arabCandidates.length > 0) {
-    pickCandidate(arabCandidates, 'arab_challenge', 'تحدي عربي طموح 🏆');
+  // --------------------------------------------------------------------------
+  // POOL 2: 💰 title_challenger (نادي لديه ميزانية كبيرة ويريد المنافسة على البطولات)
+  // Wealthy club with championship ambitions and demanding expectations
+  // --------------------------------------------------------------------------
+  const titleChallengerCandidates = allClubsWithLeagues
+    .filter(({ club, league }) => {
+      if (usedClubIds.has(club.id)) return false;
+      const res = evaluateOfferMatch(club, league, 'title_challenger');
+      if (!res.eligible) return false;
+
+      // High budget or high reputation within its tier
+      const isRich = (club.budget || 0) >= (currentClub.budget || 200000) * 1.3 || club.reputation >= 60;
+      return isRich;
+    })
+    .sort((a, b) => (b.club.budget || 0) - (a.club.budget || 0));
+
+  if (titleChallengerCandidates.length > 0) {
+    const pick = titleChallengerCandidates[0];
+    usedClubIds.add(pick.club.id);
+    const evalRes = evaluateOfferMatch(pick.club, pick.league, 'title_challenger');
+    selectedArchetypes.push({
+      club: pick.club,
+      league: pick.league,
+      archetype: 'title_challenger',
+      evalScore: evalRes.score,
+      tacticalFit: evalRes.tacticalFit,
+    });
   }
 
-  // European Gateway (If manager is doing well or has decent rep)
-  if (europeanCandidates.length > 0 && (isChampion || isPromoted || isTopThree || rep >= 35)) {
-    const euroBadge = rep >= 75 ? 'عملاق أوروبي عالمي 🌟' : 'بوابة الاحتراف الأوروبي 🌍';
-    pickCandidate(europeanCandidates, 'european_leap', euroBadge);
+  // --------------------------------------------------------------------------
+  // POOL 3: 🛠️ mid_table_project (نادي متوسط يريد بناء مشروع)
+  // Stable mid-table club seeking a distinct tactical identity and long-term project
+  // --------------------------------------------------------------------------
+  const midTableCandidates = allClubsWithLeagues
+    .filter(({ club, league }) => {
+      if (usedClubIds.has(club.id)) return false;
+      const res = evaluateOfferMatch(club, league, 'mid_table_project');
+      if (!res.eligible) return false;
+
+      // Stable club in same tier or comparable tier
+      const isComparable = Math.abs(club.reputation - currentClub.reputation) <= 20;
+      return isComparable;
+    })
+    .sort((a, b) => Math.abs(a.club.reputation - rep) - Math.abs(b.club.reputation - rep));
+
+  if (midTableCandidates.length > 0) {
+    const pick = midTableCandidates[0];
+    usedClubIds.add(pick.club.id);
+    const evalRes = evaluateOfferMatch(pick.club, pick.league, 'mid_table_project');
+    selectedArchetypes.push({
+      club: pick.club,
+      league: pick.league,
+      archetype: 'mid_table_project',
+      evalScore: evalRes.score,
+      tacticalFit: evalRes.tacticalFit,
+    });
   }
 
-  // Latin America Opportunity (Brazil/Argentina)
-  if (latamCandidates.length > 0 && (isChampion || isPromoted || isTopHalf || rep >= 45)) {
-    pickCandidate(latamCandidates, 'continental_champions', 'سحر الكرة اللاتينية 🇧🇷');
+  // --------------------------------------------------------------------------
+  // POOL 4: 🛟 relegation_salvage (نادي في خطر ويحتاج إنقاذه من الهبوط)
+  // Struggling club needing tactical discipline, high urgency, emergency bonuses
+  // --------------------------------------------------------------------------
+  const salvageCandidates = allClubsWithLeagues
+    .filter(({ club, league }) => {
+      if (usedClubIds.has(club.id)) return false;
+      const res = evaluateOfferMatch(club, league, 'relegation_salvage');
+      if (!res.eligible) return false;
+
+      // Club in higher tier or same tier with lower prestige / struggling
+      return league.tier <= currentLeague.tier;
+    })
+    .sort((a, b) => a.club.reputation - b.club.reputation);
+
+  if (salvageCandidates.length > 0) {
+    const pick = salvageCandidates[0];
+    usedClubIds.add(pick.club.id);
+    const evalRes = evaluateOfferMatch(pick.club, pick.league, 'relegation_salvage');
+    selectedArchetypes.push({
+      club: pick.club,
+      league: pick.league,
+      archetype: 'relegation_salvage',
+      evalScore: evalRes.score,
+      tacticalFit: evalRes.tacticalFit,
+    });
   }
 
-  // Ambitious Rebuild / Big Budget Challenge
-  if (rebuildCandidates.length > 0 && selectedPicks.length < 4) {
-    pickCandidate(rebuildCandidates, 'rebuild_project', 'مشروع صعود وطموح تاريخي 🚀');
+  // --------------------------------------------------------------------------
+  // POOL 5: 🌱 youth_foundation (نادي أصغر يعطي المدرب فرصة أكبر لبناء الفريق)
+  // Lower pressure, complete tactical autonomy, youth academy integration
+  // --------------------------------------------------------------------------
+  const youthCandidates = allClubsWithLeagues
+    .filter(({ club, league }) => {
+      if (usedClubIds.has(club.id)) return false;
+      const res = evaluateOfferMatch(club, league, 'youth_foundation');
+      if (!res.eligible) return false;
+
+      // Club with equal or lower reputation, great for long-term project
+      return club.reputation <= (currentClub.reputation + 8);
+    })
+    .sort((a, b) => (b.club.facilities?.youthAcademyLevel || 1) - (a.club.facilities?.youthAcademyLevel || 1));
+
+  if (youthCandidates.length > 0) {
+    const pick = youthCandidates[0];
+    usedClubIds.add(pick.club.id);
+    const evalRes = evaluateOfferMatch(pick.club, pick.league, 'youth_foundation');
+    selectedArchetypes.push({
+      club: pick.club,
+      league: pick.league,
+      archetype: 'youth_foundation',
+      evalScore: evalRes.score,
+      tacticalFit: evalRes.tacticalFit,
+    });
   }
 
-  // If still fewer than 3 offers, fill from general candidate pool
-  if (selectedPicks.length < 3 && allClubsWithLeagues.length > 0) {
-    const fallbacks = allClubsWithLeagues.filter(p => !usedClubIds.has(p.club.id) && p.club.reputation <= effectiveAppeal + 15);
-    while (selectedPicks.length < 3 && fallbacks.length > 0) {
-      const idx = Math.floor(Math.random() * fallbacks.length);
-      const fallbackItem = fallbacks.splice(idx, 1)[0];
-      usedClubIds.add(fallbackItem.club.id);
-      selectedPicks.push({
-        ...fallbackItem,
-        category: 'rebuild_project',
-        badge: 'فرصة تدريبية ممتازة ⚽',
+  // Fallback: Ensure at least 3 distinct realistic offers are always available
+  if (selectedArchetypes.length < 3) {
+    const fallbacks = allClubsWithLeagues.filter(
+      p => !usedClubIds.has(p.club.id) && evaluateOfferMatch(p.club, p.league, 'mid_table_project').eligible
+    );
+    while (selectedArchetypes.length < 3 && fallbacks.length > 0) {
+      const fb = fallbacks.shift()!;
+      usedClubIds.add(fb.club.id);
+      const evalRes = evaluateOfferMatch(fb.club, fb.league, 'mid_table_project');
+      selectedArchetypes.push({
+        club: fb.club,
+        league: fb.league,
+        archetype: 'mid_table_project',
+        evalScore: evalRes.score,
+        tacticalFit: evalRes.tacticalFit,
       });
     }
   }
 
-  // Build full rich JobOffer items
-  selectedPicks.forEach(({ club, league, category, badge }, idx) => {
-    const salaryBase = Math.round(club.reputation * 450 + level * 700 + (effectiveAppeal * 250));
-    
-    // Dynamic Expectations based on league & club reputation
-    let expectations = '';
-    if (league.tier === 1) {
-      if (club.reputation >= 85) {
-        expectations = 'التتويج بلقب الدوري والمنافسة الشرسة على دوري الأبطال القاري';
-      } else if (club.reputation >= 70) {
-        expectations = 'إنهاء الموسم في المربع الذهبي والتأهل للبطولات القارية';
-      } else {
-        expectations = 'تأمين البقاء بمركز متقدم في وسط الجدول وبناء هوية تكتيكية صلبة';
-      }
-    } else if (league.tier === 2) {
-      expectations = 'المنافسة المباشرة على بطاقة الصعود للدوري الممتاز';
-    } else {
-      expectations = 'تحقيق الصعود وتطوير جيل شاب من قطاع الناشئين';
-    }
+  // --------------------------------------------------------------------------
+  // ASSEMBLE FULL REALISTIC JOB OFFERS
+  // --------------------------------------------------------------------------
+  selectedArchetypes.forEach(({ club, league, archetype, evalScore, tacticalFit }, idx) => {
+    const clubTier = getClubPrestigeTier(club, league);
+    const squadQuality = calculateSquadQuality(club, league);
 
-    // Dynamic tailored Arabic justifications matching performance & country
+    // Archetype metadata, expectations, pressure, and contract details
+    let categoryBadge = '';
+    let offerTypeArabic = '';
+    let pressureLevel: 'low' | 'moderate' | 'high' | 'extreme' = 'moderate';
+    let pressureLevelArabic = '';
+    let boardExpectations = '';
+    let clubSituationDescription = '';
     let interestReason = '';
-    if (category === 'european_leap') {
-      interestReason = `تتابع الإدارة الفنية لنادي ${club.name} في (${league.name}) تألقك اللافت مع ${currentClub.name}، وترى أن أسلوبك التكتيكي وشخصيتك القيادية مؤهلة للنجاح في الكرة الأوروبية.`;
-    } else if (category === 'arab_challenge') {
-      interestReason = `رصدت لجنة التخطيط بنادي ${club.name} نتائجك المتميزة في ${currentLeague.shortName}، وتضع بين يديك مشروعاً عربياً طموحاً بميزانية قوية للمنافسة على الألقاب.`;
-    } else if (isChampion) {
-      interestReason = `أعرب مسؤولو ${club.name} عن إعجابهم الشديد بتتويجك بطلاً للدوري مع ${currentClub.name}، ويرون فيك المدرب البطل القادر على كتابة التاريخ مع فريقهم.`;
-    } else if (isPromoted) {
-      interestReason = `جذبت قيادتك الحكيمة وتحقيق الصعود المستحق اهتمام إدارة ${club.name}، وترغب في الاستفادة من فكرك التنظيمي لإحداث ثورة فنية في النادي.`;
-    } else if (isTopThree) {
-      interestReason = `لفتت صلابة فريقك التكتيكية وإنهاؤك الموسم في المربع الذهبي (المركز ${finalPosition}) أنظار كشافي ${club.name} لقيادة مشروعهم القادم.`;
-    } else {
-      interestReason = `يقدر مسؤولو نادي ${club.name} مرونتك الخططية وثبات نتائجك، ويرون فيك الرجل المناسب لتحقيق تطلعات الجماهير وإعادة التوازن للفريق.`;
+    let tacticalFitReason = '';
+    let freedomLevelArabic = '';
+    let contractDurationYears = 3;
+    let salaryMultiplier = 1.0;
+    let transferBudgetBoost = 1.0;
+
+    switch (archetype) {
+      case 'higher_competition':
+        categoryBadge = 'منافسة عليا 🏆';
+        offerTypeArabic = 'نادي أكبر ومنافسة أعلى';
+        pressureLevel = 'high';
+        pressureLevelArabic = 'ضغط جماهيري وإعلامي مرتفع 🔥';
+        contractDurationYears = 2;
+        salaryMultiplier = 1.35;
+        transferBudgetBoost = 1.25;
+        freedomLevelArabic = 'صلاحيات متوازنة تحت إشراف الإدارة والمدير الرياضي';
+        clubSituationDescription = `نادٍ عريق ذو قاعدة جماهيرية واسعة يخوض غمار منافسات قوية في ${league.name}، ويبحث عن مدرب ذي شخصية قيادية لتحقيق قفزة نوعية في الترتيب.`;
+        boardExpectations = league.tier === 1
+          ? 'المنافسة الشرسة على المراكز المؤهلة للبطولات القارية الكبرى'
+          : 'المنافسة المباشرة على صدارة الدوري وتحقيق بطاقة الصعود';
+        interestReason = isChampion
+          ? `أبهرت إدارة ${club.name} بتتويجك المستحق بلقب الدوري مع ${currentClub.name}، وتثق بأنك المدرب القادر على قيادة فريقهم لمنصات الذهب.`
+          : isPromoted
+          ? `رصد مسؤولو ${club.name} كفاءتك في تحقيق الصعود وثبات نتائجك (نسبة فوز ${winRate}%)، ويرونك الأنسب لخوض هذا التحدي الكبير.`
+          : `يقدر نادي ${club.name} تطور مسيرتك وحصولك على رخصة ${manager.license || 'D'} مع سمعة تدريبية مرموقة (${rep}) تؤهلك لقيادة نادٍ أكبر.`;
+        tacticalFitReason = `تنسجم هويتك الفنية القائمة على [${tacticalProfile.styleNameArabic}] مع تطلعات النادي لتقديم كرة قدم شجاعة تليق بمكانته الجماهيرية.`;
+        break;
+
+      case 'title_challenger':
+        categoryBadge = 'ميزانية ضخمة 💰';
+        offerTypeArabic = 'نادي ذو ميزانية كبيرة يطمح للألقاب';
+        pressureLevel = 'high';
+        pressureLevelArabic = 'ضغط بطولات صارم ⚡ (الهدف هو الذهب فقط)';
+        contractDurationYears = 3;
+        salaryMultiplier = 1.6;
+        transferBudgetBoost = 1.8;
+        freedomLevelArabic = 'ميزانية استثنائية مع رقابة صارمة على تحقيق الألقاب';
+        clubSituationDescription = `يمتلك النادي قدرة مالية ممتازة وميزانية تعاقدات ضخمة، وقد وضع الملاك خطة واضحة تستهدف التتويج بجميع الألقاب المتاحة وتفادي أي تعثر.`;
+        boardExpectations = 'التتويج بلقب البطولة وحصد الكؤوس دون أي مساومة على المراكز الأولى';
+        interestReason = trophiesCount > 0
+          ? `يمتلك النادي مشروعاً بطولياً كبيراً، ولفت سجلك التتويجي (${trophiesCount} بطولة) أنظار مجلس الإدارة كمدرب يعرف طعم الألقاب وإدارة غرف الملابس.`
+          : `تبحث إدارة ${club.name} عن مدرب طموح ذي فكر متقدم، واستند اهتمامهم إلى أرقامك التصاعدية ونسبة الانتصارات المميزة (${winRate}%).`;
+        tacticalFitReason = `توفر الميزانية المرصودة للمدرب قدرة جلب نجوم يتناسبون تماماً مع فكرك التكتيكي في [${tacticalProfile.focusArabic}].`;
+        break;
+
+      case 'mid_table_project':
+        categoryBadge = 'مشروع متوسط 🛠️';
+        offerTypeArabic = 'نادي متوسط يريد بناء مشروع مستقر';
+        pressureLevel = 'moderate';
+        pressureLevelArabic = 'توقعات متوازنة ⚖️ (إدارة صبورة تدعم الاستقرار)';
+        contractDurationYears = 4;
+        salaryMultiplier = 1.0;
+        transferBudgetBoost = 1.0;
+        freedomLevelArabic = 'صلاحيات تدريبية واسعة واستقلالية فنية مريحة';
+        clubSituationDescription = `استقر النادي في المنطقة الدافئة بوسط الترتيب، وتسعى إدارته لعقد شراكة فنية طويلة الأمد مع مدرب قادر على تأسيس أسلوب لعب ثابت.`;
+        boardExpectations = 'بناء هوية فنية واضحة للفريق وإنهاء الموسم في النصف الأول من الجدول';
+        interestReason = `تتابع اللجنة الفنية لنادي ${club.name} عملك المنظم مع ${currentClub.name}، وترى فيك المدرب المثالي القادر على صياغة مشروع متكامل على مدار 3 إلى 4 سنوات.`;
+        tacticalFitReason = `أعجب مسؤولو النادي بأسلوبك في [${tacticalProfile.styleNameArabic}] واعتبروه الأساس الأنسب لبناء المنظومة المستقبلية للنادي.`;
+        break;
+
+      case 'relegation_salvage':
+        categoryBadge = 'إنقاذ من الهبوط 🛟';
+        offerTypeArabic = 'نادي في خطر يحتاج إنقاذه من شبح الهبوط';
+        pressureLevel = 'extreme';
+        pressureLevelArabic = 'شديد الحرج 🔥 (كل جولة بمثابة نهائي كأس للبقاء)';
+        contractDurationYears = 1;
+        salaryMultiplier = 1.25; // Combat hazard pay
+        transferBudgetBoost = 1.15; // Emergency squad reinforcement
+        freedomLevelArabic = 'صلاحيات تكتيكية كاملة لإحداث صدمة إيجابية فورية';
+        clubSituationDescription = `يمر الفريق بأزمة نتائج حادة وضعته في منطقة الخطر وشبح الهبوط، وتبحث الإدارة عن منقذ تكتيكي صارم يوقف نزيف النقاط فوراً.`;
+        boardExpectations = 'تفادي الهبوط بأي ثمن وضمان البقاء في الدوري بحصد النقاط الحاسمة';
+        interestReason = `تبحث إدارة ${club.name} عن قائد حازم يعيد الانضباط والروح القتالية، واستقرت على اسمك لما تتمتع به من حنكة تكتيكية وقدرة على إدارة المباريات المعقدة.`;
+        tacticalFitReason = `يعول النادي على قدرتك في ضبط التوازن الميداني وتطبيق [${tacticalProfile.styleNameArabic}] لغلق المنافذ وحسم النقاط في الأوقات الحرجة.`;
+        break;
+
+      case 'youth_foundation':
+        categoryBadge = 'حرية بناء وتطوير 🌱';
+        offerTypeArabic = 'نادي أصغر يمنحك حرية كاملة لبناء الفريق';
+        pressureLevel = 'low';
+        pressureLevelArabic = 'ضغط منخفض وهادئ 🌱 (بيئة مثالية للإبداع وتصعيد المواهب)';
+        contractDurationYears = 4;
+        salaryMultiplier = 0.9;
+        transferBudgetBoost = 0.85;
+        freedomLevelArabic = 'حرية مطلقة وسلطة كاملة على كافة القرارات الفنية والانتدابات';
+        clubSituationDescription = `نادٍ طموح يركز على ترشيد الإنفاق وبناء فريق شاب للمستقبل، ويوفر بيئة عمل هادئة تتيح للمدرب تطبيق أفكاره التكتيكية بحرية تامة دون تهديد بالإقالة.`;
+        boardExpectations = 'تطوير وتصعيد المواهب الشابة من قطاع الناشئين وتقديم كرة قدم حديثة وممتعة';
+        interestReason = `يبحث مسؤولو نادي ${club.name} عن مدرب يتمتع برؤية تطويرية وصبر تكتيكي، ووجدوا في مسيرتك نموذجاً ملهماً لتطبيق مشروع أكاديمي مستدام.`;
+        tacticalFitReason = `توفر لك إدارة النادي الضمانات الكاملة لتطبيق أسلوبك الفني [${tacticalProfile.styleNameArabic}] دون أي تدخلات خارجية.`;
+        break;
     }
 
-    // Transfer budget with realistic boost
-    const transferBudget = club.transferBudget || Math.max(150000, Math.round(club.budget * 0.45));
-    const wageBudget = club.wageBudgetMonthly || Math.max(20000, Math.round(club.budget * 0.35));
+    // Realistic Financial Scaling (الراتب وميزانيات التعاقدات)
+    // Base salary scaled by club reputation, manager level, and offer archetype
+    const baseSalary = Math.round(
+      (club.reputation * 520 + level * 650 + rep * 280) * salaryMultiplier
+    );
+
+    // Realistic transfer budget based on club wealth, tier, and offer type
+    const clubWealthBase = club.budget || (league.tier === 1 ? 5000000 : league.tier === 2 ? 1500000 : league.tier === 3 ? 500000 : 180000);
+    const transferBudget = Math.round(
+      Math.max(120000, clubWealthBase * 0.45 * transferBudgetBoost)
+    );
+    const wageBudgetMonthly = Math.round(
+      Math.max(25000, clubWealthBase * 0.35 * (salaryMultiplier > 1 ? 1.2 : 1.0))
+    );
+
+    const taskDifficultyArabic =
+      clubTier.tierLevel >= 6 ? 'مشروع أسطوري عالمي 🔥' :
+      clubTier.tierLevel >= 4 ? 'مهمة احترافية كبرى ⭐' :
+      clubTier.tierLevel >= 3 ? 'تحدي صعود طموح 🚀' : 'مشروع تأسيس وبناء ⚽';
+
+    const difficultyRating =
+      clubTier.tierLevel >= 6 ? 'extreme' :
+      clubTier.tierLevel >= 4 ? 'hard' :
+      clubTier.tierLevel >= 3 ? 'medium' : 'easy';
 
     offers.push({
       id: `job_offer_${club.id}_s_${Date.now()}_${idx}`,
@@ -486,20 +731,32 @@ export function generateSeasonJobOffers(
       clubReputation: club.reputation,
       clubPrestige: club.clubPrestige || Math.round(club.reputation * 0.9),
       financialPower: club.reputation >= 82 ? 'elite' : club.reputation >= 65 ? 'high' : club.reputation >= 40 ? 'medium' : 'low',
-      offerCategory: category,
-      categoryBadge: badge,
+      offerCategory: archetype,
+      categoryBadge,
+      offerType: archetype,
+      offerTypeArabic,
       interestReason,
-      minimumLevelRequired: Math.max(1, Math.floor(club.reputation / 15)),
-      minimumReputationRequired: Math.max(5, club.reputation - 20),
+      tacticalFitReason,
+      boardExpectations,
+      clubSituationDescription,
+      pressureLevel,
+      pressureLevelArabic,
+      freedomLevelArabic,
+      squadQualityRating: squadQuality,
+      minimumLevelRequired: Math.max(1, clubTier.minManagerLevel),
+      minimumReputationRequired: Math.max(5, clubTier.minReputation),
+      requiredLicense: clubTier.minLicense,
+      difficultyRating,
+      taskDifficultyArabic,
       primaryColor: club.primaryColor || '#1e293b',
       secondaryColor: club.secondaryColor || '#ffffff',
-      managerSalary: salaryBase,
+      managerSalary: baseSalary,
       transferBudget,
-      wageBudgetMonthly: wageBudget,
-      boardExpectations: expectations,
-      contractDurationYears: Math.floor(Math.random() * 2 + 2),
-      stadiumName: club.facilities?.stadiumName || `ملعب ${club.name}`,
-      stadiumCapacity: club.facilities?.stadiumCapacity || (league.tier === 1 ? 25000 : 8000),
+      clubBudget: clubWealthBase,
+      wageBudgetMonthly,
+      contractDurationYears,
+      stadiumName: club.facilities?.stadiumName || `استاد ${club.name}`,
+      stadiumCapacity: club.facilities?.stadiumCapacity || (league.tier === 1 ? 28000 : league.tier === 2 ? 14000 : 6000),
       currentPositionInLeague: Math.floor(Math.random() * 4 + 1),
       status: 'pending',
     });
@@ -623,9 +880,9 @@ export function getCupStageTriggers(
       return {
         r64Trigger: stage === 'round_of_64' ? 4 : -1,
         r32Trigger: stage === 'round_of_64' ? 9 : 4,
-        r16Trigger: 14,
-        quarterTrigger: 19,
-        semiTrigger: 23,
+        r16Trigger: 9,
+        quarterTrigger: 15,
+        semiTrigger: 20,
         finalTrigger: 27,
         totalSeasonRounds: 28,
       };
@@ -836,36 +1093,48 @@ export function generateMasterSeasonAgenda(
 ): Fixture[] {
   const masterFixtures: Fixture[] = [];
   const teamIds = (leagueTeams || []).map(t => t?.id).filter(Boolean) as string[];
-  const n = teamIds.length;
+  
+  // Berger round-robin requires an even number of teams; append bye placeholder if odd
+  const effectiveTeamIds = [...teamIds];
+  if (effectiveTeamIds.length % 2 !== 0) {
+    effectiveTeamIds.push('__BYE__');
+  }
+  const n = effectiveTeamIds.length;
 
-  // 1. Generate 14 League Matchdays (7 first leg + 7 second leg)
-  const halfRounds = n > 1 ? n - 1 : 1; // 7
+  // 1. Generate League Matchdays
+  const halfRounds = n > 1 ? n - 1 : 1;
   const leagueRounds: { homeId: string; awayId: string }[][] = [];
 
-  // First leg (7 rounds)
+  // First leg
   for (let r = 0; r < halfRounds; r++) {
     const roundMatches: { homeId: string; awayId: string }[] = [];
     for (let i = 0; i < n / 2; i++) {
       const homeIdx = (r + i) % (n - 1);
       let awayIdx = (n - 1 - i + r) % (n - 1);
       if (i === 0) awayIdx = n - 1;
-      roundMatches.push({
-        homeId: teamIds[homeIdx],
-        awayId: teamIds[awayIdx],
-      });
+      const homeId = effectiveTeamIds[homeIdx];
+      const awayId = effectiveTeamIds[awayIdx];
+      if (homeId && awayId && homeId !== '__BYE__' && awayId !== '__BYE__') {
+        roundMatches.push({
+          homeId,
+          awayId,
+        });
+      }
     }
     leagueRounds.push(roundMatches);
   }
 
-  // Second leg (7 rounds) - reverse home & away
+  // Second leg - reverse home & away
   for (let r = 0; r < halfRounds; r++) {
     const roundMatches: { homeId: string; awayId: string }[] = [];
-    const firstLeg = leagueRounds[r];
+    const firstLeg = leagueRounds[r] || [];
     for (const match of firstLeg) {
-      roundMatches.push({
-        homeId: match.awayId,
-        awayId: match.homeId,
-      });
+      if (match && match.homeId && match.awayId) {
+        roundMatches.push({
+          homeId: match.awayId,
+          awayId: match.homeId,
+        });
+      }
     }
     leagueRounds.push(roundMatches);
   }
@@ -1230,7 +1499,16 @@ export function advanceCupTournament(
 } {
   if (cup.isCompleted) return { updatedCup: cup };
 
-  let matches = [...cup.matches];
+  // Run integrity repair to ensure previous penalty shootout victories or qualifications are accurately recognized
+  let effectiveCup = cup;
+  if (userClub?.id) {
+    const rep = repairCupProgressionIntegrity(cup, [], userClub.id);
+    if (rep.repaired) {
+      effectiveCup = rep.updatedCup;
+    }
+  }
+
+  let matches = [...effectiveCup.matches];
   let cupMatchThisRound: CupMatch | undefined = undefined;
   let cupNewsMessage: string | undefined = undefined;
   const newMatchesCreated: CupMatch[] = [];
@@ -1282,334 +1560,513 @@ export function advanceCupTournament(
   const semiTrigger = triggers.semiTrigger;
   const finalTrigger = triggers.finalTrigger;
 
+  // Helper to determine the decisive winner of a knockout match, strictly honoring penalty shootouts
+  const resolveWinnerId = (m: CupMatch): string => {
+    if (m.winnerTeamId) return m.winnerTeamId;
+    const hs = m.homeScore ?? 0;
+    const as = m.awayScore ?? 0;
+    const hp = m.homePenalties;
+    const ap = m.awayPenalties;
+
+    if (hp !== undefined && ap !== undefined && hp !== ap) {
+      return hp > ap ? m.homeTeamId : m.awayTeamId;
+    }
+    if (hs !== as) {
+      return hs > as ? m.homeTeamId : m.awayTeamId;
+    }
+    return m.homeTeamId || m.awayTeamId;
+  };
+
   // 1. Round of 64 Trigger
-  if (currentRound === r64Trigger) {
-    const stageR64 = matches.filter(m => m.stage === 'round_of_64');
-    if (stageR64.length > 0) {
-      const qualifiedR32Ids: string[] = [];
+  const stageR64 = matches.filter(m => m.stage === 'round_of_64');
+  const userPlayedR64 = Boolean(userClub && stageR64.some(m => (m.homeTeamId === userClub.id || m.awayTeamId === userClub.id) && m.isPlayed));
+  const shouldAdvanceR64 = stageR64.length > 0 && (
+    currentRound === r64Trigger ||
+    stageR64[0]?.roundTrigger === currentRound ||
+    stageR64.every(m => m.isPlayed) ||
+    userPlayedR64
+  );
 
-      stageR64.forEach(match => {
-        if (!match.isPlayed) {
-          const homeTeam = getFullClub(match.homeTeamId);
-          const awayTeam = getFullClub(match.awayTeamId);
-          const res = simulateKnockoutMatch(homeTeam, awayTeam);
+  if (shouldAdvanceR64 && stageR64.length > 0) {
+    const qualifiedR32Ids: string[] = [];
 
-          match.homeScore = res.homeScore;
-          match.awayScore = res.awayScore;
-          match.homePenalties = res.homePenalties;
-          match.awayPenalties = res.awayPenalties;
-          match.isPlayed = true;
-          match.winnerTeamId = res.winnerTeamId;
-          match.events = res.events;
-          match.stats = res.stats;
+    stageR64.forEach(match => {
+      if (!match.isPlayed) {
+        const homeTeam = getFullClub(match.homeTeamId);
+        const awayTeam = getFullClub(match.awayTeamId);
+        const res = simulateKnockoutMatch(homeTeam, awayTeam);
 
-          if (userClub && (homeTeam.id === userClub.id || awayTeam.id === userClub.id)) {
-            cupMatchThisRound = match;
-            if (res.winnerTeamId !== userClub.id) {
-              cup.userEliminatedStage = 'دور الـ 64';
-            }
-          }
-        } else {
-          if (userClub && (match.homeTeamId === userClub.id || match.awayTeamId === userClub.id)) {
-            cupMatchThisRound = match;
-            if (match.winnerTeamId && match.winnerTeamId !== userClub.id) {
-              cup.userEliminatedStage = 'دور الـ 64';
-            }
-          }
-        }
-
-        if (match.winnerTeamId) {
-          qualifiedR32Ids.push(match.winnerTeamId);
-        } else {
-          qualifiedR32Ids.push(match.homeTeamId);
-        }
-      });
-
-      // Check if R32 matches already exist to avoid duplicate generation
-      const existingR32 = matches.filter(m => m.stage === 'round_of_32');
-      if (existingR32.length === 0 && qualifiedR32Ids.length >= 32) {
-        for (let i = 0; i < 16; i++) {
-          const r32Match: CupMatch = {
-            id: `cup_r32_${i + 1}_s${cup.seasonNumber}`,
-            stage: 'round_of_32',
-            stageName: 'دور الـ 32',
-            roundTrigger: r32Trigger,
-            homeTeamId: qualifiedR32Ids[i * 2],
-            awayTeamId: qualifiedR32Ids[i * 2 + 1],
-            isPlayed: false,
-          };
-          matches.push(r32Match);
-          newMatchesCreated.push(r32Match);
-        }
+        match.homeScore = res.homeScore;
+        match.awayScore = res.awayScore;
+        match.homePenalties = res.homePenalties;
+        match.awayPenalties = res.awayPenalties;
+        match.isPlayed = true;
+        match.winnerTeamId = res.winnerTeamId;
+        match.events = res.events;
+        match.stats = res.stats;
       }
 
-      cupNewsMessage = '🏆 اختتام منافسات دور الـ 64 من كأس مصر وتأهل 32 نادياً رسمياً إلى دور الـ 32!';
+      let matchWinnerId = resolveWinnerId(match);
+
+      if (userClub && (match.homeTeamId === userClub.id || match.awayTeamId === userClub.id)) {
+        cupMatchThisRound = match;
+        const isUserHome = match.homeTeamId === userClub.id;
+        const userPen = isUserHome ? match.homePenalties : match.awayPenalties;
+        const oppPen = isUserHome ? match.awayPenalties : match.homePenalties;
+        const userSc = isUserHome ? match.homeScore : match.awayScore;
+        const oppSc = isUserHome ? match.awayScore : match.homeScore;
+
+        const hasShootout = userPen !== undefined && oppPen !== undefined && userPen !== oppPen;
+        const userWon = match.winnerTeamId === userClub.id ||
+          matchWinnerId === userClub.id ||
+          (hasShootout ? userPen! > oppPen! : (userSc !== undefined && oppSc !== undefined && userSc > oppSc));
+
+        if (userWon) {
+          matchWinnerId = userClub.id;
+          match.winnerTeamId = userClub.id;
+          cup.userEliminatedStage = undefined;
+        } else {
+          const oppId = isUserHome ? match.awayTeamId : match.homeTeamId;
+          matchWinnerId = oppId;
+          match.winnerTeamId = oppId;
+          cup.userEliminatedStage = 'دور الـ 64';
+        }
+      } else {
+        match.winnerTeamId = matchWinnerId;
+      }
+
+      qualifiedR32Ids.push(matchWinnerId || match.homeTeamId);
+    });
+
+    // Check if R32 matches already exist
+    const existingR32 = matches.filter(m => m.stage === 'round_of_32');
+    const numR32Matches = Math.max(1, Math.min(16, Math.floor(qualifiedR32Ids.length / 2)));
+    if (existingR32.length === 0 && qualifiedR32Ids.length >= 2) {
+      for (let i = 0; i < numR32Matches; i++) {
+        const r32Match: CupMatch = {
+          id: `cup_r32_${i + 1}_s${cup.seasonNumber}`,
+          stage: 'round_of_32',
+          stageName: 'دور الـ 32',
+          roundTrigger: r32Trigger,
+          homeTeamId: qualifiedR32Ids[i * 2] || qualifiedR32Ids[0],
+          awayTeamId: qualifiedR32Ids[i * 2 + 1] || qualifiedR32Ids[1],
+          isPlayed: false,
+        };
+        matches.push(r32Match);
+        newMatchesCreated.push(r32Match);
+      }
+    } else if (existingR32.length > 0 && qualifiedR32Ids.length >= 2) {
+      existingR32.forEach((rm, i) => {
+        if (!rm.isPlayed) {
+          rm.homeTeamId = qualifiedR32Ids[i * 2] || rm.homeTeamId;
+          rm.awayTeamId = qualifiedR32Ids[i * 2 + 1] || rm.awayTeamId;
+        }
+      });
     }
+
+    if (userClub && qualifiedR32Ids.includes(userClub.id)) {
+      const r32s = matches.filter(m => m.stage === 'round_of_32');
+      const userInR32 = r32s.some(rm => rm.homeTeamId === userClub.id || rm.awayTeamId === userClub.id);
+      if (!userInR32 && r32s.length > 0) {
+        const targetR32 = r32s.find(m => !m.isPlayed) || r32s[0];
+        targetR32.homeTeamId = userClub.id;
+      }
+      cup.userEliminatedStage = undefined;
+    }
+
+    cupNewsMessage = '🏆 اختتام منافسات دور الـ 64 من كأس مصر وتأهل 32 نادياً رسمياً إلى دور الـ 32!';
   }
 
   // 2. Round of 32 Trigger
-  if (currentRound === r32Trigger) {
-    const stageR32 = matches.filter(m => m.stage === 'round_of_32');
-    if (stageR32.length > 0) {
-      const qualifiedR16Ids: string[] = [];
+  const stageR32 = matches.filter(m => m.stage === 'round_of_32');
+  const userPlayedR32 = Boolean(userClub && stageR32.some(m => (m.homeTeamId === userClub.id || m.awayTeamId === userClub.id) && m.isPlayed));
+  const shouldAdvanceR32 = stageR32.length > 0 && (
+    currentRound === r32Trigger ||
+    stageR32[0]?.roundTrigger === currentRound ||
+    stageR32.every(m => m.isPlayed) ||
+    userPlayedR32
+  );
 
-      stageR32.forEach(match => {
-        if (!match.isPlayed) {
-          const homeTeam = getFullClub(match.homeTeamId);
-          const awayTeam = getFullClub(match.awayTeamId);
-          const res = simulateKnockoutMatch(homeTeam, awayTeam);
+  if (shouldAdvanceR32 && stageR32.length > 0) {
+    const qualifiedR16Ids: string[] = [];
 
-          match.homeScore = res.homeScore;
-          match.awayScore = res.awayScore;
-          match.homePenalties = res.homePenalties;
-          match.awayPenalties = res.awayPenalties;
-          match.isPlayed = true;
-          match.winnerTeamId = res.winnerTeamId;
-          match.events = res.events;
-          match.stats = res.stats;
+    stageR32.forEach(match => {
+      if (!match.isPlayed) {
+        const homeTeam = getFullClub(match.homeTeamId);
+        const awayTeam = getFullClub(match.awayTeamId);
+        const res = simulateKnockoutMatch(homeTeam, awayTeam);
 
-          if (userClub && (homeTeam.id === userClub.id || awayTeam.id === userClub.id)) {
-            cupMatchThisRound = match;
-            if (res.winnerTeamId !== userClub.id) {
-              cup.userEliminatedStage = 'دور الـ 32';
-            }
-          }
-        } else {
-          if (userClub && (match.homeTeamId === userClub.id || match.awayTeamId === userClub.id)) {
-            cupMatchThisRound = match;
-            if (match.winnerTeamId && match.winnerTeamId !== userClub.id) {
-              cup.userEliminatedStage = 'دور الـ 32';
-            }
-          }
-        }
-
-        if (match.winnerTeamId) {
-          qualifiedR16Ids.push(match.winnerTeamId);
-        } else {
-          qualifiedR16Ids.push(match.homeTeamId);
-        }
-      });
-
-      // Check if R16 matches already exist to avoid duplicate generation
-      const existingR16 = matches.filter(m => m.stage === 'round_of_16');
-      if (existingR16.length === 0 && qualifiedR16Ids.length >= 16) {
-        for (let i = 0; i < 8; i++) {
-          const r16Match: CupMatch = {
-            id: `cup_r16_${i + 1}_s${cup.seasonNumber}`,
-            stage: 'round_of_16',
-            stageName: 'ثمن النهائي (دور الـ 16)',
-            roundTrigger: r16Trigger,
-            homeTeamId: qualifiedR16Ids[i * 2],
-            awayTeamId: qualifiedR16Ids[i * 2 + 1],
-            isPlayed: false,
-          };
-          matches.push(r16Match);
-          newMatchesCreated.push(r16Match);
-        }
+        match.homeScore = res.homeScore;
+        match.awayScore = res.awayScore;
+        match.homePenalties = res.homePenalties;
+        match.awayPenalties = res.awayPenalties;
+        match.isPlayed = true;
+        match.winnerTeamId = res.winnerTeamId;
+        match.events = res.events;
+        match.stats = res.stats;
       }
 
-      cupNewsMessage = '🏆 اختتام منافسات دور الـ 32 من كأس مصر وتأهل 16 نادياً رسمياً إلى ثمن النهائي!';
+      let matchWinnerId = resolveWinnerId(match);
+
+      if (userClub && (match.homeTeamId === userClub.id || match.awayTeamId === userClub.id)) {
+        cupMatchThisRound = match;
+        const isUserHome = match.homeTeamId === userClub.id;
+        const userPen = isUserHome ? match.homePenalties : match.awayPenalties;
+        const oppPen = isUserHome ? match.awayPenalties : match.homePenalties;
+        const userSc = isUserHome ? match.homeScore : match.awayScore;
+        const oppSc = isUserHome ? match.awayScore : match.homeScore;
+
+        const hasShootout = userPen !== undefined && oppPen !== undefined && userPen !== oppPen;
+        const userWon = match.winnerTeamId === userClub.id ||
+          matchWinnerId === userClub.id ||
+          (hasShootout ? userPen! > oppPen! : (userSc !== undefined && oppSc !== undefined && userSc > oppSc));
+
+        if (userWon) {
+          matchWinnerId = userClub.id;
+          match.winnerTeamId = userClub.id;
+          cup.userEliminatedStage = undefined;
+        } else {
+          const oppId = isUserHome ? match.awayTeamId : match.homeTeamId;
+          matchWinnerId = oppId;
+          match.winnerTeamId = oppId;
+          cup.userEliminatedStage = 'دور الـ 32';
+        }
+      } else {
+        match.winnerTeamId = matchWinnerId;
+      }
+
+      qualifiedR16Ids.push(matchWinnerId || match.homeTeamId);
+    });
+
+    // Check if R16 matches already exist to avoid duplicate generation
+    const existingR16 = matches.filter(m => m.stage === 'round_of_16');
+    const numR16Matches = Math.max(1, Math.min(8, Math.floor(qualifiedR16Ids.length / 2)));
+    if (existingR16.length === 0 && qualifiedR16Ids.length >= 2) {
+      for (let i = 0; i < numR16Matches; i++) {
+        const r16Match: CupMatch = {
+          id: `cup_r16_${i + 1}_s${cup.seasonNumber}`,
+          stage: 'round_of_16',
+          stageName: 'ثمن النهائي (دور الـ 16)',
+          roundTrigger: r16Trigger,
+          homeTeamId: qualifiedR16Ids[i * 2] || qualifiedR16Ids[0],
+          awayTeamId: qualifiedR16Ids[i * 2 + 1] || qualifiedR16Ids[1],
+          isPlayed: false,
+        };
+        matches.push(r16Match);
+        newMatchesCreated.push(r16Match);
+      }
+    } else if (existingR16.length > 0 && qualifiedR16Ids.length >= 2) {
+      existingR16.forEach((rm, i) => {
+        if (!rm.isPlayed) {
+          rm.homeTeamId = qualifiedR16Ids[i * 2] || rm.homeTeamId;
+          rm.awayTeamId = qualifiedR16Ids[i * 2 + 1] || rm.awayTeamId;
+        }
+      });
     }
+
+    if (userClub && qualifiedR16Ids.includes(userClub.id)) {
+      const r16s = matches.filter(m => m.stage === 'round_of_16');
+      const userInR16 = r16s.some(rm => rm.homeTeamId === userClub.id || rm.awayTeamId === userClub.id);
+      if (!userInR16 && r16s.length > 0) {
+        const targetR16 = r16s.find(m => !m.isPlayed) || r16s[0];
+        targetR16.homeTeamId = userClub.id;
+      }
+      cup.userEliminatedStage = undefined;
+    }
+
+    cupNewsMessage = '🏆 اختتام منافسات دور الـ 32 من كأس مصر وتأهل 16 نادياً رسمياً إلى ثمن النهائي!';
   }
 
   // 3. Round of 16 Trigger
-  if (currentRound === r16Trigger) {
-    const stageR16 = matches.filter(m => m.stage === 'round_of_16');
-    if (stageR16.length > 0) {
-      const qualifiedQuarterIds: string[] = [];
+  const stageR16 = matches.filter(m => m.stage === 'round_of_16');
+  const userPlayedR16 = Boolean(userClub && stageR16.some(m => (m.homeTeamId === userClub.id || m.awayTeamId === userClub.id) && m.isPlayed));
+  const shouldAdvanceR16 = stageR16.length > 0 && (
+    currentRound === r16Trigger ||
+    stageR16[0]?.roundTrigger === currentRound ||
+    stageR16.every(m => m.isPlayed) ||
+    userPlayedR16
+  );
 
-      stageR16.forEach(match => {
-        if (!match.isPlayed) {
-          const homeTeam = getFullClub(match.homeTeamId);
-          const awayTeam = getFullClub(match.awayTeamId);
-          const res = simulateKnockoutMatch(homeTeam, awayTeam);
+  if (shouldAdvanceR16 && stageR16.length > 0) {
+    const qualifiedQuarterIds: string[] = [];
 
-          match.homeScore = res.homeScore;
-          match.awayScore = res.awayScore;
-          match.homePenalties = res.homePenalties;
-          match.awayPenalties = res.awayPenalties;
-          match.isPlayed = true;
-          match.winnerTeamId = res.winnerTeamId;
-          match.events = res.events;
-          match.stats = res.stats;
+    stageR16.forEach(match => {
+      if (!match.isPlayed) {
+        const homeTeam = getFullClub(match.homeTeamId);
+        const awayTeam = getFullClub(match.awayTeamId);
+        const res = simulateKnockoutMatch(homeTeam, awayTeam);
 
-          if (userClub && (homeTeam.id === userClub.id || awayTeam.id === userClub.id)) {
-            cupMatchThisRound = match;
-            if (res.winnerTeamId !== userClub.id) {
-              cup.userEliminatedStage = 'ثمن النهائي (دور الـ 16)';
-            }
-          }
-        } else {
-          if (userClub && (match.homeTeamId === userClub.id || match.awayTeamId === userClub.id)) {
-            cupMatchThisRound = match;
-            if (match.winnerTeamId && match.winnerTeamId !== userClub.id) {
-              cup.userEliminatedStage = 'ثمن النهائي (دور الـ 16)';
-            }
-          }
-        }
-
-        if (match.winnerTeamId) {
-          qualifiedQuarterIds.push(match.winnerTeamId);
-        } else {
-          qualifiedQuarterIds.push(match.homeTeamId);
-        }
-      });
-
-      // Check if Quarter matches already exist
-      const existingQuarters = matches.filter(m => m.stage === 'quarter');
-      if (existingQuarters.length === 0 && qualifiedQuarterIds.length >= 8) {
-        for (let i = 0; i < 4; i++) {
-          const qMatch: CupMatch = {
-            id: `cup_q_${i + 1}_s${cup.seasonNumber}`,
-            stage: 'quarter',
-            stageName: 'ربع النهائي',
-            roundTrigger: quarterTrigger,
-            homeTeamId: qualifiedQuarterIds[i * 2],
-            awayTeamId: qualifiedQuarterIds[i * 2 + 1],
-            isPlayed: false,
-          };
-          matches.push(qMatch);
-          newMatchesCreated.push(qMatch);
-        }
+        match.homeScore = res.homeScore;
+        match.awayScore = res.awayScore;
+        match.homePenalties = res.homePenalties;
+        match.awayPenalties = res.awayPenalties;
+        match.isPlayed = true;
+        match.winnerTeamId = res.winnerTeamId;
+        match.events = res.events;
+        match.stats = res.stats;
       }
 
-      cupNewsMessage = '🏆 نهاية مباريات ثمن النهائي في الكأس واكتمال عقد الأندية المتأهلة لربع النهائي!';
+      let matchWinnerId = resolveWinnerId(match);
+
+      if (userClub && (match.homeTeamId === userClub.id || match.awayTeamId === userClub.id)) {
+        cupMatchThisRound = match;
+        const isUserHome = match.homeTeamId === userClub.id;
+        const userPen = isUserHome ? match.homePenalties : match.awayPenalties;
+        const oppPen = isUserHome ? match.awayPenalties : match.homePenalties;
+        const userSc = isUserHome ? match.homeScore : match.awayScore;
+        const oppSc = isUserHome ? match.awayScore : match.homeScore;
+
+        const hasShootout = userPen !== undefined && oppPen !== undefined && userPen !== oppPen;
+        const userWon = match.winnerTeamId === userClub.id ||
+          matchWinnerId === userClub.id ||
+          (hasShootout ? userPen! > oppPen! : (userSc !== undefined && oppSc !== undefined && userSc > oppSc));
+
+        if (userWon) {
+          matchWinnerId = userClub.id;
+          match.winnerTeamId = userClub.id;
+          cup.userEliminatedStage = undefined;
+        } else {
+          const oppId = isUserHome ? match.awayTeamId : match.homeTeamId;
+          matchWinnerId = oppId;
+          match.winnerTeamId = oppId;
+          cup.userEliminatedStage = 'ثمن النهائي (دور الـ 16)';
+        }
+      } else {
+        match.winnerTeamId = matchWinnerId;
+      }
+
+      qualifiedQuarterIds.push(matchWinnerId || match.homeTeamId);
+    });
+
+    // Check if Quarter matches already exist
+    const existingQuarters = matches.filter(m => m.stage === 'quarter');
+    const numQuarterMatches = Math.max(1, Math.min(4, Math.floor(qualifiedQuarterIds.length / 2)));
+    if (existingQuarters.length === 0 && qualifiedQuarterIds.length >= 2) {
+      for (let i = 0; i < numQuarterMatches; i++) {
+        const qMatch: CupMatch = {
+          id: `cup_q_${i + 1}_s${cup.seasonNumber}`,
+          stage: 'quarter',
+          stageName: 'ربع النهائي',
+          roundTrigger: quarterTrigger,
+          homeTeamId: qualifiedQuarterIds[i * 2] || qualifiedQuarterIds[0],
+          awayTeamId: qualifiedQuarterIds[i * 2 + 1] || qualifiedQuarterIds[1],
+          isPlayed: false,
+        };
+        matches.push(qMatch);
+        newMatchesCreated.push(qMatch);
+      }
+    } else if (existingQuarters.length > 0 && qualifiedQuarterIds.length >= 2) {
+      existingQuarters.forEach((qm, i) => {
+        if (!qm.isPlayed) {
+          qm.homeTeamId = qualifiedQuarterIds[i * 2] || qm.homeTeamId;
+          qm.awayTeamId = qualifiedQuarterIds[i * 2 + 1] || qm.awayTeamId;
+        }
+      });
     }
+
+    // Guarantee that if user qualified, they are assigned to a quarterfinal match
+    if (userClub && qualifiedQuarterIds.includes(userClub.id)) {
+      const quarters = matches.filter(m => m.stage === 'quarter');
+      const userInQuarter = quarters.some(qm => qm.homeTeamId === userClub.id || qm.awayTeamId === userClub.id);
+      if (!userInQuarter && quarters.length > 0) {
+        const targetQ = quarters.find(qm => !qm.isPlayed) || quarters[0];
+        targetQ.homeTeamId = userClub.id;
+      }
+      cup.userEliminatedStage = undefined;
+    }
+
+    cupNewsMessage = '🏆 نهاية مباريات ثمن النهائي في الكأس واكتمال عقد الأندية المتأهلة لربع النهائي!';
   }
 
   // 4. Quarterfinals Trigger
-  if (currentRound === quarterTrigger) {
-    const stageQuarters = matches.filter(m => m.stage === 'quarter');
-    if (stageQuarters.length > 0) {
-      const semiQualifiedIds: string[] = [];
+  const stageQuarters = matches.filter(m => m.stage === 'quarter');
+  const userPlayedQuarters = Boolean(userClub && stageQuarters.some(m => (m.homeTeamId === userClub.id || m.awayTeamId === userClub.id) && m.isPlayed));
+  const shouldAdvanceQuarter = stageQuarters.length > 0 && (
+    currentRound === quarterTrigger ||
+    stageQuarters[0]?.roundTrigger === currentRound ||
+    stageQuarters.every(m => m.isPlayed) ||
+    userPlayedQuarters
+  );
 
-      stageQuarters.forEach(qMatch => {
-        if (!qMatch.isPlayed) {
-          const homeTeam = getFullClub(qMatch.homeTeamId);
-          const awayTeam = getFullClub(qMatch.awayTeamId);
-          const res = simulateKnockoutMatch(homeTeam, awayTeam);
+  if (shouldAdvanceQuarter && stageQuarters.length > 0) {
+    const semiQualifiedIds: string[] = [];
 
-          qMatch.homeScore = res.homeScore;
-          qMatch.awayScore = res.awayScore;
-          qMatch.homePenalties = res.homePenalties;
-          qMatch.awayPenalties = res.awayPenalties;
-          qMatch.isPlayed = true;
-          qMatch.winnerTeamId = res.winnerTeamId;
-          qMatch.events = res.events;
-          qMatch.stats = res.stats;
+    stageQuarters.forEach(qMatch => {
+      if (!qMatch.isPlayed) {
+        const homeTeam = getFullClub(qMatch.homeTeamId);
+        const awayTeam = getFullClub(qMatch.awayTeamId);
+        const res = simulateKnockoutMatch(homeTeam, awayTeam);
 
-          if (userClub && (homeTeam.id === userClub.id || awayTeam.id === userClub.id)) {
-            cupMatchThisRound = qMatch;
-            if (res.winnerTeamId !== userClub.id) {
-              cup.userEliminatedStage = 'ربع النهائي';
-            }
-          }
-        } else {
-          if (userClub && (qMatch.homeTeamId === userClub.id || qMatch.awayTeamId === userClub.id)) {
-            cupMatchThisRound = qMatch;
-            if (qMatch.winnerTeamId && qMatch.winnerTeamId !== userClub.id) {
-              cup.userEliminatedStage = 'ربع النهائي';
-            }
-          }
-        }
-
-        if (qMatch.winnerTeamId) {
-          semiQualifiedIds.push(qMatch.winnerTeamId);
-        } else {
-          semiQualifiedIds.push(qMatch.homeTeamId);
-        }
-      });
-
-      // Check if Semi matches already exist
-      const existingSemis = matches.filter(m => m.stage === 'semi');
-      if (existingSemis.length === 0 && semiQualifiedIds.length >= 4) {
-        const semi1: CupMatch = {
-          id: `cup_semi1_s${cup.seasonNumber}`,
-          stage: 'semi',
-          stageName: 'نصف النهائي',
-          roundTrigger: semiTrigger,
-          homeTeamId: semiQualifiedIds[0],
-          awayTeamId: semiQualifiedIds[1],
-          isPlayed: false,
-        };
-        const semi2: CupMatch = {
-          id: `cup_semi2_s${cup.seasonNumber}`,
-          stage: 'semi',
-          stageName: 'نصف النهائي',
-          roundTrigger: semiTrigger,
-          homeTeamId: semiQualifiedIds[2],
-          awayTeamId: semiQualifiedIds[3],
-          isPlayed: false,
-        };
-        matches.push(semi1, semi2);
-        newMatchesCreated.push(semi1, semi2);
+        qMatch.homeScore = res.homeScore;
+        qMatch.awayScore = res.awayScore;
+        qMatch.homePenalties = res.homePenalties;
+        qMatch.awayPenalties = res.awayPenalties;
+        qMatch.isPlayed = true;
+        qMatch.winnerTeamId = res.winnerTeamId;
+        qMatch.events = res.events;
+        qMatch.stats = res.stats;
       }
 
-      cupNewsMessage = '🏆 تأهل 4 أندية كبرى إلى المربع الذهبي (نصف نهائي كأس مصر) في مواجهات حارقة!';
+      let matchWinnerId = resolveWinnerId(qMatch);
+
+      if (userClub && (qMatch.homeTeamId === userClub.id || qMatch.awayTeamId === userClub.id)) {
+        cupMatchThisRound = qMatch;
+        const isUserHome = qMatch.homeTeamId === userClub.id;
+        const userPen = isUserHome ? qMatch.homePenalties : qMatch.awayPenalties;
+        const oppPen = isUserHome ? qMatch.awayPenalties : qMatch.homePenalties;
+        const userSc = isUserHome ? qMatch.homeScore : qMatch.awayScore;
+        const oppSc = isUserHome ? qMatch.awayScore : qMatch.homeScore;
+
+        const hasShootout = userPen !== undefined && oppPen !== undefined && userPen !== oppPen;
+        const userWon = qMatch.winnerTeamId === userClub.id ||
+          matchWinnerId === userClub.id ||
+          (hasShootout ? userPen! > oppPen! : (userSc !== undefined && oppSc !== undefined && userSc > oppSc));
+
+        if (userWon) {
+          matchWinnerId = userClub.id;
+          qMatch.winnerTeamId = userClub.id;
+          cup.userEliminatedStage = undefined;
+        } else {
+          const oppId = isUserHome ? qMatch.awayTeamId : qMatch.homeTeamId;
+          matchWinnerId = oppId;
+          qMatch.winnerTeamId = oppId;
+          cup.userEliminatedStage = 'ربع النهائي';
+        }
+      } else {
+        qMatch.winnerTeamId = matchWinnerId;
+      }
+
+      semiQualifiedIds.push(matchWinnerId || qMatch.homeTeamId);
+    });
+
+    // Check if Semi matches already exist
+    const existingSemis = matches.filter(m => m.stage === 'semi');
+    const numSemiMatches = Math.max(1, Math.min(2, Math.floor(semiQualifiedIds.length / 2)));
+    if (existingSemis.length === 0 && semiQualifiedIds.length >= 2) {
+      for (let i = 0; i < numSemiMatches; i++) {
+        const sMatch: CupMatch = {
+          id: `cup_semi${i + 1}_s${cup.seasonNumber}`,
+          stage: 'semi',
+          stageName: 'نصف النهائي',
+          roundTrigger: semiTrigger,
+          homeTeamId: semiQualifiedIds[i * 2] || semiQualifiedIds[0],
+          awayTeamId: semiQualifiedIds[i * 2 + 1] || semiQualifiedIds[1],
+          isPlayed: false,
+        };
+        matches.push(sMatch);
+        newMatchesCreated.push(sMatch);
+      }
+    } else if (existingSemis.length > 0 && semiQualifiedIds.length >= 2) {
+      existingSemis.forEach((sm, i) => {
+        if (!sm.isPlayed) {
+          sm.homeTeamId = semiQualifiedIds[i * 2] || sm.homeTeamId;
+          sm.awayTeamId = semiQualifiedIds[i * 2 + 1] || sm.awayTeamId;
+        }
+      });
     }
+
+    if (userClub && semiQualifiedIds.includes(userClub.id)) {
+      const semis = matches.filter(m => m.stage === 'semi');
+      const userInSemi = semis.some(sm => sm.homeTeamId === userClub.id || sm.awayTeamId === userClub.id);
+      if (!userInSemi && semis.length > 0) {
+        const targetSemi = semis.find(m => !m.isPlayed) || semis[0];
+        targetSemi.homeTeamId = userClub.id;
+      }
+      cup.userEliminatedStage = undefined;
+    }
+
+    cupNewsMessage = '🏆 تأهل 4 أندية كبرى إلى المربع الذهبي (نصف نهائي كأس مصر) في مواجهات حارقة!';
   }
 
   // 5. Semifinals Trigger
-  if (currentRound === semiTrigger) {
-    const stageSemis = matches.filter(m => m.stage === 'semi');
-    if (stageSemis.length > 0) {
-      const finalQualifiedIds: string[] = [];
+  const stageSemis = matches.filter(m => m.stage === 'semi');
+  const userPlayedSemis = Boolean(userClub && stageSemis.some(m => (m.homeTeamId === userClub.id || m.awayTeamId === userClub.id) && m.isPlayed));
+  const shouldAdvanceSemi = stageSemis.length > 0 && (
+    currentRound === semiTrigger ||
+    stageSemis[0]?.roundTrigger === currentRound ||
+    stageSemis.every(m => m.isPlayed) ||
+    userPlayedSemis
+  );
 
-      stageSemis.forEach(sMatch => {
-        if (!sMatch.isPlayed) {
-          const homeTeam = getFullClub(sMatch.homeTeamId);
-          const awayTeam = getFullClub(sMatch.awayTeamId);
-          const res = simulateKnockoutMatch(homeTeam, awayTeam);
+  if (shouldAdvanceSemi && stageSemis.length > 0) {
+    const finalQualifiedIds: string[] = [];
 
-          sMatch.homeScore = res.homeScore;
-          sMatch.awayScore = res.awayScore;
-          sMatch.homePenalties = res.homePenalties;
-          sMatch.awayPenalties = res.awayPenalties;
-          sMatch.isPlayed = true;
-          sMatch.winnerTeamId = res.winnerTeamId;
-          sMatch.events = res.events;
-          sMatch.stats = res.stats;
+    stageSemis.forEach(sMatch => {
+      if (!sMatch.isPlayed) {
+        const homeTeam = getFullClub(sMatch.homeTeamId);
+        const awayTeam = getFullClub(sMatch.awayTeamId);
+        const res = simulateKnockoutMatch(homeTeam, awayTeam);
 
-          if (userClub && (homeTeam.id === userClub.id || awayTeam.id === userClub.id)) {
-            cupMatchThisRound = sMatch;
-            if (res.winnerTeamId !== userClub.id) {
-              cup.userEliminatedStage = 'نصف النهائي';
-            }
-          }
-        } else {
-          if (userClub && (sMatch.homeTeamId === userClub.id || sMatch.awayTeamId === userClub.id)) {
-            cupMatchThisRound = sMatch;
-            if (sMatch.winnerTeamId && sMatch.winnerTeamId !== userClub.id) {
-              cup.userEliminatedStage = 'نصف النهائي';
-            }
-          }
-        }
-
-        if (sMatch.winnerTeamId) {
-          finalQualifiedIds.push(sMatch.winnerTeamId);
-        } else {
-          finalQualifiedIds.push(sMatch.homeTeamId);
-        }
-      });
-
-      // Check if Final match already exists
-      const existingFinal = matches.find(m => m.stage === 'final');
-      if (!existingFinal && finalQualifiedIds.length >= 2) {
-        const finalMatch: CupMatch = {
-          id: `cup_final_s${cup.seasonNumber}`,
-          stage: 'final',
-          stageName: 'المباراة النهائية 🏆',
-          roundTrigger: finalTrigger,
-          homeTeamId: finalQualifiedIds[0],
-          awayTeamId: finalQualifiedIds[1],
-          isPlayed: false,
-        };
-        matches.push(finalMatch);
-        newMatchesCreated.push(finalMatch);
+        sMatch.homeScore = res.homeScore;
+        sMatch.awayScore = res.awayScore;
+        sMatch.homePenalties = res.homePenalties;
+        sMatch.awayPenalties = res.awayPenalties;
+        sMatch.isPlayed = true;
+        sMatch.winnerTeamId = res.winnerTeamId;
+        sMatch.events = res.events;
+        sMatch.stats = res.stats;
       }
 
-      cupNewsMessage = '🏆 تم تحديد طرفي المباراة النهائية لكأس مصر في قمة كروية منتظرة!';
+      let matchWinnerId = resolveWinnerId(sMatch);
+
+      if (userClub && (sMatch.homeTeamId === userClub.id || sMatch.awayTeamId === userClub.id)) {
+        cupMatchThisRound = sMatch;
+        const isUserHome = sMatch.homeTeamId === userClub.id;
+        const userPen = isUserHome ? sMatch.homePenalties : sMatch.awayPenalties;
+        const oppPen = isUserHome ? sMatch.awayPenalties : sMatch.homePenalties;
+        const userSc = isUserHome ? sMatch.homeScore : sMatch.awayScore;
+        const oppSc = isUserHome ? sMatch.awayScore : sMatch.homeScore;
+
+        const hasShootout = userPen !== undefined && oppPen !== undefined && userPen !== oppPen;
+        const userWon = sMatch.winnerTeamId === userClub.id ||
+          matchWinnerId === userClub.id ||
+          (hasShootout ? userPen! > oppPen! : (userSc !== undefined && oppSc !== undefined && userSc > oppSc));
+
+        if (userWon) {
+          matchWinnerId = userClub.id;
+          sMatch.winnerTeamId = userClub.id;
+          cup.userEliminatedStage = undefined;
+        } else {
+          const oppId = isUserHome ? sMatch.awayTeamId : sMatch.homeTeamId;
+          matchWinnerId = oppId;
+          sMatch.winnerTeamId = oppId;
+          cup.userEliminatedStage = 'نصف النهائي';
+        }
+      } else {
+        sMatch.winnerTeamId = matchWinnerId;
+      }
+
+      finalQualifiedIds.push(matchWinnerId || sMatch.homeTeamId);
+    });
+
+    // Check if Final match already exists
+    const existingFinal = matches.find(m => m.stage === 'final');
+    if (!existingFinal && finalQualifiedIds.length >= 2) {
+      const finalMatch: CupMatch = {
+        id: `cup_final_s${cup.seasonNumber}`,
+        stage: 'final',
+        stageName: 'المباراة النهائية 🏆',
+        roundTrigger: finalTrigger,
+        homeTeamId: finalQualifiedIds[0],
+        awayTeamId: finalQualifiedIds[1],
+        isPlayed: false,
+      };
+      matches.push(finalMatch);
+      newMatchesCreated.push(finalMatch);
+    } else if (existingFinal && !existingFinal.isPlayed && finalQualifiedIds.length >= 2) {
+      existingFinal.homeTeamId = finalQualifiedIds[0] || existingFinal.homeTeamId;
+      existingFinal.awayTeamId = finalQualifiedIds[1] || existingFinal.awayTeamId;
     }
+
+    if (userClub && finalQualifiedIds.includes(userClub.id)) {
+      const finalMatch = matches.find(m => m.stage === 'final');
+      if (finalMatch && finalMatch.homeTeamId !== userClub.id && finalMatch.awayTeamId !== userClub.id) {
+        finalMatch.homeTeamId = userClub.id;
+      }
+      cup.userEliminatedStage = undefined;
+    }
+
+    cupNewsMessage = '🏆 تم تحديد طرفي المباراة النهائية لكأس مصر في قمة كروية منتظرة!';
   }
 
   // 6. Final Trigger
@@ -1700,6 +2157,183 @@ export function advanceCupTournament(
     newMatchesCreated,
     newlyAwardedRewards,
   };
+}
+
+/**
+ * Automatically detects and repairs any broken cup progression states:
+ * e.g., if the user won their Round of 16 (or any cup match) on penalties or score,
+ * but was erroneously marked as eliminated or omitted from subsequent stages/fixtures.
+ */
+export function repairCupProgressionIntegrity(
+  cup: CupTournament | null | undefined,
+  fixtures: Fixture[] = [],
+  userClubId?: string
+): { updatedCup: CupTournament; updatedFixtures: Fixture[]; repaired: boolean } {
+  if (!cup || !cup.matches || !userClubId) {
+    return { updatedCup: cup as CupTournament, updatedFixtures: fixtures, repaired: false };
+  }
+
+  let repaired = false;
+  const matches = cup.matches.map(m => ({ ...m }));
+  const updatedFixtures = fixtures.map(f => ({ ...f }));
+  let eliminatedStage = cup.userEliminatedStage;
+
+  const stages: ('round_of_64' | 'round_of_32' | 'round_of_16' | 'quarter' | 'semi' | 'final')[] = [
+    'round_of_64',
+    'round_of_32',
+    'round_of_16',
+    'quarter',
+    'semi',
+    'final',
+  ];
+
+  for (let sIdx = 0; sIdx < stages.length; sIdx++) {
+    const stage = stages[sIdx];
+    const userMatch = matches.find(m => m.stage === stage && (m.homeTeamId === userClubId || m.awayTeamId === userClubId));
+    const userFix = updatedFixtures.find(f => (f.competitionType === 'cup' || f.cupStage === stage || f.stageName?.includes(stage)) && (f.homeTeamId === userClubId || f.awayTeamId === userClubId));
+
+    if (!userMatch && !userFix) continue;
+
+    const isMatchPlayed = Boolean(userMatch?.isPlayed || userFix?.isPlayed);
+    if (!isMatchPlayed) continue;
+
+    const isUserHomeInMatch = userMatch ? userMatch.homeTeamId === userClubId : userFix?.homeTeamId === userClubId;
+    const hs = userMatch?.homeScore ?? userFix?.homeScore ?? 0;
+    const as = userMatch?.awayScore ?? userFix?.awayScore ?? 0;
+    const hp = userMatch?.homePenalties ?? userFix?.homePenalties;
+    const ap = userMatch?.awayPenalties ?? userFix?.awayPenalties;
+    const userPen = isUserHomeInMatch ? hp : ap;
+    const oppPen = isUserHomeInMatch ? ap : hp;
+    const userGoals = isUserHomeInMatch ? hs : as;
+    const oppGoals = isUserHomeInMatch ? as : hs;
+
+    const userWonMatch = 
+      userMatch?.winnerTeamId === userClubId ||
+      userFix?.winnerTeamId === userClubId ||
+      (userPen !== undefined && oppPen !== undefined && userPen > oppPen) ||
+      (userPen === undefined && oppPen === undefined && hs !== as && userGoals > oppGoals);
+
+    if (userWonMatch) {
+      if (userMatch) {
+        if (userMatch.winnerTeamId !== userClubId) {
+          userMatch.winnerTeamId = userClubId;
+          repaired = true;
+        }
+        if (!userMatch.isPlayed) {
+          userMatch.isPlayed = true;
+          repaired = true;
+        }
+      }
+
+      if (userFix) {
+        if (userFix.winnerTeamId !== userClubId) {
+          userFix.winnerTeamId = userClubId;
+          repaired = true;
+        }
+        if (!userFix.isPlayed) {
+          userFix.isPlayed = true;
+          repaired = true;
+        }
+      }
+
+      // If user won this match, they CANNOT be eliminated in this stage or any prior stages
+      if (eliminatedStage) {
+        eliminatedStage = undefined;
+        repaired = true;
+      }
+
+      if (sIdx < stages.length - 1) {
+        const nextStage = stages[sIdx + 1];
+        const nextMatches = matches.filter(m => m.stage === nextStage);
+        const userInNext = nextMatches.some(m => m.homeTeamId === userClubId || m.awayTeamId === userClubId);
+
+        let targetNextMatch = nextMatches.find(m => !m.isPlayed) || nextMatches[0];
+        if (!userInNext && nextMatches.length > 0) {
+          targetNextMatch.homeTeamId = userClubId;
+          repaired = true;
+        } else if (!userInNext && nextMatches.length === 0) {
+          // If next stage matches were not generated yet, auto-create them now
+          const numMatches = nextStage === 'quarter' ? 4 : nextStage === 'semi' ? 2 : 1;
+          const stageArabicName = nextStage === 'quarter' ? 'ربع النهائي' : nextStage === 'semi' ? 'نصف النهائي' : 'المباراة النهائية 🏆';
+          for (let q = 1; q <= numMatches; q++) {
+            const newMatch: CupMatch = {
+              id: `cup_${nextStage}_${q}_s${cup.seasonNumber || 1}`,
+              stage: nextStage,
+              stageName: stageArabicName,
+              roundTrigger: nextStage === 'quarter' ? 15 : nextStage === 'semi' ? 20 : nextStage === 'final' ? 27 : 10,
+              homeTeamId: q === 1 ? userClubId : `pot_${nextStage}_${q}_h`,
+              awayTeamId: `pot_${nextStage}_${q}_a`,
+              isPlayed: false,
+            };
+            matches.push(newMatch);
+          }
+          targetNextMatch = matches.find(m => m.stage === nextStage);
+          repaired = true;
+        }
+
+        const nextFixes = updatedFixtures.filter(f => (f.competitionType === 'cup' || f.cupStage === nextStage) && (f.cupStage === nextStage || (!f.cupStage && f.stageName?.includes(nextStage))));
+        const userInNextFix = nextFixes.some(f => f.homeTeamId === userClubId || f.awayTeamId === userClubId);
+        if (!userInNextFix && nextFixes.length > 0) {
+          const targetFix = nextFixes.find(f => !f.isPlayed) || nextFixes[0];
+          const fixIdx = updatedFixtures.findIndex(f => f.id === targetFix.id);
+          if (fixIdx !== -1) {
+            updatedFixtures[fixIdx] = {
+              ...updatedFixtures[fixIdx],
+              competitionType: 'cup',
+              cupStage: nextStage,
+              homeTeamId: userClubId,
+              awayTeamId: (updatedFixtures[fixIdx].awayTeamId && updatedFixtures[fixIdx].awayTeamId !== userClubId) ? updatedFixtures[fixIdx].awayTeamId : (targetNextMatch?.awayTeamId || 'cpu_cup_opp'),
+              isPlayed: false,
+            };
+            repaired = true;
+          }
+        } else if (!userInNextFix && nextFixes.length === 0) {
+          // If no fixtures exist for this next stage in fixtures array, find the trigger round or add the fixture
+          const targetTrigger = targetNextMatch?.roundTrigger || (
+            nextStage === 'quarter' ? 15 :
+            nextStage === 'semi' ? 20 :
+            nextStage === 'final' ? 27 : 15
+          );
+          const roundCupFix = updatedFixtures.find(f => f.round === targetTrigger && f.competitionType === 'cup' && !f.isPlayed);
+          if (roundCupFix) {
+            const fixIdx = updatedFixtures.findIndex(f => f.id === roundCupFix.id);
+            if (fixIdx !== -1) {
+              updatedFixtures[fixIdx] = {
+                ...updatedFixtures[fixIdx],
+                cupStage: nextStage,
+                homeTeamId: userClubId,
+                awayTeamId: roundCupFix.awayTeamId || targetNextMatch?.awayTeamId || 'cpu_cup_opp',
+                isPlayed: false,
+              };
+              repaired = true;
+            }
+          } else {
+            const stageArabicName = nextStage === 'quarter' ? 'الكأس - ربع النهائي 🏆' : nextStage === 'semi' ? 'الكأس - نصف النهائي 🏆' : 'نهائي الكأس الوطنية الكبير 🏆';
+            updatedFixtures.push({
+              id: `fix_cup_${nextStage}_user_s${cup.seasonNumber || 1}`,
+              round: targetTrigger,
+              homeTeamId: userClubId,
+              awayTeamId: targetNextMatch?.awayTeamId || 'cpu_cup_opp',
+              competitionType: 'cup',
+              competitionName: cup.name || 'كأس مصر العريق 🏆',
+              cupStage: nextStage,
+              stageName: stageArabicName,
+              isPlayed: false,
+            });
+            repaired = true;
+          }
+        }
+      }
+    }
+  }
+
+  const updatedCup: CupTournament = {
+    ...cup,
+    matches,
+    userEliminatedStage: eliminatedStage,
+  };
+
+  return { updatedCup, updatedFixtures, repaired };
 }
 
 // ----------------------------------------------------
@@ -1816,6 +2450,25 @@ export function processNewSeasonAdvancement(
     const normOfferId = (acceptedJobOffer.clubId || '').toLowerCase().trim();
     const normOfferName = (acceptedJobOffer.clubName || '').trim();
 
+    // 1. Remove isUserClub from the previous club/league in world persistent data
+    if (userClub) {
+      const prevLeagueId = userClub.leagueId || currentSeason.leagueId;
+      if (prevLeagueId) {
+        try {
+          const prevLeague = getLeagueById(prevLeagueId);
+          if (prevLeague && Array.isArray(prevLeague.teams)) {
+            const cleanedPrevTeams = prevLeague.teams.map(t => ({
+              ...t,
+              isUserClub: false,
+            }));
+            updateLeagueRosterInWorld(prevLeague.id, cleanedPrevTeams);
+          }
+        } catch {
+          // ignore
+        }
+      }
+    }
+
     let newClubFound = leagueTeams.find(t => 
       t && t.id && (
         t.id.toLowerCase() === normOfferId ||
@@ -1846,37 +2499,64 @@ export function processNewSeasonAdvancement(
       }
     }
 
-    if (newClubFound) {
-      // Ensure authentic real roster is loaded if this is a known real club
-      let clubPlayers = Array.isArray(newClubFound.players) ? [...newClubFound.players] : [];
-      if (isRealClub(newClubFound.id) && clubPlayers.length < 11) {
-        try {
-          clubPlayers = loadRealClubSquad(newClubFound.id);
-        } catch {
-          // keep existing
-        }
-      }
+    // Failsafe: If still not found, synthesize the club from the offer details so the manager NEVER gets stuck in their old club!
+    if (!newClubFound) {
+      newClubFound = createClub(
+        acceptedJobOffer.clubId || `club_${Date.now()}`,
+        acceptedJobOffer.clubName || 'النادي الجديد',
+        acceptedJobOffer.clubName || 'النادي الجديد',
+        acceptedJobOffer.country || currentCountry,
+        acceptedJobOffer.country || currentCountry,
+        'EGY',
+        targetTier,
+        targetLeagueId,
+        acceptedJobOffer.clubReputation || 70,
+        acceptedJobOffer.squadQualityRating || 70,
+        '#1e40af',
+        '#ffffff',
+        acceptedJobOffer.clubBudget || 5000000,
+        acceptedJobOffer.transferBudget || 2000000,
+        500000,
+        `استاد ${acceptedJobOffer.clubName || 'النادي'}`,
+        25000,
+        3
+      );
+    }
 
-      const initialClubBudget = acceptedJobOffer.transferBudget || newClubFound.budget || 250000;
-      nextUserClub = {
-        ...newClubFound,
-        players: clubPlayers,
-        isUserClub: true,
-        leagueId: nextActiveLeague.id,
-        division: targetTier,
-        budget: initialClubBudget,
-      };
-
-      // Ensure new user club is properly placed in leagueTeams and marked as user club
-      const existsIdx = leagueTeams.findIndex(t => t.id === nextUserClub.id);
-      if (existsIdx >= 0) {
-        leagueTeams = leagueTeams.map((t, idx) => {
-          if (idx === existsIdx) return nextUserClub;
-          return { ...t, isUserClub: false };
-        });
-      } else {
-        leagueTeams = [nextUserClub, ...leagueTeams.map(t => ({ ...t, isUserClub: false }))];
+    // Ensure authentic real roster is loaded if this is a known real club
+    let clubPlayers = Array.isArray(newClubFound.players) ? [...newClubFound.players] : [];
+    if (isRealClub(newClubFound.id) && clubPlayers.length < 11) {
+      try {
+        clubPlayers = loadRealClubSquad(newClubFound.id);
+      } catch {
+        // keep existing
       }
+    }
+
+    const initialClubBudget = acceptedJobOffer.transferBudget || newClubFound.budget || 250000;
+    nextUserClub = {
+      ...newClubFound,
+      players: clubPlayers,
+      isUserClub: true,
+      leagueId: nextActiveLeague.id,
+      division: targetTier,
+      budget: initialClubBudget,
+    };
+
+    // Ensure new user club is properly placed in leagueTeams and marked as user club
+    const existsIdx = leagueTeams.findIndex(t => t && t.id === nextUserClub.id);
+    if (existsIdx >= 0) {
+      leagueTeams = leagueTeams.map((t, idx) => {
+        if (idx === existsIdx) return nextUserClub;
+        return { ...t, isUserClub: false };
+      });
+    } else {
+      // Swap with the last non-user AI club in leagueTeams so team count remains constant and even
+      const replaceIdx = leagueTeams.length > 0 ? leagueTeams.length - 1 : 0;
+      leagueTeams = leagueTeams.map((t, idx) => {
+        if (idx === replaceIdx) return nextUserClub;
+        return { ...t, isUserClub: false };
+      });
     }
   }
 
@@ -2048,6 +2728,7 @@ export function processNewSeasonAdvancement(
 
     return {
       ...team,
+      isUserClub: team.id === nextUserClub.id,
       players: survivingPlayers,
       tactics: cleanTactics,
       budget: teamBudget,

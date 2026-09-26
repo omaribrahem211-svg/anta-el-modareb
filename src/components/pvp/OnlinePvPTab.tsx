@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Swords,
   Trophy,
@@ -17,7 +17,13 @@ import {
   CheckCircle2,
   Trash2,
   ArrowRight,
-  ChevronRight
+  ChevronRight,
+  Flame,
+  Medal,
+  Search,
+  Bot,
+  Calendar,
+  Award
 } from 'lucide-react';
 import { useGame } from '../../context/GameContext';
 import { useAuth } from '../../context/AuthContext';
@@ -25,6 +31,7 @@ import {
   challengeClient,
   ChallengeRoomState,
   ChallengeParticipant,
+  DailyCoachRankEntry,
   getLocalChallengeHistory,
   clearLocalChallengeHistory,
   ChallengeHistoryItem,
@@ -37,6 +44,7 @@ export const OnlinePvPTab: React.FC = () => {
   const { user } = useAuth();
 
   const [activeView, setActiveView] = useState<'lobby' | 'room' | 'playing'>('lobby');
+  const [activeLobbyTab, setActiveLobbyTab] = useState<'challenges' | 'ranking'>('challenges');
   const [connectionStatus, setConnectionStatus] = useState<'disconnected' | 'connecting' | 'connected'>('disconnected');
   const [roomState, setRoomState] = useState<ChallengeRoomState | null>(null);
   const [inputCode, setInputCode] = useState('');
@@ -46,13 +54,53 @@ export const OnlinePvPTab: React.FC = () => {
   const [history, setHistory] = useState<ChallengeHistoryItem[]>([]);
   const [loadingAction, setLoadingAction] = useState<string | null>(null);
 
+  // Matchmaking (Random Online Match) state
+  const [isSearchingMatch, setIsSearchingMatch] = useState(false);
+  const [searchSeconds, setSearchSeconds] = useState(0);
+  const [queueSize, setQueueSize] = useState(0);
+
+  // Daily Ranking state (Top 50 coaches in RAM)
+  const [dailyRanking, setDailyRanking] = useState<DailyCoachRankEntry[]>([]);
+  const [isLoadingRanking, setIsLoadingRanking] = useState(false);
+
   const playerId = getOrCreatePlayerId();
   const isHost = roomState?.host?.playerId === playerId;
+
+  // Search Timer
+  useEffect(() => {
+    let timer: any;
+    if (isSearchingMatch) {
+      timer = setInterval(() => {
+        setSearchSeconds((prev) => prev + 1);
+      }, 1000);
+    } else {
+      setSearchSeconds(0);
+    }
+    return () => clearInterval(timer);
+  }, [isSearchingMatch]);
 
   // Load local challenge history on mount
   useEffect(() => {
     setHistory(getLocalChallengeHistory());
   }, [activeView]);
+
+  // Load daily ranking function
+  const loadDailyRanking = useCallback(async () => {
+    setIsLoadingRanking(true);
+    try {
+      const list = await challengeClient.fetchDailyRanking();
+      setDailyRanking(list);
+    } catch (err) {
+      console.warn('[OnlinePvPTab] Failed to load daily ranking:', err);
+    } finally {
+      setIsLoadingRanking(false);
+    }
+  }, []);
+
+  // Fetch ranking when switching to ranking tab or mounting
+  useEffect(() => {
+    loadDailyRanking();
+  }, [loadDailyRanking]);
 
   // Subscribe to connection status and incoming WebSocket events
   useEffect(() => {
@@ -62,13 +110,32 @@ export const OnlinePvPTab: React.FC = () => {
 
     const unsubMessages = challengeClient.subscribeMessages((data: any) => {
       if (data.type === 'room_created') {
+        setIsSearchingMatch(false);
         setRoomState(data.room);
         setActiveView('room');
         setFeedback({ type: 'success', message: `تم إنشاء غرفة التحدي بكود: ${data.code}` });
       } else if (data.type === 'room_joined') {
+        setIsSearchingMatch(false);
         setRoomState(data.room);
         setActiveView('room');
         setFeedback({ type: 'success', message: 'تم الانضمام إلى غرفة التحدي بنجاح!' });
+      } else if (data.type === 'random_match_matched') {
+        setIsSearchingMatch(false);
+        if (data.room) setRoomState(data.room);
+        setActiveView('playing');
+        setFeedback({
+          type: 'success',
+          message: `تم العثور على منافس أونلاين! [${data.opponent?.clubName || 'المنافس'}] - انطلقت المباراة الآن!`
+        });
+      } else if (data.type === 'matchmaking_searching') {
+        setIsSearchingMatch(true);
+        if (typeof data.queueSize === 'number') setQueueSize(data.queueSize);
+      } else if (data.type === 'matchmaking_cancelled') {
+        setIsSearchingMatch(false);
+      } else if (data.type === 'daily_ranking' || data.type === 'daily_ranking_updated') {
+        if (Array.isArray(data.ranking)) {
+          setDailyRanking(data.ranking);
+        }
       } else if (data.type === 'opponent_joined') {
         setRoomState(data.room);
         setFeedback({ type: 'success', message: `انضم المنافس [${data.guest?.clubName || 'المنافس'}] إلى الغرفة!` });
@@ -77,6 +144,7 @@ export const OnlinePvPTab: React.FC = () => {
       } else if (data.type === 'sync_state') {
         setRoomState(data.room);
       } else if (data.type === 'match_started') {
+        setIsSearchingMatch(false);
         if (data.room) setRoomState(data.room);
         setActiveView('playing');
       } else if (data.type === 'opponent_left') {
@@ -86,6 +154,7 @@ export const OnlinePvPTab: React.FC = () => {
       } else if (data.type === 'error') {
         setFeedback({ type: 'error', message: data.message || 'حدث خطأ في الاتصال.' });
         setLoadingAction(null);
+        setIsSearchingMatch(false);
       }
     });
 
@@ -107,9 +176,15 @@ export const OnlinePvPTab: React.FC = () => {
         : 70
     );
 
+    const storedCoachPhoto = typeof window !== 'undefined' ? localStorage.getItem('anta_elmodareb_coach_photo_v1') : null;
+    const coachAvatar = storedCoachPhoto || user?.photoURL || '';
+
     return {
       playerName: manager?.name || user?.displayName || 'المدرب',
+      avatar: coachAvatar,
       clubName: userClub?.name || 'نادي التحدي',
+      clubLogo: '',
+      primaryColor: userClub?.primaryColor || '#10b981',
       clubRating,
       tactics: userClub?.tactics || {
         formation: '4-3-3',
@@ -124,8 +199,42 @@ export const OnlinePvPTab: React.FC = () => {
         position: p.position,
         rating: p.rating || 65,
       })),
+      benchSummary: squad.slice(11, 22).map((p) => ({
+        id: p.id,
+        name: p.name,
+        position: p.position,
+        rating: p.rating || 65,
+      })),
     };
   }, [userClub, manager, user]);
+
+  // Handle Start Random Matchmaking
+  const handleStartRandomMatch = async () => {
+    if (!userClub) {
+      setFeedback({ type: 'error', message: 'يجب أن تقود نادياً أولاً لتتمكن من خوض التحدي العشوائي.' });
+      return;
+    }
+
+    try {
+      setFeedback(null);
+      setIsSearchingMatch(true);
+      await challengeClient.findRandomMatch(getParticipantPayload());
+    } catch (err: any) {
+      setIsSearchingMatch(false);
+      setFeedback({ type: 'error', message: err?.message || 'تعذر بدء البحث العشوائي. تحقق من الاتصال.' });
+    }
+  };
+
+  // Handle Cancel Matchmaking
+  const handleCancelMatchmaking = () => {
+    challengeClient.cancelMatchmaking();
+    setIsSearchingMatch(false);
+  };
+
+  // Handle Request Bot Match (Instant test if waiting in queue)
+  const handlePlayWithBot = () => {
+    challengeClient.requestBotMatch(getParticipantPayload());
+  };
 
   // Handle Create Room
   const handleCreateRoom = async () => {
@@ -488,9 +597,47 @@ export const OnlinePvPTab: React.FC = () => {
         </div>
 
         {/* GUARANTEE BADGE */}
-        <div className="pt-2 border-t border-slate-800 flex items-center gap-2 text-xs text-slate-400">
-          <Shield className="w-4 h-4 text-emerald-400 shrink-0" />
-          <span>اتصال حي ومباشر وفوري لمباريات وتحديات الأصدقاء أونلاين على الأندرويد والويب</span>
+        <div className="pt-2 border-t border-slate-800 flex items-center justify-between flex-wrap gap-2 text-xs text-slate-400">
+          <div className="flex items-center gap-2">
+            <Shield className="w-4 h-4 text-emerald-400 shrink-0" />
+            <span>اتصال حي ومباشر وفوري لمباريات وتحديات الأصدقاء أونلاين على الأندرويد والويب</span>
+          </div>
+          <div className="flex items-center gap-1 text-[11px] text-slate-500">
+            <Calendar className="w-3.5 h-3.5 text-slate-400" />
+            <span>تحديثات الترتيب لحظية في ذاكرة الخادم السريع (RAM)</span>
+          </div>
+        </div>
+
+        {/* LOBBY NAVIGATION TABS */}
+        <div className="flex items-center gap-2 pt-2 border-t border-slate-800/80">
+          <button
+            type="button"
+            onClick={() => setActiveLobbyTab('challenges')}
+            className={`flex-1 py-2.5 px-4 rounded-2xl font-black text-xs sm:text-sm flex items-center justify-center gap-2 transition-all ${
+              activeLobbyTab === 'challenges'
+                ? 'bg-emerald-500 text-slate-950 shadow-lg shadow-emerald-500/20'
+                : 'bg-slate-800/80 hover:bg-slate-800 text-slate-300'
+            }`}
+          >
+            <Swords className="w-4 h-4" />
+            <span>المباريات والتحديات ⚔️</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              setActiveLobbyTab('ranking');
+              loadDailyRanking();
+            }}
+            className={`flex-1 py-2.5 px-4 rounded-2xl font-black text-xs sm:text-sm flex items-center justify-center gap-2 transition-all ${
+              activeLobbyTab === 'ranking'
+                ? 'bg-amber-500 text-slate-950 shadow-lg shadow-amber-500/20'
+                : 'bg-slate-800/80 hover:bg-slate-800 text-slate-300'
+            }`}
+          >
+            <Trophy className="w-4 h-4" />
+            <span>الترتيب اليومي للمدربين (Top 50) 🏆</span>
+          </button>
         </div>
       </div>
 
@@ -521,164 +668,445 @@ export const OnlinePvPTab: React.FC = () => {
         </div>
       )}
 
-      {/* DUAL ACTION CARDS (CREATE OR JOIN) */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-        {/* CARD 1: CREATE CHALLENGE */}
-        <div className="bg-slate-900/90 border border-slate-700/80 rounded-3xl p-6 shadow-xl flex flex-col justify-between space-y-6">
-          <div className="space-y-3">
-            <div className="w-12 h-12 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400 shadow-inner">
-              <Sparkles className="w-6 h-6" />
-            </div>
-            <h3 className="text-lg font-black text-white">إنشاء تحدي جديد</h3>
-            <p className="text-xs text-slate-400 leading-relaxed">
-              قم بإنشاء غرفة تحدي واستلم كوداً خاصاً لتشاركه مع صديقك عبر واتساب أو أي تطبيق.
-            </p>
+      {/* MATCHMAKING ACTIVE SEARCH OVERLAY / MODAL */}
+      {isSearchingMatch && (
+        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="bg-slate-900 border-2 border-emerald-500/60 rounded-3xl p-6 sm:p-8 max-w-md w-full text-center space-y-6 shadow-2xl animate-in fade-in zoom-in duration-200 relative overflow-hidden">
+            {/* Ambient pulse */}
+            <div className="absolute -top-16 -right-16 w-32 h-32 bg-emerald-500/15 rounded-full blur-2xl pointer-events-none" />
+            <div className="absolute -bottom-16 -left-16 w-32 h-32 bg-blue-500/15 rounded-full blur-2xl pointer-events-none" />
 
-            {userClub && (
-              <div className="p-3 bg-slate-950/60 rounded-2xl border border-slate-800 text-xs space-y-1">
-                <div className="flex justify-between text-slate-300 font-bold">
-                  <span>نادي التحدي:</span>
-                  <span className="text-emerald-400">{userClub.name}</span>
-                </div>
-                <div className="flex justify-between text-slate-400">
-                  <span>المدرب:</span>
-                  <span>{manager?.name || 'المدرب الحالي'}</span>
-                </div>
+            <div className="relative mx-auto w-24 h-24 flex items-center justify-center">
+              <span className="absolute inset-0 rounded-full border-4 border-emerald-500/30 animate-ping opacity-75" />
+              <span className="absolute inset-2 rounded-full border-2 border-dashed border-emerald-400 animate-spin" />
+              <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-emerald-500 to-teal-600 flex items-center justify-center text-white shadow-xl shadow-emerald-500/30">
+                <Search className="w-8 h-8 animate-pulse" />
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <h3 className="text-xl font-black text-white">جارِ البحث عن منافس أونلاين...</h3>
+              <p className="text-xs text-slate-400 leading-relaxed">
+                يتم البحث الآن في قائمة الانتظار الحية عبر خادم اللعبة لمطابقتك مع مدرب آخر متاح.
+              </p>
+            </div>
+
+            {/* Live Stats */}
+            <div className="grid grid-cols-2 gap-3 p-3.5 rounded-2xl bg-slate-950/80 border border-slate-800 text-xs">
+              <div className="space-y-0.5">
+                <span className="text-slate-400">وقت البحث:</span>
+                <p className="font-mono font-black text-emerald-400 text-base">{searchSeconds} ثانية</p>
+              </div>
+              <div className="space-y-0.5">
+                <span className="text-slate-400">حجم الطابور:</span>
+                <p className="font-mono font-black text-blue-400 text-base">{Math.max(1, queueSize)} لاعب</p>
+              </div>
+            </div>
+
+            {/* Fallback Solo Bot Option if waiting */}
+            {searchSeconds >= 6 && (
+              <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-2xl space-y-2 animate-in fade-in">
+                <p className="text-[11px] text-amber-300 font-bold">
+                  لم يظهر منافس فوري؟ يمكنك خوض مواجهة سريعة الآن ضد مدرب آلي موازٍ!
+                </p>
+                <button
+                  type="button"
+                  onClick={handlePlayWithBot}
+                  className="w-full py-2.5 px-4 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs flex items-center justify-center gap-1.5 transition-colors shadow-md"
+                >
+                  <Bot className="w-4 h-4" />
+                  <span>بدء المباراة فوراً ضد مدرب آلي 🤖</span>
+                </button>
               </div>
             )}
+
+            <button
+              type="button"
+              onClick={handleCancelMatchmaking}
+              className="w-full py-3 px-5 rounded-2xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs transition-colors border border-slate-700"
+            >
+              إلغاء البحث والعودة
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* TAB 1: CHALLENGES & RANDOM MATCHMAKING */}
+      {/* ========================================================================= */}
+      {activeLobbyTab === 'challenges' && (
+        <div className="space-y-6">
+          {/* HERO CARD: RANDOM ONLINE MATCH (تحدي عشوائي) */}
+          <div className="bg-gradient-to-br from-emerald-950/60 via-slate-900/90 to-teal-950/60 border-2 border-emerald-500/40 rounded-3xl p-6 sm:p-7 shadow-2xl relative overflow-hidden backdrop-blur-md">
+            <div className="flex items-center justify-between flex-wrap gap-4">
+              <div className="space-y-2 max-w-lg">
+                <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 text-xs font-black">
+                  <Flame className="w-3.5 h-3.5 text-emerald-400 fill-current" />
+                  <span>ميزة جديدة: تحدي عشوائي بدون انتظار أصدقاء</span>
+                </div>
+                <h2 className="text-xl sm:text-2xl font-black text-white">تحدي عشوائي مباشر (Random Match)</h2>
+                <p className="text-xs sm:text-sm text-slate-300 leading-relaxed">
+                  ادخل نظام الـ Matchmaking فوراً للبحث عن أي لاعب Online متاح. عند العثور على منافس تبدأ المباراة تلقائياً دون أي حد لعدد المباريات!
+                </p>
+              </div>
+
+              <div className="w-full sm:w-auto">
+                <button
+                  type="button"
+                  onClick={handleStartRandomMatch}
+                  disabled={isSearchingMatch}
+                  className="w-full sm:w-auto px-8 py-4 rounded-2xl bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 active:scale-98 text-slate-950 font-black text-sm sm:text-base shadow-xl shadow-emerald-500/20 flex items-center justify-center gap-2.5 transition-all"
+                >
+                  <Play className="w-5 h-5 fill-current" />
+                  <span>دخول التحدي العشوائي الآن ⚡</span>
+                </button>
+              </div>
+            </div>
           </div>
 
-          <button
-            type="button"
-            onClick={handleCreateRoom}
-            disabled={loadingAction === 'create'}
-            className="w-full py-3.5 px-5 rounded-2xl bg-emerald-600 hover:bg-emerald-500 active:scale-98 text-white font-black text-sm shadow-lg flex items-center justify-center gap-2 transition-all disabled:opacity-50"
-          >
-            {loadingAction === 'create' ? (
-              <RefreshCw className="w-4 h-4 animate-spin" />
-            ) : (
-              <Play className="w-4 h-4 fill-current" />
-            )}
-            <span>إنشاء كود التحدي والانتظار ⚡</span>
-          </button>
-        </div>
+          {/* DUAL ACTION CARDS (CREATE OR JOIN WITH CODE - KEEPING EXISTING ROOMS SYSTEM 100% INTACT) */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+            {/* CARD 1: CREATE CHALLENGE ROOM */}
+            <div className="bg-slate-900/90 border border-slate-700/80 rounded-3xl p-6 shadow-xl flex flex-col justify-between space-y-6">
+              <div className="space-y-3">
+                <div className="w-12 h-12 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400 shadow-inner">
+                  <Sparkles className="w-6 h-6" />
+                </div>
+                <h3 className="text-lg font-black text-white">إنشاء غرفة لصديق (Room)</h3>
+                <p className="text-xs text-slate-400 leading-relaxed">
+                  أنشئ غرفة خاصة واستلم كوداً سداسياً لمشاركته مع صديقك عبر واتساب للعب ضده مباشرة.
+                </p>
 
-        {/* CARD 2: JOIN CHALLENGE */}
-        <div className="bg-slate-900/90 border border-slate-700/80 rounded-3xl p-6 shadow-xl flex flex-col justify-between space-y-6">
-          <div className="space-y-3">
-            <div className="w-12 h-12 rounded-2xl bg-blue-500/10 border border-blue-500/30 flex items-center justify-center text-blue-400 shadow-inner">
-              <Users className="w-6 h-6" />
-            </div>
-            <h3 className="text-lg font-black text-white">الانضمام لتحدي صديق</h3>
-            <p className="text-xs text-slate-400 leading-relaxed">
-              إذا أرسل لك صديقك كود الغرفة، اكتبه هنا للدخول في المواجهة المباشرة معه.
-            </p>
-
-            <form onSubmit={handleJoinRoom} className="space-y-3 pt-1">
-              <div>
-                <label htmlFor="challenge-room-code-input" className="block text-xs font-bold text-slate-300 mb-1.5">
-                  كود الغرفة (6 خانات):
-                </label>
-                <input
-                  id="challenge-room-code-input"
-                  type="text"
-                  maxLength={6}
-                  value={inputCode}
-                  onChange={(e) => setInputCode(e.target.value.toUpperCase())}
-                  placeholder="مثال: 7K4B2P"
-                  className="w-full bg-slate-950/80 border border-slate-700 focus:border-blue-500 rounded-2xl px-4 py-3 text-center text-lg font-mono font-black text-white tracking-widest outline-none transition-all placeholder:text-slate-600 placeholder:font-sans placeholder:text-sm"
-                />
+                {userClub && (
+                  <div className="p-3 bg-slate-950/60 rounded-2xl border border-slate-800 text-xs space-y-1">
+                    <div className="flex justify-between text-slate-300 font-bold">
+                      <span>نادي التحدي:</span>
+                      <span className="text-emerald-400">{userClub.name}</span>
+                    </div>
+                    <div className="flex justify-between text-slate-400">
+                      <span>المدرب:</span>
+                      <span>{manager?.name || 'المدرب الحالي'}</span>
+                    </div>
+                  </div>
+                )}
               </div>
 
               <button
-                type="submit"
-                disabled={loadingAction === 'join' || !inputCode.trim()}
-                className="w-full py-3.5 px-5 rounded-2xl bg-blue-600 hover:bg-blue-500 active:scale-98 disabled:opacity-50 text-white font-black text-sm shadow-lg flex items-center justify-center gap-2 transition-all"
+                type="button"
+                onClick={handleCreateRoom}
+                disabled={loadingAction === 'create'}
+                className="w-full py-3.5 px-5 rounded-2xl bg-emerald-600 hover:bg-emerald-500 active:scale-98 text-white font-black text-sm shadow-lg flex items-center justify-center gap-2 transition-all disabled:opacity-50"
               >
-                {loadingAction === 'join' ? (
+                {loadingAction === 'create' ? (
                   <RefreshCw className="w-4 h-4 animate-spin" />
                 ) : (
-                  <ChevronRight className="w-4 h-4" />
+                  <Play className="w-4 h-4 fill-current" />
                 )}
-                <span>الانضمام للمباراة 🎯</span>
+                <span>إنشاء كود الغرفة والانتظار ⚡</span>
               </button>
-            </form>
-          </div>
-        </div>
-      </div>
+            </div>
 
-      {/* SECTION 3: LOCAL MATCH HISTORY */}
-      <div className="bg-slate-900/90 border border-slate-700/80 rounded-3xl p-6 shadow-xl space-y-4">
-        <div className="flex items-center justify-between pb-3 border-b border-slate-800">
-          <div className="flex items-center gap-2 text-white font-bold text-base">
-            <Trophy className="w-5 h-5 text-amber-400" />
-            <span>سجل التحديات المحلية السابقة</span>
-          </div>
-
-          {history.length > 0 && (
-            <button
-              type="button"
-              onClick={handleClearHistory}
-              className="text-xs text-slate-400 hover:text-red-400 flex items-center gap-1 transition-colors"
-            >
-              <Trash2 className="w-3.5 h-3.5" />
-              مسح السجل
-            </button>
-          )}
-        </div>
-
-        {history.length > 0 ? (
-          <div className="space-y-2.5">
-            {history.map((item) => (
-              <div
-                key={item.id}
-                className="p-3.5 rounded-2xl bg-slate-950/70 border border-slate-800 flex items-center justify-between flex-wrap gap-2 text-xs"
-              >
-                <div className="flex items-center gap-3">
-                  <span
-                    className={`px-2.5 py-1 rounded-xl font-bold ${
-                      item.result === 'win'
-                        ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
-                        : item.result === 'draw'
-                        ? 'bg-blue-500/20 text-blue-300 border border-blue-500/30'
-                        : 'bg-red-500/20 text-red-300 border border-red-500/30'
-                    }`}
-                  >
-                    {item.result === 'win' ? 'فوز 🟢' : item.result === 'draw' ? 'تعادل 🟡' : 'خسارة 🔴'}
-                  </span>
-
-                  <div className="space-y-0.5">
-                    <p className="font-bold text-white text-sm">
-                      {item.myClub} <span className="text-emerald-400 font-mono">{item.myScore}</span> -{' '}
-                      <span className="text-blue-400 font-mono">{item.opponentScore}</span> {item.opponentClub}
-                    </p>
-                    <p className="text-[11px] text-slate-400">
-                      المنافس: {item.opponentName} • كود: {item.roomCode}
-                    </p>
-                  </div>
+            {/* CARD 2: JOIN CHALLENGE ROOM */}
+            <div className="bg-slate-900/90 border border-slate-700/80 rounded-3xl p-6 shadow-xl flex flex-col justify-between space-y-6">
+              <div className="space-y-3">
+                <div className="w-12 h-12 rounded-2xl bg-blue-500/10 border border-blue-500/30 flex items-center justify-center text-blue-400 shadow-inner">
+                  <Users className="w-6 h-6" />
                 </div>
+                <h3 className="text-lg font-black text-white">الانضمام بكود الغرفة</h3>
+                <p className="text-xs text-slate-400 leading-relaxed">
+                  إذا أرسل لك صديقك كود الغرفة، اكتبه هنا للدخول في المواجهة المباشرة معه.
+                </p>
 
-                <span className="text-[11px] text-slate-500 font-mono">
-                  {new Date(item.timestamp).toLocaleDateString('ar-EG', {
-                    month: 'short',
-                    day: 'numeric',
-                    hour: '2-digit',
-                    minute: '2-digit',
-                  })}
-                </span>
+                <form onSubmit={handleJoinRoom} className="space-y-3 pt-1">
+                  <div>
+                    <label htmlFor="challenge-room-code-input" className="block text-xs font-bold text-slate-300 mb-1.5">
+                      كود الغرفة (6 خانات):
+                    </label>
+                    <input
+                      id="challenge-room-code-input"
+                      type="text"
+                      maxLength={6}
+                      value={inputCode}
+                      onChange={(e) => setInputCode(e.target.value.toUpperCase())}
+                      placeholder="مثال: 7K4B2P"
+                      className="w-full bg-slate-950/80 border border-slate-700 focus:border-blue-500 rounded-2xl px-4 py-3 text-center text-lg font-mono font-black text-white tracking-widest outline-none transition-all placeholder:text-slate-600 placeholder:font-sans placeholder:text-sm"
+                    />
+                  </div>
+
+                  <button
+                    type="submit"
+                    disabled={loadingAction === 'join' || !inputCode.trim()}
+                    className="w-full py-3.5 px-5 rounded-2xl bg-blue-600 hover:bg-blue-500 active:scale-98 disabled:opacity-50 text-white font-black text-sm shadow-lg flex items-center justify-center gap-2 transition-all"
+                  >
+                    {loadingAction === 'join' ? (
+                      <RefreshCw className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <ChevronRight className="w-4 h-4" />
+                    )}
+                    <span>الانضمام للمباراة 🎯</span>
+                  </button>
+                </form>
               </div>
-            ))}
+            </div>
           </div>
-        ) : (
-          <div className="py-8 text-center space-y-2 text-slate-400">
-            <Shield className="w-8 h-8 mx-auto text-slate-600" />
-            <p className="text-xs font-bold">لا يوجد سجل تحديات سابقة على هذا الجهاز حتى الآن.</p>
-            <p className="text-[11px] text-slate-500">
-              أنشئ تحدياً أو انضم لصديقك لتسجيل أول مواجهة تنافسية حية!
-            </p>
+
+          {/* SECTION 3: LOCAL MATCH HISTORY */}
+          <div className="bg-slate-900/90 border border-slate-700/80 rounded-3xl p-6 shadow-xl space-y-4">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+              <div className="flex items-center gap-2 text-white font-bold text-base">
+                <Trophy className="w-5 h-5 text-amber-400" />
+                <span>سجل التحديات المحلية السابقة</span>
+              </div>
+
+              {history.length > 0 && (
+                <button
+                  type="button"
+                  onClick={handleClearHistory}
+                  className="text-xs text-slate-400 hover:text-red-400 flex items-center gap-1 transition-colors"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  مسح السجل
+                </button>
+              )}
+            </div>
+
+            {history.length > 0 ? (
+              <div className="space-y-2.5">
+                {history.map((item) => (
+                  <div
+                    key={item.id}
+                    className="p-3.5 rounded-2xl bg-slate-950/70 border border-slate-800 flex items-center justify-between flex-wrap gap-2 text-xs"
+                  >
+                    <div className="flex items-center gap-3">
+                      <span
+                        className={`px-2.5 py-1 rounded-xl font-bold ${
+                          item.result === 'win'
+                            ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                            : item.result === 'draw'
+                            ? 'bg-blue-500/20 text-blue-300 border border-blue-500/30'
+                            : 'bg-red-500/20 text-red-300 border border-red-500/30'
+                        }`}
+                      >
+                        {item.result === 'win' ? 'فوز 🟢' : item.result === 'draw' ? 'تعادل 🟡' : 'خسارة 🔴'}
+                      </span>
+
+                      <div className="space-y-0.5">
+                        <p className="font-bold text-white text-sm">
+                          {item.myClub} <span className="text-emerald-400 font-mono">{item.myScore}</span> -{' '}
+                          <span className="text-blue-400 font-mono">{item.opponentScore}</span> {item.opponentClub}
+                        </p>
+                        <p className="text-[11px] text-slate-400">
+                          المنافس: {item.opponentName} • كود: {item.roomCode}
+                        </p>
+                      </div>
+                    </div>
+
+                    <span className="text-[11px] text-slate-500 font-mono">
+                      {new Date(item.timestamp).toLocaleDateString('ar-EG', {
+                        month: 'short',
+                        day: 'numeric',
+                        hour: '2-digit',
+                        minute: '2-digit',
+                      })}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="py-8 text-center space-y-2 text-slate-400">
+                <Shield className="w-8 h-8 mx-auto text-slate-600" />
+                <p className="text-xs font-bold">لا يوجد سجل تحديات سابقة على هذا الجهاز حتى الآن.</p>
+                <p className="text-[11px] text-slate-500">
+                  أنشئ تحدياً أو ادخل التحدي العشوائي لتسجيل أول مواجهة تنافسية حية!
+                </p>
+              </div>
+            )}
           </div>
-        )}
-      </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* TAB 2: DAILY COACH RANKING (أفضل 50 مدرب - RAM Storage Only) */}
+      {/* ========================================================================= */}
+      {activeLobbyTab === 'ranking' && (
+        <div className="space-y-6 animate-in fade-in duration-200">
+          {/* DAILY RANKING HEADER CARD */}
+          <div className="bg-slate-900/90 border border-slate-700/80 rounded-3xl p-6 shadow-xl space-y-3">
+            <div className="flex items-center justify-between flex-wrap gap-3">
+              <div className="flex items-center gap-3">
+                <div className="w-12 h-12 rounded-2xl bg-amber-500/20 border-2 border-amber-500/40 flex items-center justify-center text-amber-400 shadow-inner">
+                  <Trophy className="w-6 h-6" />
+                </div>
+                <div>
+                  <h3 className="text-xl font-black text-white">الترتيب اليومي للمدربين (Top 50)</h3>
+                  <p className="text-xs text-slate-400">
+                    يعتمد الترتيب على عدد مرات الفوز اليوم فقط • يُستخدم عدد المباريات كـ Tie-Breaker
+                  </p>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={loadDailyRanking}
+                disabled={isLoadingRanking}
+                className="px-4 py-2 rounded-2xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold flex items-center gap-2 transition-colors border border-slate-700"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${isLoadingRanking ? 'animate-spin' : ''}`} />
+                <span>تحديث الترتيب</span>
+              </button>
+            </div>
+
+            <div className="p-3 bg-slate-950/70 rounded-2xl border border-slate-800/80 flex items-center gap-2 text-xs text-slate-300">
+              <Award className="w-4 h-4 text-amber-400 shrink-0" />
+              <span>
+                كل مباراة أونلاين مكتملة (سواء تحدي عشوائي أو غرفة مع صديق) تحسب الفوز فوراً في الترتيب اليومي.
+              </span>
+            </div>
+          </div>
+
+          {/* RANKING LIST TABLE */}
+          <div className="bg-slate-900/90 border border-slate-700/80 rounded-3xl p-4 sm:p-6 shadow-xl space-y-4">
+            {isLoadingRanking ? (
+              <div className="py-12 text-center space-y-3">
+                <RefreshCw className="w-8 h-8 text-amber-400 animate-spin mx-auto" />
+                <p className="text-xs font-bold text-slate-400">جارِ جلب قائمة أفضل 50 مدرب لليوم...</p>
+              </div>
+            ) : dailyRanking.length > 0 ? (
+              <div className="overflow-x-auto">
+                <table className="w-full text-right text-xs">
+                  <thead>
+                    <tr className="border-b border-slate-800 text-slate-400 font-bold">
+                      <th className="py-3 px-3 text-center">#</th>
+                      <th className="py-3 px-3">المدرب والنادي</th>
+                      <th className="py-3 px-2 text-center">القوة</th>
+                      <th className="py-3 px-3 text-center text-emerald-400">فوز (W)</th>
+                      <th className="py-3 px-2 text-center text-blue-400">تعادل (D)</th>
+                      <th className="py-3 px-2 text-center text-red-400">خسارة (L)</th>
+                      <th className="py-3 px-3 text-center text-slate-300">المباريات (M)</th>
+                      <th className="py-3 px-3 text-center text-amber-400">نسبة الفوز</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-800/60">
+                    {dailyRanking.map((coach) => {
+                      const isMe = coach.playerId === playerId;
+                      const winRate = coach.matchesPlayed > 0 ? Math.round((coach.wins / coach.matchesPlayed) * 100) : 0;
+
+                      return (
+                        <tr
+                          key={coach.playerId}
+                          className={`hover:bg-slate-800/40 transition-colors ${
+                            isMe ? 'bg-emerald-500/10 border-l-4 border-emerald-500' : ''
+                          }`}
+                        >
+                          {/* Rank */}
+                          <td className="py-3 px-3 text-center">
+                            {coach.rank === 1 ? (
+                              <span className="inline-flex items-center justify-center w-7 h-7 rounded-full bg-amber-500/20 text-amber-300 font-black border border-amber-500/40 text-sm shadow-sm">
+                                🥇
+                              </span>
+                            ) : coach.rank === 2 ? (
+                              <span className="inline-flex items-center justify-center w-7 h-7 rounded-full bg-slate-300/20 text-slate-200 font-black border border-slate-400/40 text-sm shadow-sm">
+                                🥈
+                              </span>
+                            ) : coach.rank === 3 ? (
+                              <span className="inline-flex items-center justify-center w-7 h-7 rounded-full bg-amber-700/20 text-amber-500 font-black border border-amber-700/40 text-sm shadow-sm">
+                                🥉
+                              </span>
+                            ) : (
+                              <span className="font-mono font-bold text-slate-400">#{coach.rank}</span>
+                            )}
+                          </td>
+
+                          {/* Coach & Club */}
+                          <td className="py-3 px-3">
+                            <div className="flex items-center gap-2.5">
+                              {coach.avatar ? (
+                                <img
+                                  src={coach.avatar}
+                                  alt={coach.coachName}
+                                  className="w-8 h-8 rounded-xl object-cover border border-slate-700"
+                                />
+                              ) : (
+                                <div className="w-8 h-8 rounded-xl bg-slate-800 border border-slate-700 flex items-center justify-center text-xs font-black text-slate-300">
+                                  {coach.coachName.charAt(0)}
+                                </div>
+                              )}
+                              <div className="space-y-0.5">
+                                <div className="flex items-center gap-1.5">
+                                  <span className="font-black text-white text-xs sm:text-sm">
+                                    {coach.coachName}
+                                  </span>
+                                  {isMe && (
+                                    <span className="px-1.5 py-0.5 rounded-md bg-emerald-500/20 text-emerald-300 text-[10px] font-bold border border-emerald-500/30">
+                                      أنت
+                                    </span>
+                                  )}
+                                </div>
+                                <p className="text-[11px] text-slate-400">{coach.clubName}</p>
+                              </div>
+                            </div>
+                          </td>
+
+                          {/* Club Rating */}
+                          <td className="py-3 px-2 text-center">
+                            <span className="px-2 py-0.5 rounded-md bg-slate-800 text-slate-300 font-mono font-bold text-[11px]">
+                              {coach.clubRating}
+                            </span>
+                          </td>
+
+                          {/* Wins */}
+                          <td className="py-3 px-3 text-center">
+                            <span className="font-mono font-black text-emerald-400 text-sm">{coach.wins}</span>
+                          </td>
+
+                          {/* Draws */}
+                          <td className="py-3 px-2 text-center font-mono text-blue-400 font-bold">
+                            {coach.draws}
+                          </td>
+
+                          {/* Losses */}
+                          <td className="py-3 px-2 text-center font-mono text-red-400 font-bold">
+                            {coach.losses}
+                          </td>
+
+                          {/* Matches Played */}
+                          <td className="py-3 px-3 text-center font-mono font-bold text-slate-300">
+                            {coach.matchesPlayed}
+                          </td>
+
+                          {/* Win Rate */}
+                          <td className="py-3 px-3 text-center">
+                            <span className="font-mono font-black text-amber-400">{winRate}%</span>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <div className="py-12 text-center space-y-3 text-slate-400">
+                <Trophy className="w-10 h-10 mx-auto text-slate-600" />
+                <p className="text-sm font-bold text-slate-300">لا يوجد متصدرين في الترتيب اليومي حتى الآن!</p>
+                <p className="text-xs text-slate-500 max-w-sm mx-auto">
+                  كن أول مدرب يظفر بالصدارة اليوم. العب مباراة تحدي عشوائي أو أنشئ غرفة مع صديقك الآن!
+                </p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setActiveLobbyTab('challenges');
+                    handleStartRandomMatch();
+                  }}
+                  className="px-6 py-2.5 rounded-2xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-xs inline-flex items-center gap-2 shadow-lg transition-transform active:scale-95"
+                >
+                  <Play className="w-4 h-4 fill-current" />
+                  <span>خوض مباراة لتسجيل اسمك ⚡</span>
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 };

@@ -9,6 +9,7 @@ import { getOrCreateClubManager } from '../data/worldManagersData';
 import { getPositionArabic } from '../utils/positionHelper';
 import { findClubInWorld, getClubDisplayName } from '../data/leaguesData';
 import { LiveTacticalAlertBanner } from './LiveTacticalAlertBanner';
+import { TacticalMatchReportCard } from './TacticalMatchReportCard';
 import {
   analyzeLiveMatchSituation,
   isTacticalAdviceApplied,
@@ -63,6 +64,7 @@ export const MatchesTab: React.FC = () => {
   const {
     userClub,
     manager,
+    cupTournament,
     teams,
     fixtures,
     currentRound,
@@ -291,8 +293,36 @@ export const MatchesTab: React.FC = () => {
     const isUserHome = userClub ? liveMatch.homeTeam?.id === userClub.id : false;
     const userGoals = isUserHome ? liveMatch.homeScore : liveMatch.awayScore;
     const oppGoals = isUserHome ? liveMatch.awayScore : liveMatch.homeScore;
-    const isUserWin = userGoals > oppGoals;
-    const isUserDraw = userGoals === oppGoals;
+    const isCupMatch = 
+      liveMatch.fixture?.competitionType === 'cup' || 
+      Boolean(liveMatch.fixture?.cupStage) || 
+      Boolean(liveMatch.fixture?.stageName?.includes('نهائي')) ||
+      Boolean(liveMatch.fixture?.stageName?.includes('كأس')) ||
+      Boolean(liveMatch.fixture?.stageName?.includes('الكأس')) ||
+      Boolean(liveMatch.fixture?.stageName?.includes('دور الـ')) ||
+      Boolean(liveMatch.fixture?.stageName?.includes('ثمن')) ||
+      Boolean(liveMatch.fixture?.stageName?.includes('ربع')) ||
+      Boolean(liveMatch.fixture?.stageName?.includes('نصف')) ||
+      Boolean(liveMatch.fixture?.competitionName?.includes('كأس')) ||
+      Boolean(liveMatch.fixture?.competitionName?.includes('الكأس')) ||
+      Boolean(liveMatch.fixture?.competitionName?.toLowerCase()?.includes('cup')) ||
+      Boolean(liveMatch.fixture?.id?.toLowerCase()?.includes('cup')) ||
+      (liveMatch.homePenalties !== undefined && liveMatch.awayPenalties !== undefined) ||
+      Boolean(cupTournament?.matches?.some(m => m.id === liveMatch.fixture?.id || (userClub && (m.homeTeamId === userClub.id || m.awayTeamId === userClub.id) && (m.roundTrigger === liveMatch.fixture?.round || m.roundTrigger === currentRound))));
+    const hasPenalties = isCupMatch && liveMatch.homePenalties !== undefined && liveMatch.awayPenalties !== undefined;
+    const userPenalties = isUserHome ? liveMatch.homePenalties : liveMatch.awayPenalties;
+    const oppPenalties = isUserHome ? liveMatch.awayPenalties : liveMatch.homePenalties;
+
+    // In cup matches, there are NO draws: ties are decided by penalty shootouts
+    const isUserWin = isCupMatch
+      ? (hasPenalties ? (userPenalties! > oppPenalties!) : userGoals > oppGoals)
+      : userGoals > oppGoals;
+    const isUserDraw = isCupMatch
+      ? false
+      : userGoals === oppGoals;
+    const isUserLoss = isCupMatch
+      ? (hasPenalties ? (userPenalties! < oppPenalties!) : userGoals < oppGoals)
+      : userGoals < oppGoals;
 
     // Filter events up to current minute
     const visibleEvents = (liveMatch.events || []).filter(e => e && e.minute <= liveMatch.currentMinute);
@@ -402,8 +432,13 @@ export const MatchesTab: React.FC = () => {
                 <span className="text-slate-600">:</span>
                 <span className={liveMatch.awayScore > liveMatch.homeScore ? 'text-emerald-400' : ''}>{liveMatch.awayScore}</span>
               </div>
+              {hasPenalties && (
+                <div className="mt-1 px-2 py-0.5 rounded-full bg-amber-500/20 border border-amber-500/40 text-[11px] font-mono font-black text-amber-300 shadow-sm animate-pulse">
+                  ركلات ({liveMatch.homePenalties} - {liveMatch.awayPenalties})
+                </div>
+              )}
               <span className="text-[10px] text-slate-400 mt-1 font-medium">
-                {liveMatch.isFinished ? 'النتيجة النهائية' : liveMatch.isHalfTime ? 'الشوط الأول' : 'مباشر'}
+                {liveMatch.isFinished ? (hasPenalties ? 'حسم بركلات الترجيح' : 'النتيجة النهائية') : liveMatch.isHalfTime ? 'الشوط الأول' : 'مباشر'}
               </span>
             </div>
 
@@ -513,7 +548,23 @@ export const MatchesTab: React.FC = () => {
               }`}>
                 <Trophy className="w-4 h-4" />
                 <span>
-                  {isUserWin ? '🎉 فوز رائع ومستحق! مكافأة الفوز ونقاط الخبرة أضيفت لرصيدك.' : isUserDraw ? '🤝 تعادل ونقطة إضافية في رصيد الدوري.' : '😔 هزيمة مؤسفة.. حان وقت التعويض في الجولة القادمة!'}
+                  {isCupMatch ? (
+                    isUserWin ? (
+                      hasPenalties
+                        ? `🎉 فوز ملحمي وتأهل بركلات الترجيح (${userPenalties} - ${oppPenalties}) لمواصلة المشوار في مسابقة الكأس!`
+                        : '🎉 فوز رائع وتأهل مستحق إلى الدور القادم في مسابقة الكأس!'
+                    ) : (
+                      hasPenalties
+                        ? `😔 وداع مؤلم لمسابقة الكأس بعد الخسارة بركلات الترجيح (${userPenalties} - ${oppPenalties}).. حظ أوفر!`
+                        : '😔 هزيمة وتوديع لمسابقة الكأس.. حان وقت التركيز على بطولة الدوري!'
+                    )
+                  ) : (
+                    isUserWin
+                      ? '🎉 فوز رائع ومستحق! مكافأة الفوز ونقاط الخبرة أضيفت لرصيدك.'
+                      : isUserDraw
+                      ? '🤝 تعادل ونقطة إضافية في رصيد الدوري.'
+                      : '😔 هزيمة مؤسفة.. حان وقت التعويض في الجولة القادمة!'
+                  )}
                 </span>
               </div>
 
@@ -634,6 +685,15 @@ export const MatchesTab: React.FC = () => {
                 </div>
               )}
 
+              {/* Tactical Match Analysis & Debrief */}
+              {liveMatch.tacticalMatchReport && (
+                <TacticalMatchReportCard
+                  report={liveMatch.tacticalMatchReport}
+                  userTactics={userClub?.tactics}
+                  userClub={userClub}
+                />
+              )}
+
               <button
                 id="finish_match_and_advance_btn"
                 disabled={isSimulationRunning}
@@ -682,18 +742,8 @@ export const MatchesTab: React.FC = () => {
           />
         )}
 
-        {/* 2D Tactical Pitch Component */}
-        <div className="bg-slate-900 border border-slate-800 rounded-3xl p-4 shadow-xl space-y-2.5">
-          <div className="flex items-center justify-between">
-            <h4 className="font-bold text-xs text-white flex items-center gap-2">
-              <Shield className="w-4 h-4 text-emerald-400" />
-              <span>المحاكاة التكتيكية الحية للملعب (2D)</span>
-            </h4>
-            <span className="text-[11px] text-slate-400 font-mono">
-              التبديلات: {liveMatch.substitutionsCount || 0}/5
-            </span>
-          </div>
-
+        {/* 3D Interactive Tactical Stadium Pitch */}
+        <div className="space-y-2.5">
           <TacticalPitch2D
             homeTeam={liveMatch.homeTeam}
             awayTeam={liveMatch.awayTeam}
@@ -705,6 +755,28 @@ export const MatchesTab: React.FC = () => {
             isFinished={liveMatch.isFinished}
             isHalfTime={liveMatch.isHalfTime}
             userTactics={userClub?.tactics}
+            homePossession={liveMatch.stats?.homePossession || 50}
+            awayPossession={liveMatch.stats?.awayPossession || 50}
+            homeDangerousAttacks={liveMatch.homeDangerousAttacks || 0}
+            awayDangerousAttacks={liveMatch.awayDangerousAttacks || 0}
+            onStartSecondHalf={() => resumeSecondHalf(teamTalkChosen === 'motivate' || teamTalkChosen === 'demand')}
+            onFinishMatch={() => {
+              console.log('[MatchesTab] User clicked Confirm Result from pitch center overlay');
+              finishLiveMatchAndAdvance();
+            }}
+            isSimulationRunning={isSimulationRunning}
+            userResultType={isUserWin ? 'win' : isUserDraw ? 'draw' : 'loss'}
+            homePenalties={liveMatch.homePenalties}
+            awayPenalties={liveMatch.awayPenalties}
+            isCupMatch={isCupMatch}
+            finishButtonLabel="تأكيد النتيجة والانتقال للجولة التالية"
+            onTacticChange={(tacticKey) => {
+              if (tacticKey === 'attack') changeLiveMentality('attacking');
+              else if (tacticKey === 'defend') changeLiveMentality('defensive');
+              else if (tacticKey === 'balanced') changeLiveMentality('balanced');
+              else if (tacticKey === 'counter') changeLiveMentality('attacking');
+              else if (tacticKey === 'high_press') changeLivePressing('high');
+            }}
           />
 
           {/* Stadium Pitch-side LED Sponsor Board */}

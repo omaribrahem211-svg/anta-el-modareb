@@ -891,42 +891,45 @@ const FORMATIONS: FormationType[] = [
  * Universal Manager Factory for any club
  */
 export function getOrCreateClubManager(club: Club): ClubManager {
+  const clubId = club?.id || 'unknown_club';
   // 1. Check known preset
-  const preset = KNOWN_MANAGERS[club.id];
-  if (preset && preset.name) {
-    const managerId = `mgr_${club.id}`;
+  const preset = KNOWN_MANAGERS[clubId];
+  if (preset && typeof preset.name === 'string' && preset.name.trim().length > 0) {
+    const managerId = `mgr_${clubId}`;
+    const presetName = preset.name.trim();
+    const nameParts = presetName.split(' ');
     return {
       id: managerId,
-      name: preset.name,
-      shortName: preset.name.split(' ').slice(-1)[0] || preset.name,
-      nationality: preset.nationality || (club.country || 'مصر'),
-      countryCode: preset.countryCode || club.countryCode || 'EGY',
+      name: presetName,
+      shortName: nameParts.slice(-1)[0] || presetName,
+      nationality: preset.nationality || (club?.country || 'مصر'),
+      countryCode: preset.countryCode || club?.countryCode || 'EGY',
       age: preset.age || 52,
-      rating: preset.rating || Math.round(club.reputation * 0.95),
+      rating: preset.rating || Math.round((club?.reputation || 30) * 0.95),
       tacticalStyle: preset.tacticalStyle || 'balanced',
       preferredFormation: preset.preferredFormation || '4-3-3',
-      reputation: preset.reputation || club.reputation,
-      rankingPoints: preset.rankingPoints || (club.reputation * 45),
+      reputation: preset.reputation || (club?.reputation || 30),
+      rankingPoints: preset.rankingPoints || ((club?.reputation || 30) * 45),
       worldRank: 1, // Will be computed globally
       previousWorldRank: 1,
       monthlyRankChange: 0,
       trophiesWonCount: preset.trophiesWonCount || 0,
       majorTrophies: preset.majorTrophies || [],
-      currentClubId: club.id,
-      currentClubName: club.name,
-      currentLeagueId: club.leagueId,
+      currentClubId: clubId,
+      currentClubName: club?.name || 'النادي',
+      currentLeagueId: club?.leagueId,
     };
   }
 
   // 2. Procedural Authentic Manager for lower tier / unmapped clubs
-  const hash = club.id.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
+  const hash = clubId.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
   const firstIdx = hash % ARABIC_COACH_FIRST_NAMES.length;
   const lastIdx = (hash * 3) % ARABIC_COACH_LAST_NAMES.length;
   const styleIdx = hash % TACTICAL_STYLES.length;
   const formIdx = hash % FORMATIONS.length;
 
-  const rep = club.reputation || 30;
-  const tier = club.division || 4;
+  const rep = club?.reputation || 30;
+  const tier = club?.division || 4;
   
   // Rating calibrated to tier (Tier 4: 55-64, Tier 3: 63-71, Tier 2: 69-76, Tier 1: 74-88)
   const baseRating = tier === 4 ? 58 : tier === 3 ? 65 : tier === 2 ? 71 : 78;
@@ -936,11 +939,11 @@ export function getOrCreateClubManager(club: Club): ClubManager {
   const managerName = `${ARABIC_COACH_FIRST_NAMES[firstIdx]} ${ARABIC_COACH_LAST_NAMES[lastIdx]}`;
 
   return {
-    id: `mgr_${club.id}`,
+    id: `mgr_${clubId}`,
     name: managerName,
     shortName: ARABIC_COACH_LAST_NAMES[lastIdx],
-    nationality: club.country || 'مصر',
-    countryCode: club.countryCode || 'EGY',
+    nationality: club?.country || 'مصر',
+    countryCode: club?.countryCode || 'EGY',
     age: 42 + (hash % 24),
     rating,
     tacticalStyle: TACTICAL_STYLES[styleIdx],
@@ -952,9 +955,9 @@ export function getOrCreateClubManager(club: Club): ClubManager {
     monthlyRankChange: 0,
     trophiesWonCount: tier <= 2 ? (hash % 3) : 0,
     majorTrophies: tier <= 2 ? ['صعود دوري المحترفين'] : [],
-    currentClubId: club.id,
-    currentClubName: club.name,
-    currentLeagueId: club.leagueId,
+    currentClubId: clubId,
+    currentClubName: club?.name || 'النادي',
+    currentLeagueId: club?.leagueId,
   };
 }
 

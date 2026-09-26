@@ -118,5 +118,35 @@ service cloud.firestore {
       allow read, list: if isAuthenticated();
       allow create, update, delete: if isAdmin();
     }
+
+    // Rules for Promo & Gift Codes (نظام أكواد الهدايا والمكافآت للمدربين)
+    match /promo_codes/{codeId} {
+      // Admins have full access to list, inspect, and delete codes
+      allow list, delete: if isAdmin();
+      
+      // Players can read/get a single code to verify it (cannot list all codes to prevent scraping)
+      allow get: if isAuthenticated();
+
+      // Only admins can create codes with valid properties
+      allow create: if isAdmin()
+        && request.resource.data.code == codeId
+        && request.resource.data.rewardAmount > 0
+        && request.resource.data.maxUses > 0
+        && request.resource.data.usedCount == 0;
+
+      // Update: Admin can update anything, or player can redeem atomically
+      allow update: if isAdmin() || (
+        isAuthenticated()
+        && resource.data.isActive == true
+        && (!('expiresAt' in resource.data) || resource.data.expiresAt == null || request.time.toMillis() <= resource.data.expiresAt)
+        && resource.data.usedCount < resource.data.maxUses
+        && !(request.auth.uid in resource.data.usedByManagerIds)
+        && request.resource.data.usedCount == resource.data.usedCount + 1
+        && (request.auth.uid in request.resource.data.usedByManagerIds)
+        && request.resource.data.rewardAmount == resource.data.rewardAmount
+        && request.resource.data.maxUses == resource.data.maxUses
+        && request.resource.data.code == resource.data.code
+      );
+    }
   }
 }

@@ -38,8 +38,8 @@ export const WorldRankingsTab: React.FC = () => {
   const [selectedManager, setSelectedManager] = useState<ClubManager | null>(null);
   const [selectedClub, setSelectedClub] = useState<WorldClubRankingItem | null>(null);
 
-  const managersList = worldRankings?.managers || [];
-  const clubsList = worldRankings?.clubs || [];
+  const managersList = Array.isArray(worldRankings?.managers) ? worldRankings.managers : [];
+  const clubsList = Array.isArray(worldRankings?.clubs) ? worldRankings.clubs : [];
 
   // Filtered Managers
   const filteredManagers = useMemo(() => {

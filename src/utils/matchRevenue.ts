@@ -1,4 +1,5 @@
 import { Club, Sponsor } from '../types/game';
+import { calculateSponsorMatchdayEarnings } from '../services/sponsorshipService';
 
 export interface MatchRevenueBreakdown {
   isHome: boolean;
@@ -11,6 +12,7 @@ export interface MatchRevenueBreakdown {
   sponsorsRevenue: number;
   sponsorsWinBonus: number;
   sponsorsMatchdayAd: number;
+  sponsorsBreakdown?: string[];
   resultBonus: number;
   resultType: 'win' | 'draw' | 'loss';
   baseTotalRevenue: number;
@@ -62,6 +64,9 @@ export interface CalculateRevenueParams {
   opponentScore: number;
   leagueTier: number;
   isCupMatch?: boolean;
+  competitionType?: 'league' | 'cup' | 'continental' | 'world' | string;
+  userPenalties?: number;
+  opponentPenalties?: number;
   customTicketPrice?: number;
   isSkipped?: boolean;
 }
@@ -80,13 +85,29 @@ export function calculateMatchRevenue(params: CalculateRevenueParams): MatchReve
     opponentScore,
     leagueTier,
     isCupMatch = false,
+    competitionType: rawCompetitionType,
+    userPenalties,
+    opponentPenalties,
     customTicketPrice,
     isSkipped = false,
   } = params;
 
-  // 1. Result type
-  const resultType: 'win' | 'draw' | 'loss' =
-    userScore > opponentScore ? 'win' : userScore === opponentScore ? 'draw' : 'loss';
+  const effectiveCompType = rawCompetitionType || (isCupMatch ? 'cup' : 'league');
+
+  // 1. Result type - in cup matches ties are decided by penalty shootouts, never a draw
+  let resultType: 'win' | 'draw' | 'loss';
+  if (isCupMatch) {
+    if (userPenalties !== undefined && opponentPenalties !== undefined && userPenalties !== opponentPenalties) {
+      resultType = userPenalties > opponentPenalties ? 'win' : 'loss';
+    } else if (userScore !== opponentScore) {
+      resultType = userScore > opponentScore ? 'win' : 'loss';
+    } else {
+      // In cup ties without penalties, consider it win if user advanced or loss
+      resultType = 'win';
+    }
+  } else {
+    resultType = userScore > opponentScore ? 'win' : userScore === opponentScore ? 'draw' : 'loss';
+  }
 
   // 2. Stadium Capacity & Coach Ticket Price
   const facilities = userClub.facilities || {
@@ -172,22 +193,31 @@ export function calculateMatchRevenue(params: CalculateRevenueParams): MatchReve
     ticketRevenue = Math.round(attendance * ticketPrice * 0.05);
   }
 
-  // 5. Sponsors & Commercial Matchday Ad Revenue
-  const sponsors = Array.isArray(userClub.sponsors) ? userClub.sponsors : [];
-  let sponsorsWinBonus = 0;
-  if (resultType === 'win') {
-    sponsorsWinBonus = sponsors.reduce((sum, sp) => sum + (sp.bonusForWin || 0), 0);
-  }
-
-  // Matchday pitchside board advertising / commercial sponsors income
-  const baseSponsorPayment = sponsors.reduce(
-    (sum, sp) => sum + Math.round((sp.monthlyPayment || 0) / 4),
-    0
+  // 5. Sponsors & Commercial Matchday Ad Revenue (Multi-competition clauses)
+  const isCleanSheet = opponentScore === 0;
+  const isDerby = Boolean(
+    opponentClub &&
+      ((opponentClub.reputation && opponentClub.reputation >= 75) ||
+        (opponentClub.city && userClub.city && opponentClub.city === userClub.city))
   );
-  // Default league broadcasting/ad share if no private sponsors exist
-  const defaultAdShare = leagueTier === 1 ? 25000 : leagueTier === 2 ? 15000 : leagueTier === 3 ? 9000 : 5000;
-  const sponsorsMatchdayAd = baseSponsorPayment > 0 ? baseSponsorPayment : defaultAdShare;
-  const sponsorsRevenue = sponsorsWinBonus + sponsorsMatchdayAd;
+
+  const sponsorCalc = calculateSponsorMatchdayEarnings(userClub.sponsors || [], {
+    competitionType: effectiveCompType,
+    resultType,
+    isCleanSheet,
+    isDerby,
+    isHome,
+    leagueTier,
+  });
+
+  const sponsorsRevenue = sponsorCalc.totalSponsorsRevenue;
+  const sponsorsWinBonus =
+    sponsorCalc.sponsorsWinBonus +
+    sponsorCalc.sponsorsCupBonus +
+    sponsorCalc.sponsorsContinentalBonus +
+    sponsorCalc.sponsorsDerbyBonus +
+    sponsorCalc.sponsorsCleanSheetBonus;
+  const sponsorsMatchdayAd = sponsorCalc.sponsorsBaseMatchdayAd;
 
   // 6. Match Result Official Bonus
   const resultBonus = getMatchResultBonus(leagueTier, resultType);
@@ -210,6 +240,7 @@ export function calculateMatchRevenue(params: CalculateRevenueParams): MatchReve
     sponsorsRevenue,
     sponsorsWinBonus,
     sponsorsMatchdayAd,
+    sponsorsBreakdown: sponsorCalc.detailedBreakdown,
     resultBonus,
     resultType,
     baseTotalRevenue,

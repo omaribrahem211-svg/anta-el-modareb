@@ -20,10 +20,14 @@ import {
 export interface ChallengeParticipant {
   playerId: string;
   playerName: string;
+  avatar?: string;
   clubName: string;
+  clubLogo?: string;
+  primaryColor?: string;
   clubRating: number;
   tactics: any;
   squadSummary?: { id: string; name: string; position: string; rating: number }[];
+  benchSummary?: { id: string; name: string; position: string; rating: number }[];
   isReady?: boolean;
   isConnected?: boolean;
 }
@@ -50,6 +54,20 @@ export interface ChallengeHistoryItem {
   eventsCount: number;
 }
 
+export interface DailyCoachRankEntry {
+  rank: number;
+  playerId: string;
+  coachName: string;
+  avatar?: string;
+  clubName: string;
+  clubRating: number;
+  wins: number;
+  losses: number;
+  draws: number;
+  matchesPlayed: number;
+  lastActiveTimestamp: number;
+}
+
 const STORAGE_KEY_CHALLENGE_HISTORY = 'anta_elmodareb_online_challenges_history_v1';
 const STORAGE_KEY_PLAYER_ID = 'anta_elmodareb_challenge_player_id';
 
@@ -64,13 +82,18 @@ export function getOrCreatePlayerId(): string {
 
 export function isAndroidOrNative(): boolean {
   if (typeof window === 'undefined') return false;
-  if ((window as any).Capacitor?.isNativePlatform?.()) return true;
-  if (window.location.protocol === 'file:') return true;
-  if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
-    if (navigator.userAgent.includes('Android') || (window as any).Capacitor) {
-      return true;
-    }
+  const ua = (navigator.userAgent || navigator.vendor || (window as any).opera || '').toLowerCase();
+  if (
+    ua.includes('android') ||
+    ua.includes('wv') ||
+    (window as any).Capacitor?.isNativePlatform?.() ||
+    (window as any).Capacitor?.getPlatform?.() === 'android' ||
+    (window as any).Android !== undefined ||
+    (window as any).ReactNativeWebView !== undefined
+  ) {
+    return true;
   }
+  if (window.location.protocol === 'file:' || window.location.protocol === 'capacitor:') return true;
   return false;
 }
 
@@ -105,10 +128,15 @@ function cleanForFirestore<T>(data: T): T {
 }
 
 export function getWebSocketServerUrl(): string | null {
+  if (typeof window === 'undefined') return null;
+  if (window.location.protocol === 'file:' || window.location.protocol === 'capacitor:') {
+    return null;
+  }
+
   // If explicitly configured in VITE_WS_URL
   if (typeof import.meta.env.VITE_WS_URL === 'string' && import.meta.env.VITE_WS_URL.trim() !== '') {
     const envUrl = import.meta.env.VITE_WS_URL.trim();
-    if (typeof window !== 'undefined' && window.location?.hostname) {
+    if (window.location?.hostname) {
       const isDevHost = window.location.hostname.includes('ais-dev-');
       const isEnvPreHost = envUrl.includes('ais-pre-');
       if (isDevHost && isEnvPreHost) {
@@ -119,17 +147,9 @@ export function getWebSocketServerUrl(): string | null {
     return envUrl;
   }
 
-  // If in Android or native platform, avoid unreachable external websockets
-  if (isAndroidOrNative()) {
-    return null;
-  }
-
-  if (typeof window !== 'undefined' && window.location?.host) {
-    // If not running on localhost file scheme
-    if (window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
-      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      return `${protocol}//${window.location.host}/ws/challenge`;
-    }
+  if (window.location?.host) {
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    return `${protocol}//${window.location.host}/ws/challenge`;
   }
 
   return null;
@@ -911,6 +931,162 @@ class OnlineChallengeClient {
     }
     this.currentRoomCode = null;
     this.cachedRoomState = null;
+  }
+
+  // ==========================================
+  // RANDOM ONLINE MATCHMAKING
+  // ==========================================
+
+  public async findRandomMatch(participant: {
+    playerName: string;
+    clubName: string;
+    clubRating: number;
+    avatar?: string;
+    tactics: any;
+    squadSummary: { id: string; name: string; position: string; rating: number }[];
+    benchSummary?: { id: string; name: string; position: string; rating: number }[];
+  }) {
+    await this.connect();
+    const playerId = getOrCreatePlayerId();
+
+    if (this.transport === 'websocket' && this.socket?.readyState === WebSocket.OPEN) {
+      this.sendWs({
+        type: 'find_random_match',
+        participant: {
+          playerId,
+          ...participant,
+        },
+      });
+      return;
+    }
+
+    // Fallback: If socket unavailable, simulate fast matchmaking bot
+    const botClubNames = ['نادي النجوم الدولي', 'أكاديمية الفرسان', 'اتحاد الأبطال', 'نادي الصقور أونلاين', 'كتيبة الأساطير'];
+    const botCoachNames = ['كابتن طارق السعيد', 'المدرب حسام البدري', 'كابتن أحمد سامي', 'المدرب إيهاب جلال', 'كابتن علي ماهر'];
+    const randomBotClub = botClubNames[Math.floor(Math.random() * botClubNames.length)];
+    const randomBotCoach = botCoachNames[Math.floor(Math.random() * botCoachNames.length)];
+    const code = generateRoomCode();
+
+    const fallbackRoom: ChallengeRoomState = {
+      code,
+      status: 'playing',
+      createdAt: Date.now(),
+      host: {
+        playerId,
+        ...participant,
+        isReady: true,
+        isConnected: true,
+      },
+      guest: {
+        playerId: 'bot_' + Date.now(),
+        playerName: randomBotCoach,
+        clubName: randomBotClub,
+        clubRating: Math.max(65, Math.min(88, participant.clubRating + Math.floor(Math.random() * 6 - 3))),
+        tactics: {
+          formation: '4-3-3',
+          mentality: 'balanced',
+          passingStyle: 'mixed',
+          pressingIntensity: 'balanced',
+          tempo: 'balanced',
+        },
+        squadSummary: [],
+        benchSummary: [],
+        isReady: true,
+        isConnected: true,
+      },
+    };
+
+    this.currentRoomCode = code;
+    this.cachedRoomState = fallbackRoom;
+
+    setTimeout(() => {
+      this.emitMessage({
+        type: 'random_match_matched',
+        code,
+        role: 'host',
+        room: fallbackRoom,
+        opponent: fallbackRoom.guest,
+      });
+    }, 1500);
+  }
+
+  public cancelMatchmaking() {
+    const playerId = getOrCreatePlayerId();
+    if (this.transport === 'websocket' && this.socket?.readyState === WebSocket.OPEN) {
+      this.sendWs({
+        type: 'cancel_matchmaking',
+        playerId,
+      });
+    }
+  }
+
+  public requestBotMatch(participant: {
+    playerName: string;
+    clubName: string;
+    clubRating: number;
+    avatar?: string;
+    tactics: any;
+    squadSummary: { id: string; name: string; position: string; rating: number }[];
+    benchSummary?: { id: string; name: string; position: string; rating: number }[];
+  }) {
+    const playerId = getOrCreatePlayerId();
+    if (this.transport === 'websocket' && this.socket?.readyState === WebSocket.OPEN) {
+      this.sendWs({
+        type: 'request_bot_match',
+        participant: {
+          playerId,
+          ...participant,
+        },
+      });
+    } else {
+      this.findRandomMatch(participant);
+    }
+  }
+
+  // ==========================================
+  // DAILY COACH RANKING API & SYNC
+  // ==========================================
+
+  public async fetchDailyRanking(): Promise<DailyCoachRankEntry[]> {
+    try {
+      const res = await fetch('/api/pvp/daily-ranking');
+      if (res.ok) {
+        const data = await res.json();
+        if (data && Array.isArray(data.ranking)) {
+          return data.ranking;
+        }
+      }
+    } catch (err) {
+      console.warn('[OnlineChallenge] Failed to fetch daily ranking via API:', err);
+    }
+    return [];
+  }
+
+  public async recordMatchResult(result: {
+    roomCode: string;
+    host: { playerId: string; playerName: string; clubName: string; avatar?: string; clubRating: number };
+    guest: { playerId: string; playerName: string; clubName: string; avatar?: string; clubRating: number };
+    homeScore: number;
+    awayScore: number;
+  }) {
+    // 1. Send via WebSocket if open
+    if (this.socket && this.socket.readyState === WebSocket.OPEN) {
+      this.sendWs({
+        type: 'record_match_result',
+        result,
+      });
+    }
+
+    // 2. Also send via REST API to guarantee registration in server RAM
+    try {
+      await fetch('/api/pvp/record-result', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(result),
+      });
+    } catch (err) {
+      console.warn('[OnlineChallenge] Failed to post match result to server API:', err);
+    }
   }
 
   public setCurrentRoomCode(code: string | null) {

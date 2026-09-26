@@ -12,7 +12,7 @@ import {
   RetiredPlayer,
   SeasonInfo,
 } from '../types/game';
-import { resolveFullPlayerObject, evaluateAiBuyerCounter } from './transferEngine';
+import { resolveFullPlayerObject, evaluateAiBuyerCounter, isArabOrAfricanClub, isEuropeanEliteClub, isTopEuropeanLeague } from './transferEngine';
 import { generateInitialBoardSystem as generateInitialBoardSystemFromBoardEngine } from './boardEngine';
 
 export { generateInitialBoardSystemFromBoardEngine as generateInitialBoardSystem };
@@ -67,20 +67,74 @@ export function formatCalendarDate(date: Date, dayIndexInSeason: number = 1): Ca
 }
 
 /**
- * Parses rawDateStr (YYYY-MM-DD) to JS Date.
+ * Normalizes any input (CalendarDate, rawDateStr, ISO string, null, undefined) into a guaranteed valid CalendarDate object.
  */
-export function parseDateString(rawDateStr: string): Date {
-  const [y, m, d] = rawDateStr.split('-').map(Number);
-  return new Date(y, m - 1, d);
+export function normalizeCalendarDate(input: any, fallbackSeasonNumber: number = 1): CalendarDate {
+  if (input && typeof input === 'object') {
+    if (typeof input.rawDateStr === 'string' && input.rawDateStr.includes('-')) {
+      const parts = input.rawDateStr.split('-');
+      if (parts.length === 3) {
+        const y = Number(parts[0]);
+        const m = Number(parts[1]);
+        const d = Number(parts[2]);
+        if (!isNaN(y) && !isNaN(m) && !isNaN(d) && y > 2000 && m >= 1 && m <= 12 && d >= 1 && d <= 31) {
+          const date = new Date(y, m - 1, d);
+          return formatCalendarDate(date, input.dayIndexInSeason || 1);
+        }
+      }
+    }
+  }
+
+  if (typeof input === 'string' && input.includes('-')) {
+    const parts = input.split('T')[0].split('-');
+    if (parts.length === 3) {
+      const y = Number(parts[0]);
+      const m = Number(parts[1]);
+      const d = Number(parts[2]);
+      if (!isNaN(y) && !isNaN(m) && !isNaN(d) && y > 2000 && m >= 1 && m <= 12 && d >= 1 && d <= 31) {
+        const date = new Date(y, m - 1, d);
+        return formatCalendarDate(date, 1);
+      }
+    }
+  }
+
+  return getInitialSeasonDate(fallbackSeasonNumber);
+}
+
+/**
+ * Parses rawDateStr (YYYY-MM-DD or ISO string) to JS Date defensively.
+ */
+export function parseDateString(rawDateStr?: string | null): Date {
+  if (!rawDateStr || typeof rawDateStr !== 'string') {
+    return new Date(2026, 7, 9); // Fallback: 9 August 2026
+  }
+
+  const cleanStr = rawDateStr.split('T')[0];
+  const parts = cleanStr.split('-');
+  if (parts.length === 3) {
+    const y = Number(parts[0]);
+    const m = Number(parts[1]);
+    const d = Number(parts[2]);
+    if (!isNaN(y) && !isNaN(m) && !isNaN(d) && y > 1900 && m >= 1 && m <= 12 && d >= 1 && d <= 31) {
+      return new Date(y, m - 1, d);
+    }
+  }
+
+  const parsed = new Date(rawDateStr);
+  if (!isNaN(parsed.getTime())) {
+    return parsed;
+  }
+
+  return new Date(2026, 7, 9);
 }
 
 /**
  * Advances the date by N days.
  */
-export function addDaysToDate(rawDateStr: string, daysToAdd: number = 1, currentDayIndex: number = 1): CalendarDate {
+export function addDaysToDate(rawDateStr?: string, daysToAdd: number = 1, currentDayIndex: number = 1): CalendarDate {
   const date = parseDateString(rawDateStr);
   date.setDate(date.getDate() + daysToAdd);
-  return formatCalendarDate(date, currentDayIndex + daysToAdd);
+  return formatCalendarDate(date, Math.max(1, currentDayIndex + daysToAdd));
 }
 
 /**
@@ -99,16 +153,19 @@ export function getInitialSeasonDate(seasonNumber: number = 1): CalendarDate {
  * Standard rounds occur weekly (7 days apart).
  * The National Cup Final (the penultimate round) is scheduled exactly 2 days before the final league round.
  */
-export function getScheduledRoundDate(seasonStartDateStr: string, roundNumber: number, totalRounds: number = 44): CalendarDate {
+export function getScheduledRoundDate(seasonStartDateStr?: string, roundNumber: number = 1, totalRounds: number = 44): CalendarDate {
   const startDate = parseDateString(seasonStartDateStr);
   let daysOffset: number;
 
-  if (totalRounds > 1 && roundNumber === totalRounds - 1) {
+  const safeRound = Math.max(1, roundNumber || 1);
+  const safeTotal = Math.max(1, totalRounds || 44);
+
+  if (safeTotal > 1 && safeRound === safeTotal - 1) {
     // Cup final is scheduled exactly 2 days before the final league round
-    const finalLeagueOffset = (totalRounds - 1) * 7 + 6;
+    const finalLeagueOffset = (safeTotal - 1) * 7 + 6;
     daysOffset = Math.max(0, finalLeagueOffset - 2);
   } else {
-    daysOffset = (roundNumber - 1) * 7 + 6;
+    daysOffset = (safeRound - 1) * 7 + 6;
   }
 
   const matchDate = new Date(startDate);
@@ -120,12 +177,14 @@ export function getScheduledRoundDate(seasonStartDateStr: string, roundNumber: n
  * Calculate days remaining until the next match for the user's club.
  */
 export function calculateDaysUntilNextMatch(
-  currentDateStr: string,
-  currentRound: number,
-  seasonStartDateStr: string,
+  currentDateStr?: string,
+  currentRound: number = 1,
+  seasonStartDateStr?: string,
   totalRounds: number = 44
 ): { daysRemaining: number; isMatchDay: boolean; scheduledDateStr: string; formattedScheduledDate: string } {
-  const nextMatchDateObj = getScheduledRoundDate(seasonStartDateStr, currentRound, totalRounds);
+  const safeRound = Math.max(1, currentRound || 1);
+  const safeTotal = Math.max(1, totalRounds || 44);
+  const nextMatchDateObj = getScheduledRoundDate(seasonStartDateStr, safeRound, safeTotal);
   const currentDate = parseDateString(currentDateStr);
   const matchDate = parseDateString(nextMatchDateObj.rawDateStr);
 
@@ -441,6 +500,26 @@ export function simulateDailyNegotiations(
         const targetClub = allTeams.find(t => t && t.id === current.playerClubId);
         const targetPlayer = (targetClub?.players || []).find(p => p && p.id === current.playerId);
         const playerVal = targetPlayer?.marketValue || current.bidFee;
+
+        // User intent: European stars will not leave European giants for Arab clubs
+        const isTargetEuropean = isEuropeanEliteClub(targetClub) || isTopEuropeanLeague(targetClub?.leagueId) || (targetPlayer && targetPlayer.overallRating >= 80);
+        const isBuyerArab = isArabOrAfricanClub(userClub);
+        if (isTargetEuropean && isBuyerArab && targetPlayer) {
+          const isVet = (targetPlayer.age || 25) >= 33 && userClub.leagueId === 'sau_tier_1';
+          if (!isVet && (targetPlayer.overallRating >= 78 || ((targetPlayer.age || 25) <= 23 && (targetPlayer.potentialRating || 0) >= 80))) {
+            current.stage = 'rejected';
+            current.statusMessage = `رفض النجم العالمي ${current.playerName} وناديه ${current.playerClubName} العرض رسمياً؛ اللاعب متمسك بالبقاء في أوروبا للمنافسة على دوري الأبطال ويرفض الانتقال للدوريات العربية.`;
+            current.actionRequired = false;
+            negotiationReports.push({
+              negotiationId: current.id,
+              playerName: current.playerName,
+              text: `رفض ${current.playerName} وناديه ${current.playerClubName} العرض نهائياً؛ اللاعب يرفض مغادرة الملاعب الأوروبية.`,
+              stage: 'rejected',
+              actionRequired: false,
+            });
+            return current;
+          }
+        }
 
         // If bid is >= 95% of market value: Club Approves!
         if (current.bidFee >= playerVal * 0.95) {

@@ -3,6 +3,7 @@ import { useGame } from '../context/GameContext';
 import { 
   downloadSaveFile, 
   parseAndValidateSaveFile, 
+  getExportSaveCode,
   CURRENT_SAVE_FORMAT_VERSION, 
   APP_BUILD_VERSION 
 } from '../services/saveBackupService';
@@ -27,7 +28,13 @@ import {
   Smartphone,
   ExternalLink,
   FileText,
-  Info
+  Info,
+  Copy,
+  Check,
+  FileCode,
+  ClipboardPaste,
+  ChevronDown,
+  ChevronUp
 } from 'lucide-react';
 
 interface SettingsBackupModalProps {
@@ -74,6 +81,9 @@ export const SettingsBackupModal: React.FC<SettingsBackupModalProps> = ({
 
   const [isExporting, setIsExporting] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
+  const [isCopied, setIsCopied] = useState(false);
+  const [showCodePasteArea, setShowCodePasteArea] = useState(false);
+  const [pastedCode, setPastedCode] = useState('');
   const [feedback, setFeedback] = useState<{
     type: 'success' | 'error';
     title: string;
@@ -82,44 +92,47 @@ export const SettingsBackupModal: React.FC<SettingsBackupModalProps> = ({
 
   if (!isOpen) return null;
 
-  const handleExportBackup = () => {
-    setIsExporting(true);
-    try {
-      // Gather active game payload
-      const payload = exportCurrentSavePayload ? exportCurrentSavePayload() : {
-        schemaVersion: CURRENT_SAVE_FORMAT_VERSION,
-        saveVersion: 1,
-        lastLocalSaveAt: Date.now(),
-        season,
-        activeLeague,
-        teams,
-        standings,
-        fixtures,
-        currentRound,
-        manager,
-        transferMarket,
-        incomingBids,
-        inbox,
-        cupTournament,
-        jobOffers,
-        seasonEndSummary,
-        transferHistory,
-        clubEconomy,
-        calendarDate,
-        activeNegotiations,
-        boardSystem,
-        dailyNews,
-        retiredPlayers,
-        worldRankings,
-        scoutedOpponents,
-        deletedMessageIds,
-      };
+  const getPayload = () => {
+    return exportCurrentSavePayload ? exportCurrentSavePayload() : {
+      schemaVersion: CURRENT_SAVE_FORMAT_VERSION,
+      saveVersion: 1,
+      lastLocalSaveAt: Date.now(),
+      season,
+      activeLeague,
+      teams,
+      standings,
+      fixtures,
+      currentRound,
+      manager,
+      transferMarket,
+      incomingBids,
+      inbox,
+      cupTournament,
+      jobOffers,
+      seasonEndSummary,
+      transferHistory,
+      clubEconomy,
+      calendarDate,
+      activeNegotiations,
+      boardSystem,
+      dailyNews,
+      retiredPlayers,
+      worldRankings,
+      scoutedOpponents,
+      deletedMessageIds,
+    };
+  };
 
-      downloadSaveFile(payload, trainerProfile?.trainerId);
+  const handleExportBackup = (format: 'anta-save' | 'json' = 'anta-save') => {
+    setIsExporting(true);
+    setFeedback(null);
+    try {
+      const payload = getPayload();
+      downloadSaveFile(payload, trainerProfile?.trainerId, format);
       setFeedback({
         type: 'success',
         title: 'تم تصدير ملف الحفظ بنجاح',
-        message: 'تم تنزيل ملف (.anta-save) على جهازك. يمكنك نقله أو استعادته في أي وقت بأمان.'
+        message: `تم تنزيل ملف (${format === 'json' ? '.json' : '.anta-save'}) بنجاح على جهازك. يمكنك نقله للهاتف أو رفعه في أي وقت.`
       });
     } catch (e: any) {
       setFeedback({
@@ -132,6 +145,42 @@ export const SettingsBackupModal: React.FC<SettingsBackupModalProps> = ({
     }
   };
 
+  const handleCopyCode = async () => {
+    try {
+      const payload = getPayload();
+      const code = getExportSaveCode(payload, trainerProfile?.trainerId);
+      
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(code);
+      } else {
+        // Fallback for older WebViews
+        const textArea = document.createElement('textarea');
+        textArea.value = code;
+        textArea.style.position = 'fixed';
+        textArea.style.opacity = '0';
+        document.body.appendChild(textArea);
+        textArea.focus();
+        textArea.select();
+        document.execCommand('copy');
+        document.body.removeChild(textArea);
+      }
+
+      setIsCopied(true);
+      setTimeout(() => setIsCopied(false), 3000);
+      setFeedback({
+        type: 'success',
+        title: 'تم نسخ كود المسيرة بنجاح! 📋',
+        message: 'تم نسخ نص كود الحفظ بالكامل إلى الحافظة. يمكنك الآن لصقه مباشرة في التطبيق على هاتفك دون الحاجة لملفات!'
+      });
+    } catch (err: any) {
+      setFeedback({
+        type: 'error',
+        title: 'فشل النسخ',
+        message: `تعذر نسخ الكود تلقائياً: ${err?.message || 'خطأ غير معروف'}`
+      });
+    }
+  };
+
   const handleTriggerFileInput = () => {
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
@@ -139,33 +188,32 @@ export const SettingsBackupModal: React.FC<SettingsBackupModalProps> = ({
     }
   };
 
-  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
-    if (!files || files.length === 0) return;
-
-    const file = files[0];
+  const processImportData = async (fileOrText: File | string) => {
     setIsImporting(true);
     setFeedback(null);
 
     try {
-      const result = await parseAndValidateSaveFile(file);
+      const result = await parseAndValidateSaveFile(fileOrText);
 
       if (!result.success || !result.data) {
         setFeedback({
           type: 'error',
-          title: 'فشل استيراد ملف الحفظ',
-          message: result.error || 'الملف غير متوافق أو تالف.'
+          title: 'فشل استيراد المسيرة',
+          message: result.error || 'الملف أو الكود غير متوافق أو تالف.'
         });
         return;
       }
 
-      // Safe application of migrated save
+      // Safe application and persistence
       await applyLoadedSave(result.data);
+
+      setPastedCode('');
+      setShowCodePasteArea(false);
 
       setFeedback({
         type: 'success',
-        title: 'تمت استعادة النسخة الاحتياطية بنجاح!',
-        message: `تم تحميل تقدم المدرب (${result.metadata?.managerName || result.data.manager?.name}) في الموسم ${result.metadata?.seasonNumber || result.data.season?.seasonNumber}. تم تحديث كافة أنظمة اللعبة والتشكيلة محلياً.`
+        title: 'تمت استعادة المسيرة بنجاح! 🏆',
+        message: `تم تحميل تقدم المدرب (${result.metadata?.managerName || result.data.manager?.name}) في الموسم ${result.metadata?.seasonNumber || result.data.season?.seasonNumber}. تم تحديث كافة أنظمة اللعبة والتشكيلة وحفظها محلياً على جهازك.`
       });
     } catch (err: any) {
       setFeedback({
@@ -176,6 +224,24 @@ export const SettingsBackupModal: React.FC<SettingsBackupModalProps> = ({
     } finally {
       setIsImporting(false);
     }
+  };
+
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+    await processImportData(files[0]);
+  };
+
+  const handlePastedCodeSubmit = async () => {
+    if (!pastedCode.trim()) {
+      setFeedback({
+        type: 'error',
+        title: 'الكود فارغ',
+        message: 'يرجى لصق كود أو نص ملف الحفظ أولاً.'
+      });
+      return;
+    }
+    await processImportData(pastedCode);
   };
 
   return (
@@ -251,65 +317,156 @@ export const SettingsBackupModal: React.FC<SettingsBackupModalProps> = ({
           </div>
 
           {/* Backup & Restore Action Buttons */}
-          <div className="space-y-2.5">
+          <div className="space-y-3">
             <h4 className="text-xs font-bold text-slate-300 flex items-center gap-1.5">
               <HardDrive className="w-4 h-4 text-emerald-400" />
-              <span>النسخ الاحتياطي اليدوي (Manual Backup / Restore)</span>
+              <span>النسخ الاحتياطي اليدوي ونقل المسيرة (Backup / Transfer)</span>
             </h4>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-              {/* Export Button */}
-              <button
-                type="button"
-                onClick={handleExportBackup}
-                disabled={isExporting}
-                className="p-3.5 bg-slate-800 hover:bg-slate-750 border border-emerald-500/30 hover:border-emerald-500/60 rounded-2xl text-right transition-all flex flex-col gap-1.5 cursor-pointer shadow-md group active:scale-[0.98]"
-              >
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold text-emerald-300 group-hover:text-emerald-200 flex items-center gap-1.5">
-                    <Download className="w-4 h-4 text-emerald-400" />
-                    <span>تصدير نسخة احتياطية</span>
-                  </span>
-                  <span className="text-[10px] text-emerald-400/80 font-mono bg-emerald-950/60 px-1.5 py-0.5 rounded border border-emerald-800/40">
-                    .anta-save
-                  </span>
-                </div>
-                <p className="text-[11px] text-slate-400 leading-snug">
-                  تصدير ملف يحتوي على كامل بيانات الموسم والتشكيلة والأموال مشفر ومحمي.
-                </p>
-              </button>
+            {/* Export Section */}
+            <div className="bg-slate-950/70 border border-slate-800/80 rounded-2xl p-3.5 space-y-2.5">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-emerald-300 flex items-center gap-1.5">
+                  <Download className="w-4 h-4 text-emerald-400" />
+                  <span>تصدير المسيرة الحالية (Export)</span>
+                </span>
+                <span className="text-[10px] text-slate-400">اختر الصيغة المناسبة لجهازك</span>
+              </div>
 
-              {/* Import Button */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                {/* 1. Standard .anta-save */}
+                <button
+                  type="button"
+                  onClick={() => handleExportBackup('anta-save')}
+                  disabled={isExporting}
+                  className="p-2.5 bg-slate-800 hover:bg-slate-750 border border-emerald-500/30 hover:border-emerald-500/60 rounded-xl text-right transition-all flex flex-col gap-1 cursor-pointer group active:scale-[0.98]"
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-white group-hover:text-emerald-300">ملف مشفر</span>
+                    <span className="text-[9px] text-emerald-400 font-mono bg-emerald-950/80 px-1 py-0.5 rounded border border-emerald-800/50">
+                      .anta-save
+                    </span>
+                  </div>
+                  <span className="text-[10px] text-slate-400">الصيغة الرسمية المعتمدة</span>
+                </button>
+
+                {/* 2. Standard .json */}
+                <button
+                  type="button"
+                  onClick={() => handleExportBackup('json')}
+                  disabled={isExporting}
+                  className="p-2.5 bg-slate-800 hover:bg-slate-750 border border-teal-500/30 hover:border-teal-500/60 rounded-xl text-right transition-all flex flex-col gap-1 cursor-pointer group active:scale-[0.98]"
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-white group-hover:text-teal-300">ملف قياسي</span>
+                    <span className="text-[9px] text-teal-400 font-mono bg-teal-950/80 px-1 py-0.5 rounded border border-teal-800/50">
+                      .json
+                    </span>
+                  </div>
+                  <span className="text-[10px] text-slate-400">متوافق مع كل برامج الهاتف</span>
+                </button>
+
+                {/* 3. Copy Code */}
+                <button
+                  type="button"
+                  onClick={handleCopyCode}
+                  className={`p-2.5 border rounded-xl text-right transition-all flex flex-col gap-1 cursor-pointer group active:scale-[0.98] ${
+                    isCopied 
+                      ? 'bg-emerald-950/80 border-emerald-500 text-emerald-300' 
+                      : 'bg-slate-800 hover:bg-slate-750 border-amber-500/30 hover:border-amber-500/60 text-white'
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold flex items-center gap-1">
+                      {isCopied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5 text-amber-400" />}
+                      <span>{isCopied ? 'تم النسخ!' : 'نسخ الكود'}</span>
+                    </span>
+                    <span className="text-[9px] text-amber-400 font-mono bg-amber-950/80 px-1 py-0.5 rounded border border-amber-800/50">
+                      Clipboard
+                    </span>
+                  </div>
+                  <span className="text-[10px] text-slate-400">لصق فوري بدون تحميل ملف</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Import Section */}
+            <div className="bg-slate-950/70 border border-slate-800/80 rounded-2xl p-3.5 space-y-2.5">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-sky-300 flex items-center gap-1.5">
+                  <Upload className="w-4 h-4 text-sky-400" />
+                  <span>استيراد واستعادة مسيرة (Import)</span>
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setShowCodePasteArea(prev => !prev)}
+                  className="text-[11px] text-sky-400 hover:text-sky-300 flex items-center gap-1 transition-colors cursor-pointer"
+                >
+                  <ClipboardPaste className="w-3 h-3" />
+                  <span>{showCodePasteArea ? 'إخفاء مربع النص' : 'أو الصق كود نصي'}</span>
+                  {showCodePasteArea ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+                </button>
+              </div>
+
+              {/* Import via File Button */}
               <button
                 type="button"
                 onClick={handleTriggerFileInput}
                 disabled={isImporting}
-                className="p-3.5 bg-slate-800 hover:bg-slate-750 border border-sky-500/30 hover:border-sky-500/60 rounded-2xl text-right transition-all flex flex-col gap-1.5 cursor-pointer shadow-md group active:scale-[0.98]"
+                className="w-full p-3 bg-slate-800 hover:bg-slate-750 border border-sky-500/30 hover:border-sky-500/60 rounded-xl text-right transition-all flex items-center justify-between cursor-pointer group active:scale-[0.98]"
               >
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold text-sky-300 group-hover:text-sky-200 flex items-center gap-1.5">
-                    {isImporting ? (
-                      <Loader2 className="w-4 h-4 animate-spin text-sky-400" />
-                    ) : (
-                      <Upload className="w-4 h-4 text-sky-400" />
-                    )}
-                    <span>استيراد نسخة احتياطية</span>
-                  </span>
-                  <span className="text-[10px] text-sky-400/80 font-mono bg-sky-950/60 px-1.5 py-0.5 rounded border border-sky-800/40">
-                    اختيار ملف
-                  </span>
+                <div className="flex items-center gap-2">
+                  {isImporting ? (
+                    <Loader2 className="w-4 h-4 animate-spin text-sky-400" />
+                  ) : (
+                    <Upload className="w-4 h-4 text-sky-400 group-hover:translate-y-[-1px] transition-transform" />
+                  )}
+                  <div>
+                    <span className="text-xs font-bold text-white group-hover:text-sky-300 block">
+                      اختيار ملف الحفظ من جهازك
+                    </span>
+                    <span className="text-[10px] text-slate-400">
+                      يدعم ملفات (.anta-save) و (.json) من الموقع والتطبيق
+                    </span>
+                  </div>
                 </div>
-                <p className="text-[11px] text-slate-400 leading-snug">
-                  استعادة ملف حفظ سابق مع فحص تلقائي للسلامة والترقية (Migration).
-                </p>
+                <span className="text-[10px] text-sky-300 bg-sky-950/80 border border-sky-800/50 px-2 py-1 rounded-lg font-bold">
+                  تصفح الملفات
+                </span>
               </button>
+
+              {/* Paste Text Code Expandable Area */}
+              {showCodePasteArea && (
+                <div className="pt-2 border-t border-slate-800/80 space-y-2 animate-fadeIn">
+                  <div className="flex items-center justify-between text-[11px] text-slate-400">
+                    <span>الصق نص أو كود الحفظ هنا مباشرة:</span>
+                    <span className="text-[10px] text-amber-400">مثالي لنقل المسيرة عبر واتساب أو الملاحظات</span>
+                  </div>
+                  <textarea
+                    value={pastedCode}
+                    onChange={(e) => setPastedCode(e.target.value)}
+                    placeholder="الصق كود المسيرة الكامل هنا (يبدأ بـ { وينتهي بـ })..."
+                    className="w-full h-24 p-2.5 bg-slate-900 border border-slate-700 focus:border-sky-500 rounded-xl text-[11px] text-slate-200 font-mono resize-none focus:outline-none placeholder:text-slate-500"
+                    dir="ltr"
+                  />
+                  <button
+                    type="button"
+                    onClick={handlePastedCodeSubmit}
+                    disabled={isImporting || !pastedCode.trim()}
+                    className="w-full py-2 px-3 bg-sky-600 hover:bg-sky-500 disabled:opacity-50 disabled:pointer-events-none text-white text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-1.5 shadow-md active:scale-[0.98] cursor-pointer"
+                  >
+                    {isImporting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <ClipboardPaste className="w-3.5 h-3.5" />}
+                    <span>استيراد كود المسيرة واستئناف اللعب</span>
+                  </button>
+                </div>
+              )}
             </div>
 
-            {/* Hidden File Input */}
+            {/* Hidden File Input supporting all devices and Android document pickers */}
             <input
               ref={fileInputRef}
               type="file"
-              accept=".anta-save,.json,application/json,text/plain"
+              accept="*/*,.anta-save,.json,application/json,text/plain"
               className="hidden"
               onChange={handleFileChange}
             />

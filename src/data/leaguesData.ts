@@ -153,27 +153,170 @@ export const GLOBAL_LEAGUES: Record<string, LeagueDefinition> = {
 
 export const LEAGUES_STORAGE_KEY = 'antaelmodareb_persistent_leagues_v1';
 
+// In-memory cache to guarantee fast access and eliminate redundant reads/writes
+let memoryCustomLeagues: Record<string, LeagueDefinition> = { ...GLOBAL_LEAGUES };
+const modifiedLeagueIds = new Set<string>();
+let isInitializedFromStorage = false;
+
+/**
+ * Strips non-essential fields from a player to minimize storage footprint
+ */
+function prunePlayerForStorage(p: any) {
+  if (!p) return null;
+  return {
+    id: p.id,
+    name: p.name,
+    age: p.age,
+    position: p.position,
+    positionCategory: p.positionCategory,
+    overallRating: p.overallRating || p.rating || 65,
+    potentialRating: p.potentialRating || 70,
+    attributes: p.attributes,
+    salary: p.salary,
+    contractYears: p.contractYears,
+    nationality: p.nationality,
+    nationalityCode: p.nationalityCode,
+    morale: p.morale,
+    fitness: p.fitness,
+    currentClubId: p.currentClubId,
+    currentLeagueId: p.currentLeagueId,
+    stats: p.stats ? {
+      appearances: p.stats.appearances || 0,
+      goals: p.stats.goals || 0,
+      assists: p.stats.assists || 0,
+      cleanSheets: p.stats.cleanSheets || 0,
+      yellowCards: p.stats.yellowCards || 0,
+      redCards: p.stats.redCards || 0,
+    } : undefined,
+  };
+}
+
+/**
+ * Strips non-essential fields from a club for storage
+ */
+function pruneClubForStorage(c: any) {
+  if (!c) return null;
+  return {
+    id: c.id,
+    name: c.name,
+    shortName: c.shortName,
+    city: c.city,
+    country: c.country,
+    countryCode: c.countryCode,
+    division: c.division,
+    leagueId: c.leagueId,
+    reputation: c.reputation,
+    primaryColor: c.primaryColor,
+    secondaryColor: c.secondaryColor,
+    budget: c.budget,
+    transferBudget: c.transferBudget,
+    wageBudgetMonthly: c.wageBudgetMonthly,
+    tactics: c.tactics,
+    players: Array.isArray(c.players) ? c.players.map(prunePlayerForStorage).filter(Boolean) : [],
+  };
+}
+
+/**
+ * Prunes a league definition so that only lightweight essential data is stored
+ */
+function pruneLeagueForStorage(l: any) {
+  if (!l) return null;
+  return {
+    id: l.id,
+    name: l.name,
+    shortName: l.shortName,
+    country: l.country,
+    tier: l.tier,
+    reputation: l.reputation,
+    promotionSpots: l.promotionSpots,
+    relegationSpots: l.relegationSpots,
+    playoffSpots: l.playoffSpots,
+    teams: Array.isArray(l.teams) ? l.teams.map(pruneClubForStorage).filter(Boolean) : [],
+  };
+}
+
 export function getCustomLeagues(): Record<string, LeagueDefinition> {
   if (typeof window === 'undefined') return GLOBAL_LEAGUES;
+
+  if (isInitializedFromStorage) {
+    return memoryCustomLeagues;
+  }
+
   try {
     const raw = localStorage.getItem(LEAGUES_STORAGE_KEY);
-    if (!raw) return GLOBAL_LEAGUES;
+    if (!raw) {
+      isInitializedFromStorage = true;
+      return memoryCustomLeagues;
+    }
+
     const parsed = JSON.parse(raw);
     if (parsed && typeof parsed === 'object') {
-      return { ...GLOBAL_LEAGUES, ...parsed };
+      const merged: Record<string, LeagueDefinition> = { ...GLOBAL_LEAGUES };
+      for (const [id, customLeague] of Object.entries(parsed)) {
+        if (customLeague && typeof customLeague === 'object') {
+          merged[id] = customLeague as LeagueDefinition;
+          modifiedLeagueIds.add(id);
+        }
+      }
+      memoryCustomLeagues = merged;
     }
-    return GLOBAL_LEAGUES;
-  } catch {
-    return GLOBAL_LEAGUES;
+  } catch (err) {
+    console.warn('[LeaguesData] Failed to parse custom leagues from storage:', err);
+  } finally {
+    isInitializedFromStorage = true;
   }
+
+  return memoryCustomLeagues;
 }
 
 export function saveCustomLeagues(leagues: Record<string, LeagueDefinition>): void {
   if (typeof window === 'undefined') return;
+
+  // Always keep in-memory representation updated
+  memoryCustomLeagues = { ...memoryCustomLeagues, ...leagues };
+
   try {
-    localStorage.setItem(LEAGUES_STORAGE_KEY, JSON.stringify(leagues));
+    // Only persist modified or custom leagues to avoid quota overflow (5MB limit)
+    const modifiedToSave: Record<string, any> = {};
+
+    for (const [id, league] of Object.entries(leagues)) {
+      const defaultLeague = GLOBAL_LEAGUES[id];
+
+      // Custom league not in default static dictionary
+      if (!defaultLeague) {
+        modifiedToSave[id] = pruneLeagueForStorage(league);
+        continue;
+      }
+
+      // Explicitly marked as modified (e.g. through roster update or transfer)
+      if (modifiedLeagueIds.has(id) || defaultLeague.teams !== league.teams) {
+        modifiedToSave[id] = pruneLeagueForStorage(league);
+        continue;
+      }
+
+      // Structural team count difference
+      if (defaultLeague.teams.length !== league.teams.length) {
+        modifiedToSave[id] = pruneLeagueForStorage(league);
+        continue;
+      }
+    }
+
+    const serialized = JSON.stringify(modifiedToSave);
+
+    try {
+      localStorage.setItem(LEAGUES_STORAGE_KEY, serialized);
+    } catch (quotaErr) {
+      // If quota exceeded, clean up old oversized key first, then retry with lightweight data
+      console.warn('[LeaguesData] Storage quota warning, clearing stale cache to retry write...');
+      try {
+        localStorage.removeItem(LEAGUES_STORAGE_KEY);
+        localStorage.setItem(LEAGUES_STORAGE_KEY, serialized);
+      } catch (retryErr) {
+        console.warn('[LeaguesData] Storage quota permanently full, retaining leagues in memory cache.', retryErr);
+      }
+    }
   } catch (e) {
-    console.error('Failed to save custom leagues', e);
+    console.warn('[LeaguesData] Soft warning during saveCustomLeagues (data kept in memory):', e);
   }
 }
 
@@ -187,6 +330,7 @@ export function updateLeagueRosterInWorld(leagueId: string, updatedTeams: Club[]
     teams: updatedTeams,
   };
 
+  modifiedLeagueIds.add(leagueId);
   currentLeagues[leagueId] = updated;
   saveCustomLeagues(currentLeagues);
 }
@@ -231,35 +375,38 @@ export function getLeagueByCountryAndTier(country: string, tier: number): League
 export function getAllClubsForCountry(country: string): Club[] {
   const custom = getCustomLeagues();
   const clubsMap = new Map<string, Club>();
+  const safeCountry = String(country || 'مصر').trim();
   
   // Static registry fallback for Egypt and all major nations
-  if (country === 'مصر' || country.includes('مصر')) {
+  if (safeCountry === 'مصر' || safeCountry.includes('مصر')) {
     EGYPT_PREMIER_CLUBS.forEach(t => clubsMap.set(t.id, t));
     EGYPT_TIER_2_CLUBS.forEach(t => clubsMap.set(t.id, t));
     EGYPT_TIER_3_TEAMS.forEach(t => clubsMap.set(t.id, t));
     INITIAL_TEAMS.forEach(t => clubsMap.set(t.id, t));
-  } else if (country === 'المملكة العربية السعودية' || country.includes('السعودية')) {
+  } else if (safeCountry === 'المملكة العربية السعودية' || safeCountry.includes('السعودية')) {
     SAUDI_PRO_CLUBS.forEach(t => clubsMap.set(t.id, t));
     SAUDI_TIER_2_CLUBS.forEach(t => clubsMap.set(t.id, t));
-  } else if (country === 'إسبانيا' || country.includes('إسبانيا')) {
+  } else if (safeCountry === 'إسبانيا' || safeCountry.includes('إسبانيا')) {
     SPAIN_LA_LIGA_CLUBS.forEach(t => clubsMap.set(t.id, t));
     SPAIN_LA_LIGA_2_CLUBS.forEach(t => clubsMap.set(t.id, t));
-  } else if (country === 'إنجلترا' || country.includes('إنجلترا')) {
+  } else if (safeCountry === 'إنجلترا' || safeCountry.includes('إنجلترا')) {
     ENGLAND_PREMIER_CLUBS.forEach(t => clubsMap.set(t.id, t));
     ENGLAND_CHAMPIONSHIP_CLUBS.forEach(t => clubsMap.set(t.id, t));
   }
 
   // Merge with custom persistent state
   Object.values(custom).forEach(league => {
-    const leagueCountry = league.country || '';
+    const leagueCountry = String(league?.country || '').trim();
     if (
-      leagueCountry === country || 
-      country.includes(leagueCountry) || 
-      leagueCountry.includes(country) ||
-      (country === 'مصر' && (league.id.startsWith('egy_') || leagueCountry.includes('مصر')))
+      leagueCountry === safeCountry || 
+      safeCountry.includes(leagueCountry) || 
+      leagueCountry.includes(safeCountry) ||
+      (safeCountry === 'مصر' && (league.id.startsWith('egy_') || leagueCountry.includes('مصر')))
     ) {
-      league.teams.forEach(t => {
-        clubsMap.set(t.id, t);
+      (league?.teams || []).forEach(t => {
+        if (t && t.id) {
+          clubsMap.set(t.id, t);
+        }
       });
     }
   });

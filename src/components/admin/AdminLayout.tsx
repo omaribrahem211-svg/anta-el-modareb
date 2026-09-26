@@ -14,7 +14,8 @@ import {
   Sliders,
   Radio,
   Globe2,
-  AlertCircle
+  AlertCircle,
+  Gift
 } from 'lucide-react';
 import { AdminTab, AdminDashboardMetrics } from '../../types/admin';
 import { UserProfile } from '../../types/auth';
@@ -34,6 +35,7 @@ import { AdminPvPMatchesTab } from './AdminPvPMatchesTab';
 import { AdminRealismTab } from './AdminRealismTab';
 import { AdminBroadcastsTab } from './AdminBroadcastsTab';
 import { AdminWorldEditorTab } from './AdminWorldEditorTab';
+import { AdminPromoCodesTab } from './AdminPromoCodesTab';
 
 interface AdminLayoutProps {
   onBackToGame: () => void;
@@ -76,6 +78,7 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ onBackToGame }) => {
 
   const navItems: { id: AdminTab; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
     { id: 'dashboard', label: 'لوحة المؤشرات', icon: LayoutDashboard },
+    { id: 'promo_codes', label: 'أكواد المكافآت والهدايا', icon: Gift },
     { id: 'world_editor', label: 'محرر عالم كرة القدم', icon: Globe2 },
     { id: 'broadcasts', label: 'الرسائل الجماعية', icon: Radio },
     { id: 'users', label: 'إدارة المدربين', icon: Users },
@@ -216,6 +219,10 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ onBackToGame }) => {
 
         {activeTab === 'world_editor' && (
           <AdminWorldEditorTab />
+        )}
+
+        {activeTab === 'promo_codes' && (
+          <AdminPromoCodesTab />
         )}
 
         {activeTab === 'broadcasts' && (

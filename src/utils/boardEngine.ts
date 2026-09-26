@@ -339,6 +339,11 @@ export function evaluateMatchImpactOnConfidence(
     oppClub: Club;
     round: number;
     totalRounds: number;
+    isCupMatch?: boolean;
+    userWonOnPenalties?: boolean;
+    userLostOnPenalties?: boolean;
+    homePenalties?: number;
+    awayPenalties?: number;
   }
 ): MatchEvaluationResult {
   const targetPos = currentBoardSystem.targetLeaguePosition || 1;
@@ -347,9 +352,19 @@ export function evaluateMatchImpactOnConfidence(
   // Rank difference (positive means ahead of target, negative means trailing target)
   const rankMargin = targetPos - currentRank;
 
-  const isWin = match.userScore > match.oppScore;
-  const isDraw = match.userScore === match.oppScore;
-  const isLoss = match.userScore < match.oppScore;
+  const isCup = Boolean(match.isCupMatch);
+  const userWonPenalties = Boolean(match.userWonOnPenalties);
+  const userLostPenalties = Boolean(match.userLostOnPenalties);
+
+  const isWin = isCup
+    ? (userWonPenalties || match.userScore > match.oppScore)
+    : match.userScore > match.oppScore;
+  const isDraw = isCup
+    ? false
+    : match.userScore === match.oppScore;
+  const isLoss = isCup
+    ? (userLostPenalties || match.userScore < match.oppScore)
+    : match.userScore < match.oppScore;
   const goalDiff = match.userScore - match.oppScore;
 
   const userRep = userClub.reputation || 50;
@@ -360,7 +375,7 @@ export function evaluateMatchImpactOnConfidence(
   // 1. Calculate Board Confidence Delta
   let boardDelta = 0;
   if (isWin) {
-    boardDelta += 3;
+    boardDelta += isCup ? 4 : 3;
     if (rankMargin >= 0) {
       boardDelta += 2; // On or ahead of target
     } else {
@@ -378,7 +393,7 @@ export function evaluateMatchImpactOnConfidence(
     if (oppRep > userRep + 10) boardDelta += 1; // Respectable draw against superior opponent
   } else {
     // Loss
-    boardDelta -= 3;
+    boardDelta -= isCup ? 2 : 3;
     if (rankMargin < 0) {
       // Underperforming target + lost match
       boardDelta -= Math.min(4, Math.abs(rankMargin));
@@ -392,7 +407,7 @@ export function evaluateMatchImpactOnConfidence(
   // 2. Calculate Fan Confidence Delta
   let fanDelta = 0;
   if (isWin) {
-    fanDelta += 4;
+    fanDelta += isCup ? 5 : 4;
     if (goalDiff >= 3) fanDelta += 3;
     else if (goalDiff >= 2) fanDelta += 1;
     if (isUnderdogWin) fanDelta += 4;
@@ -404,7 +419,7 @@ export function evaluateMatchImpactOnConfidence(
     if (oppRep > userRep + 10) fanDelta += 2;
   } else {
     // Loss
-    fanDelta -= 4;
+    fanDelta -= isCup ? 3 : 4;
     if (goalDiff <= -3) fanDelta -= 3;
     if (rankMargin < 0) fanDelta -= Math.min(5, Math.abs(rankMargin) + 1);
     else if (rankMargin >= 2) fanDelta += 1;
@@ -452,7 +467,25 @@ export function evaluateMatchImpactOnConfidence(
   let boardFeedback = '';
   let fanFeedback = '';
 
-  if (isWin) {
+  if (isCup) {
+    if (isWin) {
+      if (userWonPenalties) {
+        boardFeedback = `مجلس الإدارة: إشادة هائلة بحسم بطاقة التأهل بركلات الترجيح بعد ملحمة كروية، ومواصلة المشوار نحو الكأس!`;
+        fanFeedback = `أفراح جنونية في المدرجات بعد الانتصار بركلات الترجيح والاقتراب خطوة إضافية من اللقب!`;
+      } else {
+        boardFeedback = `مجلس الإدارة: فوز رائع وتأهل مستحق إلى الدور القادم في مسابقة الكأس.`;
+        fanFeedback = `هتافات تشجيعية واحتفالات صاخبة بالتأهل والمستوى المميز للفريق.`;
+      }
+    } else {
+      if (userLostPenalties) {
+        boardFeedback = `مجلس الإدارة: وداع مؤلم لمسابقة الكأس بركلات الترجيح، الإدارة تدعو للتركيز التام على مواجهات الدوري.`;
+        fanFeedback = `حزن في المدرجات على ضياع فرصة الكأس بركلات الحظ، مع مساندة الفريق في مشوار الدوري.`;
+      } else {
+        boardFeedback = `مجلس الإدارة: خيبة أمل بعد توديع مسابقة الكأس، ومطالبة بتدارك الأخطاء في مباريات الدوري.`;
+        fanFeedback = `استياء جماهيري من الإقصاء ومطالبة بالتعويض المباشر في الدوري.`;
+      }
+    }
+  } else if (isWin) {
     if (rankMargin > 0) {
       boardFeedback = `إشادة من مجلس الإدارة: فوز رائع يبقينا في المركز (${currentRank}) متفوقين على الهدف المحدد (${currentBoardSystem.targetLeaguePositionText}).`;
       fanFeedback = `هتافات واحتفالات صاخبة في المدرجات! الجماهير سعيدة جداً بالنتيجة والموقع المتقدم في الجدول.`;

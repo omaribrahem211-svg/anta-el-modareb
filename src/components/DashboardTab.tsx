@@ -1,7 +1,10 @@
 import React from 'react';
 import { useGame } from '../context/GameContext';
 import { ActiveTab, Club, Player } from '../types/game';
+import { findClubInWorld } from '../data/leaguesData';
 import { FootballNewsFeed } from './news/FootballNewsFeed';
+import { CoachHomeCard } from './CoachHomeCard';
+import { CoachCardModal } from './CoachCardModal';
 import {
   Play,
   Zap,
@@ -36,6 +39,7 @@ interface DashboardTabProps {
 
 export const DashboardTab: React.FC<DashboardTabProps> = ({ setActiveTab, onSelectPlayer }) => {
   const [notification, setNotification] = React.useState<{ text: string; type: 'success' | 'error' } | null>(null);
+  const [showCoachCardModal, setShowCoachCardModal] = React.useState(false);
 
   const {
     userClub,
@@ -228,6 +232,15 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({ setActiveTab, onSele
           </div>
         </div>
 
+        {/* Official Coach Card on Home Page (Free Agent) with Share & Details */}
+        <CoachHomeCard
+          manager={manager}
+          userClub={null}
+          worldRankings={worldRankings}
+          userDynamicManagerRating={userDynamicManagerRating}
+          onOpenFullModal={() => setShowCoachCardModal(true)}
+        />
+
         {/* Dynamic Football News Feed for Free Agent Manager */}
         <div className="pt-2">
           <FootballNewsFeed
@@ -241,6 +254,15 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({ setActiveTab, onSele
             calendarDate={calendarDate}
           />
         </div>
+
+        {/* Full Coach Card Modal for Free Agent */}
+        <CoachCardModal
+          isOpen={showCoachCardModal}
+          onClose={() => setShowCoachCardModal(false)}
+          manager={manager}
+          userClub={null}
+          worldRankings={worldRankings}
+        />
       </div>
     );
   }
@@ -262,7 +284,21 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({ setActiveTab, onSele
   const oppTeamFromLiveMatch = liveMatch
     ? (isHome ? liveMatch.awayTeam : liveMatch.homeTeam)
     : undefined;
-  const oppTeam = oppTeamFromLiveMatch || (oppTeamId ? safeTeams.find(t => t && t.id === oppTeamId) : undefined);
+  const oppTeam = oppTeamFromLiveMatch || (oppTeamId ? (
+    safeTeams.find(t => t && t.id === oppTeamId) ||
+    findClubInWorld(oppTeamId) ||
+    ({
+      id: oppTeamId,
+      name: oppTeamId === 'team_user' ? 'فريقك' : 'النادي المنافس',
+      shortName: 'منافس',
+      city: 'مصر',
+      country: 'مصر',
+      primaryColor: '#334155',
+      secondaryColor: '#ffffff',
+      reputation: 50,
+      players: [],
+    } as Club)
+  ) : undefined);
 
   // Next upcoming fixture for user club across future rounds (when user has no match in this current round)
   const nextUpcomingUserFixture = userClub?.id
@@ -270,26 +306,47 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({ setActiveTab, onSele
     : undefined;
   const isUpcomingHome = userClub?.id ? nextUpcomingUserFixture?.homeTeamId === userClub.id : false;
   const upcomingOppId = isUpcomingHome ? nextUpcomingUserFixture?.awayTeamId : nextUpcomingUserFixture?.homeTeamId;
-  const upcomingOpp = upcomingOppId ? safeTeams.find(t => t && t.id === upcomingOppId) : undefined;
+  const upcomingOpp = upcomingOppId ? (
+    safeTeams.find(t => t && t.id === upcomingOppId) ||
+    findClubInWorld(upcomingOppId) ||
+    ({
+      id: upcomingOppId,
+      name: 'النادي المنافس',
+      shortName: 'منافس',
+      city: 'مصر',
+      country: 'مصر',
+      primaryColor: '#334155',
+      secondaryColor: '#ffffff',
+      reputation: 50,
+      players: [],
+    } as Club)
+  ) : undefined;
 
   // User Standing
-  const userRankIndex = userClub?.id ? safeStandings.findIndex(s => s && s.teamId === userClub.id) : -1;
-  const userStanding = userRankIndex !== -1 ? safeStandings[userRankIndex] : safeStandings[0];
+  const userRankIndex = userClub?.id && safeStandings.length > 0 
+    ? safeStandings.findIndex(s => s && s.teamId === userClub.id) 
+    : -1;
+  const userStanding = userRankIndex !== -1 
+    ? safeStandings[userRankIndex] 
+    : (safeStandings.length > 0 ? (safeStandings[0] || null) : null);
   const userRank = userRankIndex !== -1 ? userRankIndex + 1 : 1;
 
   // Starters stats
-  const startingIds = userClub?.tactics?.startingPlayerIds || [];
+  const startingIds = Array.isArray(userClub?.tactics?.startingPlayerIds) ? userClub.tactics.startingPlayerIds : [];
   const squadPlayers = Array.isArray(userClub?.players) ? userClub.players.filter(Boolean) : [];
   const starters = squadPlayers.filter(p => p && p.id && startingIds.includes(p.id));
   const avgFitness = starters.length > 0 
-    ? Math.round(starters.reduce((sum, p) => sum + p.fitness, 0) / starters.length) 
+    ? Math.round(starters.reduce((sum, p) => sum + (p.fitness || 100), 0) / starters.length) 
     : 100;
   const avgMorale = starters.length > 0 
-    ? Math.round(starters.reduce((sum, p) => sum + p.morale, 0) / starters.length) 
+    ? Math.round(starters.reduce((sum, p) => sum + (p.morale || 85), 0) / starters.length) 
     : 85;
 
   // Top team scorer
-  const topScorer = squadPlayers.length > 0 ? [...squadPlayers].sort((a, b) => (b.stats?.goals || 0) - (a.stats?.goals || 0))[0] : null;
+  const sortedScorers = squadPlayers.length > 0
+    ? [...squadPlayers].sort((a, b) => (b?.stats?.goals || 0) - (a?.stats?.goals || 0))
+    : [];
+  const topScorer = sortedScorers.length > 0 ? (sortedScorers[0] || null) : null;
 
   return (
     <div className="space-y-4 pb-20 animate-fade-in" dir="rtl">
@@ -441,9 +498,9 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({ setActiveTab, onSele
             <div className="col-span-2 flex flex-col items-center text-center">
               <div 
                 className="w-14 h-14 rounded-2xl flex items-center justify-center font-black text-xl shadow-lg border border-white/20 mb-2"
-                style={{ backgroundColor: userClub.primaryColor, color: '#fff' }}
+                style={{ backgroundColor: userClub?.primaryColor || '#1e293b', color: '#fff' }}
               >
-                {userClub.shortName.slice(0, 2)}
+                {(userClub?.shortName || userClub?.name || 'فريق').slice(0, 2)}
               </div>
               <h3 className="font-bold text-sm text-white truncate max-w-full">{userClub.name}</h3>
               <span className="text-[10px] text-slate-400 mt-0.5">المركز #{userRank}</span>
@@ -653,6 +710,15 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({ setActiveTab, onSele
           </div>
         </div>
       )}
+
+      {/* Official Coach Card on Home Page with Share & Customization */}
+      <CoachHomeCard
+        manager={manager}
+        userClub={userClub}
+        worldRankings={worldRankings}
+        userDynamicManagerRating={userDynamicManagerRating}
+        onOpenFullModal={() => setShowCoachCardModal(true)}
+      />
 
       {/* Board & Fan Confidence Widget */}
       {boardSystem && userClub && (
@@ -924,14 +990,14 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({ setActiveTab, onSele
                 </span>
               </div>
               <p className="text-[11px] text-slate-400">
-                قوة التشكيلة: <strong className="text-emerald-400">{userSquadStrength.averageStartingRating}</strong> | قوة المدرب: <strong className="text-amber-400">{userDynamicManagerRating}/99</strong>
+                قوة التشكيلة: <strong className="text-emerald-400">{userSquadStrength?.averageStartingRating ?? userSquadStrength?.overall ?? 70}</strong> | قوة المدرب: <strong className="text-amber-400">{userDynamicManagerRating ?? 50}/99</strong>
               </p>
             </div>
           </div>
           <div className="text-left">
             <div className="text-[10px] text-slate-400">مركزك التدريبي عالمياً</div>
             <div className="text-xl font-black text-amber-400 font-mono">
-              #{manager.worldRank || ((worldRankings?.managers || []).find(m => m && m.id === 'user_manager')?.worldRank) || 850}
+              #{manager?.worldRank || (Array.isArray(worldRankings?.managers) ? (worldRankings.managers.find(m => m && (m.id === 'user_manager' || (m as any)?.isUser))?.worldRank) : null) || 850}
             </div>
           </div>
         </div>
@@ -939,18 +1005,22 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({ setActiveTab, onSele
         <div className="grid grid-cols-3 gap-2 text-center text-xs bg-slate-950/70 p-2.5 rounded-2xl border border-slate-800">
           <div>
             <div className="text-[10px] text-slate-500">نقاط التصنيف</div>
-            <div className="font-bold text-white font-mono">{manager.rankingPoints?.toLocaleString() || '1,200'}</div>
+            <div className="font-bold text-white font-mono">{manager?.rankingPoints?.toLocaleString() || '1,200'}</div>
           </div>
           <div className="border-x border-slate-800">
             <div className="text-[10px] text-slate-500">الأول عالمياً (مدربون)</div>
             <div className="font-bold text-amber-300 truncate px-1">
-              {worldRankings?.managers[0]?.name || 'بيب جوارديولا'}
+              {(Array.isArray(worldRankings?.managers) && worldRankings.managers.length > 0 && worldRankings.managers[0]?.name)
+                ? worldRankings.managers[0].name
+                : 'بيب جوارديولا'}
             </div>
           </div>
           <div>
             <div className="text-[10px] text-slate-500">الأول عالمياً (أندية)</div>
             <div className="font-bold text-cyan-300 truncate px-1">
-              {worldRankings?.clubs[0]?.clubName || 'ريال مدريد'}
+              {(Array.isArray(worldRankings?.clubs) && worldRankings.clubs.length > 0 && worldRankings.clubs[0]?.clubName)
+                ? worldRankings.clubs[0].clubName
+                : 'ريال مدريد'}
             </div>
           </div>
         </div>
@@ -982,7 +1052,7 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({ setActiveTab, onSele
                 <div className="font-bold text-sm text-white truncate">{topScorer.name}</div>
                 <div className="text-xs text-amber-400 font-medium">"{topScorer.nickname || 'الهداف'}"</div>
                 <div className="text-[11px] text-slate-400 mt-0.5">
-                  سجل {topScorer.stats.goals} أهداف • صنع {topScorer.stats.assists}
+                  سجل {topScorer.stats?.goals ?? 0} أهداف • صنع {topScorer.stats?.assists ?? 0}
                 </div>
               </div>
             </div>
@@ -1035,6 +1105,14 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({ setActiveTab, onSele
         />
       </div>
 
+      {/* Full Coach Card Modal for High-Res Inspection, Download & Customization */}
+      <CoachCardModal
+        isOpen={showCoachCardModal}
+        onClose={() => setShowCoachCardModal(false)}
+        manager={manager}
+        userClub={userClub}
+        worldRankings={worldRankings}
+      />
     </div>
   );
 };

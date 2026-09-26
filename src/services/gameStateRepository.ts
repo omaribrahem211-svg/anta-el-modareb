@@ -9,6 +9,8 @@
  * without touching Cloud Firestore.
  */
 
+import { normalizeCalendarDate } from '../utils/calendarEngine';
+
 const DB_NAME = 'AntaElModareb_DB_v2';
 const DB_VERSION = 2;
 const STORE_NAME = 'game_state_store';
@@ -294,13 +296,13 @@ export const gameStateRepository = {
           facilitySpendingTotal: 0,
           currentSeasonNetProfit: 0,
         }),
-        calendarDate: safeParse('calendarDate', '2025-08-15'),
+        calendarDate: normalizeCalendarDate(safeParse('calendarDate', null)),
         activeNegotiations: safeParse('activeNegotiations', []),
         boardSystem: safeParse('boardSystem', null),
         dailyNews: safeParse('dailyNews', []),
         retiredPlayers: safeParse('retiredPlayers', []),
-        worldRankings: safeParse('worldRankings', []),
-        scoutedOpponents: safeParse('scoutedOpponents', []),
+        worldRankings: safeParse('worldRankings', null),
+        scoutedOpponents: safeParse('scoutedOpponents', {}),
         deletedMessageIds: safeParse('deletedMessageIds', []),
       };
 

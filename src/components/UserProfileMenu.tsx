@@ -12,10 +12,12 @@ import {
   Upload,
   RotateCcw,
   ShieldCheck,
-  ExternalLink
+  ExternalLink,
+  Gift
 } from 'lucide-react';
 import { getLocalTrainerProfile } from '../services/trainerProfileService';
 import { SettingsBackupModal } from './SettingsBackupModal';
+import { PromoCodeRedeemModal } from './PromoCodeRedeemModal';
 
 interface UserProfileMenuProps {
   onOpenAdmin?: () => void;
@@ -27,6 +29,7 @@ export const UserProfileMenu: React.FC<UserProfileMenuProps> = ({ onOpenAdmin, o
   const { manager } = useGame();
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [showSettingsModal, setShowSettingsModal] = useState(false);
+  const [showPromoModal, setShowPromoModal] = useState(false);
 
   const trainerProfile = getLocalTrainerProfile();
   const trainerName = manager.name || trainerProfile?.name || 'المدرب';
@@ -116,6 +119,25 @@ export const UserProfileMenu: React.FC<UserProfileMenuProps> = ({ onOpenAdmin, o
               </div>
             )}
 
+            {/* Promo / Gift Code Redemption Action */}
+            <div className="mb-2">
+              <button
+                onClick={() => {
+                  setIsDropdownOpen(false);
+                  setShowPromoModal(true);
+                }}
+                className="w-full flex items-center justify-between p-2.5 rounded-xl bg-gradient-to-r from-amber-500/15 via-amber-500/25 to-amber-500/15 hover:from-amber-500/25 hover:to-amber-500/35 border border-amber-500/50 text-amber-200 font-bold transition-all cursor-pointer group shadow-sm text-xs"
+              >
+                <div className="flex items-center gap-2">
+                  <Gift className="w-4 h-4 text-amber-400 group-hover:scale-110 transition-transform" />
+                  <span>استرداد كود هدية (Gift Code)</span>
+                </div>
+                <span className="text-[10px] bg-amber-500/30 text-amber-300 px-2 py-0.5 rounded-full font-bold">
+                  مكافأة ميزانية 💰
+                </span>
+              </button>
+            </div>
+
             {/* Backup & Settings Primary Action */}
             <div className="space-y-1.5 text-xs">
               <button
@@ -183,6 +205,12 @@ export const UserProfileMenu: React.FC<UserProfileMenuProps> = ({ onOpenAdmin, o
         isOpen={showSettingsModal}
         onClose={() => setShowSettingsModal(false)}
         onOpenResetConfirm={onOpenResetConfirm}
+      />
+
+      {/* Promo & Gift Code Redemption Modal */}
+      <PromoCodeRedeemModal
+        isOpen={showPromoModal}
+        onClose={() => setShowPromoModal(false)}
       />
     </div>
   );

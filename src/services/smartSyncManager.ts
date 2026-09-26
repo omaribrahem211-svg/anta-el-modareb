@@ -91,7 +91,7 @@ export function buildFullCloudSavePayload(input: SmartSyncInput, saveVersion: nu
     boardSystem = null,
     dailyNews = [],
     retiredPlayers = [],
-    worldRankings = [],
+    worldRankings = null,
     scoutedOpponents = {},
     deletedMessageIds = [],
   } = input;

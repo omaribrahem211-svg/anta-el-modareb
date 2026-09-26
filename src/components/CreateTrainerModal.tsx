@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef } from 'react';
 import { 
   Trophy, 
   Shield, 
@@ -13,18 +13,27 @@ import {
   Users,
   Building2,
   MapPin,
-  Search
+  Search,
+  Upload,
+  Loader2,
+  ClipboardPaste,
+  FileCheck,
+  X
 } from 'lucide-react';
 import { saveLocalTrainerProfile, LocalTrainerProfile } from '../services/trainerProfileService';
+import { parseAndValidateSaveFile } from '../services/saveBackupService';
+import { useGame } from '../context/GameContext';
 import { INITIAL_TEAMS } from '../data/initialData';
 import { Club } from '../types/game';
 
 interface CreateTrainerModalProps {
   onProfileCreated: (profile: LocalTrainerProfile, startingClubId?: string) => void;
+  onSaveImported?: () => void;
 }
 
 const COMMON_NATIONALITIES = [
   'مصري',
+  'فلسطيني',
   'سعودي',
   'مغربي',
   'جزائري',
@@ -42,7 +51,14 @@ const COMMON_NATIONALITIES = [
   'فرنسي',
 ];
 
-export const CreateTrainerModal: React.FC<CreateTrainerModalProps> = ({ onProfileCreated }) => {
+export const CreateTrainerModal: React.FC<CreateTrainerModalProps> = ({ onProfileCreated, onSaveImported }) => {
+  const { applyLoadedSave } = useGame();
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [showImportSection, setShowImportSection] = useState(false);
+  const [isImporting, setIsImporting] = useState(false);
+  const [importError, setImportError] = useState<string | null>(null);
+  const [pastedCode, setPastedCode] = useState('');
+
   const [step, setStep] = useState<'profile' | 'club'>('profile');
   const [name, setName] = useState('');
   const [age, setAge] = useState<number | string>(35);
@@ -89,6 +105,19 @@ export const CreateTrainerModal: React.FC<CreateTrainerModalProps> = ({ onProfil
       return;
     }
 
+    const normalizedNat = finalNat.toLowerCase().replace(/[\s\-_]/g, '');
+    if (
+      normalizedNat.includes('اسرائيل') ||
+      normalizedNat.includes('إسرائيل') ||
+      normalizedNat.includes('israel') ||
+      normalizedNat.includes('israeli') ||
+      normalizedNat.includes('اسرائيلي') ||
+      normalizedNat.includes('إسرائيلي')
+    ) {
+      setError('الجنسية المحددة غير متاحة، يرجى اختيار جنسية أخرى.');
+      return;
+    }
+
     if (numAge < 20 || numAge > 80) {
       setError('عمر المدرب يجب أن يكون بين 20 و 80 عاماً.');
       return;
@@ -110,6 +139,44 @@ export const CreateTrainerModal: React.FC<CreateTrainerModalProps> = ({ onProfil
     });
 
     onProfileCreated(newProfile, selectedClubId);
+  };
+
+  const handleImportSave = async (fileOrText: File | string) => {
+    setIsImporting(true);
+    setImportError(null);
+    try {
+      const result = await parseAndValidateSaveFile(fileOrText);
+      if (!result.success || !result.data) {
+        setImportError(result.error || 'الملف غير متوافق أو تالف.');
+        return;
+      }
+
+      await applyLoadedSave(result.data);
+
+      const targetClubId = result.data.manager?.currentClubId || 'team_user';
+      const trainer = saveLocalTrainerProfile({
+        name: result.data.manager?.name || 'المدرب',
+        age: result.data.manager?.age || 35,
+        nationality: result.data.manager?.nationality || 'مصري',
+        trainerId: result.data.manager?.trainerId || 'TRN-IMPORTED',
+      });
+
+      if (onSaveImported) {
+        onSaveImported();
+      } else {
+        onProfileCreated(trainer, targetClubId);
+      }
+    } catch (err: any) {
+      setImportError(`تعذر استيراد المسيرة: ${err?.message || 'حدث خطأ غير متوقع'}`);
+    } finally {
+      setIsImporting(false);
+    }
+  };
+
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+    await handleImportSave(files[0]);
   };
 
   return (
@@ -268,7 +335,7 @@ export const CreateTrainerModal: React.FC<CreateTrainerModalProps> = ({ onProfil
             </div>
 
             {/* Next Button */}
-            <div className="pt-2">
+            <div className="pt-2 space-y-3">
               <button
                 type="submit"
                 className="w-full py-3.5 px-5 bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-slate-950 font-black text-sm rounded-2xl shadow-xl shadow-emerald-500/25 flex items-center justify-center gap-2 cursor-pointer transition-all active:scale-[0.98]"
@@ -276,6 +343,84 @@ export const CreateTrainerModal: React.FC<CreateTrainerModalProps> = ({ onProfil
                 <span>التالي: اختيار النادي</span>
                 <ArrowLeft className="w-4 h-4" />
               </button>
+
+              {/* Or Import Existing Career from Web/Device */}
+              <div className="pt-2 border-t border-slate-800/80">
+                {!showImportSection ? (
+                  <button
+                    type="button"
+                    onClick={() => setShowImportSection(true)}
+                    className="w-full py-2.5 px-3 bg-slate-950/80 hover:bg-slate-850 border border-sky-500/30 hover:border-sky-500/60 rounded-2xl text-xs font-bold text-sky-300 flex items-center justify-center gap-2 transition-all cursor-pointer"
+                  >
+                    <Upload className="w-4 h-4 text-sky-400" />
+                    <span>لديك مسيرة سابقة وتريد استكمالها؟ اضغط للاستيراد</span>
+                  </button>
+                ) : (
+                  <div className="p-3 bg-slate-950/90 border border-sky-500/40 rounded-2xl space-y-2.5 animate-fadeIn">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-bold text-sky-300 flex items-center gap-1.5">
+                        <Upload className="w-3.5 h-3.5 text-sky-400" />
+                        <span>استيراد مسيرة سابقة (.anta-save أو كود)</span>
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowImportSection(false);
+                          setImportError(null);
+                        }}
+                        className="p-1 text-slate-400 hover:text-white rounded-lg"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    </div>
+
+                    {importError && (
+                      <div className="p-2 bg-rose-950/70 border border-rose-800 text-rose-300 text-[11px] rounded-xl">
+                        {importError}
+                      </div>
+                    )}
+
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => fileInputRef.current?.click()}
+                        disabled={isImporting}
+                        className="flex-1 py-2 px-3 bg-sky-600 hover:bg-sky-500 disabled:opacity-50 text-white font-bold text-xs rounded-xl flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                      >
+                        {isImporting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Upload className="w-3.5 h-3.5" />}
+                        <span>اختيار ملف (.anta-save / .json)</span>
+                      </button>
+                    </div>
+
+                    <div className="space-y-1.5 pt-1">
+                      <textarea
+                        value={pastedCode}
+                        onChange={(e) => setPastedCode(e.target.value)}
+                        placeholder="أو الصق نص كود المسيرة هنا..."
+                        className="w-full h-16 p-2 bg-slate-900 border border-slate-700 focus:border-sky-500 rounded-xl text-[11px] text-slate-200 font-mono resize-none focus:outline-none placeholder:text-slate-500"
+                        dir="ltr"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => handleImportSave(pastedCode)}
+                        disabled={isImporting || !pastedCode.trim()}
+                        className="w-full py-1.5 px-3 bg-slate-800 hover:bg-slate-700 disabled:opacity-40 text-sky-300 font-bold text-xs rounded-xl flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                      >
+                        <ClipboardPaste className="w-3.5 h-3.5" />
+                        <span>استيراد الكود واستئناف المسيرة</span>
+                      </button>
+                    </div>
+
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      accept="*/*,.anta-save,.json,application/json,text/plain"
+                      className="hidden"
+                      onChange={handleFileChange}
+                    />
+                  </div>
+                )}
+              </div>
             </div>
           </form>
         )}

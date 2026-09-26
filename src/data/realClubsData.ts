@@ -1,6 +1,7 @@
 import { Club } from '../types/game';
 import { isRealClub, loadRealClubSquad } from './realPlayersData';
 import { generateClubSquad } from '../utils/playerGenerator';
+import { populateClubSponsors } from '../services/sponsorshipService';
 
 /**
  * Universal Club Factory
@@ -33,6 +34,26 @@ export function createClub(
 
   const startingPlayerIds = players.slice(0, 11).map(p => p.id);
   const benchPlayerIds = players.slice(11, 18).map(p => p.id);
+
+  const baseClub: Partial<Club> = {
+    id,
+    name,
+    shortName,
+    city,
+    country,
+    countryCode,
+    countryId: countryCode,
+    division,
+    leagueId,
+    reputation,
+    budget,
+    transferBudget,
+    wageBudgetMonthly,
+    primaryColor,
+    secondaryColor,
+  };
+
+  const dynamicSponsors = populateClubSponsors(baseClub as Club);
 
   return {
     id,
@@ -74,23 +95,6 @@ export function createClub(
       cornerTakerId: players[0]?.id || '',
     },
     players,
-    sponsors: [
-      {
-        id: `sp_${id}_main`,
-        name: `${name} شريك رئيسي`,
-        type: 'shirt',
-        monthlyPayment: Math.round(budget * 0.05),
-        contractMonthsRemaining: 12,
-        bonusForWin: 50000,
-      },
-      {
-        id: `sp_${id}_kit`,
-        name: 'راعي الملعب الرسمي',
-        type: 'stadium',
-        monthlyPayment: Math.round(budget * 0.03),
-        contractMonthsRemaining: 24,
-        bonusForWin: 25000,
-      },
-    ],
+    sponsors: dynamicSponsors,
   };
 }

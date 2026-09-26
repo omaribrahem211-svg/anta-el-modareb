@@ -125,68 +125,18 @@ export function processPostMatchPlayerUpdates(
       const actualGain = Math.round(baseGain * (1 + staffBonuses.restRecoveryBonus));
       const newFitness = Math.min(100, (p.fitness ?? 80) + actualGain);
 
-      // 4. Morale decay for sitting on bench (mitigated by sports psychologist)
-      const currentUnhappy = (p.unhappyMatchesCount ?? 0) + 1;
-      const baseDrop = Math.floor(Math.random() * 3 + 4); // 4 to 6
-      const actualDrop = Math.max(1, Math.round(baseDrop * (1 - staffBonuses.benchMoraleProtection)));
-      const newMorale = Math.max(10, (p.morale ?? 70) - actualDrop);
-
-      let disgruntled = p.disgruntled ?? false;
-      let transferRequestSubmitted = p.transferRequestSubmitted ?? false;
-
-      // Unhappy threshold reached
-      if (currentUnhappy >= 4 && newMorale < 50) {
-        disgruntled = true;
-      }
-
-      // Transfer request submitted
-      if (currentUnhappy >= 6 && newMorale < 40 && !transferRequestSubmitted) {
-        transferRequestSubmitted = true;
-        if (isUserClub) {
-          transferMessages.push({
-            id: `transfer_req_${p.id}_${Date.now()}`,
-            title: `إنذار وطلب انتقال رسمي من وكيل ${p.name} ⚠️`,
-            sender: `وكيل أعمال اللاعب ${p.name}`,
-            date: 'طلب رسمي',
-            type: 'contract',
-            read: false,
-            content: `السيد المدير الفني، موكلي اللاعب ${p.name} يشعر بإحباط شديد وتراجع في حالته النفسية (${newMorale}%) بسبب عدم مشاركته في المباريات الأخيرة (${currentUnhappy} مباريات متتالية). يطالب اللاعب بالحصول على فرصة لعب فورية أو الموافقة على بيعه خلال أقرب وقت ممكن.`,
-          });
-        }
-      }
-
-      // Forced transfer execution if completely neglected
-      if (isUserClub && (currentUnhappy >= 9 || newMorale < 25)) {
-        const buyerClubName = BUYER_CLUBS[Math.floor(Math.random() * BUYER_CLUBS.length)];
-        const transferFee = Math.round((p.marketValue || 350000) * 0.9);
-
-        departedPlayers.push({
-          player: p,
-          fee: transferFee,
-          newClubName: buyerClubName,
-        });
-
-        transferMessages.push({
-          id: `forced_transfer_${p.id}_${Date.now()}`,
-          title: `رحيل رسمي: انتقال اللاعب ${p.name} إلى ${buyerClubName} ✈️`,
-          sender: 'مجلس إدارة النادي',
-          date: 'بيان رسمي',
-          type: 'news',
-          read: false,
-          content: `بسبب انهيار الحالة النفسية للاعب ${p.name} (${newMorale}%) وغيابه المستمر عن التشكيل لـ ${currentUnhappy} مباريات، قررت إدارة النادي قبول العرض المقدم من ${buyerClubName} لشراء بطاقة اللاعب نهائياً بمبلغ ${transferFee.toLocaleString()} ج.م، وتم إنهاء التعاقد ودياً حفاظاً على استقرار غرفة الملابس.`,
-        });
-
-        // Do not add to updatedPlayers (player left squad)
-        return;
-      }
+      // 4. Morale for sitting on bench: Rested players maintain good morale and recover full fitness
+      // As requested by user: players never leave the club or get forced out due to lack of playing time
+      const currentUnhappy = 0; // Disabled: Bench players do not accumulate unhappy counter
+      const newMorale = Math.max(65, Math.min(100, (p.morale ?? 80))); // Healthy morale floor for squad depth
 
       updatedPlayers.push({
         ...p,
         fitness: newFitness,
         morale: newMorale,
-        unhappyMatchesCount: currentUnhappy,
-        disgruntled,
-        transferRequestSubmitted,
+        unhappyMatchesCount: 0,
+        disgruntled: false,
+        transferRequestSubmitted: false,
       });
     }
   });
@@ -194,7 +144,7 @@ export function processPostMatchPlayerUpdates(
   return {
     updatedPlayers,
     transferMessages,
-    departedPlayers,
+    departedPlayers: [], // Players never leave forcefully due to lack of participation
   };
 }
 

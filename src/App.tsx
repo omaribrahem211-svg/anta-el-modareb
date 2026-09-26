@@ -259,9 +259,11 @@ function GameApp() {
         )}
 
         {activeTab === 'transfers' && (
-          <TransfersTab 
-            onSelectPlayer={(p) => setSelectedPlayer(p)} 
-          />
+          <MatchErrorBoundary componentName="TransfersTab">
+            <TransfersTab 
+              onSelectPlayer={(p) => setSelectedPlayer(p)} 
+            />
+          </MatchErrorBoundary>
         )}
 
         {activeTab === 'training' && (

@@ -3,6 +3,8 @@ import { useGame } from '../context/GameContext';
 import { FormationType, Player, TacticalMentality, PassingStyle, PressingIntensity, TempoSpeed, TacticalStyle, TeamTactics } from '../types/game';
 import { validateSquadLineup } from '../utils/squadValidator';
 import { getPositionArabic, getPositionBadgeClass } from '../utils/positionHelper';
+import { ALL_FORMATIONS, ALL_TACTICAL_STYLES } from '../utils/tacticalKnowledgeEngine';
+import { getLicenseRank } from '../utils/careerProgressionEngine';
 import {
   Sliders,
   Sparkles,
@@ -21,6 +23,8 @@ import {
   Flame,
   Layers,
   Compass,
+  Lock,
+  Unlock,
 } from 'lucide-react';
 
 interface TacticsTabProps {
@@ -275,6 +279,97 @@ const FORMATION_SLOTS: Record<FormationType, { pos: string; top: number; left: n
     { pos: 'CAM', top: 32, left: 50 },
     { pos: 'RAM', top: 34, left: 75 },
     { pos: 'ST', top: 16, left: 50 },
+  ],
+  '3-4-3-diamond': [
+    { pos: 'GK', top: 88, left: 50 },
+    { pos: 'CB', top: 72, left: 25 },
+    { pos: 'CB', top: 74, left: 50 },
+    { pos: 'CB', top: 72, left: 75 },
+    { pos: 'CDM', top: 56, left: 50 },
+    { pos: 'LM', top: 46, left: 15 },
+    { pos: 'RM', top: 46, left: 85 },
+    { pos: 'CAM', top: 36, left: 50 },
+    { pos: 'LW', top: 20, left: 20 },
+    { pos: 'ST', top: 15, left: 50 },
+    { pos: 'RW', top: 20, left: 80 },
+  ],
+  '4-4-1-1': [
+    { pos: 'GK', top: 88, left: 50 },
+    { pos: 'RB', top: 70, left: 18 },
+    { pos: 'CB', top: 72, left: 39 },
+    { pos: 'CB', top: 72, left: 61 },
+    { pos: 'LB', top: 70, left: 82 },
+    { pos: 'RM', top: 46, left: 18 },
+    { pos: 'CM', top: 48, left: 39 },
+    { pos: 'CM', top: 48, left: 61 },
+    { pos: 'LM', top: 46, left: 82 },
+    { pos: 'CAM', top: 30, left: 50 },
+    { pos: 'ST', top: 16, left: 50 },
+  ],
+  '4-2-3-1-asym': [
+    { pos: 'GK', top: 88, left: 50 },
+    { pos: 'RB', top: 70, left: 18 },
+    { pos: 'CB', top: 72, left: 39 },
+    { pos: 'CB', top: 72, left: 61 },
+    { pos: 'LB', top: 70, left: 82 },
+    { pos: 'CDM', top: 56, left: 38 },
+    { pos: 'CM', top: 52, left: 62 },
+    { pos: 'CAM', top: 36, left: 50 },
+    { pos: 'RW', top: 22, left: 18 },
+    { pos: 'ST', top: 16, left: 50 },
+    { pos: 'LW', top: 28, left: 82 },
+  ],
+  '3-2-4-1': [
+    { pos: 'GK', top: 88, left: 50 },
+    { pos: 'CB', top: 72, left: 25 },
+    { pos: 'CB', top: 74, left: 50 },
+    { pos: 'CB', top: 72, left: 75 },
+    { pos: 'CDM', top: 56, left: 36 },
+    { pos: 'CDM', top: 56, left: 64 },
+    { pos: 'LM', top: 38, left: 14 },
+    { pos: 'CAM', top: 36, left: 38 },
+    { pos: 'CAM', top: 36, left: 62 },
+    { pos: 'RM', top: 38, left: 86 },
+    { pos: 'ST', top: 16, left: 50 },
+  ],
+  '3-2-2-3': [
+    { pos: 'GK', top: 88, left: 50 },
+    { pos: 'CB', top: 72, left: 25 },
+    { pos: 'CB', top: 74, left: 50 },
+    { pos: 'CB', top: 72, left: 75 },
+    { pos: 'CDM', top: 58, left: 38 },
+    { pos: 'CDM', top: 58, left: 62 },
+    { pos: 'CAM', top: 38, left: 38 },
+    { pos: 'CAM', top: 38, left: 62 },
+    { pos: 'RW', top: 22, left: 18 },
+    { pos: 'ST', top: 16, left: 50 },
+    { pos: 'LW', top: 22, left: 82 },
+  ],
+  '2-3-5': [
+    { pos: 'GK', top: 88, left: 50 },
+    { pos: 'CB', top: 74, left: 38 },
+    { pos: 'CB', top: 74, left: 62 },
+    { pos: 'RWB', top: 56, left: 20 },
+    { pos: 'CDM', top: 54, left: 50 },
+    { pos: 'LWB', top: 56, left: 80 },
+    { pos: 'RW', top: 20, left: 14 },
+    { pos: 'CAM', top: 22, left: 32 },
+    { pos: 'ST', top: 16, left: 50 },
+    { pos: 'CAM', top: 22, left: 68 },
+    { pos: 'LW', top: 20, left: 86 },
+  ],
+  '4-2-1-3': [
+    { pos: 'GK', top: 88, left: 50 },
+    { pos: 'RB', top: 70, left: 18 },
+    { pos: 'CB', top: 72, left: 39 },
+    { pos: 'CB', top: 72, left: 61 },
+    { pos: 'LB', top: 70, left: 82 },
+    { pos: 'CDM', top: 54, left: 36 },
+    { pos: 'CDM', top: 54, left: 64 },
+    { pos: 'CAM', top: 36, left: 50 },
+    { pos: 'RW', top: 22, left: 20 },
+    { pos: 'ST', top: 16, left: 50 },
+    { pos: 'LW', top: 22, left: 80 },
   ],
 };
 
@@ -583,23 +678,76 @@ export const TacticsTab: React.FC<TacticsTabProps> = ({ onSelectPlayer }) => {
         <div className="space-y-4">
           
           {/* Formation Selector Bar */}
-          <div className="flex items-center justify-between bg-slate-900 border border-slate-800 p-3 rounded-2xl">
-            <span className="text-xs text-slate-400 font-medium">الرسم التكتيكي:</span>
-            <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar">
-              {(['4-3-3', '4-4-2', '4-2-3-1', '3-5-2', '5-3-2', '4-1-4-1', '3-4-3', '4-5-1', '4-1-2-1-2', '5-4-1', '4-2-4', '4-3-2-1', '4-2-2-2', '4-3-1-2', '3-4-2-1', '3-4-1-2', '5-2-3', '4-1-3-2', '3-3-3-1'] as FormationType[]).map((fmt) => (
-                <button
-                  key={fmt}
-                  onClick={() => setFormation(fmt)}
-                  className={`px-3 py-1.5 rounded-xl text-xs font-mono font-bold whitespace-nowrap transition-all flex-shrink-0 cursor-pointer ${
-                    tactics.formation === fmt
-                      ? 'bg-amber-500 text-slate-950 shadow-md scale-105'
-                      : 'bg-slate-800 text-slate-300 hover:text-white hover:bg-slate-700'
-                  }`}
-                >
-                  {fmt}
-                </button>
-              ))}
+          <div className="bg-slate-900 border border-slate-800 p-3.5 rounded-3xl space-y-2.5">
+            <div className="flex items-center justify-between">
+              <span className="text-xs text-slate-300 font-bold flex items-center gap-1.5">
+                <Sliders className="w-3.5 h-3.5 text-amber-400" />
+                <span>الرسم التكتيكي (26 تشكيل عالمي):</span>
+              </span>
+              <span className="text-[10px] bg-amber-950/80 text-amber-300 border border-amber-800/80 px-2 py-0.5 rounded-full font-bold">
+                رخصتك: {manager.license}
+              </span>
             </div>
+
+            <div className="flex items-center gap-1.5 overflow-x-auto pb-1 no-scrollbar">
+              {Object.values(ALL_FORMATIONS).map((fmt) => {
+                const isUnlocked = getLicenseRank(manager.license) >= getLicenseRank(fmt.minLicense);
+                const isSelected = tactics.formation === fmt.id;
+
+                return (
+                  <button
+                    key={fmt.id}
+                    onClick={() => {
+                      if (isUnlocked) {
+                        setFormation(fmt.id);
+                        setNotification(`تم تطبيق تشكيل ${fmt.nameArabic}`);
+                      } else {
+                        setNotification(`🔒 خطة ${fmt.nameArabic} تتطلب رخصة تدريب (${fmt.minLicense}) على الأقل! رخصتك الحالية (${manager.license}).`);
+                      }
+                    }}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-mono font-bold whitespace-nowrap transition-all flex-shrink-0 cursor-pointer flex items-center gap-1.5 ${
+                      isSelected
+                        ? 'bg-amber-500 text-slate-950 shadow-md scale-105 ring-2 ring-amber-400'
+                        : isUnlocked
+                        ? 'bg-slate-800 text-slate-200 hover:text-white hover:bg-slate-700'
+                        : 'bg-slate-950/90 text-slate-500 border border-slate-800/80 hover:border-slate-700'
+                    }`}
+                  >
+                    {!isUnlocked && <Lock className="w-3 h-3 text-slate-500" />}
+                    <span>{fmt.id}</span>
+                    {!isUnlocked && (
+                      <span className="text-[9px] px-1 py-0.5 rounded bg-slate-900 text-amber-500/80 font-bold">
+                        {fmt.minLicense}
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Selected Formation Info Card */}
+            {ALL_FORMATIONS[tactics.formation] && (
+              <div className="bg-slate-950/70 border border-slate-800/80 p-2.5 rounded-2xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 text-xs">
+                <div className="space-y-0.5">
+                  <div className="flex items-center gap-2">
+                    <span className="font-black text-amber-300 text-xs">
+                      {ALL_FORMATIONS[tactics.formation].nameArabic}
+                    </span>
+                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-800 text-slate-300 border border-slate-700">
+                      الرخصة المطلوبة: {ALL_FORMATIONS[tactics.formation].minLicense}
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-slate-400 leading-relaxed">
+                    {ALL_FORMATIONS[tactics.formation].descriptionArabic}
+                  </p>
+                </div>
+                <div className="flex items-center gap-1.5 shrink-0 self-end sm:self-auto">
+                  <span className="text-[10px] text-emerald-400 bg-emerald-950/80 border border-emerald-500/30 px-2 py-0.5 rounded-lg">
+                    {ALL_FORMATIONS[tactics.formation].strengthsArabic}
+                  </span>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Football Field Visualizer */}
@@ -898,85 +1046,220 @@ export const TacticsTab: React.FC<TacticsTabProps> = ({ onSelectPlayer }) => {
       {activeSubTab === 'instructions' && (
         <div className="space-y-4">
           
-          {/* Tactical Style (طريقة وأسلوب اللعب) */}
+          {/* Tactical Style (طريقة وأسلوب اللعب وفلسفة المدرب) */}
           <div className="bg-slate-900 border border-slate-800 p-4 rounded-3xl space-y-3">
-            <label className="text-xs font-bold text-white flex items-center justify-between">
-              <span className="flex items-center gap-1.5">
+            <div className="flex items-center justify-between">
+              <label className="text-xs font-bold text-white flex items-center gap-1.5">
                 <Compass className="w-4 h-4 text-amber-400" />
-                <span>فلسفة وأسلوب اللعب الأساسي (Tactical Style):</span>
+                <span>فلسفات وأساليب اللعب العالمية (Tactical Philosophies):</span>
+              </label>
+              <span className="text-[10px] bg-amber-950/80 text-amber-300 border border-amber-800/80 px-2 py-0.5 rounded-full font-bold">
+                رخصتك التدريبية: {manager.license}
               </span>
-              <span className="text-[10px] bg-amber-950 text-amber-300 border border-amber-800/80 px-2 py-0.5 rounded-full font-bold">
-                8 طرق لعب عالمية
-              </span>
-            </label>
+            </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-              {[
-                {
-                  id: 'tiki_taka',
-                  label: 'تيكي تاكا واستحواذ شامل (Tiki-Taka)',
-                  desc: 'تمريرات قصيرة مكثفة مع تدوير الكرة والسيطرة التامة على منتصف الملعب.',
-                  icon: '🌀'
-                },
-                {
-                  id: 'gegenpress',
-                  label: 'ضغط عكسي عالي خانق (Gegenpressing)',
-                  desc: 'افتكاك الكرة فور فقدانها في الثلث الهجومي برتم بدني عنيف.',
-                  icon: '⚡'
-                },
-                {
-                  id: 'direct_counter',
-                  label: 'هجمات مرتدة سريعة وخاطفة (Counter Attack)',
-                  desc: 'تراجع دفاعي منظم واستغلال المساحات الشاغرة بانطلاقات صاروخية.',
-                  icon: '🚀'
-                },
-                {
-                  id: 'wing_play',
-                  label: 'لعب هجومي عبر الأطراف (Wing Play)',
-                  desc: 'تحميل اللعب على الأجنحة والظهيرين وإرسال عرضيات متقنة للمهاجمين.',
-                  icon: '🏹'
-                },
-                {
-                  id: 'catenaccio',
-                  label: 'كاتيناتشو دفاعي حديدي (Catenaccio)',
-                  desc: 'تأمين دفاعي صارم وإغلاق تام لكافة المنافذ لإنهاء اللقاء بنظافة الشباك.',
-                  icon: '🛡️'
-                },
-                {
-                  id: 'possession_control',
-                  label: 'التحكم بالرتم والاستحواذ الصبور (Control)',
-                  desc: 'بناء متدرج من الخلف بدون تسرع والبحث عن الثغرات في دفاع المنافس.',
-                  icon: '🎯'
-                },
-                {
-                  id: 'long_ball',
-                  label: 'كرات طولية مباشرة (Route One)',
-                  desc: 'إرسال كرات ساقطة طويلة خلف المدافعين للمهاجم القوي لربح الكرات الثانية.',
-                  icon: '✈️'
-                },
-                {
-                  id: 'fluid_creative',
-                  label: 'لامركزية وحرية إبداعية (Fluid / Free)',
-                  desc: 'تبادل المراكز بحرية تامة وإعطاء صانعي الألعاب كامل الإبداع والارتجال.',
-                  icon: '✨'
-                },
-              ].map(opt => (
-                <button
-                  key={opt.id}
-                  onClick={() => updateTactics({ ...tactics, tacticalStyle: opt.id as TacticalStyle })}
-                  className={`p-3 rounded-2xl border text-right transition-all cursor-pointer ${
-                    tactics.tacticalStyle === opt.id
-                      ? 'bg-amber-950/80 border-amber-500 text-amber-200 shadow-md ring-1 ring-amber-500/50'
-                      : 'bg-slate-950/60 border-slate-800 text-slate-300 hover:bg-slate-800/80 hover:border-slate-700'
-                  }`}
-                >
-                  <div className="flex items-center justify-between">
-                    <span className="font-bold text-xs text-white">{opt.label}</span>
-                    <span className="text-base">{opt.icon}</span>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+              {Object.values(ALL_TACTICAL_STYLES).map(style => {
+                const isUnlocked = getLicenseRank(manager.license) >= getLicenseRank(style.minLicense);
+                const isSelected = (tactics.tacticalStyle || 'total_football') === style.id;
+                const exp = (manager.tacticalExperience && (manager.tacticalExperience as any)[style.id]) ?? 50;
+
+                return (
+                  <div
+                    key={style.id}
+                    onClick={() => {
+                      if (isUnlocked) {
+                        updateTactics({ ...tactics, tacticalStyle: style.id });
+                        setNotification(`تم اعتماد فلسفة: ${style.nameArabic}`);
+                      } else {
+                        setNotification(`🔒 أسلوب (${style.nameArabic}) يتطلب رخصة تدريب (${style.minLicense}) على الأقل! رخصتك الحالية (${manager.license}).`);
+                      }
+                    }}
+                    className={`p-3.5 rounded-2xl border text-right transition-all cursor-pointer relative overflow-hidden ${
+                      isSelected
+                        ? 'bg-amber-950/80 border-amber-500 text-amber-100 shadow-xl ring-2 ring-amber-500/40'
+                        : isUnlocked
+                        ? 'bg-slate-950/70 border-slate-800 text-slate-300 hover:bg-slate-850 hover:border-slate-700'
+                        : 'bg-slate-950/90 border-slate-900 text-slate-500 hover:border-slate-800 opacity-75'
+                    }`}
+                  >
+                    {/* Header */}
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="space-y-0.5">
+                        <div className="flex items-center gap-1.5">
+                          <span className="font-bold text-xs text-white">{style.nameArabic}</span>
+                          {!isUnlocked && <Lock className="w-3.5 h-3.5 text-amber-500 shrink-0" />}
+                        </div>
+                        <span className="text-[10px] text-slate-400 block">{style.nameEnglish}</span>
+                      </div>
+
+                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0 border ${
+                        isUnlocked
+                          ? 'bg-emerald-950/80 text-emerald-300 border-emerald-500/30'
+                          : 'bg-amber-950/80 text-amber-400 border-amber-500/40'
+                      }`}>
+                        {isUnlocked ? `رخصة ${style.minLicense} ✓` : `مطلوب رخصة ${style.minLicense}`}
+                      </span>
+                    </div>
+
+                    {/* Description */}
+                    <p className="text-[11px] text-slate-400 mt-2 leading-relaxed">{style.descArabic}</p>
+
+                    {/* Synergy & Counter Advantage */}
+                    <div className="mt-2.5 pt-2 border-t border-slate-800/80 text-[10px] space-y-1">
+                      <div className="text-emerald-400 flex items-center gap-1">
+                        <span>⚡ الميزة التكتيكية:</span>
+                        <span className="text-slate-300">{style.counterAdvantageArabic}</span>
+                      </div>
+                      <div className="text-amber-400 flex items-center gap-1">
+                        <span>⚠️ الحذر الفني:</span>
+                        <span className="text-slate-400">{style.mismatchWarningArabic}</span>
+                      </div>
+                    </div>
+
+                    {/* Mastery XP Progress Bar */}
+                    {isUnlocked && (
+                      <div className="mt-2.5 pt-1.5 border-t border-slate-800/60 flex items-center justify-between text-[10px]">
+                        <span className="text-slate-400">معدل إتقان الخطة:</span>
+                        <div className="flex items-center gap-1.5">
+                          <div className="w-20 bg-slate-800 rounded-full h-1.5 overflow-hidden">
+                            <div
+                              className="h-full bg-gradient-to-r from-cyan-500 to-emerald-500 rounded-full"
+                              style={{ width: `${Math.min(100, exp)}%` }}
+                            />
+                          </div>
+                          <span className="font-mono font-bold text-cyan-400">{exp}/100</span>
+                        </div>
+                      </div>
+                    )}
                   </div>
-                  <div className="text-[11px] text-slate-400 mt-1 leading-relaxed">{opt.desc}</div>
-                </button>
-              ))}
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Advanced Tactical Roles & Instructions */}
+          <div className="bg-slate-900 border border-slate-800 p-4 rounded-3xl space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-2.5">
+              <label className="text-xs font-bold text-white flex items-center gap-1.5">
+                <Layers className="w-4 h-4 text-cyan-400" />
+                <span>التعليمات التكتيكية المتقدمة (Advanced Instructions):</span>
+              </label>
+              <span className="text-[10px] bg-cyan-950 text-cyan-300 border border-cyan-800/80 px-2 py-0.5 rounded-full font-bold">
+                تحكم احترافي
+              </span>
+            </div>
+
+            {/* Build-up Style */}
+            <div className="space-y-2">
+              <span className="text-xs font-bold text-slate-300 flex items-center gap-1.5">
+                <span>1. نمط بناء اللعب من الخلف (Build-up Style):</span>
+              </span>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+                {[
+                  { id: 'standard', label: 'تدرج كروي متوازن', desc: 'خيارات تمرير مفتوحة' },
+                  { id: 'from_back', label: 'تحضير قصير صبور', desc: 'بناء مع حارس المرمى' },
+                  { id: 'direct_pivot', label: 'عمودي نحو المحطة', desc: 'تخطي وسط الملعب' },
+                  { id: 'channel_balls', label: 'عبر أروقة الأطراف', desc: 'استغلال المساحات الجانبية' },
+                ].map(opt => (
+                  <button
+                    key={opt.id}
+                    onClick={() => updateTactics({ ...tactics, buildUpStyle: opt.id as any })}
+                    className={`p-2.5 rounded-2xl border text-right transition-all cursor-pointer ${
+                      (tactics.buildUpStyle || 'standard') === opt.id
+                        ? 'bg-cyan-950 border-cyan-500 text-cyan-200 ring-1 ring-cyan-500/50'
+                        : 'bg-slate-950/70 border-slate-800 text-slate-400 hover:text-white hover:bg-slate-800'
+                    }`}
+                  >
+                    <div className="font-bold text-white text-xs">{opt.label}</div>
+                    <div className="text-[10px] text-slate-400 mt-0.5">{opt.desc}</div>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Pressing Trap */}
+            <div className="space-y-2">
+              <span className="text-xs font-bold text-slate-300 flex items-center gap-1.5">
+                <span>2. مصيدة الضغط واسترجاع الكرة (Pressing Trap):</span>
+              </span>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+                {[
+                  { id: 'none', label: 'ضغط متوازن بدون فخ', desc: 'تغطية متساوية للملعب' },
+                  { id: 'trap_wings', label: 'حصار على خط التماس', desc: 'إجبار الخصم على الأطراف' },
+                  { id: 'trap_center', label: 'خنق العمق والوسط', desc: 'افتكاك الكرة بالدائرة' },
+                  { id: 'zonal_trap', label: 'مصيدة المساحات النصفية', desc: 'عزل صانعي ألعاب الخصم' },
+                ].map(opt => (
+                  <button
+                    key={opt.id}
+                    onClick={() => updateTactics({ ...tactics, pressingTrap: opt.id as any })}
+                    className={`p-2.5 rounded-2xl border text-right transition-all cursor-pointer ${
+                      (tactics.pressingTrap || 'none') === opt.id
+                        ? 'bg-amber-950 border-amber-500 text-amber-200 ring-1 ring-amber-500/50'
+                        : 'bg-slate-950/70 border-slate-800 text-slate-400 hover:text-white hover:bg-slate-800'
+                    }`}
+                  >
+                    <div className="font-bold text-white text-xs">{opt.label}</div>
+                    <div className="text-[10px] text-slate-400 mt-0.5">{opt.desc}</div>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Fullback Roles */}
+            <div className="space-y-2">
+              <span className="text-xs font-bold text-slate-300 flex items-center gap-1.5">
+                <span>3. توظيف الأظهرة (Fullback Roles):</span>
+              </span>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+                {[
+                  { id: 'standard', label: 'ظهير تقليدي', desc: 'مساندة متزنة دفاعاً وهجوماً' },
+                  { id: 'overlapping', label: 'ظهير طائر متداخل', desc: 'انطلاقات هجومية وعرضيات' },
+                  { id: 'inverted', label: 'ظهير مقلوب للعمق', desc: 'الدخول كلاعب وسط إضافي' },
+                  { id: 'stay_back', label: 'التزام دفاعي صارم', desc: 'تأمين المرتدات والبقاء بالخلف' },
+                ].map(opt => (
+                  <button
+                    key={opt.id}
+                    onClick={() => updateTactics({ ...tactics, fullbackRole: opt.id as any })}
+                    className={`p-2.5 rounded-2xl border text-right transition-all cursor-pointer ${
+                      (tactics.fullbackRole || 'standard') === opt.id
+                        ? 'bg-emerald-950 border-emerald-500 text-emerald-200 ring-1 ring-emerald-500/50'
+                        : 'bg-slate-950/70 border-slate-800 text-slate-400 hover:text-white hover:bg-slate-800'
+                    }`}
+                  >
+                    <div className="font-bold text-white text-xs">{opt.label}</div>
+                    <div className="text-[10px] text-slate-400 mt-0.5">{opt.desc}</div>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Striker Roles */}
+            <div className="space-y-2">
+              <span className="text-xs font-bold text-slate-300 flex items-center gap-1.5">
+                <span>4. دور رأس الحربة (Striker Role):</span>
+              </span>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+                {[
+                  { id: 'advanced_forward', label: 'مهاجم متقدم صريح', desc: 'الجري في المساحات والتسجيل' },
+                  { id: 'target_man', label: 'مهاجم محطة بدني', desc: 'الاستلام بظهره وربح الهوائيات' },
+                  { id: 'false_9', label: 'مهاجم وهمي ساقط', desc: 'النزول للوسط وتفريغ المساحات' },
+                  { id: 'pressing_forward', label: 'مهاجم ضاغط مقاتل', desc: 'إزعاج مدافعي الخصم ومطاردتهم' },
+                ].map(opt => (
+                  <button
+                    key={opt.id}
+                    onClick={() => updateTactics({ ...tactics, strikerRole: opt.id as any })}
+                    className={`p-2.5 rounded-2xl border text-right transition-all cursor-pointer ${
+                      (tactics.strikerRole || 'advanced_forward') === opt.id
+                        ? 'bg-rose-950 border-rose-500 text-rose-200 ring-1 ring-rose-500/50'
+                        : 'bg-slate-950/70 border-slate-800 text-slate-400 hover:text-white hover:bg-slate-800'
+                    }`}
+                  >
+                    <div className="font-bold text-white text-xs">{opt.label}</div>
+                    <div className="text-[10px] text-slate-400 mt-0.5">{opt.desc}</div>
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
 

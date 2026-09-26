@@ -22,7 +22,34 @@ export type AdminActionType =
   | 'edit_league'
   | 'edit_club'
   | 'edit_player'
-  | 'edit_competition';
+  | 'edit_competition'
+  | 'create_promo_code'
+  | 'delete_promo_code'
+  | 'toggle_promo_code';
+
+export interface PromoCodeRedemption {
+  userId: string;
+  managerName: string;
+  clubName: string;
+  redeemedAt: number;
+  amount: number;
+}
+
+export interface PromoCode {
+  id: string; // Document ID (usually the uppercase code string)
+  code: string; // The uppercase alphanumeric code entered by coaches
+  rewardAmount: number; // Cash money added to club budget (e.g. 10,000,000 EGP)
+  rewardCoins?: number; // Optional bonus coins
+  maxUses: number; // Maximum allowed total redemptions
+  usedCount: number; // Number of times redeemed so far
+  usedByManagerIds: string[]; // List of user/manager IDs who already redeemed
+  redeemedBy?: PromoCodeRedemption[]; // Detailed log of redemptions
+  description?: string; // Optional admin description / event name
+  isActive: boolean; // Whether the code is active and redeemable
+  createdAt: number;
+  createdBy: string;
+  expiresAt?: number | null; // Optional expiration timestamp
+}
 
 export type BroadcastType = 'announcement' | 'event' | 'maintenance' | 'reward' | 'update';
 
@@ -155,5 +182,5 @@ export interface GameRealismSettings {
   updatedBy: string;
 }
 
-export type AdminTab = 'dashboard' | 'world_editor' | 'users' | 'broadcasts' | 'pvp_matches' | 'realism' | 'realism_settings' | 'audit_logs' | 'settings';
+export type AdminTab = 'dashboard' | 'world_editor' | 'users' | 'broadcasts' | 'promo_codes' | 'pvp_matches' | 'realism' | 'realism_settings' | 'audit_logs' | 'settings';
 

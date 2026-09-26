@@ -1,4 +1,4 @@
-import { ActiveNegotiation, Club, InboxMessage, Player, Position, PositionCategory, TransferHistoryEntry, TransferOffer } from '../types/game';
+import { ActiveNegotiation, Club, InboxMessage, Player, PlayerStats, Position, PositionCategory, TransferHistoryEntry, TransferOffer } from '../types/game';
 import { GLOBAL_LEAGUES, getCustomLeagues, saveCustomLeagues } from '../data/leaguesData';
 import { isRealClub, loadRealClubSquad, REAL_SQUADS_BY_CLUB_ID } from '../data/realPlayersData';
 import { VERIFIED_REAL_PLAYERS, convertVerifiedRealPlayerToPlayer } from '../data/playersData';
@@ -48,6 +48,49 @@ export interface NegotiationResult {
   counterFee?: number;
   counterSalary?: number;
   rejectionReason?: string;
+}
+
+/**
+ * Helper: Detects if a league ID belongs to top European competitions
+ */
+export function isTopEuropeanLeague(leagueId?: string): boolean {
+  if (!leagueId) return false;
+  return ['eng_tier_1', 'esp_tier_1', 'ita_tier_1', 'ger_tier_1', 'fra_tier_1', 'eng_tier_2', 'esp_tier_2'].includes(leagueId);
+}
+
+/**
+ * Helper: Detects if a club/league belongs to the Arab / African / Middle East region
+ */
+export function isArabOrAfricanClub(club?: Club): boolean {
+  if (!club) return false;
+  const country = club.country || '';
+  if (['مصر', 'المملكة العربية السعودية', 'المغرب', 'تونس', 'الجزائر', 'الإمارات العربية المتحدة', 'قطر'].includes(country)) {
+    return true;
+  }
+  const leagueId = club.leagueId || '';
+  return [
+    'egy_tier_1', 'egy_tier_2', 'egy_tier_3', 'egy_tier_4',
+    'sau_tier_1', 'sau_tier_2',
+    'uae_tier_1', 'qat_tier_1',
+    'mar_tier_1', 'tun_tier_1', 'alg_tier_1'
+  ].includes(leagueId);
+}
+
+/**
+ * Helper: Detects elite European clubs
+ */
+export function isEuropeanEliteClub(club?: Club): boolean {
+  if (!club) return false;
+  if (isTopEuropeanLeague(club.leagueId)) return true;
+  const name = club.name || '';
+  const shortName = club.shortName || '';
+  const eliteKeywords = [
+    'ريال مدريد', 'برشلونة', 'مانشستر سيتي', 'ليفربول', 'بايرن ميونخ',
+    'أرسنال', 'باريس سان جيرمان', 'إنتر ميلان', 'يوفنتوس', 'أتلتيكو مدريد',
+    'تشيلسي', 'مانشستر يونايتد', 'توتنهام', 'ميلان', 'بوروسيا دورتموند',
+    'باير ليفركوزن', 'أستون فيلا', 'نيوكاسل', 'نابولي', 'روما', 'بنفيكا', 'سبورتينغ', 'بورتو'
+  ];
+  return eliteKeywords.some(kw => name.includes(kw) || shortName.includes(kw));
 }
 
 /**
@@ -250,6 +293,61 @@ export function evaluateTransferOffer(
     };
   }
 
+  // G. CRITICAL USER RULE: European Stars will NEVER leave top European clubs for Arab/African leagues
+  // "مينفعش لاعب مشهور و قوى يسيب فريق كبيرر فى اوربا عشان يروح نادى عربى"
+  const isSellerEuropean = isEuropeanEliteClub(sellingClub) || isTopEuropeanLeague(sellingClub?.leagueId) || (sellingClub?.country && ['إنجلترا', 'إسبانيا', 'إيطاليا', 'ألمانيا', 'فرنسا'].includes(sellingClub.country));
+  const isBuyerArabOrAfrican = isArabOrAfricanClub(userClub);
+
+  if (isSellerEuropean && isBuyerArabOrAfrican) {
+    // 1. Prime / Star players (Rating >= 78, or young talents with potential >= 80, or players under 33 with rating >= 75)
+    if (ovr >= 78 || (age <= 32 && ovr >= 75) || (age <= 23 && pot >= 80)) {
+      return {
+        decision: 'reject',
+        clubApproved: false,
+        playerApproved: false,
+        message: `يرفض النجم العالمي ${player.name} (تقييم ${ovr}) مغادرة الملاعب الأوروبية وناديه الحالي (${sellingClub?.name || 'الأوروبي'}) للانتقال إلى الدوريات العربية؛ اللاعب في أوج عطائه الكروي ويرفض بشكل قاطع مغادرة أوروبا لرغبته الثابتة في المنافسة على دوري أبطال أوروبا والبطولات القارية الكبرى.`,
+      };
+    }
+
+    // 2. Late career veterans (Age >= 33): Only top Saudi tier 1 clubs can even negotiate marquee deals
+    if (age >= 33) {
+      if (userClub.leagueId !== 'sau_tier_1') {
+        return {
+          decision: 'reject',
+          clubApproved: false,
+          playerApproved: false,
+          message: `يرى اللاعب ${player.name} (تقييم ${ovr}) أن الانتقال للدوري الحالي لا يناسب مكانته وتاريخه الكروي في الملاعب الأوروبية.`,
+        };
+      }
+      // Even for Saudi tier 1, requires massive financial incentive (minimum 1.8x recommended salary)
+      if (proposal.monthlySalary < recommendedMonthlyWage * 1.5) {
+        return {
+          decision: 'reject',
+          clubApproved: false,
+          playerApproved: false,
+          message: `يشترط النجم ${player.name} ووكيله حزمة مالية استثنائية وراتباً ضخماً لا يقل عن (${Math.round(recommendedMonthlyWage * 1.8).toLocaleString()} ج.م/شهر) للموافقة على مغادرة الملاعب الأوروبية وخوض تجربة في دوري روشن.`,
+        };
+      }
+    }
+  }
+
+  // H. REALISTIC ELITE TRANSFERS BETWEEN BIG EUROPEAN CLUBS
+  // "خلى الانتقالات اكثر واقعيه خصوصا بين الفرق واللاعبين الكبار"
+  if (isSellerEuropean && !isBuyerArabOrAfrican) {
+    const isSellerGiant = isEuropeanEliteClub(sellingClub) && (sellingClub?.reputation || 0) >= 88;
+    const isBuyerGiant = (userClub.reputation || 0) >= 85;
+
+    // Superstars (85+) at European Giants will refuse downgrading to mid-table clubs
+    if (isSellerGiant && ovr >= 85 && !isBuyerGiant) {
+      return {
+        decision: 'reject',
+        clubApproved: false,
+        playerApproved: false,
+        message: `يرفض النجم ${player.name} (تقييم ${ovr}) مغادرة نادي النخبة ${sellingClub?.name} للانتقال إلى نادٍ أقل في التصنيف القاري؛ اللاعب يشترط الانضمام فقط لفرق الصفوة الأوروبية المنافسة على دوري أبطال أوروبا.`,
+      };
+    }
+  }
+
   // 3. EVALUATE SELLING CLUB (if not a free agent) or Signing Fee
   let clubApproved = false;
   let clubCounterFee: number | undefined = undefined;
@@ -410,13 +508,30 @@ export function executeAtomicTransfer(params: {
     };
   }
 
+  // Prevent buying club from buying its own player
+  if (buyingClubId && sellingClubId && buyingClubId === sellingClubId) {
+    return {
+      success: false,
+      message: 'اللاعب موجود بالفعل في صفوف هذا النادي!',
+      updatedTeams: allTeams,
+    };
+  }
+  if (buyingClub && (buyingClub.players || []).some(p => p && p.id === player.id)) {
+    return {
+      success: false,
+      message: 'اللاعب متواجد بالفعل ضمن قائمة النادي!',
+      updatedTeams: allTeams,
+    };
+  }
+
   // Financial safety check: strictly applied for both user and AI buying clubs
   if (buyingClub) {
-    if (buyingClub.budget < transferFee) {
+    const clubBudget = buyingClub.budget || 0;
+    if (clubBudget < transferFee) {
       const errorPrefix = buyingClub.isUserClub ? 'ميزانية ناديك' : `ميزانية النادي المشتري (${buyingClub.name})`;
       return {
         success: false,
-        message: `${errorPrefix} (${buyingClub.budget.toLocaleString()} ج.م) لا تكفي لدفع قيمة الصفقة المطلوبة (${transferFee.toLocaleString()} ج.م)!`,
+        message: `${errorPrefix} (${clubBudget.toLocaleString()} ج.م) لا تكفي لدفع قيمة الصفقة المطلوبة (${transferFee.toLocaleString()} ج.م)!`,
         updatedTeams: allTeams,
       };
     }
@@ -428,13 +543,13 @@ export function executeAtomicTransfer(params: {
         const remaining = Math.max(0, monthlyIncome - currentWages);
         return {
           success: false,
-          message: `لا يمكن إتمام الصفقة! راتب اللاعب (${salary.toLocaleString()} ج.م) سيتجاوز سقف الدخل الشهري للنادي (${monthlyIncome.toLocaleString()} ج.م). إجمالي الرواتب الحالي: ${currentWages.toLocaleString()} ج.م، والمتبقي لسقف الرواتب هو ${remaining.toLocaleString()} ج.م فقط.`,
+          message: `لا يمكن إتمام الصفقة! راتب اللاعب (${(salary || 0).toLocaleString()} ج.م) سيتجاوز سقف الدخل الشهري للنادي (${(monthlyIncome || 0).toLocaleString()} ج.م). إجمالي الرواتب الحالي: ${(currentWages || 0).toLocaleString()} ج.م، والمتبقي لسقف الرواتب هو ${(remaining || 0).toLocaleString()} ج.م فقط.`,
           updatedTeams: allTeams,
         };
       }
 
       if ((buyingClub.players || []).length >= 35) {
-        return { success: false, message: 'قائمة الفريق بلغت الحد الأقصى (35 لاعباً)!', updatedTeams: allTeams };
+        return { success: false, message: 'قائمة الفريق بلغت الحد الأقصى (35 لاعباً)! قم ببيع أو تسريح لاعبين أولاً.', updatedTeams: allTeams };
       }
     }
   }
@@ -500,25 +615,57 @@ export function executeAtomicTransfer(params: {
     saveCustomLeagues(customLeagues);
   }
 
+  const fallbackStats: PlayerStats = {
+    appearances: 0,
+    starts: 0,
+    minutes: 0,
+    goals: 0,
+    assists: 0,
+    cleanSheets: 0,
+    yellowCards: 0,
+    redCards: 0,
+    shots: 0,
+    shotsOnTarget: 0,
+    passes: 0,
+    tackles: 0,
+    saves: 0,
+    averageRating: 7.0,
+    motm: 0,
+  };
+
+  const defaultAttrs = {
+    pace: player.overallRating || 70,
+    shooting: player.overallRating || 70,
+    passing: player.overallRating || 70,
+    dribbling: player.overallRating || 70,
+    defending: player.overallRating || 70,
+    physical: player.overallRating || 70,
+    goalkeeping: player.position === 'GK' ? (player.overallRating || 70) : 20,
+  };
+
   const transferredPlayer: Player = {
     ...player,
     currentClubId: buyingClub?.id || buyingClubId || 'external_club',
     currentLeagueId: buyingClub?.leagueId || '',
-    salary,
-    contractYears,
+    salary: Math.max(1000, Number(salary) || player.salary || 2500),
+    marketValue: Math.max(10000, Number(player.marketValue) || transferFee || 50000),
+    contractYears: Math.max(1, contractYears || 2),
     isListedForTransfer: false,
     morale: Math.min(100, (player.morale || 80) + 15),
     fitness: 100,
+    stats: player.stats ? { ...player.stats } : fallbackStats,
+    attributes: player.attributes ? { ...player.attributes } : defaultAttrs,
   };
 
   // Update teams atomically
-  const updatedTeams = allTeams.map(t => {
+  const updatedTeams = (Array.isArray(allTeams) ? allTeams : []).map(t => {
+    if (!t) return t;
     const isThisSellingClub = (sellingClub && t.id === sellingClub.id) || (sellingClubId && t.id === sellingClubId) || (sellingClub?.isUserClub && t.isUserClub);
     const isThisBuyingClub = (buyingClub && t.id === buyingClub.id) || (buyingClubId && t.id === buyingClubId);
 
     // 1. Selling Club: remove player, remove from tactics lineup/bench/special roles, add transfer fee
-    if (isThisSellingClub) {
-      const filteredPlayers = (t.players || []).filter(p => p && p.id !== player.id);
+    if (isThisSellingClub && !isThisBuyingClub) {
+      const filteredPlayers = (t.players || []).filter(p => p && p.id && p.id !== player.id);
       const updatedTactics = t.tactics ? {
         ...t.tactics,
         startingPlayerIds: (t.tactics.startingPlayerIds || []).filter(id => id && id !== player.id),
@@ -531,7 +678,7 @@ export function executeAtomicTransfer(params: {
 
       return {
         ...t,
-        budget: t.budget + transferFee,
+        budget: (t.budget || 0) + transferFee,
         players: filteredPlayers,
         tactics: updatedTactics,
       };
@@ -540,10 +687,10 @@ export function executeAtomicTransfer(params: {
     // 2. Buying Club: add player and subtract transfer fee (if in league teams)
     if (isThisBuyingClub) {
       toClubName = t.name;
-      const filteredExisting = (t.players || []).filter(p => p && p.id !== player.id);
+      const filteredExisting = (t.players || []).filter(p => p && p.id && p.id !== player.id);
       return {
         ...t,
-        budget: Math.max(0, t.budget - transferFee),
+        budget: Math.max(0, (t.budget || 0) - transferFee),
         players: [...filteredExisting, transferredPlayer],
       };
     }
@@ -552,7 +699,7 @@ export function executeAtomicTransfer(params: {
     if (t.players && t.players.some(p => p && p.id === player.id) && !isThisSellingClub) {
       return {
         ...t,
-        players: t.players.filter(p => p && p.id !== player.id),
+        players: (t.players || []).filter(p => p && p.id && p.id !== player.id),
         tactics: t.tactics ? {
           ...t.tactics,
           startingPlayerIds: (t.tactics.startingPlayerIds || []).filter(id => id && id !== player.id),
@@ -632,8 +779,9 @@ export function resolveFullPlayerObject(
   transferMarket: Player[] = []
 ): Player {
   // 1. Search in current teams
-  for (const t of allTeams) {
-    const p = (t.players || []).find(x => x.id === deal.playerId);
+  for (const t of (allTeams || [])) {
+    if (!t) continue;
+    const p = (t.players || []).find(x => x && x.id === deal.playerId);
     if (p) {
       return {
         ...p,
@@ -647,7 +795,7 @@ export function resolveFullPlayerObject(
   }
 
   // 2. Search in transfer market
-  const marketPlayer = transferMarket.find(p => p.id === deal.playerId);
+  const marketPlayer = (transferMarket || []).find(p => p && p.id === deal.playerId);
   if (marketPlayer) {
     return {
       ...marketPlayer,
@@ -660,7 +808,7 @@ export function resolveFullPlayerObject(
   }
 
   // 3. Search in verified real players registry
-  const vrp = VERIFIED_REAL_PLAYERS.find(p => p.id === deal.playerId);
+  const vrp = VERIFIED_REAL_PLAYERS.find(p => p && p.id === deal.playerId);
   if (vrp) {
     const converted = convertVerifiedRealPlayerToPlayer(vrp);
     return {
@@ -787,11 +935,24 @@ export function findEligibleBuyerClubs(
     if (budget < val * 0.75) continue;
 
     // Caliber & Reputation compatibility:
-    // Superstars (85+) only go to elite clubs (rep >= 75)
+    // 1. STRICT REALISM: European Stars (Rating >= 78 or wonderkids) CANNOT be bought by Arab clubs
+    // "مينفعش لاعب مشهور و قوى يسيب فريق كبيرر فى اوربا عشان يروح نادى عربى"
+    const currentClub = allTeams.find(t => t.id === targetPlayer.currentClubId);
+    const isPlayerFromEuropeanClub = isEuropeanEliteClub(currentClub) || isTopEuropeanLeague(currentClub?.leagueId) || ovr >= 82;
+    const isBuyerArab = isArabOrAfricanClub(club);
+
+    if (isPlayerFromEuropeanClub && isBuyerArab) {
+      const isVeteranMarquee = (targetPlayer.age || 25) >= 33 && club.leagueId === 'sau_tier_1' && rep >= 80;
+      if (!isVeteranMarquee && (ovr >= 78 || ((targetPlayer.age || 25) <= 23 && (targetPlayer.potentialRating || ovr) >= 80))) {
+        continue; // Exclude Arab clubs from bidding on prime European stars
+      }
+    }
+
+    // 2. Superstars (85+) only go to world-class elite clubs (rep >= 84)
     if (ovr >= 85) {
-      if (div !== 1 || rep < 75) continue;
+      if (div !== 1 || rep < 84) continue;
     } else if (ovr >= 80) {
-      if (div !== 1 || rep < 60) continue;
+      if (div !== 1 || rep < 70) continue;
     } else if (ovr >= 75) {
       if (div > 2 || (div === 2 && rep < 48)) continue;
     } else if (ovr >= 70) {

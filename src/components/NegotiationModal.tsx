@@ -87,7 +87,7 @@ export const NegotiationModal: React.FC<NegotiationModalProps> = ({
   const remainingWageBudget = Math.max(0, clubMonthlyIncome - clubCurrentWages);
   
   const isSalaryBelowCurrent = numSalary < (targetPlayer.salary || 0);
-  const isFeeExceedingBudget = userClub ? numFee > userClub.budget : false;
+  const isFeeExceedingBudget = userClub ? numFee > (userClub.budget || 0) : false;
   const isSalaryExceedingCap = numSalary > remainingWageBudget;
 
   const transferValidation = userClub
@@ -95,7 +95,7 @@ export const NegotiationModal: React.FC<NegotiationModalProps> = ({
     : { allowed: false, canAffordFee: false, canAffordWage: false, reason: 'يجب تولي تدريب نادٍ أولاً' };
 
   // Counter offer validations
-  const canAffordCounterFee = userClub && existingNegotiation?.demandedFee ? userClub.budget >= existingNegotiation.demandedFee : true;
+  const canAffordCounterFee = userClub && existingNegotiation?.demandedFee ? (userClub.budget || 0) >= existingNegotiation.demandedFee : true;
   const canAffordCounterSalary = userClub && existingNegotiation?.demandedSalary ? (clubCurrentWages + existingNegotiation.demandedSalary <= clubMonthlyIncome) : true;
 
   const handleSubmit = (e: React.FormEvent) => {

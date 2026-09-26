@@ -77,6 +77,21 @@ export function normalizeStanding(s: any): LeagueStanding {
 }
 
 export function normalizeManagerProfile(parsed: any): ManagerProfile {
+  const matches = parsed?.matchesManaged ?? parsed?.careerMatches ?? 0;
+  const completedSeasons = parsed?.totalSeasonsCompleted ?? Math.max(0, (parsed?.totalSeasons || 1) - 1);
+
+  // Safe migration for play time: if existing career has matches but 0/missing play time, calculate fair retroactive time
+  const existingMinutes = typeof parsed?.totalPlayTimeMinutes === 'number' ? parsed.totalPlayTimeMinutes : 0;
+  const migratedPlayTimeMinutes = existingMinutes > 0
+    ? existingMinutes
+    : (matches > 0 ? (matches * 4 + completedSeasons * 20) : 0);
+
+  // Safe migration for player development
+  const existingDeveloped = typeof parsed?.totalPlayersDeveloped === 'number' ? parsed.totalPlayersDeveloped : 0;
+  const migratedPlayersDeveloped = existingDeveloped > 0
+    ? existingDeveloped
+    : Math.max(0, Math.floor((parsed?.developmentPoints || 0) / 15));
+
   return {
     ...INITIAL_MANAGER,
     ...parsed,
@@ -88,7 +103,19 @@ export function normalizeManagerProfile(parsed: any): ManagerProfile {
     personalWallet: parsed?.personalWallet !== undefined ? parsed.personalWallet : 65000,
     financialTransactions: Array.isArray(parsed?.financialTransactions) ? parsed.financialTransactions : [],
     completedCourses: Array.isArray(parsed?.completedCourses) ? parsed.completedCourses : [],
-    license: (parsed?.license && ['D', 'C', 'B', 'A', 'PRO'].includes(parsed.license)) ? parsed.license : 'D',
+    license: (parsed?.license && ['D', 'C', 'B', 'A', 'PRO', 'ELITE'].includes(parsed.license)) ? parsed.license : 'D',
     favoriteFormation: parsed?.favoriteFormation || INITIAL_MANAGER.favoriteFormation || '4-3-3',
+    matchesManaged: matches,
+    wins: parsed?.wins ?? parsed?.careerWins ?? 0,
+    draws: parsed?.draws ?? parsed?.careerDraws ?? 0,
+    losses: parsed?.losses ?? parsed?.careerLosses ?? 0,
+    totalPlayTimeMinutes: migratedPlayTimeMinutes,
+    totalPlayersDeveloped: migratedPlayersDeveloped,
+    tacticalExperience: parsed?.tacticalExperience && typeof parsed.tacticalExperience === 'object'
+      ? { ...INITIAL_MANAGER.tacticalExperience, ...parsed.tacticalExperience }
+      : (INITIAL_MANAGER.tacticalExperience || {}),
+    tacticalKnowledge: Array.isArray(parsed?.tacticalKnowledge)
+      ? parsed.tacticalKnowledge
+      : (INITIAL_MANAGER.tacticalKnowledge || []),
   };
 }

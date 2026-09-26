@@ -65,12 +65,29 @@ export function checkCupStageAdvancementRewards(
   const userMatches = cup.matches.filter(m => m.homeTeamId === userClubId || m.awayTeamId === userClubId);
   const finalMatch = cup.matches.find(m => m.stage === 'final');
 
+  const isMatchWonByUser = (m: any): boolean => {
+    if (!m || !m.isPlayed) return false;
+    if (m.winnerTeamId === userClubId) return true;
+    const isUserHome = m.homeTeamId === userClubId;
+    const isUserAway = m.awayTeamId === userClubId;
+    if (!isUserHome && !isUserAway) return false;
+
+    const hs = m.homeScore ?? 0;
+    const as = m.awayScore ?? 0;
+    const hp = m.homePenalties;
+    const ap = m.awayPenalties;
+
+    if (hp !== undefined && ap !== undefined && hp !== ap) {
+      return isUserHome ? hp > ap : ap > hp;
+    }
+    if (hs !== as) {
+      return isUserHome ? hs > as : as > hs;
+    }
+    return false;
+  };
+
   // Check 1: Champion
-  const isChampion = (finalMatch && finalMatch.isPlayed && (
-    finalMatch.winnerTeamId === userClubId ||
-    (finalMatch.homeTeamId === userClubId && (finalMatch.homeScore || 0) > (finalMatch.awayScore || 0)) ||
-    (finalMatch.awayTeamId === userClubId && (finalMatch.awayScore || 0) > (finalMatch.homeScore || 0))
-  )) || (cup.isCompleted && cup.winnerClubId === userClubId);
+  const isChampion = (finalMatch && finalMatch.isPlayed && isMatchWonByUser(finalMatch)) || (cup.isCompleted && cup.winnerClubId === userClubId);
 
   if (isChampion && !claimed.has('champion')) {
     claimed.add('champion');
@@ -100,11 +117,7 @@ export function checkCupStageAdvancementRewards(
   }
 
   // Check 3: Semi-finals reached (user has a semi match, or won a quarter match)
-  const wonQuarter = userMatches.some(m => m.stage === 'quarter' && m.isPlayed && (
-    m.winnerTeamId === userClubId ||
-    (m.homeTeamId === userClubId && (m.homeScore || 0) > (m.awayScore || 0)) ||
-    (m.awayTeamId === userClubId && (m.awayScore || 0) > (m.homeScore || 0))
-  ));
+  const wonQuarter = userMatches.some(m => m.stage === 'quarter' && isMatchWonByUser(m));
   const hasSemiMatch = userMatches.some(m => m.stage === 'semi');
 
   if ((wonQuarter || hasSemiMatch) && !claimed.has('semi')) {
@@ -120,11 +133,7 @@ export function checkCupStageAdvancementRewards(
   }
 
   // Check 4: Quarter-finals reached (user has a quarter match, or won round_of_16)
-  const wonR16 = userMatches.some(m => m.stage === 'round_of_16' && m.isPlayed && (
-    m.winnerTeamId === userClubId ||
-    (m.homeTeamId === userClubId && (m.homeScore || 0) > (m.awayScore || 0)) ||
-    (m.awayTeamId === userClubId && (m.awayScore || 0) > (m.homeScore || 0))
-  ));
+  const wonR16 = userMatches.some(m => m.stage === 'round_of_16' && isMatchWonByUser(m));
   const hasQuarterMatch = userMatches.some(m => m.stage === 'quarter');
 
   if ((wonR16 || hasQuarterMatch) && !claimed.has('quarter')) {
@@ -140,11 +149,7 @@ export function checkCupStageAdvancementRewards(
   }
 
   // Check 5: Round of 16 reached (user has a round_of_16 match, or won round_of_32)
-  const wonR32 = userMatches.some(m => m.stage === 'round_of_32' && m.isPlayed && (
-    m.winnerTeamId === userClubId ||
-    (m.homeTeamId === userClubId && (m.homeScore || 0) > (m.awayScore || 0)) ||
-    (m.awayTeamId === userClubId && (m.awayScore || 0) > (m.homeScore || 0))
-  ));
+  const wonR32 = userMatches.some(m => m.stage === 'round_of_32' && isMatchWonByUser(m));
   const hasR16Match = userMatches.some(m => m.stage === 'round_of_16');
 
   if ((wonR32 || hasR16Match) && !claimed.has('round_of_16')) {
@@ -160,11 +165,7 @@ export function checkCupStageAdvancementRewards(
   }
 
   // Check 6: Round of 32 reached (won round_of_64, or started in round_of_32)
-  const wonR64 = userMatches.some(m => m.stage === 'round_of_64' && m.isPlayed && (
-    m.winnerTeamId === userClubId ||
-    (m.homeTeamId === userClubId && (m.homeScore || 0) > (m.awayScore || 0)) ||
-    (m.awayTeamId === userClubId && (m.awayScore || 0) > (m.homeScore || 0))
-  ));
+  const wonR64 = userMatches.some(m => m.stage === 'round_of_64' && isMatchWonByUser(m));
   const hasR32Match = userMatches.some(m => m.stage === 'round_of_32');
 
   if (wonR64 && !claimed.has('round_of_32')) {

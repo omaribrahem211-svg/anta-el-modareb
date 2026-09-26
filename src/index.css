@@ -33,3 +33,31 @@ html, body {
   overscroll-behavior-y: none;
 }
 
+/* Lightweight 60fps hardware-accelerated animations for 2.5D match pitch */
+@keyframes pitchLegRunLeft {
+  0%, 100% { transform: translateY(0px); }
+  50% { transform: translateY(-1.8px); }
+}
+
+@keyframes pitchLegRunRight {
+  0%, 100% { transform: translateY(-1.8px); }
+  50% { transform: translateY(0px); }
+}
+
+@keyframes pitchBallFloat {
+  0%, 100% { transform: translateY(0px) scale(1); }
+  50% { transform: translateY(-2.5px) scale(1.08); }
+}
+
+.animate-leg-left {
+  animation: pitchLegRunLeft 0.32s ease-in-out infinite alternate;
+}
+
+.animate-leg-right {
+  animation: pitchLegRunRight 0.32s ease-in-out infinite alternate;
+}
+
+.animate-ball-float {
+  animation: pitchBallFloat 0.45s ease-in-out infinite;
+}
+
