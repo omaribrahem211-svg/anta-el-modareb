@@ -1,3 +1,6 @@
+import { DailyLoginRewardState } from './dailyReward';
+export * from './dailyReward';
+
 export type Position = 'GK' | 'CB' | 'RB' | 'LB' | 'CDM' | 'CM' | 'CAM' | 'RW' | 'LW' | 'ST';
 
 export type PositionCategory = 'GK' | 'DEF' | 'MID' | 'FWD';
@@ -815,6 +818,7 @@ export interface ManagerProfile {
   completedCourses?: string[]; // الدورات والرخص التدريبية الحاصل عليها
   totalClubDonations?: number; // إجمالي المبالغ المتبرع بها للنادي
   totalBonusesEarned?: number; // إجمالي مكافآت الفوز والبطولات
+  dailyLoginRewardState?: DailyLoginRewardState; // حالة ومكافآت تسجيل الدخول اليومي المتتالية
 
   // Deep Tactical Knowledge & Mastery (الخبرة والمعرفة التكتيكية التراكمية)
   tacticalExperience?: Record<string, number>; // e.g. { high_press: 72, tiki_taka: 55, low_block: 85 }

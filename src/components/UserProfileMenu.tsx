@@ -26,7 +26,7 @@ interface UserProfileMenuProps {
 
 export const UserProfileMenu: React.FC<UserProfileMenuProps> = ({ onOpenAdmin, onOpenResetConfirm }) => {
   const { user, isAdmin } = useAuth();
-  const { manager } = useGame();
+  const { manager, canClaimDailyReward, setShowDailyRewardModal, dailyRewardState } = useGame();
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [showSettingsModal, setShowSettingsModal] = useState(false);
   const [showPromoModal, setShowPromoModal] = useState(false);
@@ -118,6 +118,33 @@ export const UserProfileMenu: React.FC<UserProfileMenuProps> = ({ onOpenAdmin, o
                 </button>
               </div>
             )}
+
+            {/* Daily Login Reward Action */}
+            <div className="mb-2">
+              <button
+                onClick={() => {
+                  setIsDropdownOpen(false);
+                  setShowDailyRewardModal(true);
+                }}
+                className={`w-full flex items-center justify-between p-2.5 rounded-xl border font-bold transition-all cursor-pointer group shadow-sm text-xs ${
+                  canClaimDailyReward
+                    ? 'bg-gradient-to-r from-emerald-500/20 via-emerald-500/30 to-amber-500/20 hover:from-emerald-500/30 hover:to-amber-500/30 border-emerald-500/60 text-emerald-200 animate-pulse'
+                    : 'bg-slate-800 hover:bg-slate-750 border-slate-700/80 text-slate-200'
+                }`}
+              >
+                <div className="flex items-center gap-2">
+                  <Gift className={`w-4 h-4 ${canClaimDailyReward ? 'text-amber-400 group-hover:scale-110' : 'text-slate-400'} transition-transform`} />
+                  <span>مكافأة تسجيل الدخول اليومي</span>
+                </div>
+                <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${
+                  canClaimDailyReward
+                    ? 'bg-emerald-500/40 text-emerald-200 border border-emerald-400/50'
+                    : 'bg-slate-700 text-slate-300'
+                }`}>
+                  {canClaimDailyReward ? 'متاح الآن 🎁' : `سلسلة ${dailyRewardState.streak || 0} أيام 🔥`}
+                </span>
+              </button>
+            </div>
 
             {/* Promo / Gift Code Redemption Action */}
             <div className="mb-2">

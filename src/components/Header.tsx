@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useGame } from '../context/GameContext';
-import { Trophy, Wallet, Star, Bell, Shield, Play, Cloud, Check, Loader2 } from 'lucide-react';
+import { Trophy, Wallet, Star, Bell, Shield, Play, Cloud, Check, Loader2, Gift } from 'lucide-react';
 import { ActiveTab } from '../types/game';
 import { UserProfileMenu } from './UserProfileMenu';
 import { useLanguage } from '../utils/i18n';
@@ -30,6 +30,8 @@ export const Header: React.FC<HeaderProps> = ({
     activeLeague,
     openSeasonModal,
     saveToCloud,
+    canClaimDailyReward,
+    setShowDailyRewardModal,
   } = useGame();
 
   const { t } = useLanguage();
@@ -173,6 +175,26 @@ export const Header: React.FC<HeaderProps> = ({
             {unreadMessagesCount > 0 && (
               <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[10px] font-bold w-4 h-4 rounded-full flex items-center justify-center animate-pulse">
                 {unreadMessagesCount}
+              </span>
+            )}
+          </button>
+
+          {/* Daily Reward Button */}
+          <button 
+            onClick={() => setShowDailyRewardModal(true)}
+            className={`relative flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs font-bold transition-all cursor-pointer ${
+              canClaimDailyReward
+                ? 'bg-gradient-to-r from-amber-500/20 via-amber-500/30 to-amber-500/20 border-amber-500/60 text-amber-300 shadow-md shadow-amber-500/10 animate-pulse'
+                : 'bg-slate-800 hover:bg-slate-700 border-slate-700/80 text-slate-300'
+            }`}
+            title="مكافآت تسجيل الدخول اليومي"
+          >
+            <Gift className={`w-3.5 h-3.5 ${canClaimDailyReward ? 'text-amber-400' : 'text-slate-400'}`} />
+            <span className="hidden sm:inline text-[11px]">مكافأة يومية</span>
+            {canClaimDailyReward && (
+              <span className="absolute -top-1 -right-1 flex h-2.5 w-2.5">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-amber-500"></span>
               </span>
             )}
           </button>

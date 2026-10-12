@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useGame } from '../context/GameContext';
 import { Sponsor, SponsorshipOffer, SponsorCategory } from '../types/game';
 import { getSponsorCategoryLabel } from '../services/sponsorshipService';
@@ -52,6 +52,17 @@ export const SponsorshipHubModal: React.FC<SponsorshipHubModalProps> = ({
     text: string;
     type: 'success' | 'error' | 'info';
   } | null>(null);
+
+  // Android hardware back button listener
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleBack = (e: Event) => {
+      e.preventDefault();
+      onClose();
+    };
+    window.addEventListener('anta-android-back-pressed', handleBack);
+    return () => window.removeEventListener('anta-android-back-pressed', handleBack);
+  }, [isOpen, onClose]);
 
   if (!isOpen || !userClub) return null;
 

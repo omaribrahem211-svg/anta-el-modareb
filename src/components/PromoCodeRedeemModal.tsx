@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   Gift, 
   X, 
@@ -31,6 +31,17 @@ export const PromoCodeRedeemModal: React.FC<PromoCodeRedeemModalProps> = ({ isOp
     coins?: number;
     message: string;
   } | null>(null);
+
+  // Android hardware back button listener
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleBack = (e: Event) => {
+      e.preventDefault();
+      onClose();
+    };
+    window.addEventListener('anta-android-back-pressed', handleBack);
+    return () => window.removeEventListener('anta-android-back-pressed', handleBack);
+  }, [isOpen, onClose]);
 
   if (!isOpen) return null;
 

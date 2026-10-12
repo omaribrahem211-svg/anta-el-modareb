@@ -26,6 +26,7 @@ import { WelcomeModalHandler } from './components/WelcomeModalHandler';
 import { FacebookBanner } from './components/FacebookBanner';
 import { BannerAdContainer } from './components/ads/BannerAdContainer';
 import { RewardedAdCenterModal } from './components/ads/RewardedAdCenterModal';
+import { DailyLoginRewardModal } from './components/DailyLoginRewardModal';
 import { AdManager } from './services/adManager';
 import { ADMOB_CONFIG } from './config/admobConfig';
 import { AdRewardType } from './services/adRewardService';
@@ -43,7 +44,15 @@ function GameApp() {
   }, []);
 
   const { isAdmin } = useAuth();
-  const { dayAdvanceSummary, showDaySummaryModal, closeDaySummaryModal, isMatchDay, liveMatch } = useGame();
+  const { 
+    dayAdvanceSummary, 
+    showDaySummaryModal, 
+    closeDaySummaryModal, 
+    isMatchDay, 
+    liveMatch,
+    showDailyRewardModal,
+    setShowDailyRewardModal
+  } = useGame();
   const [activeTab, setActiveTab] = useState<ActiveTab>('dashboard');
 
   const handleTabChange = useCallback((newTab: ActiveTab) => {
@@ -113,38 +122,51 @@ function GameApp() {
     if (!Capacitor.isNativePlatform()) return;
 
     let backListenerPromise = CapApp.addListener('backButton', () => {
-      // 1. Close open Player Modal
+      // 0. Close Rewarded Ad Modal if open
+      if (isRewardedModalOpen) {
+        setIsRewardedModalOpen(false);
+        return;
+      }
+
+      // 1. Dispatch custom event so open page-level modals (like Sponsorship Hub, Promo code) can handle back
+      const backEvent = new CustomEvent('anta-android-back-pressed', { cancelable: true });
+      const handled = !window.dispatchEvent(backEvent);
+      if (handled) {
+        return;
+      }
+
+      // 2. Close open Player Modal
       if (selectedPlayer) {
         setSelectedPlayer(null);
         return;
       }
 
-      // 2. Close Day Summary Modal if open
+      // 3. Close Day Summary Modal if open
       if (showDaySummaryModal) {
         closeDaySummaryModal();
         return;
       }
 
-      // 3. Exit Privacy Policy or Admin View if open
+      // 4. Exit Privacy Policy or Admin View if open
       if (isPrivacyPolicyMode || isAdminMode) {
         handleBackToGame();
         return;
       }
 
-      // 4. If on sub-tab, return to Dashboard Home
+      // 5. If on sub-tab, return to Dashboard Home
       if (activeTab !== 'dashboard') {
         setActiveTab('dashboard');
         return;
       }
 
-      // 5. If on Dashboard Home and nothing open, exit app
+      // 6. If on Dashboard Home and nothing open, exit app
       CapApp.exitApp();
     });
 
     return () => {
       backListenerPromise.then(l => l.remove()).catch(() => {});
     };
-  }, [selectedPlayer, showDaySummaryModal, closeDaySummaryModal, isAdminMode, isPrivacyPolicyMode, activeTab]);
+  }, [selectedPlayer, showDaySummaryModal, closeDaySummaryModal, isAdminMode, isPrivacyPolicyMode, activeTab, isRewardedModalOpen]);
 
   // Listen to browser navigation changes for /admin, #admin, /privacy-policy, #privacy-policy
   useEffect(() => {
@@ -323,6 +345,12 @@ function GameApp() {
 
       {/* Google AdMob Persistent Smart Banner (Android & Safe Preview) */}
       <BannerAdContainer activeTab={activeTab} isMatchActive={!!liveMatch} />
+
+      {/* Daily Login Reward Modal */}
+      <DailyLoginRewardModal
+        isOpen={showDailyRewardModal}
+        onClose={() => setShowDailyRewardModal(false)}
+      />
 
       {/* Google AdMob Rewarded Video Center Modal (Temporarily Disabled) */}
       {ADMOB_CONFIG.ENABLE_REWARDS && (

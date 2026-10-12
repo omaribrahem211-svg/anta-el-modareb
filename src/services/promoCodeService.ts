@@ -7,6 +7,7 @@ import {
   deleteDoc, 
   updateDoc, 
   query, 
+  where,
   orderBy, 
   runTransaction 
 } from 'firebase/firestore';
@@ -16,6 +17,7 @@ import { isQuotaExceededError, markQuotaExceeded } from '../utils/firestoreError
 import { addDoc } from 'firebase/firestore';
 
 const LOCAL_PROMO_CODES_KEY = 'anta_el_modareb_cached_promo_codes_v1';
+const LOCAL_CUSTOM_PROMO_CODES_KEY = 'anta_el_modareb_custom_promo_codes_permanent_v1';
 const LOCAL_REDEEMED_CODES_KEY = 'anta_el_modareb_redeemed_codes_v1';
 const RATE_LIMIT_KEY = 'anta_el_modareb_promo_rate_limit_v1';
 
@@ -51,7 +53,7 @@ export const DEFAULT_PROMO_CODES: PromoCode[] = [
     code: 'WELCOME10M',
     rewardAmount: 10000000,
     rewardCoins: 50,
-    maxUses: 500,
+    maxUses: 1000,
     usedCount: 0,
     usedByManagerIds: [],
     redeemedBy: [],
@@ -63,19 +65,66 @@ export const DEFAULT_PROMO_CODES: PromoCode[] = [
   }
 ];
 
+function getPersistentCustomCodes(): PromoCode[] {
+  try {
+    const raw = localStorage.getItem(LOCAL_CUSTOM_PROMO_CODES_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) return parsed;
+    }
+  } catch {}
+  return [];
+}
+
+function savePersistentCustomCodes(customCodes: PromoCode[]): void {
+  try {
+    localStorage.setItem(LOCAL_CUSTOM_PROMO_CODES_KEY, JSON.stringify(customCodes));
+  } catch {}
+}
+
 function getCachedPromoCodes(): PromoCode[] {
+  const map = new Map<string, PromoCode>();
+  
+  // 1. Defaults first
+  for (const c of DEFAULT_PROMO_CODES) {
+    map.set(c.code.toUpperCase(), c);
+  }
+
+  // 2. Persistent custom codes (never wiped)
+  for (const c of getPersistentCustomCodes()) {
+    map.set(c.code.toUpperCase(), c);
+  }
+
+  // 3. Regular cached codes
   try {
     const raw = localStorage.getItem(LOCAL_PROMO_CODES_KEY);
     if (raw) {
-      return JSON.parse(raw);
+      const parsed: PromoCode[] = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        for (const c of parsed) {
+          map.set(c.code.toUpperCase(), c);
+        }
+      }
     }
   } catch {}
-  return DEFAULT_PROMO_CODES;
+
+  return Array.from(map.values());
 }
 
 function cachePromoCodes(codes: PromoCode[]): void {
   try {
     localStorage.setItem(LOCAL_PROMO_CODES_KEY, JSON.stringify(codes));
+    
+    // Also save all custom non-default codes to persistent store
+    const defaultKeys = new Set(DEFAULT_PROMO_CODES.map(d => d.code.toUpperCase()));
+    const customOnly = codes.filter(c => !defaultKeys.has(c.code.toUpperCase()));
+    if (customOnly.length > 0) {
+      const existingCustom = getPersistentCustomCodes();
+      const customMap = new Map<string, PromoCode>();
+      existingCustom.forEach(c => customMap.set(c.code.toUpperCase(), c));
+      customOnly.forEach(c => customMap.set(c.code.toUpperCase(), c));
+      savePersistentCustomCodes(Array.from(customMap.values()));
+    }
   } catch {}
 }
 
@@ -148,7 +197,7 @@ function clearRateLimit(): void {
 // -----------------------------------------------------------
 
 /**
- * Fetch all promo codes from Firestore (with local cache fallback)
+ * Fetch all promo codes from Firestore (with intelligent local cache merge)
  */
 export async function fetchAllPromoCodes(): Promise<PromoCode[]> {
   try {
@@ -162,23 +211,39 @@ export async function fetchAllPromoCodes(): Promise<PromoCode[]> {
     );
     const snap = await Promise.race([getDocsPromise, timeoutPromise]);
 
+    const localCached = getCachedPromoCodes();
+
     if (snap.empty) {
-      // Seed initial default code if empty
-      const cached = getCachedPromoCodes();
-      if (cached.length > 0) {
-        const first = cached[0];
+      // Seed initial default code if database is fresh
+      if (localCached.length > 0) {
+        const first = localCached[0];
         setDoc(doc(db, 'promo_codes', first.code), first).catch(() => {});
       }
-      return cached;
+      return localCached;
     }
 
-    const codes: PromoCode[] = snap.docs.map(d => ({
+    const firestoreCodes: PromoCode[] = snap.docs.map(d => ({
       id: d.id,
       ...d.data()
     } as PromoCode));
 
-    cachePromoCodes(codes);
-    return codes;
+    // MERGE: Keep all local custom codes while updating from Firestore
+    const mergedMap = new Map<string, PromoCode>();
+    
+    // 1. Local cached / persistent codes
+    for (const c of localCached) {
+      mergedMap.set(c.code.toUpperCase(), c);
+    }
+
+    // 2. Overwrite / supplement with latest cloud Firestore codes
+    for (const c of firestoreCodes) {
+      mergedMap.set(c.code.toUpperCase(), c);
+    }
+
+    const mergedList = Array.from(mergedMap.values());
+    cachePromoCodes(mergedList);
+
+    return mergedList;
   } catch (err) {
     if (isQuotaExceededError(err)) {
       markQuotaExceeded();
@@ -218,9 +283,9 @@ export async function createPromoCode(params: {
     throw new Error('عدد مرات الاستخدام يجب أن يكون 1 على الأقل.');
   }
 
-  // 1. Fast local cache check for duplicates
+  // 1. Fast check for duplicates
   const cachedCodes = getCachedPromoCodes();
-  if (cachedCodes.some(c => c.code === normalizedCode)) {
+  if (cachedCodes.some(c => c.code.toUpperCase() === normalizedCode)) {
     throw new Error(`الكود (${normalizedCode}) موجود بالفعل! يرجى اختيار كود آخر أو تعديله.`);
   }
 
@@ -243,39 +308,38 @@ export async function createPromoCode(params: {
     expiresAt: params.expiresAt || null
   };
 
-  // 2. Save to local cache IMMEDIATELY (instant responsiveness)
-  const updatedCache = [newCodeDoc, ...cachedCodes.filter(c => c.code !== normalizedCode)];
+  // 2. Save to local cache & persistent store IMMEDIATELY (guarantees code is never lost)
+  const updatedCache = [newCodeDoc, ...cachedCodes.filter(c => c.code.toUpperCase() !== normalizedCode)];
   cachePromoCodes(updatedCache);
 
-  // 3. Write to Firestore in background with 3000ms safety timeout
-  const saveToFirestore = async () => {
-    try {
-      const setDocPromise = setDoc(doc(db, 'promo_codes', normalizedCode), newCodeDoc);
-      const timeoutPromise = new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error('Firestore write timeout')), 3000)
-      );
-      await Promise.race([setDocPromise, timeoutPromise]);
-    } catch (err) {
-      console.warn('[PromoCodes] Firestore write note:', err);
-    }
+  // 3. Write to Firestore cloud with safety timeout (await it to guarantee it is persisted in cloud for Android users)
+  let cloudSynced = false;
+  try {
+    const setDocPromise = setDoc(doc(db, 'promo_codes', normalizedCode), newCodeDoc);
+    const timeoutPromise = new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error('Firestore write timeout')), 5000)
+    );
+    await Promise.race([setDocPromise, timeoutPromise]);
+    cloudSynced = true;
+  } catch (err) {
+    console.warn('[PromoCodes] Firestore write note (saved locally):', err);
+  }
 
-    logPromoAdminAudit(
-      adminUid,
-      adminEmail,
-      'create_promo_code',
-      normalizedCode,
-      `إنشاء كود مكافأة [${normalizedCode}] بمبلغ ${params.rewardAmount.toLocaleString()} ج.م وحد أقصى ${params.maxUses} استخدام`,
-      { code: normalizedCode, rewardAmount: params.rewardAmount, maxUses: params.maxUses }
-    ).catch(() => {});
-  };
-
-  // Run cloud sync in background
-  saveToFirestore();
+  logPromoAdminAudit(
+    adminUid,
+    adminEmail,
+    'create_promo_code',
+    normalizedCode,
+    `إنشاء كود مكافأة [${normalizedCode}] بمبلغ ${params.rewardAmount.toLocaleString()} ج.م وحد أقصى ${params.maxUses} استخدام`,
+    { code: normalizedCode, rewardAmount: params.rewardAmount, maxUses: params.maxUses, cloudSynced }
+  ).catch(() => {});
 
   return {
     success: true,
     promoCode: newCodeDoc,
-    message: `تم إنشاء كود المكافأة [${normalizedCode}] بنجاح بقيمة ${params.rewardAmount.toLocaleString()} ج.م!`
+    message: cloudSynced
+      ? `تم إنشاء ونشر كود المكافأة [${normalizedCode}] بنجاح على السحابة وجاهز للاستخدام الفوري لجميع أجهزة الأندرويد والويب!`
+      : `تم حفظ الكود [${normalizedCode}] محلياً وجاري مزامنته مع السحابة فور توفر الاتصال.`
   };
 }
 
@@ -295,29 +359,25 @@ export async function deletePromoCode(
   const adminEmail = adminUser?.email || 'omar.ibrahem211@gmail.com';
   const adminUid = adminUser?.uid || 'super_admin';
 
-  // 2. Sync deletion to Firestore in background with safety timeout
-  const deleteFromFirestore = async () => {
-    try {
-      const deletePromise = deleteDoc(doc(db, 'promo_codes', normalized));
-      const timeoutPromise = new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error('Firestore delete timeout')), 3000)
-      );
-      await Promise.race([deletePromise, timeoutPromise]);
-    } catch (err) {
-      console.warn('[PromoCodes] Firestore delete note:', err);
-    }
+  // 2. Sync deletion to Firestore with safety timeout
+  try {
+    const deletePromise = deleteDoc(doc(db, 'promo_codes', normalized));
+    const timeoutPromise = new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error('Firestore delete timeout')), 4000)
+    );
+    await Promise.race([deletePromise, timeoutPromise]);
+  } catch (err) {
+    console.warn('[PromoCodes] Firestore delete note:', err);
+  }
 
-    logPromoAdminAudit(
-      adminUid,
-      adminEmail,
-      'delete_promo_code',
-      normalized,
-      `حذف كود المكافأة [${normalized}] نهائياً من النظام لمنع أي استخدام مستقبلي`,
-      { code: normalized }
-    ).catch(() => {});
-  };
-
-  deleteFromFirestore();
+  logPromoAdminAudit(
+    adminUid,
+    adminEmail,
+    'delete_promo_code',
+    normalized,
+    `حذف كود المكافأة [${normalized}] نهائياً من النظام لمنع أي استخدام مستقبلي`,
+    { code: normalized }
+  ).catch(() => {});
 
   return {
     success: true,
@@ -345,29 +405,25 @@ export async function togglePromoCodeStatus(
   const adminEmail = adminUser?.email || 'omar.ibrahem211@gmail.com';
   const adminUid = adminUser?.uid || 'super_admin';
 
-  // 2. Sync toggle to Firestore in background with safety timeout
-  const toggleInFirestore = async () => {
-    try {
-      const updatePromise = updateDoc(doc(db, 'promo_codes', normalized), { isActive });
-      const timeoutPromise = new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error('Firestore toggle timeout')), 3000)
-      );
-      await Promise.race([updatePromise, timeoutPromise]);
-    } catch (err) {
-      console.warn('[PromoCodes] Firestore toggle note:', err);
-    }
+  // 2. Sync toggle to Firestore with safety timeout
+  try {
+    const updatePromise = updateDoc(doc(db, 'promo_codes', normalized), { isActive });
+    const timeoutPromise = new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error('Firestore toggle timeout')), 4000)
+    );
+    await Promise.race([updatePromise, timeoutPromise]);
+  } catch (err) {
+    console.warn('[PromoCodes] Firestore toggle note:', err);
+  }
 
-    logPromoAdminAudit(
-      adminUid,
-      adminEmail,
-      'toggle_promo_code',
-      normalized,
-      `تغيير حالة كود المكافأة [${normalized}] إلى (${isActive ? 'مفعل ومتاح للاستخدام' : 'معطل ومجمد'})`,
-      { code: normalized, isActive }
-    ).catch(() => {});
-  };
-
-  toggleInFirestore();
+  logPromoAdminAudit(
+    adminUid,
+    adminEmail,
+    'toggle_promo_code',
+    normalized,
+    `تغيير حالة كود المكافأة [${normalized}] إلى (${isActive ? 'مفعل ومتاح للاستخدام' : 'معطل ومجمد'})`,
+    { code: normalized, isActive }
+  ).catch(() => {});
 
   return {
     success: true,
@@ -405,6 +461,7 @@ export async function redeemPromoCode(
   }
 ): Promise<RedeemResult> {
   const normalizedCode = (rawInput || '').trim().toUpperCase().replace(/\s+/g, '');
+  const strippedCode = normalizedCode.replace(/[-_]/g, '');
 
   if (!normalizedCode) {
     throw new Error('يرجى كتابة كود الهدية أولاً!');
@@ -416,31 +473,63 @@ export async function redeemPromoCode(
     throw new Error(`يرجى الانتظار (${rateLimit.waitSeconds} ثانية) قبل محاولة إدخال كود جديد لحماية الأمان.`);
   }
 
-  // 2. Check local redemption record
-  const localRedeemed = getLocalRedeemedCodeKeys();
-  if (localRedeemed.includes(normalizedCode)) {
-    throw new Error('لقد قمت باسترداد هذا الكود بالفعل مسبقاً! لا يمكن استرداد الكود أكثر من مرة لنفس المدرب.');
-  }
-
   const userIdentifier = managerInfo.userId || managerInfo.trainerId || 'anon_manager';
 
-  // 3. Look up promo code: First in local cache, then Firestore fallback
+  // 2. Look up promo code: First in local cache & persistent store, then Firestore cloud fallback
   const cachedCodes = getCachedPromoCodes();
-  let matchedCode: PromoCode | undefined = cachedCodes.find(c => c.code === normalizedCode);
+  let matchedCode: PromoCode | undefined = cachedCodes.find(
+    c => c.code.toUpperCase() === normalizedCode || 
+         c.code.toUpperCase().replace(/[-_]/g, '') === strippedCode
+  );
 
-  // If not found in local cache, check Firestore with safety timeout
+  // If not found in local cache, check Firestore with safety timeout (up to 6000ms for mobile networks)
   if (!matchedCode) {
     try {
+      // Step A: Direct document lookup by normalizedCode
       const codeRef = doc(db, 'promo_codes', normalizedCode);
       const getDocPromise = getDoc(codeRef);
       const timeoutPromise = new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error('Firestore read timeout')), 2500)
+        setTimeout(() => reject(new Error('Firestore read timeout')), 6000)
       );
       const docSnap = await Promise.race([getDocPromise, timeoutPromise]);
       if (docSnap && docSnap.exists()) {
         matchedCode = { id: docSnap.id, ...docSnap.data() } as PromoCode;
-        // Add to local cache for future lookups
-        const updated = [matchedCode, ...cachedCodes.filter(c => c.code !== normalizedCode)];
+      } else if (strippedCode !== normalizedCode) {
+        // Step B: Direct document lookup by strippedCode
+        const strippedRef = doc(db, 'promo_codes', strippedCode);
+        const strippedSnap = await getDoc(strippedRef).catch(() => null);
+        if (strippedSnap && strippedSnap.exists()) {
+          matchedCode = { id: strippedSnap.id, ...strippedSnap.data() } as PromoCode;
+        }
+      }
+
+      // Step C: If still not found, query by code field
+      if (!matchedCode) {
+        const qCode = query(collection(db, 'promo_codes'), where('code', '==', normalizedCode));
+        const qSnap = await getDocs(qCode).catch(() => null);
+        if (qSnap && !qSnap.empty) {
+          matchedCode = { id: qSnap.docs[0].id, ...qSnap.docs[0].data() } as PromoCode;
+        }
+      }
+
+      // Step D: If still not found, search full collection in-memory
+      if (!matchedCode) {
+        const allSnap = await getDocs(collection(db, 'promo_codes')).catch(() => null);
+        if (allSnap && !allSnap.empty) {
+          for (const d of allSnap.docs) {
+            const data = d.data() as PromoCode;
+            const cCode = (data.code || d.id).toUpperCase();
+            if (cCode === normalizedCode || cCode.replace(/[-_]/g, '') === strippedCode) {
+              matchedCode = { id: d.id, ...data };
+              break;
+            }
+          }
+        }
+      }
+
+      if (matchedCode) {
+        // Add to local cache for future instantaneous lookups
+        const updated = [matchedCode, ...cachedCodes.filter(c => c.code.toUpperCase() !== matchedCode!.code.toUpperCase())];
         cachePromoCodes(updated);
       }
     } catch (err) {
@@ -452,6 +541,14 @@ export async function redeemPromoCode(
   if (!matchedCode) {
     recordFailedAttempt();
     throw new Error('كود غير صحيح! يرجى التأكد من كتابة الحروف والأرقام بدقة.');
+  }
+
+  const officialCode = matchedCode.code.toUpperCase();
+
+  // 3. Check local redemption record
+  const localRedeemed = getLocalRedeemedCodeKeys();
+  if (localRedeemed.includes(officialCode) || localRedeemed.includes(normalizedCode)) {
+    throw new Error('لقد قمت باسترداد هذا الكود بالفعل مسبقاً! لا يمكن استرداد الكود أكثر من مرة لنفس المدرب.');
   }
 
   // 4. Validate code business rules
@@ -498,19 +595,20 @@ export async function redeemPromoCode(
     redeemedBy: nextRedeemedBy,
   };
 
-  const updatedCache = cachedCodes.map(c => c.code === normalizedCode ? updatedCode : c);
-  if (!updatedCache.some(c => c.code === normalizedCode)) {
+  const updatedCache = cachedCodes.map(c => c.code.toUpperCase() === officialCode ? updatedCode : c);
+  if (!updatedCache.some(c => c.code.toUpperCase() === officialCode)) {
     updatedCache.unshift(updatedCode);
   }
   cachePromoCodes(updatedCache);
 
+  markCodeRedeemedLocally(officialCode);
   markCodeRedeemedLocally(normalizedCode);
   clearRateLimit();
 
   // 6. Background cloud sync to Firestore with safety timeout
   const syncRedemptionToCloud = async () => {
     try {
-      const codeRef = doc(db, 'promo_codes', normalizedCode);
+      const codeRef = doc(db, 'promo_codes', officialCode);
       const updatePromise = updateDoc(codeRef, {
         usedCount: nextUsedCount,
         usedByManagerIds: nextUsedIds,

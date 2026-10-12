@@ -50,6 +50,9 @@ export const ClubTab: React.FC = () => {
     setClubTicketPrice,
     activeLeague,
     availableSponsorOffers,
+    canClaimDailyReward,
+    setShowDailyRewardModal,
+    dailyRewardState,
   } = useGame();
   const [notification, setNotification] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
   const [isMedicalModalOpen, setIsMedicalModalOpen] = useState<boolean>(false);
@@ -197,6 +200,19 @@ export const ClubTab: React.FC = () => {
           </div>
 
           <div className="flex items-center gap-2">
+            <button
+              onClick={() => setShowDailyRewardModal(true)}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl transition-all shadow-md active:scale-95 cursor-pointer text-xs font-bold border ${
+                canClaimDailyReward
+                  ? 'bg-gradient-to-r from-emerald-500/25 via-amber-500/25 to-emerald-500/25 hover:from-emerald-500/35 hover:to-amber-500/35 border-emerald-400 text-emerald-200 animate-pulse'
+                  : 'bg-slate-800 hover:bg-slate-750 border-slate-700/80 text-slate-300'
+              }`}
+              title="مكافأة تسجيل الدخول اليومي"
+            >
+              <Gift className={`w-4 h-4 ${canClaimDailyReward ? 'text-amber-400' : 'text-slate-400'}`} />
+              <span>مكافأة يومية {canClaimDailyReward ? '⚡' : `(يوم ${dailyRewardState.streak || 0})`}</span>
+            </button>
+
             <button
               onClick={() => setShowPromoModal(true)}
               className="flex items-center gap-1.5 bg-gradient-to-r from-amber-500/20 via-amber-500/30 to-amber-500/20 hover:from-amber-500/30 hover:to-amber-500/40 border border-amber-500/50 px-3 py-1.5 rounded-xl text-amber-200 hover:text-white transition-all shadow-md active:scale-95 cursor-pointer text-xs font-bold"

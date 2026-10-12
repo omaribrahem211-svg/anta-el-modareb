@@ -42,6 +42,14 @@ import {
   SponsorCategory,
 } from '../types/game';
 import {
+  DailyLoginRewardItem,
+  DailyLoginRewardState,
+  ClaimDailyRewardResult,
+  DAILY_LOGIN_REWARDS_SCHEDULE,
+  getLocalTodayDateString,
+  calculateDaysDifference,
+} from '../types/dailyReward';
+import {
   generateIncomingSponsorshipOffers,
   negotiateSponsorshipOffer as negotiateSponsorService,
   getSponsorCategoryLabel,
@@ -340,6 +348,14 @@ interface GameContextType {
   negotiateSponsorshipOffer: (offerId: string) => { success: boolean; message: string };
   renewSponsorshipContract: (sponsorId: string) => { success: boolean; message: string };
   refreshSponsorshipOffers: () => void;
+
+  // Daily Login Reward System (نظام مكافآت تسجيل الدخول اليومي وتشجيع التفاعل)
+  dailyRewardState: DailyLoginRewardState;
+  canClaimDailyReward: boolean;
+  claimDailyLoginReward: () => ClaimDailyRewardResult;
+  showDailyRewardModal: boolean;
+  setShowDailyRewardModal: (show: boolean) => void;
+  dailyRewardsSchedule: readonly DailyLoginRewardItem[];
 }
 
 const STORAGE_KEY = 'anta_el_modareb_save_v1';
@@ -930,6 +946,55 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const [trainingIntensity, setTrainingIntensity] = useState<'recovery' | 'normal' | 'high'>('normal');
   const [matchBlocker, setMatchBlocker] = useState<MatchBlockerInfo | null>(null);
 
+  // --- Daily Login Reward State (نظام مكافآت تسجيل الدخول اليومي) ---
+  const [dailyRewardState, setDailyRewardState] = useState<DailyLoginRewardState>(() => {
+    try {
+      const saved = localStorage.getItem('anta_el_modareb_daily_login_rewards_v1');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (typeof parsed === 'object' && parsed !== null) {
+          return {
+            streak: typeof parsed.streak === 'number' ? parsed.streak : 0,
+            lastClaimDate: typeof parsed.lastClaimDate === 'string' ? parsed.lastClaimDate : null,
+            totalDaysClaimed: typeof parsed.totalDaysClaimed === 'number' ? parsed.totalDaysClaimed : 0,
+            lastClaimTimestamp: typeof parsed.lastClaimTimestamp === 'number' ? parsed.lastClaimTimestamp : null,
+            history: Array.isArray(parsed.history) ? parsed.history : [],
+          };
+        }
+      }
+    } catch (_) {}
+    return {
+      streak: 0,
+      lastClaimDate: null,
+      totalDaysClaimed: 0,
+      lastClaimTimestamp: null,
+      history: [],
+    };
+  });
+
+  const [showDailyRewardModal, setShowDailyRewardModal] = useState<boolean>(false);
+
+  const canClaimDailyReward = useMemo(() => {
+    if (!dailyRewardState.lastClaimDate) return true;
+    const todayStr = getLocalTodayDateString();
+    const daysDiff = calculateDaysDifference(dailyRewardState.lastClaimDate, todayStr);
+    return daysDiff >= 1;
+  }, [dailyRewardState.lastClaimDate]);
+
+  // Prompt the user once per browser session if a daily reward is waiting
+  useEffect(() => {
+    if (canClaimDailyReward) {
+      const hasPrompted = sessionStorage.getItem('anta_daily_reward_prompted_session');
+      if (!hasPrompted) {
+        sessionStorage.setItem('anta_daily_reward_prompted_session', 'true');
+        const timer = setTimeout(() => {
+          setShowDailyRewardModal(true);
+        }, 1500);
+        return () => clearTimeout(timer);
+      }
+    }
+  }, [canClaimDailyReward]);
+
   const totalRounds = useMemo(() => {
     if (fixtures.length > 0) {
       const maxR = Math.max(...fixtures.map(f => f.round || 0));
@@ -1206,6 +1271,12 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       setScoutedOpponents(migrated.scoutedOpponents);
     }
     if (Array.isArray(migrated.deletedMessageIds)) setDeletedMessageIds(migrated.deletedMessageIds);
+    if (migrated.dailyRewardState && typeof migrated.dailyRewardState === 'object') {
+      setDailyRewardState(migrated.dailyRewardState);
+      try {
+        localStorage.setItem('anta_el_modareb_daily_login_rewards_v1', JSON.stringify(migrated.dailyRewardState));
+      } catch (_) {}
+    }
 
     // Save immediately to local IndexedDB and localStorage so reload retains this save
     try {
@@ -7268,12 +7339,14 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       worldRankings,
       scoutedOpponents,
       deletedMessageIds,
+      dailyRewardState,
     };
   }, [
     season, activeLeague, teams, standings, fixtures, currentRound, manager,
     transferMarket, incomingBids, inbox, cupTournament, jobOffers, seasonEndSummary,
     transferHistory, clubEconomy, calendarDate, activeNegotiations, boardSystem,
-    dailyNews, retiredPlayers, worldRankings, scoutedOpponents, deletedMessageIds
+    dailyNews, retiredPlayers, worldRankings, scoutedOpponents, deletedMessageIds,
+    dailyRewardState
   ]);
 
   // ----------------------------------------------------
@@ -7522,6 +7595,155 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
   };
 
+  // ----------------------------------------------------
+  // DAILY LOGIN REWARDS SYSTEM (نظام مكافآت تسجيل الدخول اليومي)
+  // ----------------------------------------------------
+  const claimDailyLoginReward = useCallback((): ClaimDailyRewardResult => {
+    const todayStr = getLocalTodayDateString();
+
+    // Check if already claimed today
+    if (dailyRewardState.lastClaimDate === todayStr) {
+      return {
+        success: false,
+        message: 'لقد استلمت مكافأتك اليومية بالفعل اليوم! عد غداً للاستمرار في سلسلة المكافآت والحصول على جوائز أكبر.',
+      };
+    }
+
+    // Determine current streak
+    let nextStreak = 1;
+    if (dailyRewardState.lastClaimDate) {
+      const daysDiff = calculateDaysDifference(dailyRewardState.lastClaimDate, todayStr);
+      if (daysDiff === 1 && dailyRewardState.streak > 0) {
+        // Consecutive day: advance in 1..7 cycle
+        nextStreak = (dailyRewardState.streak % 7) + 1;
+      } else if (daysDiff === 0) {
+        return {
+          success: false,
+          message: 'تم استلام مكافأة اليوم مسبقاً!',
+        };
+      } else {
+        // Missed one or more days: reset to Day 1
+        nextStreak = 1;
+      }
+    } else {
+      nextStreak = 1;
+    }
+
+    const rewardItem = DAILY_LOGIN_REWARDS_SCHEDULE.find(r => r.day === nextStreak) || DAILY_LOGIN_REWARDS_SCHEDULE[0];
+
+    // 1. Grant Coins & Personal Wallet
+    if (rewardItem.coins > 0) {
+      setManager(prev => ({
+        ...prev,
+        personalWallet: (prev.personalWallet || 0) + (rewardItem.coins * 100),
+        careerEarnings: (prev.careerEarnings || 0) + rewardItem.clubFunds,
+      }));
+
+      try {
+        const authData = localStorage.getItem('anta_el_modareb_auth_user');
+        if (authData) {
+          const parsed = JSON.parse(authData);
+          parsed.virtualCoins = (parsed.virtualCoins || 0) + rewardItem.coins;
+          localStorage.setItem('anta_el_modareb_auth_user', JSON.stringify(parsed));
+        }
+      } catch (_) {}
+    }
+
+    // 2. Grant Club Funds (if user manages a club)
+    if (userClub && rewardItem.clubFunds > 0) {
+      setTeams(prev => prev.map(t => {
+        if (!t.isUserClub && t.id !== userClub.id) return t;
+        return {
+          ...t,
+          budget: (t.budget || 0) + rewardItem.clubFunds,
+          transferBudget: (t.transferBudget || 0) + rewardItem.clubFunds,
+        };
+      }));
+
+      setClubEconomy(prev => ({
+        ...prev,
+        clubBudget: (prev.clubBudget || 0) + rewardItem.clubFunds,
+      }));
+    }
+
+    // 3. Grant Development Points
+    if (rewardItem.developmentPoints > 0) {
+      grantDevelopmentPoints(rewardItem.developmentPoints, `مكافأة تسجيل الدخول اليومي - اليوم ${nextStreak}`);
+    }
+
+    // 4. Boost Squad Energy / Morale if milestone or specified
+    if (userClub && (rewardItem.energyBoost || rewardItem.moraleBoost)) {
+      setTeams(prev => prev.map(t => {
+        if (!t.isUserClub && t.id !== userClub.id) return t;
+        return {
+          ...t,
+          players: (t.players || []).map(p => ({
+            ...p,
+            fitness: rewardItem.energyBoost ? Math.min(100, (p.fitness || 85) + 15) : p.fitness,
+            morale: rewardItem.moraleBoost ? 100 : p.morale,
+            moraleStatus: rewardItem.moraleBoost ? 'ecstatic' : p.moraleStatus,
+          })),
+        };
+      }));
+    }
+
+    // 5. Send celebratory message to manager's inbox
+    const rewardMsg: InboxMessage = {
+      id: `msg_daily_reward_${Date.now()}_${Math.random()}`,
+      title: `🎁 استلام مكافأة تسجيل الدخول اليومية (اليوم ${nextStreak} من 7)`,
+      sender: 'إدارة اللعبة والفعاليات اليومية',
+      date: `الجولة ${currentRound}`,
+      type: 'board',
+      read: false,
+      content: `تهانينا يا كابتن ${manager.name}!\n\nتم استلام مكافأة تسجيل الدخول اليومي بنجاح:\n• 🪙 +${rewardItem.coins} كوينز ذهبية للرصيد والمحفظة\n• 💰 +${rewardItem.clubFunds.toLocaleString()} ج.م دعماً لميزانية النادي\n• ⭐ +${rewardItem.developmentPoints} نقاط تدريب وتطوير للاعبين\n${rewardItem.energyBoost ? '• ⚡ استعادة وشحن طاقة ولياقة جميع لاعبي الفريق\n' : ''}${rewardItem.moraleBoost ? '• 🔥 رفع الروح المعنوية للاعبين إلى الدرجة الممتازة\n' : ''}\nسلسلة تسجيل الدخول الحالية: ${nextStreak} يوم/أيام.\nإجمالي أيام الدخول التراكمية: ${(dailyRewardState.totalDaysClaimed || 0) + 1} يوم.\nاستمر في تسجيل الدخول اليومي لحصد الجائزة الكبرى!`,
+    };
+    setInbox(prev => [rewardMsg, ...prev]);
+
+    // 6. Update dailyRewardState
+    const updatedState: DailyLoginRewardState = {
+      streak: nextStreak,
+      lastClaimDate: todayStr,
+      totalDaysClaimed: (dailyRewardState.totalDaysClaimed || 0) + 1,
+      lastClaimTimestamp: Date.now(),
+      history: [
+        {
+          date: todayStr,
+          day: nextStreak,
+          coins: rewardItem.coins,
+          clubFunds: rewardItem.clubFunds,
+          developmentPoints: rewardItem.developmentPoints,
+          timestamp: Date.now(),
+        },
+        ...(dailyRewardState.history || []).slice(0, 30),
+      ],
+    };
+
+    setDailyRewardState(updatedState);
+    try {
+      localStorage.setItem('anta_el_modareb_daily_login_rewards_v1', JSON.stringify(updatedState));
+    } catch (_) {}
+
+    // 7. Save game state
+    setTimeout(() => {
+      saveToCloud(false).catch(() => {});
+    }, 400);
+
+    return {
+      success: true,
+      message: `مبروك يا كابتن! حصلت على مكافأة اليوم (${nextStreak}) بنجاح! 🪙 +${rewardItem.coins} كوينز و +${rewardItem.clubFunds.toLocaleString()} ج.م`,
+      reward: rewardItem,
+      streak: nextStreak,
+      isMilestone: rewardItem.isMilestone,
+    };
+  }, [
+    dailyRewardState,
+    manager.name,
+    userClub,
+    currentRound,
+    grantDevelopmentPoints,
+    saveToCloud,
+  ]);
+
   return (
     <GameContext.Provider
       value={{
@@ -7660,6 +7882,12 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         negotiateSponsorshipOffer,
         renewSponsorshipContract,
         refreshSponsorshipOffers,
+        dailyRewardState,
+        canClaimDailyReward,
+        claimDailyLoginReward,
+        showDailyRewardModal,
+        setShowDailyRewardModal,
+        dailyRewardsSchedule: DAILY_LOGIN_REWARDS_SCHEDULE,
         deletedMessageIds,
         africanChampionsLeague: null,
         uefaChampionsLeague: null,
