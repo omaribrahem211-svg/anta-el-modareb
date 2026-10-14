@@ -340,11 +340,48 @@ export function getLeagueById(leagueId: string): LeagueDefinition {
   return custom[leagueId] || GLOBAL_LEAGUES[leagueId] || EGYPT_TIER_4_LEAGUE;
 }
 
-export function getLeagueByCountryAndTier(country: string, tier: number): LeagueDefinition {
+export function getLeagueByCountryAndTier(country: string, tier: number, preferredLeagueId?: string): LeagueDefinition {
   const custom = getCustomLeagues();
-  const safeCountry = (country || '').trim();
+  let safeCountry = (country || '').trim();
 
-  // 1. Direct match by country and tier
+  // Normalize UK / Welsh clubs playing in English league system (e.g. Cardiff, Swansea, Wrexham)
+  if (safeCountry === 'ويلز' || safeCountry === 'WAL' || safeCountry.includes('ويلز') || safeCountry.toLowerCase().includes('wales')) {
+    safeCountry = 'إنجلترا';
+  }
+  if (safeCountry.toLowerCase() === 'england' || safeCountry === 'ENG') {
+    safeCountry = 'إنجلترا';
+  }
+
+  // 1. If preferredLeagueId pattern is specified (e.g. promoting from eng_tier_2 to tier 1):
+  if (preferredLeagueId) {
+    if (preferredLeagueId.startsWith('eng_')) {
+      const targetId = `eng_tier_${tier}`;
+      if (custom[targetId]) return custom[targetId];
+      if (GLOBAL_LEAGUES[targetId]) return GLOBAL_LEAGUES[targetId];
+    } else if (preferredLeagueId.startsWith('egy_')) {
+      const targetId = `egy_tier_${tier}`;
+      if (custom[targetId]) return custom[targetId];
+      if (GLOBAL_LEAGUES[targetId]) return GLOBAL_LEAGUES[targetId];
+    } else if (preferredLeagueId.startsWith('sa_')) {
+      const targetId = `sa_tier_${tier}`;
+      if (custom[targetId]) return custom[targetId];
+      if (GLOBAL_LEAGUES[targetId]) return GLOBAL_LEAGUES[targetId];
+    } else if (preferredLeagueId.startsWith('spain_')) {
+      const targetId = `spain_tier_${tier}`;
+      if (custom[targetId]) return custom[targetId];
+      if (GLOBAL_LEAGUES[targetId]) return GLOBAL_LEAGUES[targetId];
+    }
+  }
+
+  // 2. Direct English system mapping
+  if (safeCountry === 'إنجلترا' || safeCountry.includes('إنجلترا')) {
+    const id = `eng_tier_${tier}`;
+    if (custom[id]) return custom[id];
+    if (GLOBAL_LEAGUES[id]) return GLOBAL_LEAGUES[id];
+    return custom['eng_tier_1'] || GLOBAL_LEAGUES['eng_tier_1'];
+  }
+
+  // 3. Direct match by country and tier across all leagues
   if (safeCountry) {
     for (const league of Object.values(custom)) {
       const leagueCountry = (league.country || '').trim();
@@ -353,7 +390,7 @@ export function getLeagueByCountryAndTier(country: string, tier: number): League
       }
     }
 
-    // 2. If tier not found for that country, try finding closest tier in that country
+    // 4. If tier not found for that country, find closest tier in that exact country
     const countryLeagues = Object.values(custom).filter(league => {
       const leagueCountry = (league.country || '').trim();
       return leagueCountry === safeCountry || safeCountry.includes(leagueCountry) || leagueCountry.includes(safeCountry);
@@ -364,12 +401,13 @@ export function getLeagueByCountryAndTier(country: string, tier: number): League
     }
   }
 
-  // 3. Fallback search by ID pattern
+  // 5. Fallback for Egyptian league system
   if (!safeCountry || safeCountry === 'مصر' || safeCountry.includes('مصر')) {
     const id = `egy_tier_${tier}`;
     if (custom[id]) return custom[id];
+    if (GLOBAL_LEAGUES[id]) return GLOBAL_LEAGUES[id];
   }
-  return custom['egy_tier_1'] || EGYPT_TIER_4_LEAGUE;
+  return custom['egy_tier_1'] || GLOBAL_LEAGUES['egy_tier_1'] || EGYPT_TIER_4_LEAGUE;
 }
 
 export function getAllClubsForCountry(country: string): Club[] {

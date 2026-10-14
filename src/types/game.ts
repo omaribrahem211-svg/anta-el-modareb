@@ -543,6 +543,7 @@ export interface SeasonEndSummary {
   resultTitle: string;
   resultDescription: string;
   nextLeagueName: string;
+  nextLeagueId?: string;
   nextDivisionTier: number;
   leagueTrophyAwarded?: string;
   cupTrophyAwarded?: string;

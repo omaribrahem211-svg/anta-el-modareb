@@ -115,13 +115,20 @@ export function getLocalTodayDateString(): string {
   return `${year}-${month}-${day}`;
 }
 
-export function calculateDaysDifference(dateStr1: string, dateStr2: string): number {
+export function calculateDaysDifference(dateStr1?: string | null, dateStr2?: string | null): number {
+  if (!dateStr1 || !dateStr2) return 1;
   try {
-    const d1 = new Date(dateStr1 + 'T00:00:00');
-    const d2 = new Date(dateStr2 + 'T00:00:00');
-    const diffTime = d2.getTime() - d1.getTime();
-    return Math.round(diffTime / (1000 * 60 * 60 * 24));
+    const s1 = dateStr1.split('T')[0].trim();
+    const s2 = dateStr2.split('T')[0].trim();
+    const d1 = new Date(`${s1}T00:00:00`);
+    const d2 = new Date(`${s2}T00:00:00`);
+    const t1 = d1.getTime();
+    const t2 = d2.getTime();
+    if (isNaN(t1) || isNaN(t2)) return 1;
+    const diffTime = t2 - t1;
+    const days = Math.round(diffTime / (1000 * 60 * 60 * 24));
+    return isNaN(days) ? 1 : days;
   } catch {
-    return 0;
+    return 1;
   }
 }

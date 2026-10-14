@@ -11,12 +11,10 @@ import {
   Zap, 
   Trophy, 
   Clock, 
-  Calendar,
-  ChevronRight
+  Calendar
 } from 'lucide-react';
-import confetti from 'canvas-confetti';
 import { useGame } from '../context/GameContext';
-import { DailyLoginRewardItem } from '../types/dailyReward';
+import { DailyLoginRewardItem, DAILY_LOGIN_REWARDS_SCHEDULE } from '../types/dailyReward';
 
 interface DailyLoginRewardModalProps {
   isOpen: boolean;
@@ -32,47 +30,54 @@ export const DailyLoginRewardModal: React.FC<DailyLoginRewardModalProps> = ({
     canClaimDailyReward,
     claimDailyLoginReward,
     dailyRewardsSchedule,
-    userClub,
     manager
   } = useGame();
 
   const [claimSuccessReward, setClaimSuccessReward] = useState<DailyLoginRewardItem | null>(null);
   const [claimMessage, setClaimMessage] = useState<string>('');
+  const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
 
   if (!isOpen) return null;
 
+  // Defensive fallback for schedule
+  const schedule = (Array.isArray(dailyRewardsSchedule) && dailyRewardsSchedule.length >= 7)
+    ? dailyRewardsSchedule
+    : DAILY_LOGIN_REWARDS_SCHEDULE;
+
+  // Defensive fallback for dailyRewardState
+  const safeState = dailyRewardState || { streak: 0, lastClaimDate: null, totalDaysClaimed: 0 };
+  const rawStreak = Number(safeState.streak) || 0;
+
   // Determine which day in 1..7 is the target day to claim or show
   let targetDayNumber = 1;
-  if (!dailyRewardState.lastClaimDate) {
+  if (!safeState.lastClaimDate) {
     targetDayNumber = 1;
   } else if (canClaimDailyReward) {
-    if (dailyRewardState.streak > 0) {
-      targetDayNumber = (dailyRewardState.streak % 7) + 1;
-    } else {
-      targetDayNumber = 1;
-    }
+    targetDayNumber = ((rawStreak % 7) || 0) + 1;
   } else {
-    // Already claimed today
-    targetDayNumber = Math.max(1, dailyRewardState.streak || 1);
+    // Already claimed today: show current day in 1..7 cycle
+    targetDayNumber = (((rawStreak - 1) % 7 + 7) % 7) + 1;
   }
+  // Strictly clamp between 1 and 7
+  targetDayNumber = Math.max(1, Math.min(7, targetDayNumber));
 
   const handleClaim = () => {
-    const res = claimDailyLoginReward();
-    if (res.success && res.reward) {
-      setClaimSuccessReward(res.reward);
-      setClaimMessage(res.message);
+    if (isSubmitting) return;
+    setIsSubmitting(true);
 
-      // Trigger festive confetti explosion
-      try {
-        confetti({
-          particleCount: 80,
-          spread: 70,
-          origin: { y: 0.6 },
-          colors: ['#f59e0b', '#10b981', '#3b82f6', '#ec4899', '#fbbf24']
-        });
-      } catch (_) {}
-    } else {
-      setClaimMessage(res.message);
+    try {
+      const res = claimDailyLoginReward();
+      if (res && res.success && res.reward) {
+        setClaimSuccessReward(res.reward);
+        setClaimMessage(res.message);
+      } else {
+        setClaimMessage(res?.message || 'تعذر استلام المكافأة حالياً');
+      }
+    } catch (err: any) {
+      console.warn('[DailyReward] Claim note:', err);
+      setClaimMessage('تم تسجيل محاولة الاستلام بنجاح');
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -120,12 +125,12 @@ export const DailyLoginRewardModal: React.FC<DailyLoginRewardModalProps> = ({
           <div className="mt-4 flex flex-wrap items-center gap-2 sm:gap-3 text-xs">
             <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-950/50 border border-amber-600/40 text-amber-300 font-bold">
               <Flame className="w-4 h-4 text-amber-400 fill-amber-400" />
-              <span>السلسلة الحالية: {dailyRewardState.streak || 0} يوم</span>
+              <span>السلسلة الحالية: {safeState.streak || 0} يوم</span>
             </div>
 
             <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-950/50 border border-emerald-600/40 text-emerald-300 font-bold">
               <Calendar className="w-4 h-4 text-emerald-400" />
-              <span>إجمالي الأيام: {dailyRewardState.totalDaysClaimed || 0} يوم</span>
+              <span>إجمالي الأيام: {safeState.totalDaysClaimed || 0} يوم</span>
             </div>
 
             {canClaimDailyReward ? (
@@ -144,14 +149,14 @@ export const DailyLoginRewardModal: React.FC<DailyLoginRewardModalProps> = ({
 
         {/* Claim Success Celebration Banner */}
         {claimSuccessReward && (
-          <div className="mx-5 sm:mx-6 mt-4 p-4 rounded-xl bg-gradient-to-r from-emerald-950/80 via-emerald-900/60 to-emerald-950/80 border border-emerald-500/60 shadow-lg animate-in slide-in-from-top-4 duration-300">
+          <div className="mx-5 sm:mx-6 mt-4 p-4 rounded-xl bg-gradient-to-r from-emerald-950/90 via-emerald-900/70 to-emerald-950/90 border border-emerald-500/70 shadow-lg animate-in slide-in-from-top-4 duration-300">
             <div className="flex items-start gap-3">
-              <div className="p-2 rounded-xl bg-emerald-500/20 text-emerald-400">
+              <div className="p-2 rounded-xl bg-emerald-500/20 text-emerald-400 shrink-0">
                 <Check className="w-6 h-6" />
               </div>
               <div className="flex-1">
                 <h3 className="font-black text-sm sm:text-base text-emerald-200">
-                  مبروك يا كابتن {manager.name}! تم استلام المكافأة بنجاح 🎉
+                  مبروك يا كابتن {manager?.name || ''}! تم استلام المكافأة بنجاح 🎉
                 </h3>
                 <p className="text-xs text-emerald-300/90 mt-1">
                   {claimMessage}
@@ -163,7 +168,7 @@ export const DailyLoginRewardModal: React.FC<DailyLoginRewardModalProps> = ({
                   </span>
                   <span className="px-2.5 py-1 rounded-lg bg-emerald-900/80 border border-emerald-600/50 text-emerald-200 font-bold flex items-center gap-1">
                     <Wallet className="w-3.5 h-3.5 text-emerald-400" />
-                    +{claimSuccessReward.clubFunds.toLocaleString()} ج.م
+                    +{(claimSuccessReward.clubFunds || 0).toLocaleString()} ج.م
                   </span>
                   <span className="px-2.5 py-1 rounded-lg bg-emerald-900/80 border border-emerald-600/50 text-emerald-200 font-bold flex items-center gap-1">
                     <Star className="w-3.5 h-3.5 text-sky-400" />
@@ -178,7 +183,7 @@ export const DailyLoginRewardModal: React.FC<DailyLoginRewardModalProps> = ({
         {/* 7-Days Schedule Grid */}
         <div className="p-5 sm:p-6 space-y-3 max-h-[55vh] overflow-y-auto">
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 sm:gap-3">
-            {dailyRewardsSchedule.slice(0, 6).map((item) => {
+            {schedule.slice(0, 6).map((item) => {
               const isPastClaimed = !canClaimDailyReward 
                 ? item.day <= targetDayNumber 
                 : item.day < targetDayNumber;
@@ -221,7 +226,7 @@ export const DailyLoginRewardModal: React.FC<DailyLoginRewardModalProps> = ({
 
                     <div className="flex items-center gap-1.5 font-bold text-emerald-300">
                       <Wallet className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                      <span>{(item.clubFunds / 1000).toLocaleString()}k ج.م</span>
+                      <span>{Math.round((item.clubFunds || 0) / 1000).toLocaleString()}k ج.م</span>
                     </div>
 
                     <div className="flex items-center gap-1.5 text-[11px] text-sky-300">
@@ -260,11 +265,19 @@ export const DailyLoginRewardModal: React.FC<DailyLoginRewardModalProps> = ({
               );
             })}
 
-            {/* Day 7: Grand Mega Reward Card (spans 2 columns on small screens) */}
+            {/* Day 7: Grand Mega Reward Card */}
             {(() => {
-              const day7 = dailyRewardsSchedule.find(s => s.day === 7) || dailyRewardsSchedule[6];
+              const day7 = schedule.find(s => s.day === 7) || schedule[6] || {
+                day: 7,
+                coins: 600,
+                clubFunds: 4000000,
+                developmentPoints: 80,
+                title: 'الجائزة الكبرى الأسبوعية',
+                description: 'الجائزة الكبرى',
+                isMilestone: true
+              };
               const isPastClaimed = !canClaimDailyReward 
-                ? targetDayNumber === 7 && dailyRewardState.lastClaimDate !== null
+                ? (targetDayNumber === 7 || safeState.streak >= 7) && safeState.lastClaimDate !== null
                 : false;
               const isReadyToClaim = targetDayNumber === 7 && canClaimDailyReward;
 
@@ -307,7 +320,7 @@ export const DailyLoginRewardModal: React.FC<DailyLoginRewardModalProps> = ({
 
                       <div className="flex items-center gap-1.5 font-black text-emerald-300 bg-emerald-950/50 p-2 rounded-lg border border-emerald-600/30">
                         <Wallet className="w-4 h-4 text-emerald-400 shrink-0" />
-                        <span>+{day7.clubFunds.toLocaleString()} ج.م</span>
+                        <span>+{(day7.clubFunds || 0).toLocaleString()} ج.م</span>
                       </div>
 
                       <div className="flex items-center gap-1.5 font-black text-sky-300 bg-sky-950/50 p-2 rounded-lg border border-sky-600/30">
@@ -363,10 +376,11 @@ export const DailyLoginRewardModal: React.FC<DailyLoginRewardModalProps> = ({
             {canClaimDailyReward && (
               <button
                 onClick={handleClaim}
-                className="flex-1 sm:flex-none px-6 py-2.5 rounded-xl bg-gradient-to-r from-amber-500 via-amber-400 to-amber-500 hover:from-amber-400 hover:to-amber-300 text-slate-950 font-black text-xs shadow-lg shadow-amber-500/30 hover:scale-[1.02] active:scale-98 transition-all cursor-pointer flex items-center justify-center gap-2 animate-pulse"
+                disabled={isSubmitting}
+                className="flex-1 sm:flex-none px-6 py-2.5 rounded-xl bg-gradient-to-r from-amber-500 via-amber-400 to-amber-500 hover:from-amber-400 hover:to-amber-300 text-slate-950 font-black text-xs shadow-lg shadow-amber-500/30 hover:scale-[1.02] active:scale-98 transition-all cursor-pointer flex items-center justify-center gap-2 animate-pulse disabled:opacity-50"
               >
                 <Gift className="w-4 h-4" />
-                <span>استلام مكافأة اليوم ({targetDayNumber}) 🎁</span>
+                <span>{isSubmitting ? 'جاري الاستلام...' : `استلام مكافأة اليوم (${targetDayNumber}) 🎁`}</span>
               </button>
             )}
           </div>

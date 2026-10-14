@@ -304,6 +304,20 @@ export function simulateDailySquadTraining(
     if (intensity === 'high') progressGain *= 1.35;
     if (intensity === 'recovery') progressGain *= 0.6;
 
+    // Ensure attributes object is guaranteed valid to prevent any TypeError
+    if (!updatedPlayer.attributes || typeof updatedPlayer.attributes !== 'object') {
+      const baseAttr = updatedPlayer.overallRating || 65;
+      updatedPlayer.attributes = {
+        pace: baseAttr,
+        shooting: baseAttr,
+        passing: baseAttr,
+        dribbling: baseAttr,
+        defending: baseAttr,
+        physical: baseAttr,
+        goalkeeping: updatedPlayer.position === 'GK' ? baseAttr : 30,
+      };
+    }
+
     // Age Curves:
     // 16-20: fastest youth development (~3.0-4.0x)
     // 21-24: steady development (~1.8-2.2x)
@@ -323,7 +337,7 @@ export function simulateDailySquadTraining(
       ageMultiplier = 0.05;
       // Potential veteran physical attribute decline over time
       if (age >= 33 && Math.random() < 0.03) {
-        if (updatedPlayer.attributes.pace && updatedPlayer.attributes.pace > 45) {
+        if (updatedPlayer.attributes && typeof updatedPlayer.attributes.pace === 'number' && updatedPlayer.attributes.pace > 45) {
           updatedPlayer.attributes.pace = Math.max(40, updatedPlayer.attributes.pace - 1);
         }
       }
@@ -360,10 +374,10 @@ export function simulateDailySquadTraining(
     attrProgress[targetAttr] = (attrProgress[targetAttr] || 0) + dailyGain * 1.5;
     if (attrProgress[targetAttr] >= 100) {
       attrProgress[targetAttr] -= 100;
-      const currentVal = updatedPlayer.attributes[targetAttr] || 60;
+      const currentVal = (updatedPlayer.attributes && updatedPlayer.attributes[targetAttr]) || 60;
       if (currentVal < 95) {
         updatedPlayer.attributes = {
-          ...updatedPlayer.attributes,
+          ...(updatedPlayer.attributes || {}),
           [targetAttr]: currentVal + 1,
         };
       }
@@ -414,6 +428,9 @@ export function simulateDailyNegotiations(
 
   const updatedNegotiations = activeNegotiations.map(neg => {
     let current = { ...neg };
+    if (!Array.isArray(current.history)) {
+      current.history = [];
+    }
 
     // If already finalized or rejected, leave as is
     if (current.stage === 'completed' || current.stage === 'rejected' || current.stage === 'cancelled') {
@@ -421,7 +438,7 @@ export function simulateDailyNegotiations(
     }
 
     // Decrement wait days
-    current.daysRemainingInStage = Math.max(0, current.daysRemainingInStage - 1);
+    current.daysRemainingInStage = Math.max(0, (current.daysRemainingInStage ?? 1) - 1);
 
     // If still waiting for another day, just return
     if (current.daysRemainingInStage > 0) {

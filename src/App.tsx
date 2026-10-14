@@ -27,6 +27,7 @@ import { FacebookBanner } from './components/FacebookBanner';
 import { BannerAdContainer } from './components/ads/BannerAdContainer';
 import { RewardedAdCenterModal } from './components/ads/RewardedAdCenterModal';
 import { DailyLoginRewardModal } from './components/DailyLoginRewardModal';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import { AdManager } from './services/adManager';
 import { ADMOB_CONFIG } from './config/admobConfig';
 import { AdRewardType } from './services/adRewardService';
@@ -347,10 +348,12 @@ function GameApp() {
       <BannerAdContainer activeTab={activeTab} isMatchActive={!!liveMatch} />
 
       {/* Daily Login Reward Modal */}
-      <DailyLoginRewardModal
-        isOpen={showDailyRewardModal}
-        onClose={() => setShowDailyRewardModal(false)}
-      />
+      <ErrorBoundary fallbackTitle="تنبيه المكافأة اليومية" fallbackMessage="يمكنك متابعة اللعب واستلام المكافأة مباشرة من القائمة أو شريط التحكم.">
+        <DailyLoginRewardModal
+          isOpen={showDailyRewardModal}
+          onClose={() => setShowDailyRewardModal(false)}
+        />
+      </ErrorBoundary>
 
       {/* Google AdMob Rewarded Video Center Modal (Temporarily Disabled) */}
       {ADMOB_CONFIG.ENABLE_REWARDS && (

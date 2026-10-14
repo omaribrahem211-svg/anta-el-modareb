@@ -14,6 +14,7 @@ export const MatchDayBlockerModal: React.FC<MatchDayBlockerModalProps> = ({ onNa
     autoFixUserStartingLineup,
     startLiveMatch,
     instantSimulateCurrentRound,
+    simulateMatchAndAdvanceToNextDay,
     advanceToNextDay,
     userClub,
     currentRound,
@@ -34,6 +35,12 @@ export const MatchDayBlockerModal: React.FC<MatchDayBlockerModalProps> = ({ onNa
     autoFixUserStartingLineup();
   };
 
+  const handleAutoFixAndAdvance = () => {
+    closeMatchBlocker();
+    autoFixUserStartingLineup();
+    simulateMatchAndAdvanceToNextDay();
+  };
+
   const handleGoToTactics = () => {
     closeMatchBlocker();
     onNavigateTab('tactics');
@@ -49,6 +56,11 @@ export const MatchDayBlockerModal: React.FC<MatchDayBlockerModalProps> = ({ onNa
     closeMatchBlocker();
     instantSimulateCurrentRound();
     onNavigateTab('matches');
+  };
+
+  const handleInstantSimAndAdvance = () => {
+    closeMatchBlocker();
+    simulateMatchAndAdvanceToNextDay();
   };
 
   const handleSkipToMatch = () => {
@@ -168,20 +180,30 @@ export const MatchDayBlockerModal: React.FC<MatchDayBlockerModalProps> = ({ onNa
             {/* Actions for Lineup Issues */}
             <div className="space-y-2 pt-2">
               <button
-                onClick={handleAutoFix}
-                className="w-full py-3 px-4 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-slate-950 font-black text-xs sm:text-sm shadow-lg shadow-amber-950/60 flex items-center justify-center gap-2 transition-all active:scale-95 cursor-pointer"
+                onClick={handleAutoFixAndAdvance}
+                className="w-full py-3.5 px-4 rounded-xl bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-600 hover:from-emerald-500 hover:to-teal-500 text-white font-black text-xs sm:text-sm shadow-lg shadow-emerald-950/60 flex items-center justify-center gap-2 transition-all active:scale-95 cursor-pointer"
               >
-                <Zap className="w-4 h-4" />
-                <span>تعديل التشكيلة تلقائياً بأفضل البدلاء الجاهزين ⚡</span>
+                <Zap className="w-4 h-4 text-amber-300" />
+                <span>ضبط التشكيلة ومحاكاة اللقاء والانتقال لليوم التالي فوراً ⚡⏩</span>
               </button>
 
-              <button
-                onClick={handleGoToTactics}
-                className="w-full py-2.5 px-4 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs border border-slate-700 flex items-center justify-center gap-2 transition-all active:scale-95 cursor-pointer"
-              >
-                <Sliders className="w-4 h-4 text-cyan-400" />
-                <span>الذهاب إلى التكتيك والتشكيلة لتعديلها يدوياً 📋</span>
-              </button>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <button
+                  onClick={handleAutoFix}
+                  className="py-2.5 px-3 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 font-bold text-xs flex items-center justify-center gap-1.5 transition-all active:scale-95 cursor-pointer"
+                >
+                  <Zap className="w-3.5 h-3.5" />
+                  <span>ضبط التشكيلة بالبدلاء فقط ⚡</span>
+                </button>
+
+                <button
+                  onClick={handleGoToTactics}
+                  className="py-2.5 px-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs border border-slate-700 flex items-center justify-center gap-1.5 transition-all active:scale-95 cursor-pointer"
+                >
+                  <Sliders className="w-3.5 h-3.5 text-cyan-400" />
+                  <span>تعديل الخطة يدوياً 📋</span>
+                </button>
+              </div>
             </div>
           </div>
         )}
@@ -269,32 +291,42 @@ export const MatchDayBlockerModal: React.FC<MatchDayBlockerModalProps> = ({ onNa
             )}
 
             {/* Actions for Match Day */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-2">
+            <div className="space-y-2 pt-2">
               <button
-                onClick={handleStartLive}
-                className="py-3 px-4 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-black text-xs sm:text-sm shadow-lg shadow-emerald-950/60 flex items-center justify-center gap-2 transition-all active:scale-95 cursor-pointer"
+                onClick={handleInstantSimAndAdvance}
+                className="w-full py-3.5 px-4 rounded-xl bg-gradient-to-r from-amber-500 via-orange-500 to-amber-500 hover:from-amber-400 hover:to-orange-400 text-slate-950 font-black text-xs sm:text-sm shadow-lg shadow-amber-950/60 flex items-center justify-center gap-2 transition-all active:scale-95 cursor-pointer"
               >
-                <Play className="w-4 h-4 fill-white" />
-                <span>خوض المباراة لايف ⚽</span>
+                <Zap className="w-4 h-4" />
+                <span>محاكاة فورية للمباراة والانتقال لليوم التالي فوراً ⚡⏩</span>
               </button>
 
-              <button
-                onClick={handleInstantSim}
-                className="py-3 px-4 rounded-xl bg-slate-800 hover:bg-slate-750 border border-slate-700 text-slate-200 font-bold text-xs flex items-center justify-center gap-1.5 transition-all active:scale-95 cursor-pointer"
-              >
-                <Zap className="w-3.5 h-3.5 text-amber-400" />
-                <span>محاكاة فورية سريعة ⚡</span>
-              </button>
-            </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <button
+                  onClick={handleStartLive}
+                  className="py-3 px-4 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-black text-xs sm:text-sm shadow-lg shadow-emerald-950/60 flex items-center justify-center gap-2 transition-all active:scale-95 cursor-pointer"
+                >
+                  <Play className="w-4 h-4 fill-white" />
+                  <span>خوض المباراة لايف ⚽</span>
+                </button>
 
-            <div className="pt-1">
-              <button
-                onClick={handleGoToTactics}
-                className="w-full py-2 px-3 rounded-xl bg-slate-950 hover:bg-slate-800 text-slate-400 hover:text-white font-bold text-xs border border-slate-800 flex items-center justify-center gap-1.5 transition-all cursor-pointer"
-              >
-                <Sliders className="w-3.5 h-3.5 text-cyan-400" />
-                <span>مراجعة وتعديل الخطة والتشكيلة 📋</span>
-              </button>
+                <button
+                  onClick={handleInstantSim}
+                  className="py-3 px-4 rounded-xl bg-slate-800 hover:bg-slate-750 border border-slate-700 text-slate-200 font-bold text-xs flex items-center justify-center gap-1.5 transition-all active:scale-95 cursor-pointer"
+                >
+                  <Zap className="w-3.5 h-3.5 text-amber-400" />
+                  <span>محاكاة الجولة فقط ⚡</span>
+                </button>
+              </div>
+
+              <div className="pt-1">
+                <button
+                  onClick={handleGoToTactics}
+                  className="w-full py-2 px-3 rounded-xl bg-slate-950 hover:bg-slate-800 text-slate-400 hover:text-white font-bold text-xs border border-slate-800 flex items-center justify-center gap-1.5 transition-all cursor-pointer"
+                >
+                  <Sliders className="w-3.5 h-3.5 text-cyan-400" />
+                  <span>مراجعة وتعديل الخطة والتشكيلة 📋</span>
+                </button>
+              </div>
             </div>
           </div>
         )}

@@ -202,12 +202,11 @@ function clearRateLimit(): void {
 export async function fetchAllPromoCodes(): Promise<PromoCode[]> {
   try {
     const promoRef = collection(db, 'promo_codes');
-    const q = query(promoRef, orderBy('createdAt', 'desc'));
     
-    // Safety timeout: 2500ms so UI never hangs
-    const getDocsPromise = getDocs(q);
+    // Safety timeout: 4000ms so UI never hangs
+    const getDocsPromise = getDocs(promoRef);
     const timeoutPromise = new Promise<never>((_, reject) =>
-      setTimeout(() => reject(new Error('Promo codes fetch timeout')), 2500)
+      setTimeout(() => reject(new Error('Promo codes fetch timeout')), 4000)
     );
     const snap = await Promise.race([getDocsPromise, timeoutPromise]);
 
@@ -225,7 +224,7 @@ export async function fetchAllPromoCodes(): Promise<PromoCode[]> {
     const firestoreCodes: PromoCode[] = snap.docs.map(d => ({
       id: d.id,
       ...d.data()
-    } as PromoCode));
+    } as PromoCode)).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
 
     // MERGE: Keep all local custom codes while updating from Firestore
     const mergedMap = new Map<string, PromoCode>();
@@ -444,10 +443,41 @@ export interface RedeemResult {
   description: string;
 }
 
+const GUEST_DEVICE_KEY = 'anta_el_modareb_guest_device_token_v1';
+
+export function getOrCreateGuestDeviceId(): string {
+  try {
+    let devId = localStorage.getItem(GUEST_DEVICE_KEY);
+    if (!devId) {
+      devId = `dev_${Date.now()}_${Math.random().toString(36).substring(2, 12)}`;
+      localStorage.setItem(GUEST_DEVICE_KEY, devId);
+    }
+    return devId;
+  } catch {
+    return `dev_fallback_${Date.now()}`;
+  }
+}
+
+/**
+ * Normalizes input code:
+ * - Strips all Unicode zero-width, LTR/RTL marks, and whitespace
+ * - Converts Arabic-Indic numbers (٠-٩) and Persian numbers (۰-۹) to standard digits
+ * - Uppercases
+ */
+export function cleanPromoCodeInput(raw: string): string {
+  if (!raw) return '';
+  return raw
+    .replace(/[\u200B-\u200D\uFEFF\u200E\u200F\u202A-\u202E\u00A0\s]/g, '')
+    .replace(/[٠-٩]/g, d => String('٠١٢٣٤٥٦٧٨٩'.indexOf(d)))
+    .replace(/[۰-۹]/g, d => String('۰۱۲۳۴۵۶۷۸۹'.indexOf(d)))
+    .toUpperCase()
+    .trim();
+}
+
 /**
  * Redeem a promo code for a manager:
  * - Checks local cached codes and Firestore cloud codes seamlessly.
- * - Prevents multiple uses by the same manager.
+ * - Prevents multiple uses by the same manager using unique user/device ID.
  * - Prevents usage of expired, inactive, or exhausted codes.
  * - Supports offline and instant local redemption with background sync.
  */
@@ -460,7 +490,7 @@ export async function redeemPromoCode(
     trainerId?: string;
   }
 ): Promise<RedeemResult> {
-  const normalizedCode = (rawInput || '').trim().toUpperCase().replace(/\s+/g, '');
+  const normalizedCode = cleanPromoCodeInput(rawInput);
   const strippedCode = normalizedCode.replace(/[-_]/g, '');
 
   if (!normalizedCode) {
@@ -473,13 +503,17 @@ export async function redeemPromoCode(
     throw new Error(`يرجى الانتظار (${rateLimit.waitSeconds} ثانية) قبل محاولة إدخال كود جديد لحماية الأمان.`);
   }
 
-  const userIdentifier = managerInfo.userId || managerInfo.trainerId || 'anon_manager';
+  // Guarantee truly unique user/device identifier (never share a static 'anon_manager' across players!)
+  let userIdentifier = managerInfo.userId || managerInfo.trainerId;
+  if (!userIdentifier || userIdentifier === 'anon_manager' || userIdentifier === 'local_user') {
+    userIdentifier = getOrCreateGuestDeviceId();
+  }
 
   // 2. Look up promo code: First in local cache & persistent store, then Firestore cloud fallback
   const cachedCodes = getCachedPromoCodes();
   let matchedCode: PromoCode | undefined = cachedCodes.find(
-    c => c.code.toUpperCase() === normalizedCode || 
-         c.code.toUpperCase().replace(/[-_]/g, '') === strippedCode
+    c => cleanPromoCodeInput(c.code) === normalizedCode || 
+         cleanPromoCodeInput(c.code).replace(/[-_]/g, '') === strippedCode
   );
 
   // If not found in local cache, check Firestore with safety timeout (up to 6000ms for mobile networks)
@@ -518,7 +552,7 @@ export async function redeemPromoCode(
         if (allSnap && !allSnap.empty) {
           for (const d of allSnap.docs) {
             const data = d.data() as PromoCode;
-            const cCode = (data.code || d.id).toUpperCase();
+            const cCode = cleanPromoCodeInput(data.code || d.id);
             if (cCode === normalizedCode || cCode.replace(/[-_]/g, '') === strippedCode) {
               matchedCode = { id: d.id, ...data };
               break;
@@ -529,7 +563,7 @@ export async function redeemPromoCode(
 
       if (matchedCode) {
         // Add to local cache for future instantaneous lookups
-        const updated = [matchedCode, ...cachedCodes.filter(c => c.code.toUpperCase() !== matchedCode!.code.toUpperCase())];
+        const updated = [matchedCode, ...cachedCodes.filter(c => cleanPromoCodeInput(c.code) !== cleanPromoCodeInput(matchedCode!.code))];
         cachePromoCodes(updated);
       }
     } catch (err) {
@@ -543,11 +577,11 @@ export async function redeemPromoCode(
     throw new Error('كود غير صحيح! يرجى التأكد من كتابة الحروف والأرقام بدقة.');
   }
 
-  const officialCode = matchedCode.code.toUpperCase();
+  const officialCode = cleanPromoCodeInput(matchedCode.code);
 
   // 3. Check local redemption record
   const localRedeemed = getLocalRedeemedCodeKeys();
-  if (localRedeemed.includes(officialCode) || localRedeemed.includes(normalizedCode)) {
+  if (localRedeemed.includes(officialCode) || localRedeemed.includes(normalizedCode) || localRedeemed.includes(strippedCode)) {
     throw new Error('لقد قمت باسترداد هذا الكود بالفعل مسبقاً! لا يمكن استرداد الكود أكثر من مرة لنفس المدرب.');
   }
 
@@ -567,7 +601,9 @@ export async function redeemPromoCode(
     throw new Error('عذراً، لقد استُنفد هذا الكود بالكامل ووصل للحد الأقصى المسموح من الاستخدامات!');
   }
 
-  const usedIds = Array.isArray(matchedCode.usedByManagerIds) ? matchedCode.usedByManagerIds : [];
+  // Filter out any stale generic placeholders like 'anon_manager' or 'local_user'
+  const rawUsedIds = Array.isArray(matchedCode.usedByManagerIds) ? matchedCode.usedByManagerIds : [];
+  const usedIds = rawUsedIds.filter(id => id !== 'anon_manager' && id !== 'local_user');
   if (usedIds.includes(userIdentifier)) {
     recordFailedAttempt();
     throw new Error('لقد قمت باسترداد هذا الكود بالفعل مسبقاً! لا يمكن استخدام الكود مرتين لنفس الحساب.');

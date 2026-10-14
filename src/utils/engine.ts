@@ -1492,15 +1492,15 @@ export function simulateMatchStep(
   const managerDiff = homeStrength.managerRating - awayStrength.managerRating;
   const overallDiff = homeStrength.overall - awayStrength.overall;
 
-  const qualityAdvantage = (overallDiff * 0.016) + (managerDiff * 0.012) + (squadDiff * 0.008);
-  const homeQualityMod = Math.max(0.50, Math.min(1.85, 1.0 + qualityAdvantage));
-  const awayQualityMod = Math.max(0.50, Math.min(1.85, 1.0 - qualityAdvantage));
+  const qualityAdvantage = (overallDiff * 0.025) + (managerDiff * 0.018) + (squadDiff * 0.012);
+  const homeQualityMod = Math.max(0.18, Math.min(2.60, 1.0 + qualityAdvantage));
+  const awayQualityMod = Math.max(0.18, Math.min(2.60, 1.0 - qualityAdvantage));
 
-  // Dynamic Possession for this minute (incorporates player quality & tactical dominance)
+  // Dynamic Possession for this minute (strongly reflects quality gap and tactical control)
   const weightedHomeMid = effHomeMid * Math.sqrt(homeQualityMod);
   const weightedAwayMid = effAwayMid * Math.sqrt(awayQualityMod);
   const totalMid = Math.max(10, weightedHomeMid + weightedAwayMid);
-  const homePossession = Math.min(80, Math.max(20, Math.round((weightedHomeMid / totalMid) * 100)));
+  const homePossession = Math.min(84, Math.max(16, Math.round((weightedHomeMid / totalMid) * 100)));
   const awayPossession = 100 - homePossession;
 
   // Track match events and stats
@@ -1527,29 +1527,31 @@ export function simulateMatchStep(
   let updatedHomeRedded = [...prevState.homeReddedPlayerIds];
   let updatedAwayRedded = [...prevState.awayReddedPlayerIds];
 
-  // 3. Dynamic Match Momentum & Anti-Blowout Governor (Eliminates unrealistic high scores)
+  // 3. Dynamic Match Momentum & Anti-Blowout Governor
   const scoreDiff = homeScore - awayScore;
 
-  // Realistic Lead Governor: Leading teams naturally control tempo, protect shape, and avoid risky commitments
+  // Realistic Lead Governor: Leading teams manage tempo, but quality advantage still maintains threat
   let homeLeadMod = 1.0;
-  if (scoreDiff >= 3) homeLeadMod = 0.35; // Total game consolidation, protects clean sheet
-  else if (scoreDiff === 2) homeLeadMod = 0.58; // Game management, controls tempo
-  else if (scoreDiff === 1) homeLeadMod = 0.88; // Slight consolidation
-  else if (scoreDiff < 0) homeLeadMod = 1.12; // Trailing team takes more initiative
+  if (scoreDiff >= 4) homeLeadMod = overallDiff > 8 ? 0.70 : 0.50;
+  else if (scoreDiff === 3) homeLeadMod = overallDiff > 8 ? 0.80 : 0.68;
+  else if (scoreDiff === 2) homeLeadMod = overallDiff > 8 ? 0.92 : 0.85;
+  else if (scoreDiff === 1) homeLeadMod = 0.98;
+  else if (scoreDiff < 0) homeLeadMod = overallDiff < -8 ? 1.05 : 1.15;
 
   let awayLeadMod = 1.0;
-  if (scoreDiff <= -3) awayLeadMod = 0.35;
-  else if (scoreDiff === -2) awayLeadMod = 0.58;
-  else if (scoreDiff === -1) awayLeadMod = 0.88;
-  else if (scoreDiff > 0) awayLeadMod = 1.12;
+  if (scoreDiff <= -4) awayLeadMod = overallDiff < -8 ? 0.70 : 0.50;
+  else if (scoreDiff === -3) awayLeadMod = overallDiff < -8 ? 0.80 : 0.68;
+  else if (scoreDiff === -2) awayLeadMod = overallDiff < -8 ? 0.92 : 0.85;
+  else if (scoreDiff === -1) awayLeadMod = 0.98;
+  else if (scoreDiff > 0) awayLeadMod = overallDiff > 8 ? 1.05 : 1.15;
 
   // Overextended risk: If a team leads and recklessly stays on ultra_attacking, opponent gets counter-attack opportunities
   const homeOverextended = scoreDiff > 0 && currentHomeTactics.mentality === 'ultra_attacking';
   const awayOverextended = scoreDiff < 0 && currentAwayTactics.mentality === 'ultra_attacking';
 
   // Calibrated attack generation per minute (strongly driven by midfield control, tactics, and player/manager quality)
-  let homeAttackProb = (weightedHomeMid / totalMid) * 0.23 * homeLeadMod * homeQualityMod;
-  let awayAttackProb = (weightedAwayMid / totalMid) * 0.21 * awayLeadMod * awayQualityMod;
+  let homeAttackProb = (weightedHomeMid / totalMid) * 0.25 * homeLeadMod * homeQualityMod;
+  let awayAttackProb = (weightedAwayMid / totalMid) * 0.23 * awayLeadMod * awayQualityMod;
 
   if (awayOverextended) homeAttackProb *= 1.25;
   if (homeOverextended) awayAttackProb *= 1.25;
@@ -1558,8 +1560,8 @@ export function simulateMatchStep(
   if (isAwayParked) homeAttackProb *= 0.82;
   if (isHomeParked) awayAttackProb *= 0.82;
 
-  homeAttackProb = Math.min(0.24, Math.max(0.03, homeAttackProb));
-  awayAttackProb = Math.min(0.24, Math.max(0.03, awayAttackProb));
+  homeAttackProb = Math.min(0.32, Math.max(0.02, homeAttackProb));
+  awayAttackProb = Math.min(0.32, Math.max(0.02, awayAttackProb));
 
   const roll = Math.random();
 
@@ -1568,8 +1570,9 @@ export function simulateMatchStep(
     homeDangerousAttacks++;
     const shotRoll = Math.random();
 
-    // ~52% of dangerous attacks culminate in an attempted shot (the rest are cleared, tackled, or intercepted before shooting)
-    if (shotRoll < 0.52) {
+    // Superior teams penetrating weaker defenses convert higher % of attacks into shots
+    const homeShotChance = Math.max(0.42, Math.min(0.68, 0.52 + (overallDiff * 0.005)));
+    if (shotRoll < homeShotChance) {
       homeShots++;
       const topHomeAttacker = pickPlayerByPosition(homeActivePlayers, 'FWD', 'MID');
       const shootingSkill = topHomeAttacker?.attributes?.shooting || effHomeAtk;
@@ -1578,8 +1581,8 @@ export function simulateMatchStep(
       const attackerFatigue = prevState.homeFatigueMap[topHomeAttacker?.id] ?? 85;
       const fatigueFactor = attackerFatigue < 55 ? 0.82 : (attackerFatigue < 68 ? 0.92 : 1.0);
 
-      // Blocked shot check: ~30% of attempted shots are blocked by defenders' bodies before reaching the GK
-      const blockProb = isAwayParked ? 0.40 : 0.28;
+      // Blocked shot check: High defending skill blocks more, weak defending blocks less
+      const blockProb = isAwayParked ? 0.38 : Math.max(0.12, Math.min(0.34, 0.25 - (overallDiff * 0.003)));
       if (Math.random() < blockProb) {
         // Defensive Block
         const defendingCb = pickPlayerByPosition(awayActivePlayers, 'DEF', 'MID');
@@ -1593,13 +1596,13 @@ export function simulateMatchStep(
           });
         }
       } else {
-        // Shot is through on goal
-        let onTargetProb = (0.35 + ((shootingSkill - 50) * 0.0028)) * fatigueFactor;
+        // Shot is through on goal: high skill strikers reliably find the target
+        let onTargetProb = (0.38 + ((shootingSkill - 50) * 0.0036)) * fatigueFactor;
         if (isAwayParked) onTargetProb -= 0.05; // Narrow shooting lanes
-        onTargetProb = Math.min(0.50, Math.max(0.26, onTargetProb));
+        onTargetProb = Math.min(0.68, Math.max(0.25, onTargetProb));
 
         const isTarget = Math.random() < onTargetProb;
-        const shotXg = isTarget ? (Math.random() * 0.18 + 0.08) : (Math.random() * 0.05 + 0.02);
+        const shotXg = isTarget ? (Math.random() * 0.20 + 0.09) : (Math.random() * 0.05 + 0.02);
         homeXg += Number(shotXg.toFixed(2));
 
         if (isTarget) {
@@ -1611,17 +1614,18 @@ export function simulateMatchStep(
 
           // Calibrated Goal Conversion on Target:
           // Factoring Player quality and manager coaching quality
-          const atkVsGk = ((effHomeAtk - (awayGkPower * gkEfficiency)) * 0.0035);
-          const defSuppression = ((effAwayDef - 50) * 0.0022);
-          const qualityConversionBonus = (overallDiff * 0.004) + (managerDiff * 0.0025);
-          let goalProb = 0.25 + atkVsGk - defSuppression + qualityConversionBonus;
+          const atkVsGk = ((effHomeAtk - (awayGkPower * gkEfficiency)) * 0.0042);
+          const defSuppression = ((effAwayDef - 50) * 0.0020);
+          const qualityConversionBonus = (overallDiff * 0.005) + (managerDiff * 0.003);
+          let goalProb = 0.28 + atkVsGk - defSuppression + qualityConversionBonus;
 
           if (isAwayParked) goalProb -= 0.06;
           // Anti-blowout conversion dampener
-          if (scoreDiff >= 2) goalProb *= 0.65;
-          if (scoreDiff >= 3) goalProb *= 0.40;
+          if (scoreDiff >= 4) goalProb *= 0.50;
+          else if (scoreDiff >= 3) goalProb *= 0.70;
+          else if (scoreDiff >= 2) goalProb *= 0.85;
 
-          goalProb = Math.max(0.06, Math.min(0.42, goalProb));
+          goalProb = Math.max(0.05, Math.min(0.60, goalProb));
 
           if (Math.random() < goalProb) {
             homeScore++;
@@ -1671,7 +1675,9 @@ export function simulateMatchStep(
     awayDangerousAttacks++;
     const shotRoll = Math.random();
 
-    if (shotRoll < 0.52) {
+    // Superior teams penetrating weaker defenses convert higher % of attacks into shots
+    const awayShotChance = Math.max(0.42, Math.min(0.68, 0.52 - (overallDiff * 0.005)));
+    if (shotRoll < awayShotChance) {
       awayShots++;
       const topAwayAttacker = pickPlayerByPosition(awayActivePlayers, 'FWD', 'MID');
       const shootingSkill = topAwayAttacker?.attributes?.shooting || effAwayAtk;
@@ -1679,8 +1685,8 @@ export function simulateMatchStep(
       const attackerFatigue = prevState.awayFatigueMap[topAwayAttacker?.id] ?? 85;
       const fatigueFactor = attackerFatigue < 55 ? 0.82 : (attackerFatigue < 68 ? 0.92 : 1.0);
 
-      // Blocked shot check
-      const blockProb = isHomeParked ? 0.40 : 0.28;
+      // Blocked shot check: High defending skill blocks more, weak defending blocks less
+      const blockProb = isHomeParked ? 0.38 : Math.max(0.12, Math.min(0.34, 0.25 + (overallDiff * 0.003)));
       if (Math.random() < blockProb) {
         const defendingCb = pickPlayerByPosition(homeActivePlayers, 'DEF', 'MID');
         if (Math.random() < 0.45) {
@@ -1693,12 +1699,12 @@ export function simulateMatchStep(
           });
         }
       } else {
-        let onTargetProb = (0.35 + ((shootingSkill - 50) * 0.0028)) * fatigueFactor * crowdAdvantage.awayIntimidationPenalty;
+        let onTargetProb = (0.38 + ((shootingSkill - 50) * 0.0036)) * fatigueFactor * crowdAdvantage.awayIntimidationPenalty;
         if (isHomeParked) onTargetProb -= 0.05;
-        onTargetProb = Math.min(0.50, Math.max(0.26, onTargetProb));
+        onTargetProb = Math.min(0.68, Math.max(0.25, onTargetProb));
 
         const isTarget = Math.random() < onTargetProb;
-        const shotXg = isTarget ? (Math.random() * 0.18 + 0.08) : (Math.random() * 0.05 + 0.02);
+        const shotXg = isTarget ? (Math.random() * 0.20 + 0.09) : (Math.random() * 0.05 + 0.02);
         awayXg += Number(shotXg.toFixed(2));
 
         if (isTarget) {
@@ -1708,16 +1714,17 @@ export function simulateMatchStep(
           const homeGkFatigue = prevState.homeFatigueMap[homeGk?.id] ?? 90;
           const gkEfficiency = homeGkFatigue < 50 ? 0.88 : 1.0;
 
-          const atkVsGk = ((effAwayAtk - (homeGkPower * gkEfficiency)) * 0.0035);
-          const defSuppression = ((effHomeDef - 50) * 0.0022);
-          const qualityConversionBonus = (-overallDiff * 0.004) + (-managerDiff * 0.0025);
-          let goalProb = 0.25 + atkVsGk - defSuppression + qualityConversionBonus;
+          const atkVsGk = ((effAwayAtk - (homeGkPower * gkEfficiency)) * 0.0042);
+          const defSuppression = ((effHomeDef - 50) * 0.0020);
+          const qualityConversionBonus = (-overallDiff * 0.005) + (-managerDiff * 0.003);
+          let goalProb = 0.28 + atkVsGk - defSuppression + qualityConversionBonus;
 
           if (isHomeParked) goalProb -= 0.06;
-          if (scoreDiff <= -2) goalProb *= 0.65;
-          if (scoreDiff <= -3) goalProb *= 0.40;
+          if (scoreDiff <= -4) goalProb *= 0.50;
+          else if (scoreDiff <= -3) goalProb *= 0.70;
+          else if (scoreDiff <= -2) goalProb *= 0.85;
 
-          goalProb = Math.max(0.06, Math.min(0.42, goalProb));
+          goalProb = Math.max(0.05, Math.min(0.60, goalProb));
 
           if (Math.random() < goalProb) {
             awayScore++;

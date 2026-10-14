@@ -8,6 +8,7 @@ import {
   APP_BUILD_VERSION 
 } from '../services/saveBackupService';
 import { getLocalTrainerProfile } from '../services/trainerProfileService';
+import { notificationService, NotificationSettings } from '../services/notificationService';
 import {
   Settings,
   X,
@@ -34,7 +35,17 @@ import {
   FileCode,
   ClipboardPaste,
   ChevronDown,
-  ChevronUp
+  ChevronUp,
+  Bell,
+  BellRing,
+  Send,
+  Flame,
+  Swords,
+  DollarSign,
+  Megaphone,
+  Trophy,
+  Radio,
+  Rocket
 } from 'lucide-react';
 
 interface SettingsBackupModalProps {
@@ -70,6 +81,8 @@ export const SettingsBackupModal: React.FC<SettingsBackupModalProps> = ({
     dailyNews,
     retiredPlayers,
     worldRankings,
+    userClub,
+    daysUntilNextMatch,
     scoutedOpponents,
     deletedMessageIds,
     applyLoadedSave,
@@ -78,6 +91,10 @@ export const SettingsBackupModal: React.FC<SettingsBackupModalProps> = ({
 
   const trainerProfile = getLocalTrainerProfile();
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const [notifSettings, setNotifSettings] = useState<NotificationSettings>(() => notificationService.getSettings());
+  const [isTestingNotif, setIsTestingNotif] = useState(false);
+  const [testNotifNotice, setTestNotifNotice] = useState<string | null>(null);
 
   const [isExporting, setIsExporting] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
@@ -89,6 +106,66 @@ export const SettingsBackupModal: React.FC<SettingsBackupModalProps> = ({
     title: string;
     message: string;
   } | null>(null);
+
+  const handleToggleNotifications = async () => {
+    const nextState = !notifSettings.enabled;
+    if (nextState) {
+      await notificationService.requestPermissions();
+    }
+    notificationService.saveSettings({ enabled: nextState });
+    setNotifSettings(notificationService.getSettings());
+
+    if (nextState) {
+      // Immediately schedule with latest game context
+      const roundFixtures = (fixtures || []).filter(f => f && f.round === currentRound);
+      const userFixture = roundFixtures.find(f => f && userClub && (f.homeTeamId === userClub.id || f.awayTeamId === userClub.id));
+      const oppId = userFixture ? (userFixture.homeTeamId === userClub?.id ? userFixture.awayTeamId : userFixture.homeTeamId) : null;
+      const oppClub = (teams || []).find(t => t && t.id === oppId);
+
+      await notificationService.scheduleDailyMotivationalNotifications({
+        userClub,
+        manager,
+        teams: teams || [],
+        fixtures: fixtures || [],
+        currentRound,
+        daysUntilNextMatch,
+        nextOpponentName: oppClub?.name,
+      });
+      setTestNotifNotice('تم تفعيل الإشعارات وجدولة إشعارين يومياً بأوقات مختلفة 🔔');
+    } else {
+      await notificationService.cancelAllScheduledNotifications();
+      setTestNotifNotice('تم تعطيل الإشعارات وإلغاء الجداول السابقة 🔕');
+    }
+    setTimeout(() => setTestNotifNotice(null), 4000);
+  };
+
+  const handleSendTestNotification = async (forcedType?: string) => {
+    setIsTestingNotif(true);
+    setTestNotifNotice(null);
+
+    const roundFixtures = (fixtures || []).filter(f => f && f.round === currentRound);
+    const userFixture = roundFixtures.find(f => f && userClub && (f.homeTeamId === userClub.id || f.awayTeamId === userClub.id));
+    const oppId = userFixture ? (userFixture.homeTeamId === userClub?.id ? userFixture.awayTeamId : userFixture.homeTeamId) : null;
+    const oppClub = (teams || []).find(t => t && t.id === oppId);
+
+    const res = await notificationService.sendTestNotification({
+      userClub,
+      manager,
+      teams: teams || [],
+      fixtures: fixtures || [],
+      currentRound,
+      daysUntilNextMatch,
+      nextOpponentName: oppClub?.name,
+    }, forcedType);
+
+    setIsTestingNotif(false);
+    if (res.success) {
+      setTestNotifNotice(`تم إرسال إشعار تجريبي: "${res.title}" 📲`);
+    } else {
+      setTestNotifNotice('تعذر إرسال الإشعار التجريبي. يرجى التأكد من منح إذن الإشعارات.');
+    }
+    setTimeout(() => setTestNotifNotice(null), 5000);
+  };
 
   if (!isOpen) return null;
 
@@ -470,6 +547,143 @@ export const SettingsBackupModal: React.FC<SettingsBackupModalProps> = ({
               className="hidden"
               onChange={handleFileChange}
             />
+          </div>
+
+          {/* Daily Motivational Notifications (حد أقصى إشعارين يومياً بأوقات مختلفة) */}
+          <div className="bg-slate-950/70 border border-amber-500/30 rounded-2xl p-3.5 space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-amber-400">
+                  <Bell className="w-4 h-4" />
+                </div>
+                <div>
+                  <h4 className="text-xs font-bold text-white flex items-center gap-1.5">
+                    <span>إشعارات اللعبة اليومية الحماسية</span>
+                    <span className="text-[10px] bg-amber-950/80 text-amber-300 border border-amber-800/50 px-2 py-0.5 rounded-full font-mono">
+                      حد أقصى 2 يومياً
+                    </span>
+                  </h4>
+                  <p className="text-[11px] text-slate-400">تنبيهات مشوقة بأوقات متباعدة (ظهراً ومساءً) لتشجيعك على متابعة فريقك</p>
+                </div>
+              </div>
+
+              {/* Toggle Switch */}
+              <button
+                type="button"
+                onClick={handleToggleNotifications}
+                className={`w-12 h-6 rounded-full transition-colors relative cursor-pointer ${
+                  notifSettings.enabled ? 'bg-emerald-600' : 'bg-slate-700'
+                }`}
+                title={notifSettings.enabled ? 'تعطيل الإشعارات' : 'تفعيل الإشعارات'}
+              >
+                <div
+                  className={`w-5 h-5 rounded-full bg-white transition-transform absolute top-0.5 ${
+                    notifSettings.enabled ? 'left-0.5' : 'right-0.5'
+                  }`}
+                />
+              </button>
+            </div>
+
+            <p className="text-[11px] text-slate-300 leading-relaxed bg-slate-900/80 p-2.5 rounded-xl border border-slate-800">
+              ترسل اللعبة رسائل ديناميكية واقعية من واقع مسيرتك:
+              <strong className="text-amber-300"> استعدادات الخصوم وخططهم لمواجهتك</strong>،
+              <strong className="text-rose-300"> كواليس التدريب والاشتباكات الحماسية بين اللاعبين</strong>،
+              <strong className="text-emerald-300"> وصول عروض شراء مالية لنجومك</strong>،
+              و<strong className="text-cyan-300">توجيهات مجلس الإدارة والمكافآت اليومية</strong>.
+            </p>
+
+            {/* Test Notification Feedback */}
+            {testNotifNotice && (
+              <div className="p-2.5 bg-emerald-950/80 border border-emerald-500/60 rounded-xl text-emerald-200 text-xs font-bold flex items-center gap-2 animate-fadeIn">
+                <BellRing className="w-4 h-4 text-emerald-400 shrink-0 animate-bounce" />
+                <span>{testNotifNotice}</span>
+              </div>
+            )}
+
+            {/* Test Notification Interactive Buttons */}
+            <div className="space-y-1.5 pt-1">
+              <span className="text-[10px] font-bold text-slate-400 block">اختبار وتجربة نوعية الإشعارات فورياً على جهازك:</span>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => handleSendTestNotification('rival_preparation')}
+                  disabled={isTestingNotif}
+                  className="p-2 bg-slate-800 hover:bg-slate-750 border border-slate-700 rounded-xl text-right text-[11px] font-bold text-slate-200 hover:text-white flex items-center gap-1.5 transition-all cursor-pointer active:scale-95"
+                >
+                  <Swords className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                  <span>تحدي الخصم ⚔️</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => handleSendTestNotification('training_drama')}
+                  disabled={isTestingNotif}
+                  className="p-2 bg-slate-800 hover:bg-slate-750 border border-slate-700 rounded-xl text-right text-[11px] font-bold text-slate-200 hover:text-white flex items-center gap-1.5 transition-all cursor-pointer active:scale-95"
+                >
+                  <Flame className="w-3.5 h-3.5 text-rose-400 shrink-0" />
+                  <span>خناقة بالتمرين 💥</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => handleSendTestNotification('transfer_rumors')}
+                  disabled={isTestingNotif}
+                  className="p-2 bg-slate-800 hover:bg-slate-750 border border-slate-700 rounded-xl text-right text-[11px] font-bold text-slate-200 hover:text-white flex items-center gap-1.5 transition-all cursor-pointer active:scale-95"
+                >
+                  <DollarSign className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                  <span>عرض شراء 💰</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => handleSendTestNotification('daily_reward')}
+                  disabled={isTestingNotif}
+                  className="p-2 bg-slate-800 hover:bg-slate-750 border border-slate-700 rounded-xl text-right text-[11px] font-bold text-slate-200 hover:text-white flex items-center gap-1.5 transition-all cursor-pointer active:scale-95"
+                >
+                  <Sparkles className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+                  <span>هدية يومية 🎁</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleSendTestNotification('fan_ultras')}
+                  disabled={isTestingNotif}
+                  className="p-2 bg-slate-800 hover:bg-slate-750 border border-slate-700 rounded-xl text-right text-[11px] font-bold text-slate-200 hover:text-white flex items-center gap-1.5 transition-all cursor-pointer active:scale-95"
+                >
+                  <Megaphone className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                  <span>تيفو الألتراس 🔥</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => handleSendTestNotification('scouting_wonderkid')}
+                  disabled={isTestingNotif}
+                  className="p-2 bg-slate-800 hover:bg-slate-750 border border-slate-700 rounded-xl text-right text-[11px] font-bold text-slate-200 hover:text-white flex items-center gap-1.5 transition-all cursor-pointer active:scale-95"
+                >
+                  <Trophy className="w-3.5 h-3.5 text-yellow-400 shrink-0" />
+                  <span>موهبة ناشئة 💎</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => handleSendTestNotification('press_conference_feud')}
+                  disabled={isTestingNotif}
+                  className="p-2 bg-slate-800 hover:bg-slate-750 border border-slate-700 rounded-xl text-right text-[11px] font-bold text-slate-200 hover:text-white flex items-center gap-1.5 transition-all cursor-pointer active:scale-95"
+                >
+                  <Radio className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
+                  <span>مؤتمر صحفي 🎙️</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => handleSendTestNotification('training_wonder_goal')}
+                  disabled={isTestingNotif}
+                  className="p-2 bg-slate-800 hover:bg-slate-750 border border-slate-700 rounded-xl text-right text-[11px] font-bold text-slate-200 hover:text-white flex items-center gap-1.5 transition-all cursor-pointer active:scale-95"
+                >
+                  <Rocket className="w-3.5 h-3.5 text-rose-400 shrink-0" />
+                  <span>هدف صاروخي 🚀</span>
+                </button>
+              </div>
+            </div>
           </div>
 
           {/* Android Project Download */}

@@ -12,6 +12,11 @@ const config: CapacitorConfig = {
     AdMob: {
       appId: 'ca-app-pub-5272866425919152~1232269694', // Official AdMob Android App ID
     },
+    LocalNotifications: {
+      smallIcon: "ic_stat_icon_config_sample",
+      iconColor: "#059669",
+      sound: "beep.wav",
+    },
   },
   android: {
     allowMixedContent: false,

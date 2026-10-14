@@ -559,10 +559,14 @@ export function evaluateMatchImpactOnConfidence(
  * Updates Board & Fan metrics on daily calendar advancement based on standing positioning.
  */
 export function updateDailyBoardConfidence(
-  prev: BoardSystem,
+  prev: BoardSystem | null | undefined,
   userClub: Club | undefined,
   standings: LeagueStanding[]
 ): BoardSystem {
+  if (!prev || typeof prev !== 'object') {
+    return generateInitialBoardSystem(userClub, 1, 18, [], false);
+  }
+
   const currentPos = (userClub?.id ? (standings || []).findIndex(s => s && s.teamId === userClub.id) + 1 : 1) || 1;
   const targetPos = prev.targetLeaguePosition || 1;
   const margin = targetPos - currentPos;

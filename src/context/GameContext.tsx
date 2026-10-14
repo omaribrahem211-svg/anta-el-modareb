@@ -111,6 +111,7 @@ import { EGYPT_TIER_4_LEAGUE, getLeagueById, GLOBAL_LEAGUES, findClubInWorld, ge
 import { calculateMatchRevenue, MatchRevenueBreakdown, getBenchmarkTicketPrice } from '../utils/matchRevenue';
 import { AdManager } from '../services/adManager';
 import { ADMOB_CONFIG } from '../config/admobConfig';
+import { notificationService } from '../services/notificationService';
 import { DIAGNOSTIC_CONFIG } from '../config/diagnosticConfig';
 import { AdRewardType, AdRewardClaimResult } from '../services/adRewardService';
 import { MIGRATION_STORAGE_KEY, runOneTimeWorldMigration, inferClubCountry } from '../utils/worldMigration';
@@ -123,7 +124,7 @@ import { migrateSavePayload, CURRENT_SAVE_FORMAT_VERSION } from '../services/sav
 import { smartSyncManager, SmartSyncInput } from '../services/smartSyncManager';
 import { canPlayerJoinClub, DEFAULT_ECONOMY_CONFIG, calculateClubMonthlyIncome, calculateClubTotalMonthlyWages, validateTransferFinancials } from '../services/economyService';
 import { fetchActiveBroadcasts, applyWorldOverridesToClubs, applyWorldOverridesToMarket, isPlayerDeletedInOverrides } from '../services/adminService';
-import { redeemPromoCode } from '../services/promoCodeService';
+import { redeemPromoCode, getOrCreateGuestDeviceId } from '../services/promoCodeService';
 import { isQuotaExceededError, markQuotaExceeded, isRecentQuotaExceeded } from '../utils/firestoreErrorHelper';
 import { validateCareerState, resignManagerFromClub, appointManagerToClub } from '../utils/careerValidator';
 import {
@@ -230,6 +231,7 @@ interface GameContextType {
   skipLiveMatchToEnd: () => void;
   finishLiveMatchAndAdvance: () => void;
   instantSimulateCurrentRound: () => void;
+  simulateMatchAndAdvanceToNextDay: () => void;
   simulateMultipleRounds: (roundsCount?: number) => { success: boolean; simulatedCount: number; message: string };
   resumeSecondHalf: (teamTalkMoraleBoost?: boolean) => void;
   makeLiveSubstitution: (outPlayerId: string, inPlayerId: string) => { success: boolean; message: string };
@@ -868,6 +870,17 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
   });
 
+  // Synchronize calendarDate to localStorage so it is always preserved across sessions/reloads
+  useEffect(() => {
+    try {
+      if (calendarDate && calendarDate.rawDateStr) {
+        localStorage.setItem(`${STORAGE_KEY}_calendarDate`, JSON.stringify(calendarDate));
+      }
+    } catch (err) {
+      console.warn('[GameContext] Failed to sync calendarDate to localStorage:', err);
+    }
+  }, [calendarDate]);
+
   const [activeNegotiations, setActiveNegotiations] = useState<ActiveNegotiation[]>(() => {
     try {
       const saved = localStorage.getItem(`${STORAGE_KEY}_activeNegotiations`);
@@ -984,13 +997,27 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   // Prompt the user once per browser session if a daily reward is waiting
   useEffect(() => {
     if (canClaimDailyReward) {
-      const hasPrompted = sessionStorage.getItem('anta_daily_reward_prompted_session');
-      if (!hasPrompted) {
-        sessionStorage.setItem('anta_daily_reward_prompted_session', 'true');
-        const timer = setTimeout(() => {
-          setShowDailyRewardModal(true);
-        }, 1500);
-        return () => clearTimeout(timer);
+      try {
+        let hasPrompted = false;
+        try {
+          hasPrompted = Boolean(sessionStorage.getItem('anta_daily_reward_prompted_session'));
+        } catch {
+          hasPrompted = Boolean((window as any).__anta_daily_reward_prompted_memory);
+        }
+
+        if (!hasPrompted) {
+          try {
+            sessionStorage.setItem('anta_daily_reward_prompted_session', 'true');
+          } catch {}
+          (window as any).__anta_daily_reward_prompted_memory = true;
+
+          const timer = setTimeout(() => {
+            setShowDailyRewardModal(true);
+          }, 1500);
+          return () => clearTimeout(timer);
+        }
+      } catch (err) {
+        console.warn('[DailyReward] Prompt check notice:', err);
       }
     }
   }, [canClaimDailyReward]);
@@ -1462,6 +1489,34 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     return () => clearTimeout(timer);
   }, []);
+
+  // Daily Motivational Notifications Scheduler (Max 2 per day at distinct hours)
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      try {
+        const roundFixtures = (fixtures || []).filter(f => f && f.round === currentRound);
+        const userFixture = roundFixtures.find(f => f && userClub && (f.homeTeamId === userClub.id || f.awayTeamId === userClub.id));
+        const oppId = userFixture ? (userFixture.homeTeamId === userClub?.id ? userFixture.awayTeamId : userFixture.homeTeamId) : null;
+        const oppClub = (teams || []).find(t => t && t.id === oppId);
+
+        notificationService.scheduleDailyMotivationalNotifications({
+          userClub,
+          manager,
+          teams: teams || [],
+          fixtures: fixtures || [],
+          currentRound,
+          daysUntilNextMatch,
+          nextOpponentName: oppClub?.name,
+        }).catch(err => {
+          console.warn('[NotificationService] Background schedule notice:', err);
+        });
+      } catch (e) {
+        console.warn('[NotificationService] Schedule effect warning:', e);
+      }
+    }, 2500);
+
+    return () => clearTimeout(timer);
+  }, [userClub?.id, currentRound, manager?.name, daysUntilNextMatch]);
 
   // Load Active Admin Broadcasts to Inbox
   useEffect(() => {
@@ -4011,6 +4066,40 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     // Interstitial Check (non-blocking background preload & show if ready)
     AdManager.onMatchCompleted();
     console.log('[MatchEndingFlow] Instant simulate round completed successfully');
+
+    // Immediately persist to local disk repository
+    try {
+      gameStateRepository.saveLocalGameState({
+        schemaVersion: 2,
+        saveVersion: 1,
+        lastLocalSaveAt: Date.now(),
+        season,
+        activeLeague,
+        teams: updatedAllTeams,
+        standings: updatedStandings,
+        fixtures: updatedFixtures,
+        currentRound: nextRoundNumber,
+        manager: updatedManager,
+        transferMarket,
+        incomingBids,
+        inbox: [...newInboxMsgs, ...inbox],
+        cupTournament: updatedCupTournament,
+        jobOffers,
+        seasonEndSummary,
+        transferHistory,
+        clubEconomy,
+        calendarDate,
+        activeNegotiations,
+        boardSystem,
+        dailyNews: matchdayNews ? [...matchdayNews, ...(dailyNews || [])].slice(0, 40) : dailyNews,
+        retiredPlayers,
+        worldRankings,
+        scoutedOpponents,
+        deletedMessageIds,
+      });
+    } catch (saveErr) {
+      console.warn('[MatchEndingFlow] Instant simulate save error:', saveErr);
+    }
     } catch (error) {
       console.error('[MatchEndingFlow] CRITICAL UNCAUGHT EXCEPTION in instantSimulateCurrentRound:', error);
     } finally {
@@ -4019,6 +4108,31 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         setIsSimulationRunning(false);
       }, 100);
     }
+  };
+
+  /**
+   * One-touch Match Simulation & Next Day Advancement:
+   * Fixes starting lineup automatically if needed, simulates this round's matches,
+   * advances calendar by 1 day, and persists everything to disk.
+   */
+  const simulateMatchAndAdvanceToNextDay = () => {
+    if (isSimulationRunningRef.current || seasonFinished) return;
+
+    // 1. Auto fix user starting lineup if needed so match is simulated cleanly
+    if (userClub) {
+      const val = validateSquadLineup(userClub);
+      if (!val.isValid) {
+        autoFixUserStartingLineup();
+      }
+    }
+
+    // 2. Instant simulate round
+    instantSimulateCurrentRound();
+
+    // 3. Immediately advance the calendar date by 1 day to the day after match
+    setTimeout(() => {
+      advanceToNextDay(false);
+    }, 250);
   };
 
   const simulateMultipleRounds = (roundsCount: number = 10): { success: boolean; simulatedCount: number; message: string } => {
@@ -5834,7 +5948,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         const newAgenda = generateMasterSeasonAgenda(season.seasonNumber || 1, targetLeague, appointed.teams, newCup, undefined, userClubObj);
         setFixtures(newAgenda);
         const maxR = Math.max(...newAgenda.map(f => f.round), 42);
-        setSeason(prev => ({ ...prev, totalRounds: maxR, leagueId: targetLeague.id, leagueName: targetLeague.name }));
+        setSeason(prev => ({ ...prev, totalRounds: maxR, leagueId: targetLeague.id, leagueName: targetLeague.name, divisionTier: targetLeague.tier }));
       }
     }
 
@@ -6116,117 +6230,131 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     try {
       // Gating check: Block advancement if today is match day and match is not yet completed
       if (userClub && !seasonFinished) {
-      const roundFixtures = fixtures.filter(f => f.round === currentRound);
-      const userFixture = roundFixtures.find(f => f.homeTeamId === userClub.id || f.awayTeamId === userClub.id);
+        const roundFixtures = (fixtures || []).filter(f => f && f.round === currentRound);
+        const userFixture = roundFixtures.find(f => f && userClub && (f.homeTeamId === userClub.id || f.awayTeamId === userClub.id));
 
-      const currentMatchInfo = calculateDaysUntilNextMatch(
-        calendarDate.rawDateStr,
-        currentRound,
-        getInitialSeasonDate(season.seasonNumber).rawDateStr
-      );
-
-      const isTodayMatchDay = currentMatchInfo.isMatchDay || currentMatchInfo.daysRemaining <= 0;
-
-      if (isTodayMatchDay && userFixture && !userFixture.isPlayed) {
-        const val = validateSquadLineup(userClub);
-        const oppClub = teams.find(t => t.id === (userFixture.homeTeamId === userClub.id ? userFixture.awayTeamId : userFixture.homeTeamId));
-
-        if (!val.isValid) {
-          setMatchBlocker({
-            isOpen: true,
-            reason: 'lineup_issue',
-            title: '🚨 تنبيه: لا يمكن الانتقال لليوم التالي بوجود لاعب غير جاهز',
-            message: 'يوجد لاعبون مصابون أو موقوفون ضمن التشكيل الأساسي لمباراة اليوم! يجب استبدالهم أو تسوية التشكيل أولاً.',
-            fixture: userFixture,
-            opponentClub: oppClub,
-            invalidStarters: val.invalidStarters,
-          });
-        } else {
-          setMatchBlocker({
-            isOpen: true,
-            reason: 'match_today',
-            title: '⚽ اليوم موعد مباراة رسمية!',
-            message: `اليوم موعد مباراة الجولة ${currentRound} أمام (${oppClub?.name || 'المنافس'})! لا يمكن الانتقال إلى اليوم التالي قبل خوض المباراة أو محاكاتها وإنهاء أحداث هذا اليوم.`,
-            fixture: userFixture,
-            opponentClub: oppClub,
-          });
-        }
-        return; // BLOCK ADVANCEMENT!
-      }
-    }
-
-    let daysAdvanced = 1;
-
-    // If skipToMatch requested, skip directly to the exact match day
-    if (skipToMatch && userClub && !seasonFinished) {
-      const matchInfo = calculateDaysUntilNextMatch(
-        calendarDate.rawDateStr,
-        currentRound,
-        getInitialSeasonDate(season.seasonNumber).rawDateStr,
-        totalRounds
-      );
-
-      if (matchInfo.daysRemaining > 0) {
-        // Jump directly to the exact match day!
-        daysAdvanced = matchInfo.daysRemaining;
-      }
-    }
-
-    const newDate = addDaysToDate(calendarDate.rawDateStr, daysAdvanced, calendarDate.dayIndexInSeason || 1);
-
-    // 1. Simulate Daily Squad Training & Recovery across the days advanced
-    let updatedTrainingReports: DayAdvanceSummary['trainingReports'] = [];
-    let updatedInjuryReports: DayAdvanceSummary['injuryUpdates'] = [];
-    let updatedSquadPlayers: Player[] | undefined = userClub && userClub.players ? [...userClub.players] : undefined;
-
-    if (updatedSquadPlayers) {
-      for (let dayStep = 0; dayStep < daysAdvanced; dayStep++) {
-        const trainingResult = simulateDailySquadTraining(
-          updatedSquadPlayers,
-          trainingIntensity,
-          userClub?.facilities?.trainingGroundLevel || 1
+        const currentMatchInfo = calculateDaysUntilNextMatch(
+          calendarDate?.rawDateStr,
+          currentRound,
+          getInitialSeasonDate(season?.seasonNumber || 1).rawDateStr,
+          totalRounds
         );
-        updatedSquadPlayers = trainingResult.updatedPlayers;
-        if (trainingResult.injuryUpdates.length > 0) {
-          updatedInjuryReports.push(...trainingResult.injuryUpdates);
+
+        const isTodayMatchDay = currentMatchInfo.isMatchDay || currentMatchInfo.daysRemaining <= 0;
+
+        if (isTodayMatchDay && userFixture && !userFixture.isPlayed) {
+          const val = validateSquadLineup(userClub);
+          const oppClub = (teams || []).find(t => t && (t.id === (userFixture.homeTeamId === userClub.id ? userFixture.awayTeamId : userFixture.homeTeamId)));
+
+          if (!val.isValid) {
+            setMatchBlocker({
+              isOpen: true,
+              reason: 'lineup_issue',
+              title: '🚨 تنبيه: لا يمكن الانتقال لليوم التالي بوجود لاعب غير جاهز',
+              message: 'يوجد لاعبون مصابون أو موقوفون ضمن التشكيل الأساسي لمباراة اليوم! يجب استبدالهم أو تسوية التشكيل أولاً.',
+              fixture: userFixture,
+              opponentClub: oppClub,
+              invalidStarters: val.invalidStarters,
+            });
+          } else {
+            setMatchBlocker({
+              isOpen: true,
+              reason: 'match_today',
+              title: '⚽ اليوم موعد مباراة رسمية!',
+              message: `اليوم موعد مباراة الجولة ${currentRound} أمام (${oppClub?.name || 'المنافس'})! لا يمكن الانتقال إلى اليوم التالي قبل خوض المباراة أو محاكاتها وإنهاء أحداث هذا اليوم.`,
+              fixture: userFixture,
+              opponentClub: oppClub,
+            });
+          }
+          return; // BLOCK ADVANCEMENT!
         }
-        if (dayStep === daysAdvanced - 1 || trainingResult.trainingReports.some(r => r.type === 'growth')) {
-          updatedTrainingReports.push(...trainingResult.trainingReports);
+      }
+
+      let daysAdvanced = 1;
+
+      // If skipToMatch requested, skip directly to the exact match day
+      if (skipToMatch && userClub && !seasonFinished) {
+        const matchInfo = calculateDaysUntilNextMatch(
+          calendarDate?.rawDateStr,
+          currentRound,
+          getInitialSeasonDate(season?.seasonNumber || 1).rawDateStr,
+          totalRounds
+        );
+
+        if (matchInfo.daysRemaining > 0) {
+          // Jump directly to the exact match day!
+          daysAdvanced = matchInfo.daysRemaining;
         }
       }
-    }
 
-    // 2. Simulate Active Negotiations Progression across the days advanced
-    let currentActiveNegs = [...activeNegotiations];
-    let allCompletedTransfers: { negotiation: ActiveNegotiation; player: Player }[] = [];
-    let allNegReports: DayAdvanceSummary['negotiationUpdates'] = [];
+      const safeCurrentRawDate = calendarDate?.rawDateStr || getInitialSeasonDate(season?.seasonNumber || 1).rawDateStr;
+      const safeDayIndex = calendarDate?.dayIndexInSeason || 1;
+      const newDate = addDaysToDate(safeCurrentRawDate, daysAdvanced, safeDayIndex);
 
-    for (let dayStep = 0; dayStep < daysAdvanced; dayStep++) {
-      if (currentActiveNegs.length === 0) break;
-      const negResult = simulateDailyNegotiations(
-        currentActiveNegs,
-        userClub,
-        teams,
-        transferMarket
-      );
-      currentActiveNegs = negResult.updatedNegotiations.filter(n => n.stage !== 'completed');
-      if (negResult.completedTransfers.length > 0) {
-        allCompletedTransfers.push(...negResult.completedTransfers);
+      // 1. Simulate Daily Squad Training & Recovery across the days advanced
+      let updatedTrainingReports: DayAdvanceSummary['trainingReports'] = [];
+      let updatedInjuryReports: DayAdvanceSummary['injuryUpdates'] = [];
+      let updatedSquadPlayers: Player[] | undefined = userClub && Array.isArray(userClub.players)
+        ? userClub.players.filter((p): p is Player => Boolean(p && p.id))
+        : undefined;
+
+      if (updatedSquadPlayers && updatedSquadPlayers.length > 0) {
+        for (let dayStep = 0; dayStep < daysAdvanced; dayStep++) {
+          try {
+            const trainingResult = simulateDailySquadTraining(
+              updatedSquadPlayers,
+              trainingIntensity || 'normal',
+              userClub?.facilities?.trainingGroundLevel || 1
+            );
+            updatedSquadPlayers = trainingResult.updatedPlayers;
+            if (trainingResult.injuryUpdates && trainingResult.injuryUpdates.length > 0) {
+              updatedInjuryReports.push(...trainingResult.injuryUpdates);
+            }
+            if (dayStep === daysAdvanced - 1 || (trainingResult.trainingReports && trainingResult.trainingReports.some(r => r && r.type === 'growth'))) {
+              updatedTrainingReports.push(...trainingResult.trainingReports);
+            }
+          } catch (tErr) {
+            console.warn('[DailyProgression] Training simulation step warning:', tErr);
+          }
+        }
       }
-      if (negResult.negotiationReports.length > 0) {
-        allNegReports.push(...negResult.negotiationReports);
-      }
-      if (currentActiveNegs.some(n => n.actionRequired)) {
-        break;
-      }
-    }
 
-    // Filter out completed deals so they do not linger on the active negotiations tab
-    setActiveNegotiations(currentActiveNegs);
+      // 2. Simulate Active Negotiations Progression across the days advanced
+      let currentActiveNegs = Array.isArray(activeNegotiations) ? [...activeNegotiations] : [];
+      let allCompletedTransfers: { negotiation: ActiveNegotiation; player: Player }[] = [];
+      let allNegReports: DayAdvanceSummary['negotiationUpdates'] = [];
 
-    // Atomically execute squad updates and completed transfers
-    setTeams(prevTeams => {
-      let nextTeams = prevTeams.map(t => {
+      for (let dayStep = 0; dayStep < daysAdvanced; dayStep++) {
+        if (currentActiveNegs.length === 0) break;
+        try {
+          const negResult = simulateDailyNegotiations(
+            currentActiveNegs,
+            userClub,
+            teams || [],
+            transferMarket || []
+          );
+          currentActiveNegs = (negResult.updatedNegotiations || []).filter(n => n && n.stage !== 'completed');
+          if (negResult.completedTransfers && negResult.completedTransfers.length > 0) {
+            allCompletedTransfers.push(...negResult.completedTransfers);
+          }
+          if (negResult.negotiationReports && negResult.negotiationReports.length > 0) {
+            allNegReports.push(...negResult.negotiationReports);
+          }
+          if (currentActiveNegs.some(n => n && n.actionRequired)) {
+            break;
+          }
+        } catch (negErr) {
+          console.warn('[DailyProgression] Negotiation simulation warning:', negErr);
+          break;
+        }
+      }
+
+      // Filter out completed deals so they do not linger on the active negotiations tab
+      setActiveNegotiations(currentActiveNegs);
+
+      // Atomically execute squad updates and completed transfers
+      let calculatedNextTeams = (Array.isArray(teams) ? teams : []).map(t => {
+        if (!t) return t;
         if ((t.isUserClub || (userClub && t.id === userClub.id)) && updatedSquadPlayers) {
           return {
             ...t,
@@ -6238,38 +6366,42 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
       if (allCompletedTransfers.length > 0 && userClub) {
         allCompletedTransfers.forEach(({ negotiation: deal, player: targetPlayer }) => {
-          if (targetPlayer) {
+          if (targetPlayer && deal) {
+            const safeFee = deal.bidFee || 0;
+            const safeSalary = deal.offeredSalary || targetPlayer.salary || 10000;
+            const safeYears = deal.contractYears || 2;
             const newPlayer: Player = {
               ...targetPlayer,
               currentClubId: userClub.id,
-              currentLeagueId: activeLeague.id,
-              salary: deal.offeredSalary,
-              contractYears: deal.contractYears,
+              currentLeagueId: activeLeague?.id || userClub.leagueId || 'egy_tier_1',
+              salary: safeSalary,
+              contractYears: safeYears,
               isListedForTransfer: false,
               morale: 95,
               fitness: 100,
             };
 
-            nextTeams = nextTeams.map(t => {
+            calculatedNextTeams = calculatedNextTeams.map(t => {
+              if (!t) return t;
               if (t.isUserClub || t.id === userClub.id) {
-                const filtered = (t.players || []).filter(p => p.id !== targetPlayer.id);
+                const filtered = (t.players || []).filter(p => p && p.id !== targetPlayer.id);
                 return {
                   ...t,
-                  budget: Math.max(0, t.budget - deal.bidFee),
+                  budget: Math.max(0, (t.budget || 0) - safeFee),
                   players: [...filtered, newPlayer],
                 };
               }
               if (deal.playerClubId && t.id === deal.playerClubId) {
                 return {
                   ...t,
-                  budget: t.budget + deal.bidFee,
-                  players: (t.players || []).filter(p => p.id !== targetPlayer.id),
+                  budget: (t.budget || 0) + safeFee,
+                  players: (t.players || []).filter(p => p && p.id !== targetPlayer.id),
                 };
               }
-              if (t.players && t.players.some(p => p.id === targetPlayer.id)) {
+              if (t.players && t.players.some(p => p && p.id === targetPlayer.id)) {
                 return {
                   ...t,
-                  players: t.players.filter(p => p.id !== targetPlayer.id),
+                  players: t.players.filter(p => p && p.id !== targetPlayer.id),
                 };
               }
               return t;
@@ -6278,151 +6410,225 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         });
       }
 
-      return nextTeams;
-    });
+      setTeams(calculatedNextTeams);
 
-    if (allCompletedTransfers.length > 0 && userClub) {
-      allCompletedTransfers.forEach(({ negotiation: deal, player: targetPlayer }) => {
-        if (targetPlayer) {
-          // Remove from market
-          setTransferMarket(prev => prev.filter(p => p.id !== targetPlayer.id));
+      if (allCompletedTransfers.length > 0 && userClub) {
+        allCompletedTransfers.forEach(({ negotiation: deal, player: targetPlayer }) => {
+          if (targetPlayer && deal) {
+            const safeFee = deal.bidFee || 0;
+            const safeSalary = deal.offeredSalary || targetPlayer.salary || 10000;
+            // Remove from market
+            setTransferMarket(prev => (prev || []).filter(p => p && p.id !== targetPlayer.id));
 
-          // Log to transfer history
-          const historyEntry: TransferHistoryEntry = {
-            id: `th_neg_${deal.id}_${Date.now()}`,
-            date: newDate.formattedArabic,
-            playerName: deal.playerName,
-            playerId: deal.playerId,
-            playerRating: targetPlayer.overallRating || deal.playerOverall,
-            position: targetPlayer.position || deal.playerPosition,
-            fromClubName: deal.playerClubName || 'وكيل حر',
-            toClubName: userClub.name,
-            fee: deal.bidFee,
-            salary: deal.offeredSalary,
-            seasonNumber: season.seasonNumber,
-            type: 'buy',
-            timestamp: Date.now(),
-          };
-          setTransferHistory(prev => [historyEntry, ...prev]);
+            // Log to transfer history
+            const historyEntry: TransferHistoryEntry = {
+              id: `th_neg_${deal.id}_${Date.now()}`,
+              date: newDate.formattedArabic,
+              playerName: deal.playerName || targetPlayer.name,
+              playerId: deal.playerId || targetPlayer.id,
+              playerRating: targetPlayer.overallRating || deal.playerOverall || 70,
+              position: targetPlayer.position || deal.playerPosition || 'CM',
+              fromClubName: deal.playerClubName || 'وكيل حر',
+              toClubName: userClub.name,
+              fee: safeFee,
+              salary: safeSalary,
+              seasonNumber: season?.seasonNumber || 1,
+              type: 'buy',
+              timestamp: Date.now(),
+            };
+            setTransferHistory(prev => [historyEntry, ...(prev || [])]);
 
-          // Update club economy
-          setClubEconomy(prev => ({
-            ...prev,
-            transferSpendingTotal: prev.transferSpendingTotal + deal.bidFee,
-            currentSeasonNetProfit: prev.currentSeasonNetProfit - deal.bidFee,
-          }));
+            // Update club economy
+            setClubEconomy(prev => ({
+              ...prev,
+              transferSpendingTotal: (prev?.transferSpendingTotal || 0) + safeFee,
+              currentSeasonNetProfit: (prev?.currentSeasonNetProfit || 0) - safeFee,
+            }));
 
-          // Send confirmation message to inbox
-          const inboxMsg: InboxMessage = {
-            id: `msg_trans_comp_${Date.now()}_${targetPlayer.id}`,
-            title: `انضمام اللاعب ${deal.playerName} للفريق رسمياً! ✍️`,
-            sender: 'لجنة التعاقدات والاحتراف',
-            date: newDate.formattedArabic,
-            type: 'transfer',
-            read: false,
-            content: `اكتملت إجراءات انتقال اللاعب ${deal.playerName} (${deal.playerPosition} - تقييم ${deal.playerOverall}) بنجاح وتم قيده رسمياً في قائمة الفريق. العقد يمتد لـ ${deal.contractYears} سنوات براتب شهري ${deal.offeredSalary.toLocaleString()} ج.م.`,
-          };
-          setInbox(prev => [inboxMsg, ...prev]);
+            // Send confirmation message to inbox
+            const inboxMsg: InboxMessage = {
+              id: `msg_trans_comp_${Date.now()}_${targetPlayer.id}`,
+              title: `انضمام اللاعب ${deal.playerName || targetPlayer.name} للفريق رسمياً! ✍️`,
+              sender: 'لجنة التعاقدات والاحتراف',
+              date: newDate.formattedArabic,
+              type: 'transfer',
+              read: false,
+              content: `اكتملت إجراءات انتقال اللاعب ${deal.playerName || targetPlayer.name} (${deal.playerPosition || targetPlayer.position} - تقييم ${deal.playerOverall || targetPlayer.overallRating}) بنجاح وتم قيده رسمياً في قائمة الفريق. العقد يمتد لـ ${deal.contractYears || 2} سنوات براتب شهري ${safeSalary.toLocaleString()} ج.م.`,
+            };
+            setInbox(prev => [inboxMsg, ...(prev || [])]);
+          }
+        });
+      }
+
+      // 3. Generate Daily World News
+      let dailyNewsBatch: DailyNewsItem[] = [];
+      try {
+        dailyNewsBatch = generateImmersiveNewsBatch({
+          calendarDate: newDate,
+          userClub,
+          manager,
+          teams: calculatedNextTeams || teams || [],
+          standings: standings || [],
+          currentRound,
+        }, 4);
+        setDailyNews(prev => [...dailyNewsBatch, ...(prev || [])].slice(0, 40));
+      } catch (e) {
+        console.warn('Daily news generation error:', e);
+      }
+
+      // 4. Update Board System Confidence & Feedback
+      let dailyBoardFeedback: string | undefined = undefined;
+      if (userClub) {
+        setBoardSystem(prev => {
+          const updated = updateDailyBoardConfidence(prev, userClub, standings || []);
+          dailyBoardFeedback = updated?.statusDescription || undefined;
+          return updated;
+        });
+      }
+
+      // 5. Monthly World Rankings Recalculation & Notification
+      if (calendarDate && typeof calendarDate.month === 'number' && newDate.month !== calendarDate.month) {
+        try {
+          const updatedMonthStr = `${newDate.year}-${String(newDate.month).padStart(2, '0')}`;
+          const freshWorldRankings = generateMonthlyWorldRankings(manager, userClub, updatedMonthStr);
+          if (freshWorldRankings) {
+            setWorldRankings(freshWorldRankings);
+
+            const userRankEntry = (freshWorldRankings.managers || []).find(m => m && (m.id === 'user_manager' || (m.name && m.name.includes('(أنت)'))));
+            const topManager = freshWorldRankings.managers?.[0];
+            const topClub = freshWorldRankings.clubs?.[0];
+
+            const monthlyInboxMsg: InboxMessage = {
+              id: `msg_fifa_rankings_${newDate.month}_${newDate.year}_${Date.now()}`,
+              title: `تقرير التصنيف الشهري العالمي للأندية والمدربين 🌍 (${newDate.formattedArabic})`,
+              sender: 'الاتحاد الدولي للتاريخ والإحصاء (IFFHS) والفيفا',
+              date: newDate.formattedArabic,
+              type: 'news',
+              read: false,
+              content: `صدر رسمياً جدول التصنيف العالمي الجديد لشهر ${newDate.formattedArabic}!\n\n👑 المصنف الأول عالمياً بين المدربين: ${topManager?.name || 'بيب جوارديولا'} (${topManager?.currentClubName || 'مانشستر سيتي'}) برصيد ${(topManager?.rankingPoints || 3200).toLocaleString()} نقطة.\n🏆 المصنف الأول بين الأندية: ${topClub?.clubName || 'ريال مدريد'} برصيد ${(topClub?.rankingPoints || 3400).toLocaleString()} نقطة.\n\n📍 ترتيبك التدريبي العالمي: المركز #${userRankEntry?.worldRank || manager?.worldRank || 850} برصيد ${(userRankEntry?.rankingPoints || manager?.rankingPoints || 1200).toLocaleString()} نقطة.\n\nتفضل بزيارة قسم "التصنيف العالمي" لمشاهدة القائمة الكاملة ومتابعة رحلتك نحو القمة!`,
+            };
+
+            setInbox(prev => [monthlyInboxMsg, ...(prev || [])]);
+
+            if (userRankEntry) {
+              setManager(prev => ({
+                ...prev,
+                worldRank: userRankEntry.worldRank,
+                rankingPoints: userRankEntry.rankingPoints,
+                managerRating: userDynamicManagerRating,
+              }));
+            }
+          }
+        } catch (rankErr) {
+          console.warn('[DailyProgression] Monthly rankings error:', rankErr);
         }
-      });
-    }
+      }
 
-    // 3. Generate Daily World News
-    let dailyNewsBatch: DailyNewsItem[] = [];
-    try {
-      dailyNewsBatch = generateImmersiveNewsBatch({
-        calendarDate: newDate,
-        userClub,
-        manager,
-        teams,
-        standings,
-        currentRound,
-      }, 4);
-      setDailyNews(prev => [...dailyNewsBatch, ...prev].slice(0, 40));
-    } catch (e) {
-      console.warn('Daily news generation error:', e);
-    }
+      // 6. Periodic Contract Expiry Checks (on 1st & 15th of month or month change)
+      if (userClub && (newDate.day === 1 || newDate.day === 15 || (calendarDate && newDate.month !== calendarDate.month))) {
+        try {
+          const contractAlerts = checkExpiringContracts(userClub, newDate.formattedArabic, inbox || []);
+          if (contractAlerts.length > 0) {
+            setInbox(prev => [...contractAlerts, ...(prev || [])]);
+          }
+        } catch (contractErr) {
+          console.warn('[DailyProgression] Contract alert error:', contractErr);
+        }
+      }
 
-    // 4. Update Board System Confidence & Feedback
-    let dailyBoardFeedback: string | undefined = undefined;
-    if (userClub) {
-      setBoardSystem(prev => {
-        const updated = updateDailyBoardConfidence(prev, userClub, standings);
-        dailyBoardFeedback = updated.statusDescription;
-        return updated;
-      });
-    }
-
-    // 5. Check If Next Match is Today
-    const nextInfoAfterAdvance = userClub ? calculateDaysUntilNextMatch(
-      newDate.rawDateStr,
-      currentRound,
-      getInitialSeasonDate(season.seasonNumber).rawDateStr
-    ) : { daysRemaining: 0, isMatchDay: false };
-
-    // 6. Monthly World Rankings Recalculation & Notification
-    if (newDate.month !== calendarDate.month) {
-      const updatedMonthStr = `${newDate.year}-${String(newDate.month).padStart(2, '0')}`;
-      const freshWorldRankings = generateMonthlyWorldRankings(manager, userClub, updatedMonthStr);
-      setWorldRankings(freshWorldRankings);
-
-      const userRankEntry = freshWorldRankings.managers.find(m => m.id === 'user_manager' || m.name.includes('(أنت)'));
-      const topManager = freshWorldRankings.managers[0];
-      const topClub = freshWorldRankings.clubs[0];
-
-      const monthlyInboxMsg: InboxMessage = {
-        id: `msg_fifa_rankings_${newDate.month}_${newDate.year}_${Date.now()}`,
-        title: `تقرير التصنيف الشهري العالمي للأندية والمدربين 🌍 (${newDate.formattedArabic})`,
-        sender: 'الاتحاد الدولي للتاريخ والإحصاء (IFFHS) والفيفا',
-        date: newDate.formattedArabic,
-        type: 'news',
-        read: false,
-        content: `صدر رسمياً جدول التصنيف العالمي الجديد لشهر ${newDate.formattedArabic}!\n\n👑 المصنف الأول عالمياً بين المدربين: ${topManager?.name || 'بيب جوارديولا'} (${topManager?.currentClubName || 'مانشستر سيتي'}) برصيد ${(topManager?.rankingPoints || 3200).toLocaleString()} نقطة.\n🏆 المصنف الأول بين الأندية: ${topClub?.clubName || 'ريال مدريد'} برصيد ${(topClub?.rankingPoints || 3400).toLocaleString()} نقطة.\n\n📍 ترتيبك التدريبي العالمي: المركز #${userRankEntry?.worldRank || manager.worldRank || 850} برصيد ${(userRankEntry?.rankingPoints || manager.rankingPoints || 1200).toLocaleString()} نقطة.\n\nتفضل بزيارة قسم "التصنيف العالمي" لمشاهدة القائمة الكاملة ومتابعة رحلتك نحو القمة!`,
+      // 7. Assemble Day Summary
+      const summary: DayAdvanceSummary = {
+        currentDateStr: newDate.rawDateStr,
+        formattedArabicDate: newDate.formattedArabic,
+        daysAdvanced,
+        trainingReports: updatedTrainingReports,
+        injuryUpdates: updatedInjuryReports,
+        negotiationUpdates: allNegReports,
+        newsItems: dailyNewsBatch.slice(0, 3),
+        boardFeedback: dailyBoardFeedback || undefined,
       };
 
-      setInbox(prev => [monthlyInboxMsg, ...prev]);
+      setCalendarDate(newDate);
+      setDayAdvanceSummary(summary);
+      setShowDaySummaryModal(true);
+      console.log('[DailyProgression] Day advanced successfully to:', newDate.formattedArabic);
 
-      if (userRankEntry) {
-        setManager(prev => ({
-          ...prev,
-          worldRank: userRankEntry.worldRank,
-          rankingPoints: userRankEntry.rankingPoints,
-          managerRating: userDynamicManagerRating,
-        }));
+      // Persist advanced calendar date and full game state to disk repository
+      try {
+        localStorage.setItem(`${STORAGE_KEY}_calendarDate`, JSON.stringify(newDate));
+        gameStateRepository.saveLocalGameState({
+          schemaVersion: 2,
+          saveVersion: 1,
+          lastLocalSaveAt: Date.now(),
+          season,
+          activeLeague,
+          teams: calculatedNextTeams,
+          standings,
+          fixtures,
+          currentRound,
+          manager,
+          transferMarket,
+          incomingBids,
+          inbox,
+          cupTournament,
+          jobOffers,
+          seasonEndSummary,
+          transferHistory,
+          clubEconomy,
+          calendarDate: newDate,
+          activeNegotiations: currentActiveNegs,
+          boardSystem,
+          dailyNews: dailyNewsBatch ? [...dailyNewsBatch, ...(dailyNews || [])].slice(0, 40) : dailyNews,
+          retiredPlayers,
+          worldRankings,
+          scoutedOpponents,
+          deletedMessageIds,
+        });
+      } catch (saveErr) {
+        console.warn('[DailyProgression] Save to local repository notice:', saveErr);
       }
-    }
 
-    // 7. Periodic Contract Expiry Checks (on 1st & 15th of month or month change)
-    if (userClub && (newDate.day === 1 || newDate.day === 15 || newDate.month !== calendarDate.month)) {
-      const contractAlerts = checkExpiringContracts(userClub, newDate.formattedArabic, inbox);
-      if (contractAlerts.length > 0) {
-        setInbox(prev => [...contractAlerts, ...prev]);
-      }
-    }
-
-    // 7. Assemble Day Summary
-    const summary: DayAdvanceSummary = {
-      currentDateStr: newDate.rawDateStr,
-      formattedArabicDate: newDate.formattedArabic,
-      daysAdvanced,
-      trainingReports: updatedTrainingReports,
-      injuryUpdates: updatedInjuryReports,
-      negotiationUpdates: allNegReports,
-      newsItems: dailyNewsBatch.slice(0, 3),
-      boardFeedback: dailyBoardFeedback || undefined,
-    };
-
-    setCalendarDate(newDate);
-    setDayAdvanceSummary(summary);
-    setShowDaySummaryModal(true);
-    console.log('[DailyProgression] Day advanced successfully to:', newDate.formattedArabic);
+      // Automatically re-schedule daily motivational notifications based on new date & upcoming opponent
+      try {
+        const roundFixtures = (fixtures || []).filter(f => f && f.round === currentRound);
+        const userFixture = roundFixtures.find(f => f && userClub && (f.homeTeamId === userClub.id || f.awayTeamId === userClub.id));
+        const oppId = userFixture ? (userFixture.homeTeamId === userClub?.id ? userFixture.awayTeamId : userFixture.homeTeamId) : null;
+        const oppClub = (teams || []).find(t => t && t.id === oppId);
+        notificationService.scheduleDailyMotivationalNotifications({
+          userClub,
+          manager,
+          teams: calculatedNextTeams || teams || [],
+          fixtures: fixtures || [],
+          currentRound,
+          daysUntilNextMatch,
+          nextOpponentName: oppClub?.name,
+        }).catch(() => {});
+      } catch {}
     } catch (error) {
-      console.error('[DailyProgression] CRITICAL UNCAUGHT EXCEPTION in advanceToNextDay:', error);
+      console.error('[DailyProgression] CRITICAL UNCAUGHT EXCEPTION in advanceToNextDay, recovering safely:', error);
+      try {
+        const safeRaw = calendarDate?.rawDateStr || getInitialSeasonDate(season?.seasonNumber || 1).rawDateStr;
+        const fallbackDate = addDaysToDate(safeRaw, 1, (calendarDate?.dayIndexInSeason || 1));
+        setCalendarDate(fallbackDate);
+        localStorage.setItem(`${STORAGE_KEY}_calendarDate`, JSON.stringify(fallbackDate));
+        setDayAdvanceSummary({
+          currentDateStr: fallbackDate.rawDateStr,
+          formattedArabicDate: fallbackDate.formattedArabic,
+          daysAdvanced: 1,
+          trainingReports: [],
+          injuryUpdates: [],
+          negotiationUpdates: [],
+          newsItems: [],
+        });
+        setShowDaySummaryModal(true);
+      } catch (fallbackErr) {
+        console.error('[DailyProgression] Fallback advance failed:', fallbackErr);
+      }
     } finally {
       setTimeout(() => {
         isSimulationRunningRef.current = false;
         setIsSimulationRunning(false);
-      }, 100);
+      }, 50);
     }
   };
 
@@ -7631,52 +7837,32 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     const rewardItem = DAILY_LOGIN_REWARDS_SCHEDULE.find(r => r.day === nextStreak) || DAILY_LOGIN_REWARDS_SCHEDULE[0];
 
-    // 1. Grant Coins & Personal Wallet
-    if (rewardItem.coins > 0) {
-      setManager(prev => ({
-        ...prev,
-        personalWallet: (prev.personalWallet || 0) + (rewardItem.coins * 100),
-        careerEarnings: (prev.careerEarnings || 0) + rewardItem.clubFunds,
-      }));
+    // 1. Grant Coins & Personal Wallet & Manager Development Points (Single atomic update)
+    setManager(prev => ({
+      ...prev,
+      personalWallet: (prev.personalWallet || 0) + (rewardItem.coins * 100),
+      careerEarnings: (prev.careerEarnings || 0) + (rewardItem.clubFunds || 0),
+      developmentPoints: (prev.developmentPoints || 0) + (rewardItem.developmentPoints || 0),
+    }));
 
-      try {
-        const authData = localStorage.getItem('anta_el_modareb_auth_user');
-        if (authData) {
-          const parsed = JSON.parse(authData);
-          parsed.virtualCoins = (parsed.virtualCoins || 0) + rewardItem.coins;
-          localStorage.setItem('anta_el_modareb_auth_user', JSON.stringify(parsed));
-        }
-      } catch (_) {}
-    }
+    try {
+      const authData = localStorage.getItem('anta_el_modareb_auth_user');
+      if (authData) {
+        const parsed = JSON.parse(authData);
+        parsed.virtualCoins = (parsed.virtualCoins || 0) + rewardItem.coins;
+        localStorage.setItem('anta_el_modareb_auth_user', JSON.stringify(parsed));
+      }
+    } catch (_) {}
 
-    // 2. Grant Club Funds (if user manages a club)
-    if (userClub && rewardItem.clubFunds > 0) {
+    // 2. Grant Club Funds, Development Points & Squad Energy/Morale (Single atomic update)
+    if (userClub) {
       setTeams(prev => prev.map(t => {
         if (!t.isUserClub && t.id !== userClub.id) return t;
         return {
           ...t,
-          budget: (t.budget || 0) + rewardItem.clubFunds,
-          transferBudget: (t.transferBudget || 0) + rewardItem.clubFunds,
-        };
-      }));
-
-      setClubEconomy(prev => ({
-        ...prev,
-        clubBudget: (prev.clubBudget || 0) + rewardItem.clubFunds,
-      }));
-    }
-
-    // 3. Grant Development Points
-    if (rewardItem.developmentPoints > 0) {
-      grantDevelopmentPoints(rewardItem.developmentPoints, `مكافأة تسجيل الدخول اليومي - اليوم ${nextStreak}`);
-    }
-
-    // 4. Boost Squad Energy / Morale if milestone or specified
-    if (userClub && (rewardItem.energyBoost || rewardItem.moraleBoost)) {
-      setTeams(prev => prev.map(t => {
-        if (!t.isUserClub && t.id !== userClub.id) return t;
-        return {
-          ...t,
+          budget: (t.budget || 0) + (rewardItem.clubFunds || 0),
+          transferBudget: (t.transferBudget || 0) + (rewardItem.clubFunds || 0),
+          developmentPoints: (t.developmentPoints || 0) + (rewardItem.developmentPoints || 0),
           players: (t.players || []).map(p => ({
             ...p,
             fitness: rewardItem.energyBoost ? Math.min(100, (p.fitness || 85) + 15) : p.fitness,
@@ -7685,9 +7871,16 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           })),
         };
       }));
+
+      if (rewardItem.clubFunds > 0) {
+        setClubEconomy(prev => ({
+          ...prev,
+          clubBudget: (prev.clubBudget || 0) + rewardItem.clubFunds,
+        }));
+      }
     }
 
-    // 5. Send celebratory message to manager's inbox
+    // 3. Send celebratory message to manager's inbox
     const rewardMsg: InboxMessage = {
       id: `msg_daily_reward_${Date.now()}_${Math.random()}`,
       title: `🎁 استلام مكافأة تسجيل الدخول اليومية (اليوم ${nextStreak} من 7)`,
@@ -7695,11 +7888,11 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       date: `الجولة ${currentRound}`,
       type: 'board',
       read: false,
-      content: `تهانينا يا كابتن ${manager.name}!\n\nتم استلام مكافأة تسجيل الدخول اليومي بنجاح:\n• 🪙 +${rewardItem.coins} كوينز ذهبية للرصيد والمحفظة\n• 💰 +${rewardItem.clubFunds.toLocaleString()} ج.م دعماً لميزانية النادي\n• ⭐ +${rewardItem.developmentPoints} نقاط تدريب وتطوير للاعبين\n${rewardItem.energyBoost ? '• ⚡ استعادة وشحن طاقة ولياقة جميع لاعبي الفريق\n' : ''}${rewardItem.moraleBoost ? '• 🔥 رفع الروح المعنوية للاعبين إلى الدرجة الممتازة\n' : ''}\nسلسلة تسجيل الدخول الحالية: ${nextStreak} يوم/أيام.\nإجمالي أيام الدخول التراكمية: ${(dailyRewardState.totalDaysClaimed || 0) + 1} يوم.\nاستمر في تسجيل الدخول اليومي لحصد الجائزة الكبرى!`,
+      content: `تهانينا يا كابتن ${manager?.name || 'المدرب'}!\n\nتم استلام مكافأة تسجيل الدخول اليومي بنجاح:\n• 🪙 +${rewardItem.coins} كوينز ذهبية للرصيد والمحفظة\n• 💰 +${rewardItem.clubFunds.toLocaleString()} ج.م دعماً لميزانية النادي\n• ⭐ +${rewardItem.developmentPoints} نقاط تدريب وتطوير للاعبين\n${rewardItem.energyBoost ? '• ⚡ استعادة وشحن طاقة ولياقة جميع لاعبي الفريق\n' : ''}${rewardItem.moraleBoost ? '• 🔥 رفع الروح المعنوية للاعبين إلى الدرجة الممتازة\n' : ''}\nسلسلة تسجيل الدخول الحالية: ${nextStreak} يوم/أيام.\nإجمالي أيام الدخول التراكمية: ${(dailyRewardState.totalDaysClaimed || 0) + 1} يوم.\nاستمر في تسجيل الدخول اليومي لحصد الجائزة الكبرى!`,
     };
     setInbox(prev => [rewardMsg, ...prev]);
 
-    // 6. Update dailyRewardState
+    // 4. Update dailyRewardState
     const updatedState: DailyLoginRewardState = {
       streak: nextStreak,
       lastClaimDate: todayStr,
@@ -7723,11 +7916,6 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       localStorage.setItem('anta_el_modareb_daily_login_rewards_v1', JSON.stringify(updatedState));
     } catch (_) {}
 
-    // 7. Save game state
-    setTimeout(() => {
-      saveToCloud(false).catch(() => {});
-    }, 400);
-
     return {
       success: true,
       message: `مبروك يا كابتن! حصلت على مكافأة اليوم (${nextStreak}) بنجاح! 🪙 +${rewardItem.coins} كوينز و +${rewardItem.clubFunds.toLocaleString()} ج.م`,
@@ -7737,11 +7925,9 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     };
   }, [
     dailyRewardState,
-    manager.name,
+    manager?.name,
     userClub,
     currentRound,
-    grantDevelopmentPoints,
-    saveToCloud,
   ]);
 
   return (
@@ -7806,6 +7992,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         skipLiveMatchToEnd,
         finishLiveMatchAndAdvance,
         instantSimulateCurrentRound,
+        simulateMatchAndAdvanceToNextDay,
         simulateMultipleRounds,
         resumeSecondHalf,
         makeLiveSubstitution,

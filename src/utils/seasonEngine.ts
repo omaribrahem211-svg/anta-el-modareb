@@ -15,6 +15,8 @@ import {
   SeasonInfo,
   RetiredPlayer,
   TeamTactics,
+  Position,
+  PositionCategory,
 } from '../types/game';
 import { getLeagueByCountryAndTier, getLeagueById, GLOBAL_LEAGUES, updateLeagueRosterInWorld, getCustomLeagues, getAllClubsForCountry, findClubInWorld, createClub } from '../data/leaguesData';
 import { generateLeagueSchedule, generateInitialStandings } from '../data/initialData';
@@ -146,7 +148,7 @@ export function calculateSeasonEndSummary(
   } else if (resultStatus === 'relegated') {
     nextDivisionTier = Math.min(4, activeLeague.tier + 1);
   }
-  const nextLeague = getLeagueByCountryAndTier(activeLeague.country, nextDivisionTier);
+  const nextLeague = getLeagueByCountryAndTier(activeLeague.country, nextDivisionTier, activeLeague.id);
 
   // Financial Prizes
   let prizeMoney = 0;
@@ -250,6 +252,7 @@ export function calculateSeasonEndSummary(
     resultTitle,
     resultDescription,
     nextLeagueName: nextLeague.name,
+    nextLeagueId: nextLeague.id,
     nextDivisionTier,
     leagueTrophyAwarded,
     cupTrophyAwarded,
@@ -787,137 +790,28 @@ export function getCupStageTriggers(
       ? (cupStartStage ? 'round_of_64' : 'round_of_32')
       : cupStartStage;
 
-  if (totalLeagueRounds >= 30) {
-    // 38-round league schedule (20 clubs playing 38 matchdays)
-    if (isContinentalActive) {
-      if (stage === 'round_of_64') {
-        return {
-          r64Trigger: 6,
-          r32Trigger: 15,
-          r16Trigger: 28,
-          quarterTrigger: 36,
-          semiTrigger: 44,
-          finalTrigger: 52,
-          totalSeasonRounds: 53,
-        };
-      } else if (stage === 'round_of_32') {
-        return {
-          r64Trigger: -1,
-          r32Trigger: 10,
-          r16Trigger: 28,
-          quarterTrigger: 36,
-          semiTrigger: 44,
-          finalTrigger: 51,
-          totalSeasonRounds: 52,
-        };
-      } else if (stage === 'round_of_16') {
-        return {
-          r64Trigger: -1,
-          r32Trigger: -1,
-          r16Trigger: 18,
-          quarterTrigger: 36,
-          semiTrigger: 44,
-          finalTrigger: 50,
-          totalSeasonRounds: 51,
-        };
-      } else {
-        return {
-          r64Trigger: -1,
-          r32Trigger: -1,
-          r16Trigger: -1,
-          quarterTrigger: 24,
-          semiTrigger: 36,
-          finalTrigger: 49,
-          totalSeasonRounds: 50,
-        };
-      }
-    } else {
-      if (stage === 'round_of_64') {
-        return {
-          r64Trigger: 3,
-          r32Trigger: 11,
-          r16Trigger: 20,
-          quarterTrigger: 29,
-          semiTrigger: 37,
-          finalTrigger: 43,
-          totalSeasonRounds: 44,
-        };
-      } else if (stage === 'round_of_32') {
-        return {
-          r64Trigger: -1,
-          r32Trigger: 7,
-          r16Trigger: 16,
-          quarterTrigger: 25,
-          semiTrigger: 34,
-          finalTrigger: 42,
-          totalSeasonRounds: 43,
-        };
-      } else if (stage === 'round_of_16') {
-        return {
-          r64Trigger: -1,
-          r32Trigger: -1,
-          r16Trigger: 10,
-          quarterTrigger: 21,
-          semiTrigger: 32,
-          finalTrigger: 41,
-          totalSeasonRounds: 42,
-        };
-      } else {
-        return {
-          r64Trigger: -1,
-          r32Trigger: -1,
-          r16Trigger: -1,
-          quarterTrigger: 15,
-          semiTrigger: 28,
-          finalTrigger: 40,
-          totalSeasonRounds: 41,
-        };
-      }
-    }
-  } else {
-    // Legacy 14-round league calendar fallback (8 teams)
-    if (isContinentalActive) {
-      return {
-        r64Trigger: stage === 'round_of_64' ? 4 : -1,
-        r32Trigger: stage === 'round_of_64' ? 9 : 4,
-        r16Trigger: 9,
-        quarterTrigger: 15,
-        semiTrigger: 20,
-        finalTrigger: 27,
-        totalSeasonRounds: 28,
-      };
-    } else if (stage === 'round_of_64') {
-      return {
-        r64Trigger: 2,
-        r32Trigger: 5,
-        r16Trigger: 9,
-        quarterTrigger: 13,
-        semiTrigger: 17,
-        finalTrigger: 19,
-        totalSeasonRounds: 20,
-      };
-    } else if (stage === 'round_of_32') {
-      return {
-        r64Trigger: -1,
-        r32Trigger: 3,
-        r16Trigger: 7,
-        quarterTrigger: 11,
-        semiTrigger: 15,
-        finalTrigger: 18,
-        totalSeasonRounds: 19,
-      };
-    } else {
-      return {
-        r64Trigger: -1,
-        r32Trigger: -1,
-        r16Trigger: 5,
-        quarterTrigger: 9,
-        semiTrigger: 13,
-        finalTrigger: 17,
-        totalSeasonRounds: 18,
-      };
-    }
-  }
+  const effectiveLeagueRounds = Math.max(10, totalLeagueRounds || 38);
+  const cupStagesCount = stage === 'round_of_64' ? 6 : stage === 'round_of_32' ? 5 : stage === 'round_of_16' ? 4 : 3;
+  const contMatchesCount = isContinentalActive ? 9 : 0;
+  const totalSeasonRounds = effectiveLeagueRounds + cupStagesCount + contMatchesCount;
+
+  // Final is at totalSeasonRounds - 1 (the penultimate round, exactly 2 days before the final league round)
+  const finalTrigger = totalSeasonRounds - 1;
+  const semiTrigger = Math.max(4, Math.round(totalSeasonRounds * 0.82));
+  const quarterTrigger = Math.max(3, Math.round(totalSeasonRounds * 0.62));
+  const r16Trigger = stage !== 'quarter' ? Math.max(2, Math.round(totalSeasonRounds * 0.44)) : -1;
+  const r32Trigger = (stage === 'round_of_64' || stage === 'round_of_32') ? Math.max(2, Math.round(totalSeasonRounds * 0.24)) : -1;
+  const r64Trigger = stage === 'round_of_64' ? Math.max(2, Math.round(totalSeasonRounds * 0.10)) : -1;
+
+  return {
+    r64Trigger,
+    r32Trigger,
+    r16Trigger,
+    quarterTrigger,
+    semiTrigger,
+    finalTrigger,
+    totalSeasonRounds,
+  };
 }
 
 export function initNationalCupTournament(
@@ -1321,71 +1215,97 @@ function buildMasterRoundMapping(
       ? (cupStartStage ? 'round_of_64' : 'round_of_32')
       : cupStartStage;
   const hasR64 = stage === 'round_of_64';
+  const effectiveLeagueRounds = Math.max(10, totalLeagueRounds || 38);
 
-  if (totalLeagueRounds >= 30) {
-    // 38-round league schedule (20 clubs playing 38 matchdays)
-    const triggers = getCupStageTriggers(totalLeagueRounds, stage, isContinentalActive);
-    const totalRounds = triggers.totalSeasonRounds;
-    const mapping: MasterRoundMappingItem[] = [];
+  const triggers = getCupStageTriggers(effectiveLeagueRounds, stage, isContinentalActive);
+  const totalRounds = triggers.totalSeasonRounds;
+  const mapping: MasterRoundMappingItem[] = [];
 
-    const cupRoundsMap = new Map<number, { stage: 'round_of_64' | 'round_of_32' | 'round_of_16' | 'quarter' | 'semi' | 'final'; name: string }>();
-    if (stage === 'round_of_64' && triggers.r64Trigger > 0) {
-      cupRoundsMap.set(triggers.r64Trigger, { stage: 'round_of_64', name: 'الكأس الوطنية - دور الـ 64 (مشاركة جميع الأندية) 🏆' });
-    }
-    if ((stage === 'round_of_64' || stage === 'round_of_32') && triggers.r32Trigger > 0) {
-      cupRoundsMap.set(triggers.r32Trigger, { stage: 'round_of_32', name: 'الكأس الوطنية - دور الـ 32 🏆' });
-    }
-    if (triggers.r16Trigger > 0) {
-      cupRoundsMap.set(triggers.r16Trigger, { stage: 'round_of_16', name: 'الكأس الوطنية - ثمن النهائي (دور الـ 16) 🏆' });
-    }
-    if (triggers.quarterTrigger > 0) {
-      cupRoundsMap.set(triggers.quarterTrigger, { stage: 'quarter', name: 'الكأس الوطنية - ربع النهائي 🏆' });
-    }
-    if (triggers.semiTrigger > 0) {
-      cupRoundsMap.set(triggers.semiTrigger, { stage: 'semi', name: 'الكأس الوطنية - نصف النهائي 🏆' });
-    }
-    if (triggers.finalTrigger > 0) {
-      cupRoundsMap.set(triggers.finalTrigger, { stage: 'final', name: 'نهائي الكأس الوطنية الكبير 🏆' });
-    }
+  const cupRoundsMap = new Map<number, { stage: 'round_of_64' | 'round_of_32' | 'round_of_16' | 'quarter' | 'semi' | 'final'; name: string }>();
+  if (stage === 'round_of_64' && triggers.r64Trigger > 0) {
+    cupRoundsMap.set(triggers.r64Trigger, { stage: 'round_of_64', name: 'الكأس الوطنية - دور الـ 64 (مشاركة جميع الأندية) 🏆' });
+  }
+  if ((stage === 'round_of_64' || stage === 'round_of_32') && triggers.r32Trigger > 0) {
+    cupRoundsMap.set(triggers.r32Trigger, { stage: 'round_of_32', name: 'الكأس الوطنية - دور الـ 32 🏆' });
+  }
+  if (triggers.r16Trigger > 0) {
+    cupRoundsMap.set(triggers.r16Trigger, { stage: 'round_of_16', name: 'الكأس الوطنية - ثمن النهائي (دور الـ 16) 🏆' });
+  }
+  if (triggers.quarterTrigger > 0) {
+    cupRoundsMap.set(triggers.quarterTrigger, { stage: 'quarter', name: 'الكأس الوطنية - ربع النهائي 🏆' });
+  }
+  if (triggers.semiTrigger > 0) {
+    cupRoundsMap.set(triggers.semiTrigger, { stage: 'semi', name: 'الكأس الوطنية - نصف النهائي 🏆' });
+  }
+  if (triggers.finalTrigger > 0) {
+    cupRoundsMap.set(triggers.finalTrigger, { stage: 'final', name: 'نهائي الكأس الوطنية الكبير 🏆' });
+  }
 
-    const contRoundsMap = new Map<number, { stage: 'group' | 'quarter' | 'semi' | 'final'; md?: number; name: string }>();
-    if (isContinentalActive) {
-      contRoundsMap.set(4, { stage: 'group', md: 1, name: 'دوري الأبطال - المجموعات (الجولة 1)' });
-      contRoundsMap.set(8, { stage: 'group', md: 2, name: 'دوري الأبطال - المجموعات (الجولة 2)' });
-      contRoundsMap.set(12, { stage: 'group', md: 3, name: 'دوري الأبطال - المجموعات (الجولة 3)' });
-      contRoundsMap.set(hasR64 ? 18 : 16, { stage: 'group', md: 4, name: 'دوري الأبطال - المجموعات (الجولة 4)' });
-      contRoundsMap.set(hasR64 ? 22 : 20, { stage: 'group', md: 5, name: 'دوري الأبطال - المجموعات (الجولة 5)' });
-      contRoundsMap.set(hasR64 ? 26 : 24, { stage: 'group', md: 6, name: 'دوري الأبطال - المجموعات (الجولة 6)' });
-      contRoundsMap.set(32, { stage: 'quarter', name: 'دوري الأبطال - ربع النهائي' });
-      contRoundsMap.set(40, { stage: 'semi', name: 'دوري الأبطال - نصف النهائي' });
-      contRoundsMap.set(48, { stage: 'final', name: 'نهائي دوري الأبطال القاري الكبير 🏆' });
-    }
+  const contRoundsMap = new Map<number, { stage: 'group' | 'quarter' | 'semi' | 'final'; md?: number; name: string }>();
+  if (isContinentalActive) {
+    const contCandidates = [
+      Math.max(3, Math.round(totalRounds * 0.12)),
+      Math.max(5, Math.round(totalRounds * 0.19)),
+      Math.max(7, Math.round(totalRounds * 0.28)),
+      Math.max(9, Math.round(totalRounds * 0.38)),
+      Math.max(11, Math.round(totalRounds * 0.48)),
+      Math.max(13, Math.round(totalRounds * 0.56)),
+      Math.max(15, Math.round(totalRounds * 0.70)),
+      Math.max(17, Math.round(totalRounds * 0.86)),
+      Math.max(19, totalRounds - 2),
+    ];
+    const contStages = [
+      { stage: 'group' as const, md: 1, name: 'دوري الأبطال - المجموعات (الجولة 1)' },
+      { stage: 'group' as const, md: 2, name: 'دوري الأبطال - المجموعات (الجولة 2)' },
+      { stage: 'group' as const, md: 3, name: 'دوري الأبطال - المجموعات (الجولة 3)' },
+      { stage: 'group' as const, md: 4, name: 'دوري الأبطال - المجموعات (الجولة 4)' },
+      { stage: 'group' as const, md: 5, name: 'دوري الأبطال - المجموعات (الجولة 5)' },
+      { stage: 'group' as const, md: 6, name: 'دوري الأبطال - المجموعات (الجولة 6)' },
+      { stage: 'quarter' as const, name: 'دوري الأبطال - ربع النهائي' },
+      { stage: 'semi' as const, name: 'دوري الأبطال - نصف النهائي' },
+      { stage: 'final' as const, name: 'نهائي دوري الأبطال القاري الكبير 🏆' },
+    ];
 
-    let leagueIdx = 0;
-    for (let r = 1; r <= totalRounds; r++) {
-      if (cupRoundsMap.has(r)) {
-        const c = cupRoundsMap.get(r)!;
-        mapping.push({
-          round: r,
-          type: 'cup',
-          cupStage: c.stage,
-          stageName: c.name,
-        });
-      } else if (contRoundsMap.has(r)) {
-        const cont = contRoundsMap.get(r)!;
-        mapping.push({
-          round: r,
-          type: 'continental',
-          contStage: cont.stage,
-          contMD: cont.md,
-          stageName: cont.name,
-        });
-      } else {
+    let lastCandidate = 1;
+    for (let i = 0; i < contStages.length; i++) {
+      let r = Math.max(lastCandidate + 1, contCandidates[i]);
+      while (r < totalRounds && (cupRoundsMap.has(r) || contRoundsMap.has(r))) {
+        r++;
+      }
+      if (r < totalRounds) {
+        contRoundsMap.set(r, contStages[i]);
+        lastCandidate = r;
+      }
+    }
+  }
+
+  let leagueIdx = 0;
+  for (let r = 1; r <= totalRounds; r++) {
+    if (cupRoundsMap.has(r)) {
+      const c = cupRoundsMap.get(r)!;
+      mapping.push({
+        round: r,
+        type: 'cup',
+        cupStage: c.stage,
+        stageName: c.name,
+      });
+    } else if (contRoundsMap.has(r)) {
+      const cont = contRoundsMap.get(r)!;
+      mapping.push({
+        round: r,
+        type: 'continental',
+        contStage: cont.stage,
+        contMD: cont.md,
+        stageName: cont.name,
+      });
+    } else {
+      if (leagueIdx < effectiveLeagueRounds) {
         const leagueNum = leagueIdx + 1;
         let stageName = `الدوري - الجولة ${leagueNum}`;
-        if (leagueNum === 19) stageName = 'الدوري - الجولة 19 (ختام الدور الأول)';
-        else if (leagueNum === 20) stageName = 'الدوري - الجولة 20 (افتتاح الدور الثاني)';
-        else if (leagueNum === totalLeagueRounds) stageName = `الدوري - الجولة ${leagueNum} (الجولة الختامية الحاسمة)`;
+        const halfMark = Math.floor(effectiveLeagueRounds / 2);
+        if (leagueNum === halfMark) stageName = `الدوري - الجولة ${leagueNum} (ختام الدور الأول)`;
+        else if (leagueNum === halfMark + 1) stageName = `الدوري - الجولة ${leagueNum} (افتتاح الدور الثاني)`;
+        else if (leagueNum === effectiveLeagueRounds) stageName = `الدوري - الجولة ${leagueNum} (الجولة الختامية الحاسمة)`;
 
         mapping.push({
           round: r,
@@ -1396,87 +1316,21 @@ function buildMasterRoundMapping(
         leagueIdx++;
       }
     }
-    return mapping;
   }
 
-  // Legacy 14-round mapping (for 8-team leagues)
-  if (isContinentalActive) {
-    return [
-      { round: 1, type: 'league', leagueIndex: 0, stageName: 'الدوري - الجولة 1' },
-      { round: 2, type: 'league', leagueIndex: 1, stageName: 'الدوري - الجولة 2' },
-      { round: 3, type: 'continental', contStage: 'group', contMD: 1, stageName: 'دوري الأبطال - المجموعات (الجولة 1)' },
-      { round: 4, type: 'cup', cupStage: hasR64 ? 'round_of_64' : 'round_of_32', stageName: hasR64 ? 'الكأس الوطنية - دور الـ 64 🏆' : 'الكأس الوطنية - دور الـ 32 🏆' },
-      { round: 5, type: 'league', leagueIndex: 2, stageName: 'الدوري - الجولة 3' },
-      { round: 6, type: 'continental', contStage: 'group', contMD: 2, stageName: 'دوري الأبطال - المجموعات (الجولة 2)' },
-      { round: 7, type: 'league', leagueIndex: 3, stageName: 'الدوري - الجولة 4' },
-      { round: 8, type: 'continental', contStage: 'group', contMD: 3, stageName: 'دوري الأبطال - المجموعات (الجولة 3)' },
-      { round: 9, type: 'cup', cupStage: 'round_of_16', stageName: 'الكأس الوطنية - ثمن النهائي (دور الـ 16) 🏆' },
-      { round: 10, type: 'league', leagueIndex: 4, stageName: 'الدوري - الجولة 5' },
-      { round: 11, type: 'continental', contStage: 'group', contMD: 4, stageName: 'دوري الأبطال - المجموعات (الجولة 4)' },
-      { round: 12, type: 'league', leagueIndex: 5, stageName: 'الدوري - الجولة 6' },
-      { round: 13, type: 'league', leagueIndex: 6, stageName: 'الدوري - الجولة 7 (ختام الدور الأول)' },
-      { round: 14, type: 'continental', contStage: 'group', contMD: 5, stageName: 'دوري الأبطال - المجموعات (الجولة 5)' },
-      { round: 15, type: 'cup', cupStage: 'quarter', stageName: 'الكأس الوطنية - ربع النهائي 🏆' },
-      { round: 16, type: 'continental', contStage: 'group', contMD: 6, stageName: 'دوري الأبطال - المجموعات (الجولة 6)' },
-      { round: 17, type: 'league', leagueIndex: 7, stageName: 'الدوري - الجولة 8' },
-      { round: 18, type: 'continental', contStage: 'quarter', stageName: 'دوري الأبطال - ربع النهائي' },
-      { round: 19, type: 'league', leagueIndex: 8, stageName: 'الدوري - الجولة 9' },
-      { round: 20, type: 'cup', cupStage: 'semi', stageName: 'الكأس الوطنية - نصف النهائي 🏆' },
-      { round: 21, type: 'continental', contStage: 'semi', stageName: 'دوري الأبطال - نصف النهائي' },
-      { round: 22, type: 'league', leagueIndex: 9, stageName: 'الدوري - الجولة 10' },
-      { round: 23, type: 'continental', contStage: 'final', stageName: 'نهائي دوري الأبطال القاري الكبير 🏆' },
-      { round: 24, type: 'league', leagueIndex: 10, stageName: 'الدوري - الجولة 11' },
-      { round: 25, type: 'league', leagueIndex: 11, stageName: 'الدوري - الجولة 12' },
-      { round: 26, type: 'league', leagueIndex: 12, stageName: 'الدوري - الجولة 13' },
-      { round: 27, type: 'cup', cupStage: 'final', stageName: 'نهائي الكأس الوطنية الكبير 🏆' },
-      { round: 28, type: 'league', leagueIndex: 13, stageName: 'الدوري - الجولة 14 (الجولة الختامية الحاسمة)' },
-    ];
-  } else if (hasR64) {
-    return [
-      { round: 1, type: 'league', leagueIndex: 0, stageName: 'الدوري - الجولة 1' },
-      { round: 2, type: 'cup', cupStage: 'round_of_64', stageName: 'الكأس الوطنية - دور الـ 64 (مشاركة جميع الأندية) 🏆' },
-      { round: 3, type: 'league', leagueIndex: 1, stageName: 'الدوري - الجولة 2' },
-      { round: 4, type: 'league', leagueIndex: 2, stageName: 'الدوري - الجولة 3' },
-      { round: 5, type: 'cup', cupStage: 'round_of_32', stageName: 'الكأس الوطنية - دور الـ 32 🏆' },
-      { round: 6, type: 'league', leagueIndex: 3, stageName: 'الدوري - الجولة 4' },
-      { round: 7, type: 'league', leagueIndex: 4, stageName: 'الدوري - الجولة 5' },
-      { round: 8, type: 'league', leagueIndex: 5, stageName: 'الدوري - الجولة 6' },
-      { round: 9, type: 'cup', cupStage: 'round_of_16', stageName: 'الكأس الوطنية - ثمن النهائي (دور الـ 16) 🏆' },
-      { round: 10, type: 'league', leagueIndex: 6, stageName: 'الدوري - الجولة 7 (ختام الدور الأول)' },
-      { round: 11, type: 'league', leagueIndex: 7, stageName: 'الدوري - الجولة 8' },
-      { round: 12, type: 'league', leagueIndex: 8, stageName: 'الدوري - الجولة 9' },
-      { round: 13, type: 'cup', cupStage: 'quarter', stageName: 'الكأس الوطنية - ربع النهائي 🏆' },
-      { round: 14, type: 'league', leagueIndex: 9, stageName: 'الدوري - الجولة 10' },
-      { round: 15, type: 'league', leagueIndex: 10, stageName: 'الدوري - الجولة 11' },
-      { round: 16, type: 'league', leagueIndex: 11, stageName: 'الدوري - الجولة 12' },
-      { round: 17, type: 'cup', cupStage: 'semi', stageName: 'الكأس الوطنية - نصف النهائي 🏆' },
-      { round: 18, type: 'league', leagueIndex: 12, stageName: 'الدوري - الجولة 13' },
-      { round: 19, type: 'cup', cupStage: 'final', stageName: 'نهائي الكأس الوطنية الكبير 🏆' },
-      { round: 20, type: 'league', leagueIndex: 13, stageName: 'الدوري - الجولة 14 (الجولة الختامية الحاسمة)' },
-    ];
-  } else {
-    return [
-      { round: 1, type: 'league', leagueIndex: 0, stageName: 'الدوري - الجولة 1' },
-      { round: 2, type: 'league', leagueIndex: 1, stageName: 'الدوري - الجولة 2' },
-      { round: 3, type: 'cup', cupStage: 'round_of_32', stageName: 'الكأس الوطنية - دور الـ 32 🏆' },
-      { round: 4, type: 'league', leagueIndex: 2, stageName: 'الدوري - الجولة 3' },
-      { round: 5, type: 'league', leagueIndex: 3, stageName: 'الدوري - الجولة 4' },
-      { round: 6, type: 'league', leagueIndex: 4, stageName: 'الدوري - الجولة 5' },
-      { round: 7, type: 'cup', cupStage: 'round_of_16', stageName: 'الكأس الوطنية - ثمن النهائي (دور الـ 16) 🏆' },
-      { round: 8, type: 'league', leagueIndex: 5, stageName: 'الدوري - الجولة 6' },
-      { round: 9, type: 'league', leagueIndex: 6, stageName: 'الدوري - الجولة 7 (ختام الدور الأول)' },
-      { round: 10, type: 'league', leagueIndex: 7, stageName: 'الدوري - الجولة 8' },
-      { round: 11, type: 'cup', cupStage: 'quarter', stageName: 'الكأس الوطنية - ربع النهائي 🏆' },
-      { round: 12, type: 'league', leagueIndex: 8, stageName: 'الدوري - الجولة 9' },
-      { round: 13, type: 'league', leagueIndex: 9, stageName: 'الدوري - الجولة 10' },
-      { round: 14, type: 'league', leagueIndex: 10, stageName: 'الدوري - الجولة 11' },
-      { round: 15, type: 'cup', cupStage: 'semi', stageName: 'الكأس الوطنية - نصف النهائي 🏆' },
-      { round: 16, type: 'league', leagueIndex: 11, stageName: 'الدوري - الجولة 12' },
-      { round: 17, type: 'league', leagueIndex: 12, stageName: 'الدوري - الجولة 13' },
-      { round: 18, type: 'cup', cupStage: 'final', stageName: 'نهائي الكأس الوطنية الكبير 🏆' },
-      { round: 19, type: 'league', leagueIndex: 13, stageName: 'الدوري - الجولة 14 (الجولة الختامية الحاسمة)' },
-    ];
+  // Safety guarantee: If any league round was not mapped, append it at the end
+  while (leagueIdx < effectiveLeagueRounds) {
+    const nextRoundNum = mapping.length + 1;
+    mapping.push({
+      round: nextRoundNum,
+      type: 'league',
+      leagueIndex: leagueIdx,
+      stageName: `الدوري - الجولة ${leagueIdx + 1}`,
+    });
+    leagueIdx++;
   }
+
+  return mapping;
 }
 
 // ----------------------------------------------------
@@ -2375,14 +2229,18 @@ export function processNewSeasonAdvancement(
     nextActiveLeague = offerLeague;
   } else {
     const currentLeague = getLeagueById(summary.leagueId || currentSeason.leagueId);
-    currentCountry = userClub?.country || currentLeague.country || 'مصر';
+    // League system's country takes top authority (Welsh clubs in English pyramid like Cardiff/Swansea play in England!)
+    currentCountry = currentLeague.country || userClub?.country || 'مصر';
+    if (currentCountry === 'ويلز' || currentCountry === 'WAL' || currentCountry.includes('ويلز')) {
+      currentCountry = 'إنجلترا';
+    }
     const oldDivisionTier = userClub?.division ?? currentLeague.tier;
     const newDivisionTier = summary.nextDivisionTier ?? oldDivisionTier;
 
     if (newDivisionTier === oldDivisionTier) {
       nextActiveLeague = currentLeague;
     } else {
-      nextActiveLeague = getLeagueByCountryAndTier(currentCountry, newDivisionTier);
+      nextActiveLeague = getLeagueByCountryAndTier(currentCountry, newDivisionTier, currentLeague.id);
     }
   }
 
@@ -2398,7 +2256,7 @@ export function processNewSeasonAdvancement(
 
     // If tier changed (promoted or relegated):
     if (newDivisionTier !== oldDivisionTier) {
-      const targetPromotedLeague = getLeagueByCountryAndTier(currentCountry, newDivisionTier);
+      const targetPromotedLeague = getLeagueByCountryAndTier(currentCountry, newDivisionTier, currentLeague.id);
       let targetLeagueSquads = [...targetPromotedLeague.teams];
 
       const isPromoted = newDivisionTier < oldDivisionTier;
@@ -2657,35 +2515,52 @@ export function processNewSeasonAdvancement(
       }
     });
 
-    // If squad size drops below 16 due to retirements, promote a promising youth
-    if (survivingPlayers.length < 16) {
-      const positionsNeeded: Player['position'][] = ['ST', 'CM', 'CB', 'GK'];
-      const pos = positionsNeeded[Math.floor(Math.random() * positionsNeeded.length)];
+    // Ensure squad maintains healthy competitive depth (at least 20 players across all positions)
+    let replenishIdx = 1;
+    while (survivingPlayers.length < 20) {
+      const gks = survivingPlayers.filter(p => p.positionCategory === 'GK').length;
+      const defs = survivingPlayers.filter(p => p.positionCategory === 'DEF').length;
+      const mids = survivingPlayers.filter(p => p.positionCategory === 'MID').length;
+      const fwds = survivingPlayers.filter(p => p.positionCategory === 'FWD').length;
+
+      let pos: Position = 'CM';
+      if (gks < 2) pos = 'GK';
+      else if (defs < 5) pos = defs % 2 === 0 ? 'CB' : (defs % 3 === 0 ? 'LB' : 'RB');
+      else if (mids < 5) pos = mids % 2 === 0 ? 'CM' : 'CDM';
+      else if (fwds < 4) pos = fwds % 2 === 0 ? 'ST' : 'RW';
+      else {
+        const fallbackPositions: Position[] = ['ST', 'CM', 'CB', 'LB', 'RB', 'GK'];
+        pos = fallbackPositions[Math.floor(Math.random() * fallbackPositions.length)];
+      }
+
+      const cat: PositionCategory = pos === 'GK' ? 'GK' : ['CB', 'LB', 'RB'].includes(pos) ? 'DEF' : ['CM', 'CDM', 'CAM'].includes(pos) ? 'MID' : 'FWD';
+      const baseRating = Math.max(58, Math.min(82, (team.reputation ? Math.round(team.reputation * 0.85) : 68) + Math.floor(Math.random() * 5 - 2)));
+
       const freshYouth: Player = {
-        id: `youth_replenish_${team.id}_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
-        name: `صاعد جديد (${pos})`,
-        age: 18,
+        id: `youth_replenish_${team.id}_s${currentSeason.seasonNumber + 1}_${Date.now()}_${replenishIdx++}`,
+        name: `صاعد جديد (${pos} #${replenishIdx})`,
+        age: Math.floor(Math.random() * 4 + 17),
         position: pos,
-        positionCategory: pos === 'GK' ? 'GK' : pos === 'CB' ? 'DEF' : pos === 'CM' ? 'MID' : 'FWD',
-        overallRating: Math.floor(Math.random() * 6 + 65),
-        potentialRating: Math.floor(Math.random() * 10 + 78),
+        positionCategory: cat,
+        overallRating: baseRating,
+        potentialRating: Math.min(92, baseRating + Math.floor(Math.random() * 10 + 6)),
         attributes: {
-          pace: 68,
-          shooting: pos === 'ST' ? 70 : 58,
-          passing: pos === 'CM' ? 70 : 60,
-          dribbling: 65,
-          defending: pos === 'CB' ? 70 : 50,
-          physical: 66,
-          goalkeeping: pos === 'GK' ? 68 : 20,
+          pace: Math.floor(Math.random() * 15 + 65),
+          shooting: cat === 'FWD' ? baseRating + 2 : 55,
+          passing: cat === 'MID' ? baseRating + 2 : 60,
+          dribbling: cat === 'FWD' || cat === 'MID' ? baseRating : 58,
+          defending: cat === 'DEF' ? baseRating + 2 : (pos === 'GK' ? 20 : 48),
+          physical: Math.floor(Math.random() * 12 + 64),
+          goalkeeping: pos === 'GK' ? baseRating + 3 : 20,
         },
         nationality: team.country || 'مصر',
-        marketValue: 350000,
-        salary: 3000,
+        marketValue: Math.round(baseRating * 12000),
+        salary: Math.round(baseRating * 50),
         contractYears: 3,
         fitness: 100,
         morale: 90,
         form: 7,
-        number: Math.floor(Math.random() * 40 + 50),
+        number: Math.floor(Math.random() * 50 + 40),
         stats: { appearances: 0, starts: 0, minutes: 0, goals: 0, assists: 0, cleanSheets: 0, yellowCards: 0, redCards: 0, shots: 0, shotsOnTarget: 0, passes: 0, tackles: 0, saves: 0, averageRating: 7.0, motm: 0 },
       };
       survivingPlayers.push(freshYouth);
@@ -2782,6 +2657,7 @@ export function processNewSeasonAdvancement(
     points: summary.points,
     trophiesWon: trophiesWonThisSeason,
     resultStatus: summary.resultStatus,
+    outcome: summary.resultStatus,
     resultText: summary.resultTitle,
     cupResult: summary.cupResultText,
     managerXpEarned: summary.xpEarned,
