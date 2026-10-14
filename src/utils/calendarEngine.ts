@@ -375,9 +375,9 @@ export function simulateDailySquadTraining(
     if (attrProgress[targetAttr] >= 100) {
       attrProgress[targetAttr] -= 100;
       const currentVal = (updatedPlayer.attributes && updatedPlayer.attributes[targetAttr]) || 60;
-      if (currentVal < 95) {
+      if (currentVal < 95 && updatedPlayer.attributes) {
         updatedPlayer.attributes = {
-          ...(updatedPlayer.attributes || {}),
+          ...updatedPlayer.attributes,
           [targetAttr]: currentVal + 1,
         };
       }

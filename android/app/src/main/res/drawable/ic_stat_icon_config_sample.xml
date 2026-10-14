@@ -1,0 +1,10 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <!-- Soccer ball / sports trophy stylized icon for notification status bar -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M12,2C6.48,2 2,6.48 2,12s4.48,10 10,10 10,-4.48 10,-10S17.52,2 12,2zM12,4c4.41,0 8,3.59 8,8 0,1.38 -0.35,2.68 -0.97,3.82l-2.92,-1.69 0.44,-3.35 -3.37,-1.95L12,5.27 10.82,8.83 7.45,10.78l0.44,3.35 -2.92,1.69C4.35,14.68 4,13.38 4,12c0,-4.41 3.59,-8 8,-8zM12,10.45l1.65,1.2 -0.63,1.95h-2.04l-0.63,-1.95L12,10.45zM9.54,15.6h4.92l1.52,2.63c-1.18,0.73 -2.55,1.17 -4.01,1.17 -1.43,0 -2.78,-0.42 -3.94,-1.14l1.51,-2.66z"/>
+</vector>

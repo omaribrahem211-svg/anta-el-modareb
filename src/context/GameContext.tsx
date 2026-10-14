@@ -4047,8 +4047,9 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     setLiveMatch(null);
 
     // Generate fresh matchday headlines for the football world
+    let matchdayNews: any[] = [];
     try {
-      const matchdayNews = generateImmersiveNewsBatch({
+      matchdayNews = generateImmersiveNewsBatch({
         calendarDate,
         userClub,
         manager: updatedManager,
