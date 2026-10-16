@@ -48,8 +48,11 @@ export function simulateMultipleLeagueRounds(
     points: 0,
   };
 
-  while (simulatedCount < roundsToSimulate && roundPtr <= totalRounds) {
-    const currentRoundFixtures = simFixtures.filter(f => f.round === roundPtr && !f.isPlayed);
+  let loopSafetyGuard = 0;
+  const MAX_ALLOWED_ITERATIONS = Math.max(50, totalRounds * 2);
+
+  while (simulatedCount < roundsToSimulate && roundPtr <= totalRounds && ++loopSafetyGuard <= MAX_ALLOWED_ITERATIONS) {
+    const currentRoundFixtures = simFixtures.filter(f => f && f.round === roundPtr && !f.isPlayed);
     if (currentRoundFixtures.length === 0) {
       roundPtr++;
       continue;
@@ -57,14 +60,15 @@ export function simulateMultipleLeagueRounds(
 
     const roundMatches: { homeTeamId: string; awayTeamId: string; homeScore: number; awayScore: number }[] = [];
 
-    // Simulate each fixture of this round
+    // Simulate each fixture of this round defensively
     currentRoundFixtures.forEach(fix => {
-      const homeTeam = simTeams.find(t => t && t.id === fix.homeTeamId) || simTeams[0];
-      const awayTeam = simTeams.find(t => t && t.id === fix.awayTeamId) || simTeams[1];
+      try {
+        const homeTeam = simTeams.find(t => t && t.id === fix.homeTeamId) || simTeams[0];
+        const awayTeam = simTeams.find(t => t && t.id === fix.awayTeamId) || simTeams[1];
 
-      if (!homeTeam || !awayTeam) return;
+        if (!homeTeam || !awayTeam) return;
 
-      const matchRes = simulateMatch(homeTeam, awayTeam, homeTeam.tactics, awayTeam.tactics);
+        const matchRes = simulateMatch(homeTeam, awayTeam, homeTeam.tactics, awayTeam.tactics);
 
       // Update fixture
       simFixtures = simFixtures.map(f => {
@@ -110,6 +114,9 @@ export function simulateMultipleLeagueRounds(
           userStatsDelta.losses += 1;
         }
       }
+    } catch (err) {
+      console.warn('[BatchSimulation] Non-fatal fixture simulation error:', err);
+    }
     });
 
     // Update player stats & fatigue for clubs that played in this round

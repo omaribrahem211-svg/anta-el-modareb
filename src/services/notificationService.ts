@@ -20,9 +20,9 @@ export interface NotificationGameContext {
 
 const SETTINGS_KEY = 'anta_el_modareb_notifications_settings';
 const DEFAULT_SETTINGS: NotificationSettings = {
-  enabled: true,
-  maxDaily: 2, // Strict requirement: max 2 notifications per day
-  soundEnabled: true,
+  enabled: false,
+  maxDaily: 0,
+  soundEnabled: false,
 };
 
 const CHANNEL_ID = 'anta_el_modareb_daily_channel';
@@ -40,7 +40,7 @@ class NotificationService {
       const saved = localStorage.getItem(SETTINGS_KEY);
       if (saved) {
         const parsed = JSON.parse(saved);
-        this.settings = { ...DEFAULT_SETTINGS, ...parsed, maxDaily: 2 };
+        this.settings = { ...DEFAULT_SETTINGS, ...parsed, enabled: false, maxDaily: 0 };
       }
     } catch {
       this.settings = DEFAULT_SETTINGS;
@@ -48,14 +48,15 @@ class NotificationService {
   }
 
   public getSettings(): NotificationSettings {
-    return { ...this.settings };
+    return { ...this.settings, enabled: false };
   }
 
   public saveSettings(newSettings: Partial<NotificationSettings>): void {
     this.settings = {
       ...this.settings,
       ...newSettings,
-      maxDaily: 2, // Enforce 2 max
+      enabled: false,
+      maxDaily: 0,
     };
     try {
       localStorage.setItem(SETTINGS_KEY, JSON.stringify(this.settings));
@@ -65,231 +66,66 @@ class NotificationService {
   }
 
   /**
-   * Initializes the notification service, registers the Android notification channel,
-   * and requests permissions if needed.
+   * Initializes the notification service.
+   * NOTE: Device notification and alarm permissions are completely disabled.
+   * Cancels any previously scheduled legacy alarms/notifications on device.
    */
   public async init(): Promise<boolean> {
     if (this.isInitialized) return true;
 
     try {
-      if (Capacitor.isNativePlatform()) {
-        // Create an official Android Notification Channel with sound & vibration
-        await LocalNotifications.createChannel({
-          id: CHANNEL_ID,
-          name: 'إشعارات النادي والبطولات الحماسية',
-          description: 'تنبيهات وأخبار النادي، عروض الانتقالات، وأجواء المباريات الساخنة',
-          importance: 4, // High importance (heads-up banner and sound)
-          visibility: 1,
-          sound: 'beep.wav',
-          vibration: true,
-          lights: true,
-          lightColor: '#059669',
-        }).catch(err => {
-          console.warn('[NotificationService] Android createChannel notice:', err);
-        });
-
-        // Request permission on native platform
-        const permStatus = await LocalNotifications.checkPermissions();
-        if (permStatus.display === 'prompt' || permStatus.display === 'prompt-with-rationale') {
-          await LocalNotifications.requestPermissions().catch(() => {});
-        }
-      } else if (typeof window !== 'undefined' && 'Notification' in window) {
-        // Web fallback
-        if (Notification.permission === 'default') {
-          // Can be prompted by user action
-        }
-      }
-
       this.isInitialized = true;
+      await this.cancelAllScheduledNotifications();
       return true;
-    } catch (error) {
-      console.warn('[NotificationService] Initialization notice:', error);
+    } catch {
       this.isInitialized = true;
       return false;
     }
   }
 
   /**
-   * Request notification permission explicitly (triggered by user interaction if needed)
+   * Device permission request completely disabled:
+   * Never requests notification permissions or alarm/reminder permissions from the user's device.
    */
   public async requestPermissions(): Promise<boolean> {
-    try {
-      if (Capacitor.isNativePlatform()) {
-        const result = await LocalNotifications.requestPermissions();
-        return result.display === 'granted';
-      } else if (typeof window !== 'undefined' && 'Notification' in window) {
-        const result = await Notification.requestPermission();
-        return result === 'granted';
-      }
-      return false;
-    } catch (error) {
-      console.warn('[NotificationService] Request permission error:', error);
-      return false;
-    }
+    return false;
   }
 
   /**
-   * Schedules at most 2 motivational, personalized notifications per day at distinct hours.
-   * Slot 1: Afternoon (~14:00)
-   * Slot 2: Evening (~20:30)
+   * Notification scheduling completely disabled:
+   * Never registers or schedules alarms on the user's device.
    */
-  public async scheduleDailyMotivationalNotifications(context: NotificationGameContext): Promise<boolean> {
-    this.loadSettings();
-    if (!this.settings.enabled) {
-      await this.cancelAllScheduledNotifications();
-      return false;
-    }
-
-    try {
-      await this.init();
-
-      if (Capacitor.isNativePlatform()) {
-        // Clear any old pending notifications to prevent stacking
-        await this.cancelAllScheduledNotifications();
-
-        const now = new Date();
-        const scheduledItems: any[] = [];
-
-        // Calculate Slot 1 (Afternoon around 14:00 - 2:00 PM)
-        const slot1Date = new Date();
-        slot1Date.setHours(14, 0, 0, 0);
-        if (slot1Date.getTime() <= now.getTime()) {
-          // If 14:00 already passed today, schedule for tomorrow 14:00
-          slot1Date.setDate(slot1Date.getDate() + 1);
-        }
-
-        // Calculate Slot 2 (Evening around 20:30 - 8:30 PM)
-        const slot2Date = new Date();
-        slot2Date.setHours(20, 30, 0, 0);
-        if (slot2Date.getTime() <= now.getTime()) {
-          // If 20:30 already passed today, schedule for tomorrow 20:30
-          slot2Date.setDate(slot2Date.getDate() + 1);
-        }
-
-        // Generate 2 distinct, varied notification messages
-        const notif1 = this.generateDynamicMessage(context, 'afternoon', []);
-        const notif2 = this.generateDynamicMessage(context, 'evening', [notif1.type]);
-
-        scheduledItems.push({
-          id: 101,
-          title: notif1.title,
-          body: notif1.body,
-          schedule: { at: slot1Date, allowWhileIdle: true },
-          channelId: CHANNEL_ID,
-          smallIcon: 'ic_stat_icon_config_sample',
-          iconColor: '#059669',
-          actionTypeId: '',
-          extra: { type: notif1.type, slot: 'afternoon' },
-        });
-
-        scheduledItems.push({
-          id: 102,
-          title: notif2.title,
-          body: notif2.body,
-          schedule: { at: slot2Date, allowWhileIdle: true },
-          channelId: CHANNEL_ID,
-          smallIcon: 'ic_stat_icon_config_sample',
-          iconColor: '#059669',
-          actionTypeId: '',
-          extra: { type: notif2.type, slot: 'evening' },
-        });
-
-        await LocalNotifications.schedule({ notifications: scheduledItems });
-        console.log('[NotificationService] Successfully scheduled 2 daily notifications at distinct times:', {
-          slot1: slot1Date.toLocaleTimeString(),
-          slot2: slot2Date.toLocaleTimeString(),
-        });
-        return true;
-      } else {
-        // On Web, store the scheduled intents in localStorage
-        const now = new Date();
-        const slot1Date = new Date();
-        slot1Date.setHours(14, 0, 0, 0);
-        if (slot1Date.getTime() <= now.getTime()) slot1Date.setDate(slot1Date.getDate() + 1);
-
-        const slot2Date = new Date();
-        slot2Date.setHours(20, 30, 0, 0);
-        if (slot2Date.getTime() <= now.getTime()) slot2Date.setDate(slot2Date.getDate() + 1);
-
-        const notif1 = this.generateDynamicMessage(context, 'afternoon', []);
-        const notif2 = this.generateDynamicMessage(context, 'evening', [notif1.type]);
-
-        localStorage.setItem('anta_el_modareb_scheduled_notifs', JSON.stringify([
-          { id: 101, title: notif1.title, body: notif1.body, at: slot1Date.toISOString(), type: notif1.type },
-          { id: 102, title: notif2.title, body: notif2.body, at: slot2Date.toISOString(), type: notif2.type },
-        ]));
-        return true;
-      }
-    } catch (error) {
-      console.warn('[NotificationService] scheduleDailyMotivationalNotifications error:', error);
-      return false;
-    }
+  public async scheduleDailyMotivationalNotifications(_context?: NotificationGameContext): Promise<boolean> {
+    await this.cancelAllScheduledNotifications();
+    return false;
   }
 
   /**
-   * Cancel all previously scheduled local notifications
+   * Cancel and clear all previously scheduled local notifications/alarms
    */
   public async cancelAllScheduledNotifications(): Promise<void> {
     try {
       if (Capacitor.isNativePlatform()) {
-        const pending = await LocalNotifications.getPending();
-        if (pending.notifications.length > 0) {
-          await LocalNotifications.cancel({
-            notifications: pending.notifications.map(n => ({ id: n.id })),
-          });
-        }
-      } else {
-        localStorage.removeItem('anta_el_modareb_scheduled_notifs');
+        try {
+          const pending = await LocalNotifications.getPending();
+          if (pending && pending.notifications && pending.notifications.length > 0) {
+            await LocalNotifications.cancel({
+              notifications: pending.notifications.map(n => ({ id: n.id })),
+            });
+          }
+        } catch (_) {}
       }
+      localStorage.removeItem('anta_el_modareb_scheduled_notifs');
     } catch (e) {
       console.warn('[NotificationService] Cancel notifications warning:', e);
     }
   }
 
   /**
-   * Instantly fire a test notification so the user/admin can preview what it looks like.
+   * Test notification is disabled
    */
-  public async sendTestNotification(context?: NotificationGameContext, forcedType?: string): Promise<{ success: boolean; title: string; body: string }> {
-    try {
-      await this.init();
-      const message = this.generateDynamicMessage(context || {}, 'test', [], forcedType);
-
-      if (Capacitor.isNativePlatform()) {
-        await LocalNotifications.schedule({
-          notifications: [
-            {
-              id: Math.floor(Math.random() * 9000) + 1000,
-              title: message.title,
-              body: message.body,
-              schedule: { at: new Date(Date.now() + 1000) }, // in 1 second
-              channelId: CHANNEL_ID,
-              smallIcon: 'ic_stat_icon_config_sample',
-              iconColor: '#059669',
-            },
-          ],
-        });
-      } else if (typeof window !== 'undefined' && 'Notification' in window) {
-        if (Notification.permission === 'granted') {
-          new Notification(message.title, {
-            body: message.body,
-            icon: '/favicon.ico',
-          });
-        } else if (Notification.permission !== 'denied') {
-          const perm = await Notification.requestPermission();
-          if (perm === 'granted') {
-            new Notification(message.title, {
-              body: message.body,
-              icon: '/favicon.ico',
-            });
-          }
-        }
-      }
-
-      return { success: true, title: message.title, body: message.body };
-    } catch (error) {
-      console.error('[NotificationService] sendTestNotification failed:', error);
-      return { success: false, title: 'خطأ', body: 'تعذر إرسال الإشعار التجريبي' };
-    }
+  public async sendTestNotification(_context?: NotificationGameContext, _forcedType?: string): Promise<{ success: boolean; title: string; body: string }> {
+    return { success: false, title: '', body: '' };
   }
 
   /**

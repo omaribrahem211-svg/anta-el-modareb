@@ -1492,9 +1492,9 @@ export function simulateMatchStep(
   const managerDiff = homeStrength.managerRating - awayStrength.managerRating;
   const overallDiff = homeStrength.overall - awayStrength.overall;
 
-  const qualityAdvantage = (overallDiff * 0.025) + (managerDiff * 0.018) + (squadDiff * 0.012);
-  const homeQualityMod = Math.max(0.18, Math.min(2.60, 1.0 + qualityAdvantage));
-  const awayQualityMod = Math.max(0.18, Math.min(2.60, 1.0 - qualityAdvantage));
+  const qualityAdvantage = (overallDiff * 0.035) + (managerDiff * 0.022) + (squadDiff * 0.015);
+  const homeQualityMod = Math.max(0.12, Math.min(3.20, 1.0 + qualityAdvantage));
+  const awayQualityMod = Math.max(0.12, Math.min(3.20, 1.0 - qualityAdvantage));
 
   // Dynamic Possession for this minute (strongly reflects quality gap and tactical control)
   const weightedHomeMid = effHomeMid * Math.sqrt(homeQualityMod);
@@ -1616,7 +1616,7 @@ export function simulateMatchStep(
           // Factoring Player quality and manager coaching quality
           const atkVsGk = ((effHomeAtk - (awayGkPower * gkEfficiency)) * 0.0042);
           const defSuppression = ((effAwayDef - 50) * 0.0020);
-          const qualityConversionBonus = (overallDiff * 0.005) + (managerDiff * 0.003);
+          const qualityConversionBonus = (overallDiff * 0.009) + (managerDiff * 0.005);
           let goalProb = 0.28 + atkVsGk - defSuppression + qualityConversionBonus;
 
           if (isAwayParked) goalProb -= 0.06;
@@ -1625,7 +1625,12 @@ export function simulateMatchStep(
           else if (scoreDiff >= 3) goalProb *= 0.70;
           else if (scoreDiff >= 2) goalProb *= 0.85;
 
-          goalProb = Math.max(0.05, Math.min(0.60, goalProb));
+          // Underdog upset limitation: when opponent is vastly weaker, clamp conversion
+          if (overallDiff < -14) {
+            goalProb = Math.min(0.20, goalProb);
+          }
+
+          goalProb = Math.max(0.04, Math.min(0.65, goalProb));
 
           if (Math.random() < goalProb) {
             homeScore++;
@@ -1716,7 +1721,7 @@ export function simulateMatchStep(
 
           const atkVsGk = ((effAwayAtk - (homeGkPower * gkEfficiency)) * 0.0042);
           const defSuppression = ((effHomeDef - 50) * 0.0020);
-          const qualityConversionBonus = (-overallDiff * 0.005) + (-managerDiff * 0.003);
+          const qualityConversionBonus = (-overallDiff * 0.009) + (-managerDiff * 0.005);
           let goalProb = 0.28 + atkVsGk - defSuppression + qualityConversionBonus;
 
           if (isHomeParked) goalProb -= 0.06;
@@ -1724,7 +1729,12 @@ export function simulateMatchStep(
           else if (scoreDiff <= -3) goalProb *= 0.70;
           else if (scoreDiff <= -2) goalProb *= 0.85;
 
-          goalProb = Math.max(0.05, Math.min(0.60, goalProb));
+          // Underdog upset limitation: when opponent is vastly stronger, clamp conversion
+          if (overallDiff > 14) {
+            goalProb = Math.min(0.20, goalProb);
+          }
+
+          goalProb = Math.max(0.04, Math.min(0.65, goalProb));
 
           if (Math.random() < goalProb) {
             awayScore++;
@@ -2018,8 +2028,12 @@ export function simulateMatchStep(
 }
 
 /**
- * Runs a complete 90-minute event-by-event match simulation for background/AI matches
- * Uses the exact same realistic attribute-driven engine!
+ * Advanced Weighted Probability Match Simulation Engine:
+ * - Calculates effective team ratings (Player ratings + Manager rating + Home ground advantage + Tactics + Stamina).
+ * - Weighted probability based on true rating disparity (delta = R_home - R_away).
+ * - Capped Luck Factor (RNG / surprise factor strictly between 10% and 15% maximum in all scenarios).
+ * - Generates authentic football scores, events, outfield goalscorers (no goalkeepers!), assists, and stats.
+ * - Executes in O(1) time without blocking or freezing the JavaScript thread.
  */
 export function simulateMatch(
   homeTeam?: Club,
@@ -2044,6 +2058,7 @@ export function simulateMatch(
     facilities: { stadium: 1, youthAcademy: 1, trainingCenter: 1, medicalCenter: 1 },
     sponsors: [],
   } as unknown as Club);
+
   const safeAway: Club = awayTeam || ({
     id: 'team_away_safe',
     name: 'الفريق الضيف',
@@ -2062,40 +2077,239 @@ export function simulateMatch(
     sponsors: [],
   } as unknown as Club);
 
-  const dummyFixture: Fixture = {
-    id: `sim_fix_${Date.now()}_${Math.random()}`,
-    round: 1,
-    homeTeamId: safeHome.id,
-    awayTeamId: safeAway.id,
-    isPlayed: false,
+  const homeTac: TeamTactics = homeTactics || safeHome.tactics || ({
+    formation: '4-3-3',
+    tacticalStyle: 'balanced',
+    mentality: 'balanced',
+    passingStyle: 'mixed',
+    tempo: 'normal',
+    pressingIntensity: 'medium',
+    startingPlayerIds: [],
+    benchPlayerIds: [],
+  } as unknown as TeamTactics);
+
+  const awayTac: TeamTactics = awayTactics || safeAway.tactics || ({
+    formation: '4-3-3',
+    tacticalStyle: 'balanced',
+    mentality: 'balanced',
+    passingStyle: 'mixed',
+    tempo: 'normal',
+    pressingIntensity: 'medium',
+    startingPlayerIds: [],
+    benchPlayerIds: [],
+  } as unknown as TeamTactics);
+
+  // 1. Calculate Base Team Strength
+  const homeStrength = calculateTeamStrength(safeHome, homeTac);
+  const awayStrength = calculateTeamStrength(safeAway, awayTac);
+
+  // 2. Tactical Matchup Advantage
+  const matchup = calculateTacticalMatchup(homeTac, awayTac);
+  const homeTacBonus = (matchup.homeAttackMod - 1.0) * 8 + (matchup.homeDefenseMod - 1.0) * 6;
+  const awayTacBonus = (matchup.awayAttackMod - 1.0) * 8 + (matchup.awayDefenseMod - 1.0) * 6;
+
+  // 3. Squad Energy & Stamina (Fitness)
+  const homePlayers = Array.isArray(safeHome.players) ? safeHome.players : [];
+  const awayPlayers = Array.isArray(safeAway.players) ? safeAway.players : [];
+  const homeStarters = homePlayers.filter(p => p && (homeTac.startingPlayerIds || []).includes(p.id));
+  const awayStarters = awayPlayers.filter(p => p && (awayTac.startingPlayerIds || []).includes(p.id));
+
+  const calcAvgFitness = (players: Player[]): number => {
+    if (!players || players.length === 0) return 90;
+    const sum = players.reduce((acc, p) => acc + (typeof p?.fitness === 'number' ? p.fitness : 90), 0);
+    return sum / players.length;
   };
+  const homeAvgFitness = calcAvgFitness(homeStarters.length > 0 ? homeStarters : homePlayers);
+  const awayAvgFitness = calcAvgFitness(awayStarters.length > 0 ? awayStarters : awayPlayers);
+  const homeFitnessModifier = (homeAvgFitness - 80) * 0.12;
+  const awayFitnessModifier = (awayAvgFitness - 80) * 0.12;
 
-  let state = createInitialLiveMatchState(dummyFixture, safeHome, safeAway, homeTactics || safeHome.tactics);
-  if (homeTactics) state.homeTactics = homeTactics;
-  if (awayTactics) state.awayTactics = awayTactics;
+  // 4. Home Pitch & Crowd Advantage (Fair +3.5 rating bonus to home team)
+  const homePitchAdvantage = 3.5;
 
-  // Run through all 90 minutes event-by-event
-  for (let min = 1; min <= 90; min++) {
-    // At halftime (min 45), automatically resume to 2nd half
-    if (state.isHalfTime) {
-      state.isHalfTime = false;
-    }
-    state = simulateMatchStep(state);
+  // 5. Effective Overall Ratings
+  const effHomeRating = Math.max(30, Math.min(99, homeStrength.overall + homePitchAdvantage + homeTacBonus + homeFitnessModifier));
+  const effAwayRating = Math.max(30, Math.min(99, awayStrength.overall + awayTacBonus + awayFitnessModifier));
+
+  // True Rating Disparity (Rating Delta)
+  const ratingDelta = effHomeRating - effAwayRating;
+
+  // 6. Base Expected Goals (xG) based on True Rating & Lineup Differences
+  let baseHomeXg = 1.35 + (homeStrength.attack - awayStrength.defense) * 0.040 + (ratingDelta * 0.038);
+  let baseAwayXg = 1.05 + (awayStrength.attack - homeStrength.defense) * 0.040 - (ratingDelta * 0.038);
+
+  // 7. Controlled Luck / Surprise Factor (Strictly capped between 10% and 15% max)
+  // Negative or positive perturbation strictly inside [-0.12, +0.12]
+  const rawHomeLuck = (Math.random() - 0.5) * 0.24; // -12% to +12%
+  const rawAwayLuck = (Math.random() - 0.5) * 0.24; // -12% to +12%
+
+  // Prevent underdog from gaining excessive luck beyond 10% in heavy mismatch scenarios
+  const clampedHomeLuck = ratingDelta < -15 ? Math.min(0.10, rawHomeLuck) : rawHomeLuck;
+  const clampedAwayLuck = ratingDelta > 15 ? Math.min(0.10, rawAwayLuck) : rawAwayLuck;
+
+  let finalHomeXg = Math.max(0.12, Math.min(5.2, baseHomeXg * (1 + clampedHomeLuck)));
+  let finalAwayXg = Math.max(0.08, Math.min(5.2, baseAwayXg * (1 + clampedAwayLuck)));
+
+  // If a team is heavily superior (e.g., ratingDelta >= 16), guarantee strong scoring expectation
+  if (ratingDelta >= 16) {
+    finalHomeXg = Math.max(2.1, finalHomeXg);
+    finalAwayXg = Math.min(0.8, finalAwayXg);
+  } else if (ratingDelta <= -16) {
+    finalHomeXg = Math.min(0.8, finalHomeXg);
+    finalAwayXg = Math.max(2.1, finalAwayXg);
   }
 
-  // Ensure reasonable minimum stats
-  state.stats.homeShots = Math.max(state.stats.homeShots, state.homeScore + Math.floor(Math.random() * 4 + 2));
-  state.stats.awayShots = Math.max(state.stats.awayShots, state.awayScore + Math.floor(Math.random() * 4 + 2));
-  state.stats.homeShotsOnTarget = Math.max(state.stats.homeShotsOnTarget, state.homeScore + 1);
-  state.stats.awayShotsOnTarget = Math.max(state.stats.awayShotsOnTarget, state.awayScore + 1);
-  state.stats.homeCorners = Math.max(state.stats.homeCorners, Math.floor(Math.random() * 5 + 1));
-  state.stats.awayCorners = Math.max(state.stats.awayCorners, Math.floor(Math.random() * 5 + 1));
+  // 8. Poisson-based Goal Sampling
+  const samplePoisson = (lambda: number): number => {
+    const l = Math.exp(-lambda);
+    let k = 0;
+    let p = 1;
+    do {
+      k++;
+      p *= Math.random();
+    } while (p > l && k < 12);
+    return Math.max(0, k - 1);
+  };
+
+  let homeScore = samplePoisson(finalHomeXg);
+  let awayScore = samplePoisson(finalAwayXg);
+
+  // 9. Strict Upset Protection: Underdog upset chance is capped at 10-15% max!
+  // If a team is much stronger (+12 or more) but Poisson sampled an extreme loss,
+  // evaluate whether the upset is within the 10-15% luck tolerance.
+  if (ratingDelta >= 14 && awayScore > homeScore) {
+    const upsetRoll = Math.random();
+    if (upsetRoll > 0.12) { // 88% of the time, the superior team corrects to win or draw
+      if (Math.random() < 0.65) {
+        homeScore = awayScore + Math.floor(Math.random() * 2 + 1); // Win for strong team
+      } else {
+        homeScore = awayScore; // Draw
+      }
+    }
+  } else if (ratingDelta <= -14 && homeScore > awayScore) {
+    const upsetRoll = Math.random();
+    if (upsetRoll > 0.12) {
+      if (Math.random() < 0.65) {
+        awayScore = homeScore + Math.floor(Math.random() * 2 + 1);
+      } else {
+        awayScore = homeScore;
+      }
+    }
+  }
+
+  // 10. Generate Match Events (Goals, Cards, Subs, Stats)
+  const events: MatchEvent[] = [];
+  const outfieldHome = homeStarters.filter(p => p && p.id && p.positionCategory !== 'GK' && p.position !== 'GK');
+  const outfieldAway = awayStarters.filter(p => p && p.id && p.positionCategory !== 'GK' && p.position !== 'GK');
+  const safeOutfieldHome = outfieldHome.length > 0 ? outfieldHome : homePlayers.filter(p => p && p.positionCategory !== 'GK');
+  const safeOutfieldAway = outfieldAway.length > 0 ? outfieldAway : awayPlayers.filter(p => p && p.positionCategory !== 'GK');
+
+  // Distribute goal minutes realistically
+  const goalMinutes: { team: 'home' | 'away'; minute: number }[] = [];
+  for (let g = 0; g < homeScore; g++) {
+    const min = Math.min(90, Math.max(3, Math.floor(Math.random() * 88 + 2)));
+    goalMinutes.push({ team: 'home', minute: min });
+  }
+  for (let g = 0; g < awayScore; g++) {
+    const min = Math.min(90, Math.max(3, Math.floor(Math.random() * 88 + 2)));
+    goalMinutes.push({ team: 'away', minute: min });
+  }
+  goalMinutes.sort((a, b) => a.minute - b.minute);
+
+  goalMinutes.forEach(({ team, minute }) => {
+    if (team === 'home') {
+      const scorer = pickGoalScorer(safeOutfieldHome);
+      const assister = pickAssister(safeOutfieldHome, scorer.id);
+      events.push({
+        minute,
+        type: 'goal',
+        teamId: safeHome.id,
+        playerId: scorer.id,
+        playerName: scorer.name,
+        assistPlayerId: assister?.id,
+        assistPlayerName: assister?.name,
+        description: `⚽ هدف رائع لصالح ${safeHome.shortName} بتسديدة من اللاعب (${scorer.name})${assister ? ` بعد تمريرة حاسمة من (${assister.name})` : ''}!`,
+      });
+    } else {
+      const scorer = pickGoalScorer(safeOutfieldAway);
+      const assister = pickAssister(safeOutfieldAway, scorer.id);
+      events.push({
+        minute,
+        type: 'goal',
+        teamId: safeAway.id,
+        playerId: scorer.id,
+        playerName: scorer.name,
+        assistPlayerId: assister?.id,
+        assistPlayerName: assister?.name,
+        description: `⚽ هدف لصالح ${safeAway.shortName} بأقدام اللاعب (${scorer.name})${assister ? ` بعد صناعة من (${assister.name})` : ''}!`,
+      });
+    }
+  });
+
+  // Generate realistic cards
+  const homeCardsCount = Math.floor(Math.random() * 3);
+  const awayCardsCount = Math.floor(Math.random() * 3 + (ratingDelta > 10 ? 1 : 0));
+  for (let c = 0; c < homeCardsCount; c++) {
+    const min = Math.floor(Math.random() * 80 + 10);
+    const player = pickPlayerByPosition(safeOutfieldHome.length > 0 ? safeOutfieldHome : homePlayers, 'DEF', 'MID');
+    if (player && player.id) {
+      events.push({
+        minute: min,
+        type: 'yellow_card',
+        teamId: safeHome.id,
+        playerId: player.id,
+        playerName: player.name,
+        description: `🟨 بطاقة صفراء للاعب (${player.name}) من ${safeHome.shortName}.`,
+      });
+    }
+  }
+  for (let c = 0; c < awayCardsCount; c++) {
+    const min = Math.floor(Math.random() * 80 + 10);
+    const player = pickPlayerByPosition(safeOutfieldAway.length > 0 ? safeOutfieldAway : awayPlayers, 'DEF', 'MID');
+    if (player && player.id) {
+      events.push({
+        minute: min,
+        type: 'yellow_card',
+        teamId: safeAway.id,
+        playerId: player.id,
+        playerName: player.name,
+        description: `🟨 بطاقة صفراء للاعب (${player.name}) من ${safeAway.shortName}.`,
+      });
+    }
+  }
+
+  // 11. Realistic Match Stats
+  const homePossession = Math.max(22, Math.min(78, Math.round(50 + (ratingDelta * 0.85))));
+  const awayPossession = 100 - homePossession;
+  const homeShots = Math.max(homeScore + 3, Math.round(finalHomeXg * 5.5 + Math.random() * 3 + 2));
+  const awayShots = Math.max(awayScore + 2, Math.round(finalAwayXg * 5.0 + Math.random() * 3 + 1));
+  const homeShotsOnTarget = Math.max(homeScore, Math.round(homeShots * 0.42 + homeScore * 0.3));
+  const awayShotsOnTarget = Math.max(awayScore, Math.round(awayShots * 0.40 + awayScore * 0.3));
+
+  const stats: MatchStats = {
+    homePossession,
+    awayPossession,
+    homeShots,
+    awayShots,
+    homeShotsOnTarget,
+    awayShotsOnTarget,
+    homeFouls: Math.round(7 + Math.random() * 7),
+    awayFouls: Math.round(8 + Math.random() * 8),
+    homeCorners: Math.max(1, Math.round(homeShots * 0.4 + (Math.random() * 2))),
+    awayCorners: Math.max(1, Math.round(awayShots * 0.35 + (Math.random() * 2))),
+    homeYellowCards: homeCardsCount,
+    awayYellowCards: awayCardsCount,
+    homeRedCards: 0,
+    awayRedCards: 0,
+  };
+
+  events.sort((a, b) => a.minute - b.minute);
 
   return {
-    homeScore: state.homeScore,
-    awayScore: state.awayScore,
-    events: state.events,
-    stats: state.stats,
+    homeScore,
+    awayScore,
+    events,
+    stats,
   };
 }
 

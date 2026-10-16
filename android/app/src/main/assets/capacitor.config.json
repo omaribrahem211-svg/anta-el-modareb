@@ -9,11 +9,6 @@
 	"plugins": {
 		"AdMob": {
 			"appId": "ca-app-pub-5272866425919152~1232269694"
-		},
-		"LocalNotifications": {
-			"smallIcon": "ic_stat_icon_config_sample",
-			"iconColor": "#059669",
-			"sound": "beep.wav"
 		}
 	},
 	"android": {
