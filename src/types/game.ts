@@ -1007,7 +1007,7 @@ export interface CurrentSeasonStats {
   pointsPerGame: number;
 }
 
-export type ActiveTab = 'dashboard' | 'squad' | 'tactics' | 'matches' | 'online_pvp' | 'rankings' | 'league' | 'transfers' | 'training' | 'club' | 'career' | 'inbox';
+export type ActiveTab = 'dashboard' | 'squad' | 'tactics' | 'matches' | 'online_pvp' | 'rankings' | 'league' | 'transfers' | 'training' | 'club' | 'career' | 'inbox' | 'challenges';
 
 // ----------------------------------------------------
 // CAREER MODE: CALENDAR, DAY-BY-DAY & ADVANCED SIMULATION

@@ -114,6 +114,7 @@ import { ADMOB_CONFIG } from '../config/admobConfig';
 import { notificationService } from '../services/notificationService';
 import { DIAGNOSTIC_CONFIG } from '../config/diagnosticConfig';
 import { AdRewardType, AdRewardClaimResult } from '../services/adRewardService';
+import { challengesManager, ChallengeReward } from '../services/challengesService';
 import { MIGRATION_STORAGE_KEY, runOneTimeWorldMigration, inferClubCountry } from '../utils/worldMigration';
 import { validateWorldDatabase, sanitizeWorldPlayerOwnership } from '../utils/worldValidation';
 import { isRealClub, loadRealClubSquad } from '../data/realPlayersData';
@@ -340,6 +341,7 @@ interface GameContextType {
 
   // AdMob Rewarded Economy System (نظام مكافآت الإعلانات الآمن)
   claimAdReward: (rewardType: AdRewardType, boostSubtype?: TrainingBoostType) => { success: boolean; message: string };
+  grantChallengeReward: (reward: ChallengeReward) => { success: boolean; message: string };
 
   // Promo / Gift Codes System (نظام استرداد أكواد الهدايا والمكافآت)
   redeemGiftCode: (code: string) => Promise<{ success: boolean; message: string; rewardAmount?: number; rewardCoins?: number }>;
@@ -471,8 +473,20 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       ? t.tactics.benchPlayerIds
       : players.slice(11, 18).map(p => p.id);
 
+    let initialBudget = Number.isFinite(t.budget) ? t.budget : 250000;
+    if (Array.isArray(t.sponsors) && t.sponsors.length > 0) {
+      const sponsorshipTaken = t.sponsors.reduce((sum: number, sp: any) => {
+        const signing = sp?.signingBonus || 50000;
+        const elapsed = Math.max(0, (sp?.totalDurationMonths || 12) - (sp?.contractMonthsRemaining ?? 12));
+        const monthly = (sp?.monthlyPayment || 0) * elapsed;
+        return sum + signing + monthly;
+      }, 0);
+      initialBudget = Math.max(0, initialBudget - sponsorshipTaken);
+    }
+
     return {
       ...t,
+      budget: initialBudget,
       name: cleanName,
       shortName: cleanShortName,
       country,
@@ -491,7 +505,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         savings: p.savings !== undefined ? p.savings : calculateInitialPlayerSavings(p),
         totalBonusesReceived: p.totalBonusesReceived ?? 0,
       })),
-      sponsors: Array.isArray(t.sponsors) ? t.sponsors : [],
+      sponsors: [],
       youthAcademyProspects: Array.isArray(t.youthAcademyProspects) && t.youthAcademyProspects.length > 0
         ? t.youthAcademyProspects
         : generateYouthAcademyBatch(t, 1),
@@ -1084,31 +1098,8 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
   });
 
-  // Sponsorship Offers Market State (سوق وعروض الرعاية الواردة)
-  const [availableSponsorOffers, setAvailableSponsorOffers] = useState<SponsorshipOffer[]>(() => {
-    try {
-      const saved = localStorage.getItem(`${STORAGE_KEY}_sponsorOffers`);
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
-      }
-      return userClub ? generateIncomingSponsorshipOffers(userClub, 4) : [];
-    } catch {
-      return [];
-    }
-  });
-
-  useEffect(() => {
-    try {
-      localStorage.setItem(`${STORAGE_KEY}_sponsorOffers`, JSON.stringify(availableSponsorOffers));
-    } catch {}
-  }, [availableSponsorOffers]);
-
-  useEffect(() => {
-    if (userClub && (!availableSponsorOffers || availableSponsorOffers.length === 0)) {
-      setAvailableSponsorOffers(generateIncomingSponsorshipOffers(userClub, 4));
-    }
-  }, [userClub?.id]);
+  // Sponsorship Offers Market State (سوق وعروض الرعاية تم إلغاؤها بالكامل)
+  const [availableSponsorOffers, setAvailableSponsorOffers] = useState<SponsorshipOffer[]>([]);
 
   const recalculateWorldRankings = (monthStr?: string) => {
     const targetMonth = monthStr || (calendarDate?.rawDateStr ? calendarDate.rawDateStr.slice(0, 7) : '2026-08');
@@ -1705,6 +1696,9 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   // Actions
   const updateTactics = (tactics: TeamTactics) => {
     setTeams(prev => prev.map(t => t.isUserClub ? { ...t, tactics } : t));
+    try {
+      challengesManager.recordTacticsAdjusted();
+    } catch (_) {}
   };
 
   const setFormation = (formation: FormationType) => {
@@ -2726,7 +2720,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           (resolvedRevenue.sponsorsBreakdown && resolvedRevenue.sponsorsBreakdown.length > 0
             ? resolvedRevenue.sponsorsBreakdown.map(b => `  • ${b}`).join('\n') + '\n'
             : '') +
-          `🏆 مكافأة النتيجة الرسمية (${resolvedRevenue.resultType === 'win' ? 'فوز' : resolvedRevenue.resultType === 'draw' ? 'تعادل' : 'مشاركة'}): ${resolvedRevenue.resultBonus.toLocaleString()} ج.م\n` +
+          `🏆 مكافأة النتيجة الرسمية (${resolvedRevenue.resultType === 'win' ? 'فوز 🏆' : resolvedRevenue.resultType === 'draw' ? 'تعادل 🤝' : 'هزيمة (0 ج.م)'}): ${resolvedRevenue.resultBonus > 0 ? `+${resolvedRevenue.resultBonus.toLocaleString()} ج.م` : '0 ج.م (لا يوجد مكافأة عند الهزيمة)'}\n` +
           (resolvedRevenue.isSkippedMatch ? `\n⚠️ خصم تخطي المباراة (50%): -${resolvedRevenue.skipPenaltyAmount?.toLocaleString()} ج.م\n(تم منحك نصف الإيرادات فقط كخصم لتخطي المباراة، تشجيعاً لخوض المباريات كاملة)\n` : '') +
           (resolvedRevenue.isDoubledWithAd ? `🎁 مكافأة مضاعفة الإعلان (2X): +${resolvedRevenue.adDoubledBonus?.toLocaleString()} ج.م\n` : '') +
           `\n✅ الإجمالي النهائي المودع في رصيد النادي: ${totalMatchRevenue.toLocaleString()} جنيه مصري.`,
@@ -2902,7 +2896,8 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const updatedRankingPoints = Math.max(100, (manager.rankingPoints || 1200) + managerPointsDelta);
 
     const roundSalary = Math.round((manager.monthlySalary || 25000) / 4);
-    const matchBonus = (isUserWin && userClub) ? (activeLeague.tier === 1 ? 12000 : activeLeague.tier === 2 ? 7000 : activeLeague.tier === 3 ? 4500 : 3000) : 0;
+    // Single-match bonus cancelled in favor of 5-consecutive wins streak reward
+    const matchBonus = 0;
     const managerCupBonusCut = cupBonusPrize > 0 ? Math.round(cupBonusPrize * 0.15) : 0;
     const totalManagerIncome = roundSalary + matchBonus + managerCupBonusCut;
 
@@ -3121,42 +3116,6 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         summary.finalPosition
       );
 
-      // Sponsor League Champion / Top 4 Milestone Bonuses
-      if (summary.finalPosition === 1) {
-        const leagueTrophyBonus = (summaryClub.sponsors || []).reduce(
-          (sum, sp) => sum + (sp.milestoneBonus?.leagueChampionBonus || 0),
-          0
-        );
-        if (leagueTrophyBonus > 0) {
-          summaryClub.budget = (summaryClub.budget || 0) + leagueTrophyBonus;
-          newInboxMsgs.unshift({
-            id: `msg_sponsor_league_trophy_${Date.now()}`,
-            title: `🏆 مكافأة الرعاة للتتويج بالدوري: +${leagueTrophyBonus.toLocaleString()} ج.م!`,
-            sender: 'تحالف الرعاة والشركاء التجاريين',
-            date: 'ختام الموسم',
-            type: 'board',
-            read: false,
-            content: `تهانينا الحارة بالتتويج بلقب الدوري الممتاز! تقديراً لهذا الإنجاز العظيم، قرر رعاة النادي تفعيل بند مكافأة التتويج وصرف +${leagueTrophyBonus.toLocaleString()} جنيه مصري لحساب النادي فوراً!`,
-          });
-        }
-      } else if (summary.finalPosition <= 4) {
-        const topFourBonus = (summaryClub.sponsors || []).reduce(
-          (sum, sp) => sum + (sp.milestoneBonus?.topFourFinishBonus || 0),
-          0
-        );
-        if (topFourBonus > 0) {
-          summaryClub.budget = (summaryClub.budget || 0) + topFourBonus;
-          newInboxMsgs.unshift({
-            id: `msg_sponsor_top4_bonus_${Date.now()}`,
-            title: `⭐ مكافأة الرعاة للمربع الذهبي: +${topFourBonus.toLocaleString()} ج.م!`,
-            sender: 'لجنة الرعاة الرسميين',
-            date: 'ختام الموسم',
-            type: 'board',
-            read: false,
-            content: `تقديراً لإنهاء الموسم في المربع الذهبي وحجز مقعد قاري في بطولات إفريقيا، تم إيداع حافز المربع الذهبي +${topFourBonus.toLocaleString()} ج.م في خزينة النادي!`,
-          });
-        }
-      }
 
       setSeasonEndSummary(summary);
       setJobOffers(generatedOffers);
@@ -3208,6 +3167,24 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     } catch (e) {
       console.warn('Non-fatal error consuming training boost:', e);
     }
+
+    // Track match in challengesManager
+    try {
+      const isUserHome = userClub ? fixture.homeTeamId === userClub.id : false;
+      const isUserAway = userClub ? fixture.awayTeamId === userClub.id : false;
+      const userGoals = isUserHome ? fixture.homeScore : isUserAway ? fixture.awayScore : 0;
+      const oppGoals = isUserHome ? fixture.awayScore : isUserAway ? fixture.homeScore : 0;
+      const isUserWin = userClub ? userGoals > oppGoals : false;
+      const isUserDraw = userClub ? userGoals === oppGoals : false;
+
+      challengesManager.recordMatchPlayed({
+        isWin: isUserWin,
+        isDraw: isUserDraw,
+        userGoals,
+        oppGoals,
+        isAway: isUserAway,
+      });
+    } catch (_) {}
 
     // Interstitial Check (decoupled microtask so it never blocks React UI or causes race condition)
     try {
@@ -3705,6 +3682,12 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     // 4. Update Manager Profile if employed
     let updatedManager = { ...manager };
     const newInboxMsgs: InboxMessage[] = [];
+    let simUserGoals = 0;
+    let simOppGoals = 0;
+    let isSimUserWin = false;
+    let isSimUserDraw = false;
+    let isSimAway = false;
+    let hasSimUserMatch = false;
 
     if (userClub) {
       const userMatch = allRoundMatches.find(m => m.homeTeamId === userClub.id || m.awayTeamId === userClub.id);
@@ -3723,6 +3706,13 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         const isUserDraw = isCup
           ? false
           : userScore === oppScore;
+
+        simUserGoals = userScore;
+        simOppGoals = oppScore;
+        isSimUserWin = isUserWin;
+        isSimUserDraw = isUserDraw;
+        isSimAway = !isUserHome;
+        hasSimUserMatch = true;
         const isUserLoss = isCup
           ? (hasPenalties ? userPenalties < oppPenalties : userScore < oppScore)
           : userScore < oppScore;
@@ -3765,7 +3755,8 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         const updatedRankingPoints = Math.max(100, (manager.rankingPoints || 1200) + managerPointsDelta);
 
         const simManagerSalary = Math.round((manager.monthlySalary || 25000) / 4);
-        const simMatchBonus = isUserWin ? (activeLeague.tier === 1 ? 12000 : activeLeague.tier === 2 ? 7000 : activeLeague.tier === 3 ? 4500 : 3000) : 0;
+        // Single-match bonus cancelled in favor of 5-consecutive wins streak reward
+        const simMatchBonus = 0;
         const simCupBonusCut = simCupBonusPrize > 0 ? Math.round(simCupBonusPrize * 0.15) : 0;
         const simTotalEarned = simManagerSalary + simMatchBonus + simCupBonusCut;
 
@@ -3923,7 +3914,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
               `🏟️ الحضور الجماهيري: ${userSimMatchRevenue.attendance.toLocaleString()} مشجع (${userSimMatchRevenue.attendancePercentage}%)\n` +
               `🎟️ سعر التذكرة: ${userSimMatchRevenue.ticketPrice} ج.م • دخل التذاكر الأساسي: ${userSimMatchRevenue.ticketRevenue.toLocaleString()} ج.م\n` +
               `📢 رعاة النادي والإعلانات: ${userSimMatchRevenue.sponsorsRevenue.toLocaleString()} ج.م\n` +
-              `🏆 مكافأة النتيجة الرسمية (${userSimMatchRevenue.resultType === 'win' ? 'فوز' : userSimMatchRevenue.resultType === 'draw' ? 'تعادل' : 'مشاركة'}): ${userSimMatchRevenue.resultBonus.toLocaleString()} ج.م\n` +
+              `🏆 مكافأة النتيجة الرسمية (${userSimMatchRevenue.resultType === 'win' ? 'فوز 🏆' : userSimMatchRevenue.resultType === 'draw' ? 'تعادل 🤝' : 'هزيمة (0 ج.م)'}): ${userSimMatchRevenue.resultBonus > 0 ? `+${userSimMatchRevenue.resultBonus.toLocaleString()} ج.م` : '0 ج.م (لا يوجد مكافأة عند الهزيمة)'}\n` +
               `💵 إجمالي الإيراد الأساسي: ${userSimMatchRevenue.baseTotalRevenue.toLocaleString()} ج.م\n\n` +
               `⚠️ خصم تخطي المباراة (50%): -${userSimMatchRevenue.skipPenaltyAmount?.toLocaleString()} ج.م\n` +
               `💡 تم إيداع نصف الإيرادات فقط كخصم لتخطي/محاكاة المباراة، لتشجيع خوض المباريات كاملة.\n\n` +
@@ -4004,42 +3995,6 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         summary.finalPosition
       );
 
-      // Sponsor League Champion / Top 4 Milestone Bonuses
-      if (summary.finalPosition === 1) {
-        const leagueTrophyBonus = (summaryClub.sponsors || []).reduce(
-          (sum, sp) => sum + (sp.milestoneBonus?.leagueChampionBonus || 0),
-          0
-        );
-        if (leagueTrophyBonus > 0) {
-          summaryClub.budget = (summaryClub.budget || 0) + leagueTrophyBonus;
-          newInboxMsgs.unshift({
-            id: `msg_sponsor_league_trophy_sim_${Date.now()}`,
-            title: `🏆 مكافأة الرعاة للتتويج بالدوري: +${leagueTrophyBonus.toLocaleString()} ج.م!`,
-            sender: 'تحالف الرعاة والشركاء التجاريين',
-            date: 'ختام الموسم',
-            type: 'board',
-            read: false,
-            content: `تهانينا الحارة بالتتويج بلقب الدوري الممتاز! تقديراً لهذا الإنجاز، قرر رعاة النادي تفعيل بند مكافأة التتويج وصرف +${leagueTrophyBonus.toLocaleString()} جنيه مصري لحساب النادي فوراً!`,
-          });
-        }
-      } else if (summary.finalPosition <= 4) {
-        const topFourBonus = (summaryClub.sponsors || []).reduce(
-          (sum, sp) => sum + (sp.milestoneBonus?.topFourFinishBonus || 0),
-          0
-        );
-        if (topFourBonus > 0) {
-          summaryClub.budget = (summaryClub.budget || 0) + topFourBonus;
-          newInboxMsgs.unshift({
-            id: `msg_sponsor_top4_bonus_sim_${Date.now()}`,
-            title: `⭐ مكافأة الرعاة للمربع الذهبي: +${topFourBonus.toLocaleString()} ج.م!`,
-            sender: 'لجنة الرعاة الرسميين',
-            date: 'ختام الموسم',
-            type: 'board',
-            read: false,
-            content: `تقديراً لإنهاء الموسم في المربع الذهبي وحجز مقعد قاري في بطولات إفريقيا، تم إيداع حافز المربع الذهبي +${topFourBonus.toLocaleString()} ج.م في خزينة النادي!`,
-          });
-        }
-      }
 
       setSeasonEndSummary(summary);
       setJobOffers(generatedOffers);
@@ -4099,6 +4054,19 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     AdManager.consumeTrainingBoost();
     // Interstitial Check (non-blocking background preload & show if ready)
     AdManager.onMatchCompleted();
+
+    // Track match in challengesManager
+    if (hasSimUserMatch) {
+      try {
+        challengesManager.recordMatchPlayed({
+          isWin: isSimUserWin,
+          isDraw: isSimUserDraw,
+          userGoals: simUserGoals,
+          oppGoals: simOppGoals,
+          isAway: isSimAway,
+        });
+      } catch (_) {}
+    }
     console.log('[MatchEndingFlow] Instant simulate round completed successfully');
 
     // Synchronously write critical round progress to localStorage immediately
@@ -5513,167 +5481,112 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     };
   };
 
-  // --- Sponsorship Contracts System (نظام عقود الرعاية المتطورة) ---
-  const signSponsorshipContract = (offer: SponsorshipOffer): { success: boolean; message: string } => {
-    if (!userClub) return { success: false, message: 'أنت غير مرتبط بنادٍ حالياً!' };
-
-    const category = (offer.category || offer.type || 'shirt') as SponsorCategory;
-    const catInfo = getSponsorCategoryLabel(category);
-    const signingBonus = offer.signingBonus || 50000;
-
-    const currentSponsors = Array.isArray(userClub.sponsors) ? userClub.sponsors : [];
-    const updatedSponsors = currentSponsors.filter(
-      s => (s.category || s.type) !== category
-    );
-
-    const newSponsor: Sponsor = {
-      ...offer,
-      id: `sp_${category}_${userClub.id}_${Date.now()}`,
-      category,
-      type: category,
-      contractMonthsRemaining: offer.totalDurationMonths || 12,
-      satisfaction: 90,
-    };
-
-    updatedSponsors.push(newSponsor);
-
-    setTeams(prev => prev.map(t => {
-      if (t.id === userClub.id) {
-        return {
-          ...t,
-          budget: (t.budget || 0) + signingBonus,
-          sponsors: updatedSponsors,
-        };
-      }
-      return t;
-    }));
-
-    setAvailableSponsorOffers(prev => prev.filter(o => o.id !== offer.id));
-
-    // Official celebratory board message
-    const sponsorContractMsg: InboxMessage = {
-      id: `msg_sponsor_signed_${Date.now()}`,
-      title: `🤝 إبرام عقد رعاية رسمي مع ${offer.name} (+${signingBonus.toLocaleString()} ج.م)`,
-      sender: 'مجلس إدارة النادي - لجنة التسويق',
-      date: `الجولة ${currentRound}`,
-      type: 'board',
-      read: false,
-      content: `يسعد مجلس إدارة النادي الإعلان رسمياً عن توقيع عقد رعاية وشراكة تجارية مع "${offer.name}" كـ ${catInfo.label} لمدة ${offer.totalDurationMonths || 12} شهراً.\n\n` +
-        `💼 تفاصيل العقد المالي:\n` +
-        `💵 مكافأة توقيع فورية: +${signingBonus.toLocaleString()} ج.م تم إيداعها مباشرة في خزينة النادي.\n` +
-        `📅 الدفعة الشهرية الثابتة: +${offer.monthlyPayment.toLocaleString()} ج.م تُصرف بانتظام.\n` +
-        `⚽ مكافأة الفوز في الدوري: +${offer.bonusForWin.toLocaleString()} ج.م لكل انتصار.\n` +
-        `🏆 مكافأة مباريات الكأس: +${(offer.bonusCupWin || offer.bonusForWin * 1.5).toLocaleString()} ج.م.\n` +
-        `🌍 حافز الانتصارات القارية والإفريقية: +${(offer.bonusContinentalWin || offer.bonusForWin * 2.5).toLocaleString()} ج.م.\n\n` +
-        `نتمنى أن تسهم هذه الشراكة الاستراتيجية في دعم مسيرة الفريق نحو منصات التتويج!`,
-    };
-    setInbox(prev => [sponsorContractMsg, ...prev]);
-
-    return {
-      success: true,
-      message: `تم توقيع العقد بنجاح مع ${offer.name} وأودعت مكافأة التوقيع (+${signingBonus.toLocaleString()} ج.م) في خزينة النادي!`,
-    };
+  // --- Sponsorship Contracts System (نظام عقود الرعاية ملغى بالكامل) ---
+  const signSponsorshipContract = (_offer: SponsorshipOffer): { success: boolean; message: string } => {
+    return { success: false, message: 'تم إلغاء نظام عقود الرعاية بالكامل من اللعبة.' };
   };
 
-  const terminateSponsorshipContract = (sponsorId: string): { success: boolean; message: string } => {
-    if (!userClub) return { success: false, message: 'أنت غير مرتبط بنادٍ حالياً!' };
-
-    const currentSponsors = Array.isArray(userClub.sponsors) ? userClub.sponsors : [];
-    const targetSponsor = currentSponsors.find(s => s.id === sponsorId);
-    if (!targetSponsor) return { success: false, message: 'لم يتم العثور على عقد الرعاية المطلوب!' };
-
-    const penalty = targetSponsor.penaltyClause || Math.round(targetSponsor.monthlyPayment * 1.5);
-    const updatedSponsors = currentSponsors.filter(s => s.id !== sponsorId);
-
-    setTeams(prev => prev.map(t => {
-      if (t.id === userClub.id) {
-        return {
-          ...t,
-          budget: Math.max(0, (t.budget || 0) - penalty),
-          sponsors: updatedSponsors,
-        };
-      }
-      return t;
-    }));
-
-    return {
-      success: true,
-      message: `تم فسخ العقد مع ${targetSponsor.name}. تم تطبيق شرط جزائي قدره -${penalty.toLocaleString()} ج.م وأصبحت الخانة شاغرة للتعاقد الجديد.`,
-    };
+  const terminateSponsorshipContract = (_sponsorId: string): { success: boolean; message: string } => {
+    return { success: false, message: 'تم إلغاء نظام عقود الرعاية بالكامل من اللعبة.' };
   };
 
-  const renewSponsorshipContract = (sponsorId: string): { success: boolean; message: string } => {
-    if (!userClub) return { success: false, message: 'أنت غير مرتبط بنادٍ حالياً!' };
-
-    const currentSponsors = Array.isArray(userClub.sponsors) ? userClub.sponsors : [];
-    const targetSponsor = currentSponsors.find(s => s.id === sponsorId);
-    if (!targetSponsor) return { success: false, message: 'لم يتم العثور على عقد الرعاية المطلوب!' };
-
-    if ((targetSponsor.satisfaction || 80) < 65) {
-      return {
-        success: false,
-        message: `يرفض ممثلو شركة ${targetSponsor.name} التجديد المبكر حالياً بسبب تراجع نتائج الفريق (نسبة الرضا: ${targetSponsor.satisfaction}%). حسن النتائج أولاً!`,
-      };
-    }
-
-    const boostRatio = 1.10;
-    const newMonthly = Math.round((targetSponsor.monthlyPayment * boostRatio) / 1000) * 1000;
-    const renewalBonus = Math.round(newMonthly * 1.5);
-
-    const updatedSponsors = currentSponsors.map(s => {
-      if (s.id === sponsorId) {
-        return {
-          ...s,
-          monthlyPayment: newMonthly,
-          contractMonthsRemaining: (s.contractMonthsRemaining || 0) + 12,
-          totalDurationMonths: (s.totalDurationMonths || 12) + 12,
-          satisfaction: Math.min(100, (s.satisfaction || 80) + 10),
-        };
-      }
-      return s;
-    });
-
-    setTeams(prev => prev.map(t => {
-      if (t.id === userClub.id) {
-        return {
-          ...t,
-          budget: (t.budget || 0) + renewalBonus,
-          sponsors: updatedSponsors,
-        };
-      }
-      return t;
-    }));
-
-    return {
-      success: true,
-      message: `تم تمديد الشراكة بنجاح مع ${targetSponsor.name} لـ 12 شهراً إضافياً وزيادة الدفعة الشهرية بنسبة 10% مع صرف مكافأة ولاء +${renewalBonus.toLocaleString()} ج.م!`,
-    };
+  const renewSponsorshipContract = (_sponsorId: string): { success: boolean; message: string } => {
+    return { success: false, message: 'تم إلغاء نظام عقود الرعاية بالكامل من اللعبة.' };
   };
 
-  const negotiateSponsorshipOffer = (offerId: string): { success: boolean; message: string } => {
-    if (!userClub) return { success: false, message: 'أنت غير مرتبط بنادٍ حالياً!' };
-
-    const targetOffer = availableSponsorOffers.find(o => o.id === offerId);
-    if (!targetOffer) return { success: false, message: 'العرض غير متاح حالياً!' };
-
-    const managerRep = manager?.reputation || 50;
-    const result = negotiateSponsorService(targetOffer, userClub, managerRep);
-
-    setAvailableSponsorOffers(prev =>
-      prev.map(o => (o.id === offerId ? result.updatedOffer : o))
-    );
-
-    return {
-      success: result.success,
-      message: result.message,
-    };
+  const negotiateSponsorshipOffer = (_offerId: string): { success: boolean; message: string } => {
+    return { success: false, message: 'تم إلغاء نظام عقود الرعاية بالكامل من اللعبة.' };
   };
 
   const refreshSponsorshipOffers = () => {
-    if (!userClub) return;
-    const freshOffers = generateIncomingSponsorshipOffers(userClub, 4);
-    setAvailableSponsorOffers(freshOffers);
+    setAvailableSponsorOffers([]);
   };
+
+  // Universal Sponsorship Cancellation & Budget Deduction Migration
+  useEffect(() => {
+    try {
+      const migrationKey = 'anta_el_modareb_sponsorship_deducted_v4';
+      if (localStorage.getItem(migrationKey)) return;
+
+      let totalDeductedForUser = 0;
+      let anyChanged = false;
+
+      const sanitizedTeams = teams.map(t => {
+        const currentSponsors = Array.isArray(t.sponsors) ? t.sponsors : [];
+        if (currentSponsors.length > 0) {
+          anyChanged = true;
+          const sponsorshipMoneyTaken = currentSponsors.reduce((sum: number, sp: any) => {
+            const signing = sp?.signingBonus || 50000;
+            const elapsed = Math.max(0, (sp?.totalDurationMonths || 12) - (sp?.contractMonthsRemaining ?? 12));
+            const monthly = (sp?.monthlyPayment || 0) * elapsed;
+            return sum + signing + monthly;
+          }, 0);
+
+          if (t.isUserClub || (userClub && t.id === userClub.id)) {
+            totalDeductedForUser += sponsorshipMoneyTaken;
+          }
+
+          return {
+            ...t,
+            budget: Math.max(0, (t.budget || 0) - sponsorshipMoneyTaken),
+            sponsors: [],
+          };
+        }
+        return {
+          ...t,
+          sponsors: [],
+        };
+      });
+
+      // Also check inbox if user had previous sponsor signed messages even if sponsors array was cleared
+      if (userClub && totalDeductedForUser === 0 && Array.isArray(inbox)) {
+        const sponsorSignedMsgs = inbox.filter(m => m && (m.id?.includes('msg_sponsor_signed') || m.title?.includes('عقد رعاية')));
+        if (sponsorSignedMsgs.length > 0) {
+          const bonusDeduction = sponsorSignedMsgs.length * 50000;
+          totalDeductedForUser += bonusDeduction;
+          anyChanged = true;
+        }
+      }
+
+      if (anyChanged || totalDeductedForUser > 0) {
+        let finalTeams = sanitizedTeams;
+        if (totalDeductedForUser > 0 && userClub) {
+          finalTeams = sanitizedTeams.map(t => {
+            if (t.isUserClub || t.id === userClub.id) {
+              return {
+                ...t,
+                budget: Math.max(0, (t.budget || 0) - (t.sponsors?.length ? 0 : totalDeductedForUser)),
+                sponsors: [],
+              };
+            }
+            return t;
+          });
+        }
+        setTeams(finalTeams);
+        try {
+          localStorage.setItem(`${STORAGE_KEY}_teams`, JSON.stringify(finalTeams));
+        } catch {}
+
+        if (totalDeductedForUser > 0) {
+          const deductionMsg: InboxMessage = {
+            id: `msg_sponsor_deduction_${Date.now()}`,
+            title: `📋 قرار رسمي: إلغاء نظام الرعاية واسترداد المبالغ (-${totalDeductedForUser.toLocaleString()} ج.م)`,
+            sender: 'اللجنة المالية واتحاد الكرة',
+            date: `الجولة ${currentRound}`,
+            type: 'board',
+            read: false,
+            content: `بناءً على التحديثات التنظيمية والقرارات الأخيرة، تم إلغاء نظام عقود الرعاية بالكامل من المسابقات. وبناءً عليه تم استرداد وخصم كافة المبالغ ومكافآت التوقيع التي حصل عليها النادي سابقاً من الرعاة بقيمة (-${totalDeductedForUser.toLocaleString()} ج.م) من ميزانية النادي.`,
+          };
+          setInbox(prev => [deductionMsg, ...prev]);
+        }
+      }
+
+      localStorage.setItem(migrationKey, 'true');
+      localStorage.removeItem(`${STORAGE_KEY}_sponsorOffers`);
+    } catch (e) {
+      console.warn('Error in sponsorship cancellation migration:', e);
+    }
+  }, [teams, userClub?.id]);
 
   // --- Player Development & Rewards System (تطوير اللاعبين بنقاط المكافآت) ---
   const currentDevPoints = userClub?.developmentPoints ?? manager?.developmentPoints ?? 0;
@@ -5705,6 +5618,10 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       developmentPoints: remaining,
       totalPlayersDeveloped: (prev.totalPlayersDeveloped || 0) + 1,
     }));
+
+    try {
+      challengesManager.recordPlayerUpgraded();
+    } catch (_) {}
 
     return { success: true, message: res.message };
   };
@@ -7685,6 +7602,9 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       };
     }
 
+    // Automatically count rewarded ads towards the challenges & retention system
+    challengesManager.recordAdWatched();
+
     if (rewardType === 'coins') {
       const coinAmount = 50;
       setManager(prev => ({
@@ -7779,6 +7699,73 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
 
     return { success: false, message: 'نوع المكافأة غير معروف' };
+  };
+
+  // ----------------------------------------------------
+  // CHALLENGES & RETENTION REWARD DISPATCHER
+  // ----------------------------------------------------
+  const grantChallengeReward = (reward: ChallengeReward): { success: boolean; message: string } => {
+    if (reward.budget && reward.budget > 0 && userClub) {
+      setTeams(prev => prev.map(t => {
+        if (!t.isUserClub && t.id !== userClub.id) return t;
+        const newBudget = (t.budget || 0) + reward.budget;
+        return {
+          ...t,
+          budget: newBudget,
+          transferBudget: (t.transferBudget || 0) + reward.budget,
+        };
+      }));
+
+      setClubEconomy(prev => ({
+        ...prev,
+        clubBudget: prev.clubBudget + reward.budget,
+      }));
+    }
+
+    if (reward.coins && reward.coins > 0) {
+      setManager(prev => ({
+        ...prev,
+        personalWallet: (prev.personalWallet || 0) + (reward.coins * 100),
+      }));
+
+      try {
+        const authData = localStorage.getItem('anta_el_modareb_auth_user');
+        if (authData) {
+          const parsed = JSON.parse(authData);
+          parsed.virtualCoins = (parsed.virtualCoins || 0) + reward.coins;
+          localStorage.setItem('anta_el_modareb_auth_user', JSON.stringify(parsed));
+        }
+      } catch (_) {}
+    }
+
+    if (reward.devPoints && reward.devPoints > 0) {
+      grantDevelopmentPoints(reward.devPoints, 'مكافأة إنجاز التحديات');
+    }
+
+    if (reward.energyPercent && reward.energyPercent > 0 && userClub) {
+      setTeams(prev => prev.map(t => {
+        if (!t.isUserClub && t.id !== userClub.id) return t;
+        return {
+          ...t,
+          players: (t.players || []).map(p => ({
+            ...p,
+            fitness: Math.min(100, (p.fitness || 85) + reward.energyPercent),
+          })),
+        };
+      }));
+    }
+
+    if (reward.reputation && reward.reputation > 0) {
+      setManager(prev => ({
+        ...prev,
+        reputation: (prev.reputation || 20) + reward.reputation,
+      }));
+    }
+
+    return {
+      success: true,
+      message: `تم استلام الجائزة بنجاح: ${reward.label}`,
+    };
   };
 
   // ----------------------------------------------------
@@ -8112,6 +8099,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         boostPlayerCondition,
         grantDevelopmentPoints,
         claimAdReward,
+        grantChallengeReward,
         redeemGiftCode,
         availableSponsorOffers,
         signSponsorshipContract,

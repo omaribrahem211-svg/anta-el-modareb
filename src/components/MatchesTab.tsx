@@ -611,9 +611,9 @@ export const MatchesTab: React.FC = () => {
                     </div>
 
                     <div className="bg-slate-900/90 p-2.5 rounded-xl border border-slate-800">
-                      <span className="text-[10px] text-slate-400 block">الرعاة والمكافأة</span>
-                      <span className="text-xs font-black text-blue-400 font-mono">
-                        {(liveMatch.matchRevenue.sponsorsRevenue + liveMatch.matchRevenue.resultBonus).toLocaleString()} ج.م
+                      <span className="text-[10px] text-slate-400 block">مكافأة الفوز / النتيجة</span>
+                      <span className={`text-xs font-black font-mono ${liveMatch.matchRevenue.resultBonus > 0 ? 'text-purple-400' : 'text-slate-500'}`}>
+                        {liveMatch.matchRevenue.resultBonus > 0 ? `+${liveMatch.matchRevenue.resultBonus.toLocaleString()} ج.م` : '0 ج.م'}
                       </span>
                     </div>
                   </div>
@@ -625,12 +625,10 @@ export const MatchesTab: React.FC = () => {
                       <span className="font-mono text-emerald-400 font-bold">+{liveMatch.matchRevenue.ticketRevenue.toLocaleString()} ج.م</span>
                     </div>
                     <div className="flex items-center justify-between text-slate-300">
-                      <span>• رعاة وإعلانات النادي:</span>
-                      <span className="font-mono text-blue-400 font-bold">+{liveMatch.matchRevenue.sponsorsRevenue.toLocaleString()} ج.م</span>
-                    </div>
-                    <div className="flex items-center justify-between text-slate-300">
-                      <span>• مكافأة النتيجة ({liveMatch.matchRevenue.resultType === 'win' ? 'فوز 🏆' : liveMatch.matchRevenue.resultType === 'draw' ? 'تعادل 🤝' : 'مشاركة ⚽'}):</span>
-                      <span className="font-mono text-purple-400 font-bold">+{liveMatch.matchRevenue.resultBonus.toLocaleString()} ج.م</span>
+                      <span>• مكافأة النتيجة ({liveMatch.matchRevenue.resultType === 'win' ? 'فوز بالمباراة 🏆' : liveMatch.matchRevenue.resultType === 'draw' ? 'تعادل 🤝' : 'هزيمة ❌'}):</span>
+                      <span className="font-mono text-purple-400 font-bold">
+                        {liveMatch.matchRevenue.resultBonus > 0 ? `+${liveMatch.matchRevenue.resultBonus.toLocaleString()} ج.م` : '0 ج.م (لا يوجد مكافأة عند الهزيمة)'}
+                      </span>
                     </div>
                     {liveMatch.matchRevenue.isSkippedMatch && (
                       <div className="flex items-center justify-between text-rose-300 font-bold pt-1 border-t border-slate-800">

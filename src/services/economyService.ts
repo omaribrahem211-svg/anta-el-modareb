@@ -246,15 +246,9 @@ export function calculateRealisticSalary(
  */
 export function calculateClubMonthlyIncome(club: Club): number {
   if (!club) return 0;
-  const sponsors = Array.isArray(club.sponsors) ? club.sponsors : [];
-  let sponsorIncome = sponsors.filter(Boolean).reduce((sum, sp) => sum + (sp?.monthlyPayment || 0), 0);
-  
+  // Sponsorship completely cancelled - no sponsor revenue
+  const sponsorIncome = 0;
   const tier = club.division || 4;
-  // If no sponsors attached yet, use standard tier baseline
-  if (sponsorIncome <= 0) {
-    const tierSponsor = DEFAULT_ECONOMY_CONFIG.sponsorBaseMonthlyByTier[tier] || { min: 6000, max: 10000 };
-    sponsorIncome = Math.round((tierSponsor.min + tierSponsor.max) / 2);
-  }
 
   const facilities = club.facilities || { stadiumCapacity: 5000, stadiumLevel: 1 };
   const stadiumCapacity = facilities.stadiumCapacity || 5000;

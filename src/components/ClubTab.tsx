@@ -31,11 +31,8 @@ import {
   Heart,
   Ticket,
   Gift,
-  Handshake,
 } from 'lucide-react';
 import { PromoCodeRedeemModal } from './PromoCodeRedeemModal';
-import { SponsorshipHubModal } from './SponsorshipHubModal';
-import { getSponsorCategoryLabel } from '../services/sponsorshipService';
 
 export const ClubTab: React.FC = () => {
   const { 
@@ -49,7 +46,6 @@ export const ClubTab: React.FC = () => {
     donateToClubFromPersonalWallet,
     setClubTicketPrice,
     activeLeague,
-    availableSponsorOffers,
     canClaimDailyReward,
     setShowDailyRewardModal,
     dailyRewardState,
@@ -57,7 +53,6 @@ export const ClubTab: React.FC = () => {
   const [notification, setNotification] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
   const [isMedicalModalOpen, setIsMedicalModalOpen] = useState<boolean>(false);
   const [showPromoModal, setShowPromoModal] = useState<boolean>(false);
-  const [isSponsorModalOpen, setIsSponsorModalOpen] = useState<boolean>(false);
   const [ticketPriceInput, setTicketPriceInput] = useState<number>(userClub?.facilities?.ticketPrice || 20);
 
   useEffect(() => {
@@ -92,8 +87,6 @@ export const ClubTab: React.FC = () => {
 
   const squadPlayers = Array.isArray(userClub.players) ? userClub.players : [];
   const totalMonthlyWages = calculateClubTotalMonthlyWages(userClub);
-  const sponsors = Array.isArray(userClub.sponsors) ? userClub.sponsors : [];
-  const totalSponsorIncome = sponsors.reduce((sum, sp) => sum + (sp.monthlyPayment || 0), 0);
   const facilities = userClub.facilities || { stadiumCapacity: 5000, stadiumLevel: 1, stadiumName: 'استاد النادي', medicalCenterLevel: 1, trainingGroundLevel: 1, youthAcademyLevel: 1, scoutingNetworkLevel: 1 };
   const estimatedTicketMonthly = (facilities.stadiumCapacity || 5000) * 25 * 2; // approx 2 home games / month
   const totalMonthlyIncome = calculateClubMonthlyIncome(userClub);
@@ -232,13 +225,7 @@ export const ClubTab: React.FC = () => {
         </div>
 
         {/* Financial Flow Overview */}
-        <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 pt-2 text-xs">
-          <div className="bg-slate-950/60 p-2.5 rounded-2xl border border-slate-800">
-            <span className="text-[10px] text-slate-400 block">عقود الرعاة (شهري)</span>
-            <span className="font-black text-emerald-400 font-mono text-sm">
-              +{totalSponsorIncome.toLocaleString()} ج.م
-            </span>
-          </div>
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-2 text-xs">
 
           <div className="bg-slate-950/60 p-2.5 rounded-2xl border border-slate-800">
             <span className="text-[10px] text-slate-400 block">تذاكر المباريات (تقديري)</span>
@@ -892,152 +879,6 @@ export const ClubTab: React.FC = () => {
         </div>
       </div>
 
-      {/* Upgraded Modern Sponsors Section */}
-      <div className="bg-slate-900 border border-slate-800 rounded-3xl p-4 sm:p-5 space-y-3.5 shadow-xl relative overflow-hidden">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 border-b border-slate-800 pb-3">
-          <div>
-            <h3 className="font-black text-sm sm:text-base text-white flex items-center gap-2">
-              <Award className="w-5 h-5 text-amber-400" />
-              <span>عقود الرعاية والشراكات التجارية الرسمية</span>
-            </h3>
-            <p className="text-xs text-slate-400 mt-0.5">
-              عقود استثمارية لقميص واستاد النادي تضخ سيولة شهرية وتمنح حوافز عند حسم مباريات الدوري والكؤوس والقارات
-            </p>
-          </div>
-
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => setIsSponsorModalOpen(true)}
-              className="bg-gradient-to-r from-amber-600 to-amber-700 hover:from-amber-500 hover:to-amber-600 text-white font-black text-xs px-4 py-2 rounded-xl flex items-center gap-1.5 shadow-lg shadow-amber-600/20 transition cursor-pointer"
-            >
-              <Handshake className="w-4 h-4" />
-              <span>صفحة عقود الرعاية وسوق العروض 🏆</span>
-              {Array.isArray(availableSponsorOffers) && availableSponsorOffers.length > 0 && (
-                <span className="bg-emerald-500 text-slate-950 font-black text-[10px] px-1.5 py-0.2 rounded-full">
-                  {availableSponsorOffers.length}
-                </span>
-              )}
-            </button>
-          </div>
-        </div>
-
-        {/* Financial Quick Ticker */}
-        <div className="flex flex-wrap items-center justify-between gap-2 bg-slate-950/60 p-2.5 rounded-2xl border border-slate-800/80 text-xs">
-          <div className="flex items-center gap-2">
-            <Coins className="w-4 h-4 text-emerald-400" />
-            <span className="text-slate-400">إجمالي الدخل الشهري المضمون من الرعاة:</span>
-            <strong className="text-emerald-400 font-mono text-sm font-bold">
-              +{totalSponsorIncome.toLocaleString()} ج.م / شهرياً
-            </strong>
-          </div>
-
-          <div className="text-[11px] text-slate-400">
-            <span>العقود النشطة: </span>
-            <strong className="text-white font-mono">{sponsors.length} من 5 خانات</strong>
-          </div>
-        </div>
-
-        {/* Sponsor Cards Grid */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-          {sponsors.map(sponsor => {
-            const catInfo = getSponsorCategoryLabel(sponsor.category || sponsor.type);
-            const satisfaction = sponsor.satisfaction ?? 85;
-
-            return (
-              <div
-                key={sponsor.id}
-                className="bg-slate-950/80 border border-slate-800 hover:border-slate-700 p-3.5 rounded-2xl space-y-2.5 text-xs shadow-md relative overflow-hidden transition"
-              >
-                {/* Brand Color Header Stripe */}
-                <div
-                  className="absolute top-0 left-0 right-0 h-1"
-                  style={{ backgroundColor: sponsor.brandColor || '#f59e0b' }}
-                />
-
-                <div className="flex items-start justify-between gap-1.5 pt-0.5">
-                  <div className="flex items-center gap-2">
-                    <div
-                      className="w-8 h-8 rounded-lg flex items-center justify-center font-black text-xs text-white"
-                      style={{ backgroundColor: sponsor.brandColor || '#1e293b' }}
-                    >
-                      {sponsor.name.slice(0, 2)}
-                    </div>
-                    <div>
-                      <h4 className="font-bold text-xs sm:text-sm text-white">{sponsor.name}</h4>
-                      <span className="text-[10px] text-slate-400 block">{sponsor.industry || 'شريك تجاري'}</span>
-                    </div>
-                  </div>
-
-                  <span className={`text-[9px] px-2 py-0.5 rounded font-bold border ${catInfo.badgeColor}`}>
-                    {catInfo.shortLabel}
-                  </span>
-                </div>
-
-                <div className="space-y-1.5 text-slate-300 bg-slate-900/60 p-2 rounded-xl border border-slate-800/80 text-[11px]">
-                  <div className="flex justify-between items-center">
-                    <span className="text-slate-400">الدفع الشهري:</span>
-                    <strong className="text-emerald-400 font-mono">+{sponsor.monthlyPayment.toLocaleString()} ج.م</strong>
-                  </div>
-                  <div className="flex justify-between items-center">
-                    <span className="text-slate-400">فوز الدوري:</span>
-                    <strong className="text-amber-400 font-mono">+{sponsor.bonusForWin.toLocaleString()} ج.م</strong>
-                  </div>
-                  <div className="flex justify-between items-center">
-                    <span className="text-slate-400">فوز الكأس:</span>
-                    <strong className="text-cyan-400 font-mono">
-                      +{(sponsor.bonusCupWin || sponsor.bonusForWin * 1.5).toLocaleString()} ج.م
-                    </strong>
-                  </div>
-                  <div className="flex justify-between items-center">
-                    <span className="text-slate-400">المدة المتبقية:</span>
-                    <span className="text-white font-mono font-semibold">{sponsor.contractMonthsRemaining} أشهر</span>
-                  </div>
-                </div>
-
-                {/* Satisfaction */}
-                <div className="space-y-1">
-                  <div className="flex justify-between text-[10px]">
-                    <span className="text-slate-400">رضا الراعي:</span>
-                    <span className="text-emerald-400 font-mono font-bold">{satisfaction}%</span>
-                  </div>
-                  <div className="w-full bg-slate-800 h-1 rounded-full overflow-hidden">
-                    <div
-                      className="bg-emerald-500 h-full rounded-full"
-                      style={{ width: `${satisfaction}%` }}
-                    />
-                  </div>
-                </div>
-              </div>
-            );
-          })}
-
-          {/* Add/Vacant Slot Card */}
-          {sponsors.length < 5 && (
-            <button
-              onClick={() => setIsSponsorModalOpen(true)}
-              className="bg-slate-950/40 border-2 border-dashed border-slate-800 hover:border-amber-500/50 p-4 rounded-2xl flex flex-col items-center justify-center gap-2 text-center text-slate-400 hover:text-white transition group min-h-[140px]"
-            >
-              <div className="w-10 h-10 rounded-xl bg-slate-900 group-hover:bg-amber-500/20 text-slate-500 group-hover:text-amber-400 flex items-center justify-center transition">
-                <Handshake className="w-5 h-5" />
-              </div>
-              <div>
-                <span className="font-bold text-xs text-slate-300 group-hover:text-amber-300 block">
-                  خانة رعاية شاغرة (+ عروض واردة)
-                </span>
-                <span className="text-[10px] text-slate-500">
-                  اضغط لاستعراض سوق الرعاة وتوقيع عقد جديد
-                </span>
-              </div>
-            </button>
-          )}
-        </div>
-      </div>
-
-      {/* Sponsorship Hub Modal */}
-      <SponsorshipHubModal
-        isOpen={isSponsorModalOpen}
-        onClose={() => setIsSponsorModalOpen(false)}
-      />
 
       {/* Hospital / Medical Center Modal */}
       <MedicalCenterModal

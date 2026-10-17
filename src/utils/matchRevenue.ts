@@ -42,18 +42,66 @@ export function getBenchmarkTicketPrice(tier: number = 1): number {
 }
 
 /**
- * Official match result prize / federation bonus in EGP.
+ * Official match victory & result bonus in EGP.
+ * - Win: Full victory bonus, scaled by League tier and Opponent strength/reputation.
+ * - Draw: Partial bonus (less than win, approx 33%).
+ * - Loss: Zero (0 EGP) - nothing awarded on defeat.
+ * - Varies from team to team (opponent prestige, derbies) and from league to league (tier).
  */
-export function getMatchResultBonus(tier: number = 1, result: 'win' | 'draw' | 'loss'): number {
-  const table: Record<number, { win: number; draw: number; loss: number }> = {
-    1: { win: 50000, draw: 20000, loss: 2000 },
-    2: { win: 30000, draw: 12000, loss: 1500 },
-    3: { win: 18000, draw: 7000, loss: 1000 },
-    4: { win: 10000, draw: 4000, loss: 500 },
+export function getMatchResultBonus(
+  tier: number = 1,
+  result: 'win' | 'draw' | 'loss',
+  options?: {
+    userClub?: Club;
+    opponentClub?: Club;
+    isCupMatch?: boolean;
+    isDerby?: boolean;
+  }
+): number {
+  if (result === 'loss') {
+    return 0; // If you lose, you get nothing!
+  }
+
+  // 1. Base victory prize by league tier (varies from one league to another)
+  const tierBaseWinBonus: Record<number, number> = {
+    1: 50000, // الدوري المصري الممتاز
+    2: 28000, // دوري المحترفين (القسم الثاني أ)
+    3: 16000, // دوري القسم الثاني ب
+    4: 9000,  // دوري القسم الثالث / الرابع
   };
 
-  const tierPrizes = table[tier] || table[4];
-  return tierPrizes[result];
+  const baseWin = tierBaseWinBonus[tier] || tierBaseWinBonus[4];
+
+  // 2. Team-to-team scaling factors (varies from one team to another)
+  let opponentMultiplier = 1.0;
+  if (options?.opponentClub) {
+    const oppRep = options.opponentClub.reputation || 50;
+    if (oppRep >= 80) {
+      opponentMultiplier = 1.50; // +50% massive victory bonus against giants (Al Ahly / Zamalek / Pyramids)
+    } else if (oppRep >= 70) {
+      opponentMultiplier = 1.25; // +25% top team bonus
+    } else if (oppRep >= 60) {
+      opponentMultiplier = 1.10; // +10% solid team bonus
+    } else if (oppRep < 40) {
+      opponentMultiplier = 0.90; // Slightly lower for low tier teams
+    }
+  }
+
+  // Derby rivalry multiplier (varies if playing against city/historic rivals)
+  const derbyMultiplier = options?.isDerby ? 1.15 : 1.0;
+
+  // Knockout cup pressure bonus
+  const cupMultiplier = options?.isCupMatch ? 1.20 : 1.0;
+
+  // Calculate final win bonus
+  const finalWinBonus = Math.round(baseWin * opponentMultiplier * derbyMultiplier * cupMultiplier);
+
+  if (result === 'win') {
+    return finalWinBonus;
+  }
+
+  // Draw: less than win (approx 33% of the win prize)
+  return Math.round(finalWinBonus * 0.33);
 }
 
 export interface CalculateRevenueParams {
@@ -219,8 +267,13 @@ export function calculateMatchRevenue(params: CalculateRevenueParams): MatchReve
     sponsorCalc.sponsorsCleanSheetBonus;
   const sponsorsMatchdayAd = sponsorCalc.sponsorsBaseMatchdayAd;
 
-  // 6. Match Result Official Bonus
-  const resultBonus = getMatchResultBonus(leagueTier, resultType);
+  // 6. Match Result Official Bonus (Varies by result, league tier, and team strength)
+  const resultBonus = getMatchResultBonus(leagueTier, resultType, {
+    userClub,
+    opponentClub,
+    isCupMatch,
+    isDerby,
+  });
 
   // 7. Base Total Revenue
   const baseTotalRevenue = ticketRevenue + sponsorsRevenue + resultBonus;

@@ -840,125 +840,22 @@ export function generateSponsorForClub(
 }
 
 // =========================================================================
-// POPULATE FULL ROSTER OF SPONSORS FOR ANY CLUB (BY TIER & PRESTIGE)
-// =========================================================================
-export function populateClubSponsors(club: Club): Sponsor[] {
-  const tier = Math.min(4, Math.max(1, club.division || 1));
-  const slots: SponsorCategory[] = ['shirt', 'stadium'];
-
-  // Higher tier clubs have more active sponsors
-  if (tier === 1) {
-    slots.push('kit_apparel', 'sleeve', 'commercial_partner');
-  } else if (tier === 2) {
-    slots.push('kit_apparel', 'sleeve');
-  } else if (tier === 3) {
-    slots.push('kit_apparel');
-  }
-
-  // Keep track of used brand names to prevent duplicate brands on the same club
-  const usedNames = new Set<string>();
-  const sponsors: Sponsor[] = [];
-
-  for (const slot of slots) {
-    // Pick suitable brand not yet used
-    const candidates = SPONSOR_BRANDS_DATABASE.filter(b => {
-      return (
-        b.category === slot &&
-        !usedNames.has(b.name) &&
-        (b.tierRange.includes(tier) || b.countryCode === 'GLOBAL')
-      );
-    });
-
-    const chosenBrand = candidates.length > 0 ? candidates[Math.floor(Math.random() * candidates.length)] : undefined;
-    if (chosenBrand) {
-      usedNames.add(chosenBrand.name);
-    }
-
-    const sp = generateSponsorForClub(club, slot, chosenBrand);
-    sponsors.push(sp);
-  }
-
-  return sponsors;
+export function populateClubSponsors(_club: Club): Sponsor[] {
+  // Sponsorship system completely cancelled
+  return [];
 }
 
 // =========================================================================
 // GENERATE ATTRACTIVE INCOMING SPONSORSHIP OFFERS / BIDS
 // =========================================================================
 export function generateIncomingSponsorshipOffers(
-  club: Club,
-  count = 4
+  _club?: Club,
+  _count = 4
 ): SponsorshipOffer[] {
-  const tier = Math.min(4, Math.max(1, club.division || 1));
-  const existingSponsors = Array.isArray(club.sponsors) ? club.sponsors : [];
-  const existingCategories = new Set(existingSponsors.map(s => s.category || s.type));
-
-  const allCategories: SponsorCategory[] = [
-    'shirt',
-    'stadium',
-    'kit_apparel',
-    'sleeve',
-    'commercial_partner',
-  ];
-
-  // Prioritize open slots first, but allow upgrade bids for existing slots
-  const targetCategories: SponsorCategory[] = [];
-  for (const cat of allCategories) {
-    if (!existingCategories.has(cat)) {
-      targetCategories.push(cat);
-    }
-  }
-  while (targetCategories.length < count) {
-    const randomCat = allCategories[Math.floor(Math.random() * allCategories.length)];
-    targetCategories.push(randomCat);
-  }
-
-  const offers: SponsorshipOffer[] = [];
-  const usedNames = new Set<string>(existingSponsors.map(s => s.name));
-
-  for (let i = 0; i < count; i++) {
-    const category = targetCategories[i] || 'shirt';
-
-    // Find candidates for this slot
-    const candidates = SPONSOR_BRANDS_DATABASE.filter(b => {
-      const catMatch = b.category === category;
-      const notUsed = !usedNames.has(b.name);
-      const tierMatch = b.tierRange.includes(tier) || b.countryCode === 'GLOBAL';
-      return catMatch && notUsed && tierMatch;
-    });
-
-    const brand = candidates.length > 0 ? candidates[Math.floor(Math.random() * candidates.length)] : undefined;
-    if (brand) {
-      usedNames.add(brand.name);
-    }
-
-    const baseSponsor = generateSponsorForClub(club, category, brand);
-
-    // Variation in offer terms to create exciting strategic choices
-    const durationVariance = Math.random() > 0.6 ? 24 : 12;
-    const upfrontBoost = Math.random() > 0.5 ? 1.2 : 0.9;
-    const winBonusBoost = Math.random() > 0.5 ? 1.3 : 0.85;
-
-    const offer: SponsorshipOffer = {
-      ...baseSponsor,
-      id: `offer_${category}_${Date.now()}_${i}_${Math.floor(Math.random() * 1000)}`,
-      totalDurationMonths: durationVariance,
-      contractMonthsRemaining: durationVariance,
-      signingBonus: Math.round((baseSponsor.signingBonus || 50000) * upfrontBoost),
-      bonusForWin: Math.round(baseSponsor.bonusForWin * winBonusBoost),
-      bonusCupWin: Math.round((baseSponsor.bonusCupWin || baseSponsor.bonusForWin * 1.5) * winBonusBoost),
-      bonusContinentalWin: Math.round(
-        (baseSponsor.bonusContinentalWin || baseSponsor.bonusForWin * 2.5) * winBonusBoost
-      ),
-      offerExpiryRounds: 3, // Valid for 3 rounds
-      isNegotiated: false,
-      negotiationCount: 0,
-    };
-
-    offers.push(offer);
-  }
-
-  return offers;
+  // Sponsorship system completely cancelled
+  return [];
 }
+
 
 // =========================================================================
 // NEGOTIATE SPONSORSHIP OFFER (COACH ATTEMPTS TO IMPROVE TERMS)
@@ -1045,8 +942,8 @@ export interface MatchdaySponsorCalculation {
 }
 
 export function calculateSponsorMatchdayEarnings(
-  sponsors: Sponsor[],
-  params: {
+  _sponsors?: Sponsor[],
+  _params?: {
     competitionType: 'league' | 'cup' | 'continental' | 'world' | string;
     resultType: 'win' | 'draw' | 'loss';
     isCleanSheet: boolean;
@@ -1055,98 +952,16 @@ export function calculateSponsorMatchdayEarnings(
     leagueTier: number;
   }
 ): MatchdaySponsorCalculation {
-  const {
-    competitionType,
-    resultType,
-    isCleanSheet,
-    isDerby,
-    isHome,
-    leagueTier,
-  } = params;
-
-  let sponsorsWinBonus = 0;
-  let sponsorsDrawBonus = 0;
-  let sponsorsCupBonus = 0;
-  let sponsorsContinentalBonus = 0;
-  let sponsorsCleanSheetBonus = 0;
-  let sponsorsDerbyBonus = 0;
-  const detailedBreakdown: string[] = [];
-
-  const activeSponsors = Array.isArray(sponsors) ? sponsors : [];
-
-  for (const sp of activeSponsors) {
-    if (!sp) continue;
-
-    // 1. Victory / Draw bonuses
-    if (resultType === 'win') {
-      if (competitionType === 'cup') {
-        const cupBonus = sp.bonusCupWin || Math.round(sp.bonusForWin * 1.5);
-        sponsorsCupBonus += cupBonus;
-        detailedBreakdown.push(`🏆 ${sp.name}: مكافأة التأهل والفوز في الكأس (+${cupBonus.toLocaleString()} ج.م)`);
-      } else if (competitionType === 'continental') {
-        const contBonus = sp.bonusContinentalWin || Math.round(sp.bonusForWin * 2.5);
-        sponsorsContinentalBonus += contBonus;
-        detailedBreakdown.push(`🌍 ${sp.name}: مكافأة الانتصار الإفريقي والقاري (+${contBonus.toLocaleString()} ج.م)`);
-      } else {
-        // League win
-        const winBonus = sp.bonusForWin || 0;
-        sponsorsWinBonus += winBonus;
-        detailedBreakdown.push(`⚽ ${sp.name}: مكافأة الفوز في الدوري (+${winBonus.toLocaleString()} ج.م)`);
-      }
-
-      // Derby victory bonus
-      if (isDerby && sp.bonusDerbyWin) {
-        sponsorsDerbyBonus += sp.bonusDerbyWin;
-        detailedBreakdown.push(`🔥 ${sp.name}: حافز حسم الديربي ومباراة القمة (+${sp.bonusDerbyWin.toLocaleString()} ج.م)`);
-      }
-    } else if (resultType === 'draw') {
-      if (sp.bonusForDraw && sp.bonusForDraw > 0) {
-        sponsorsDrawBonus += sp.bonusForDraw;
-        detailedBreakdown.push(`🤝 ${sp.name}: حافز حصد نقطة التعادل (+${sp.bonusForDraw.toLocaleString()} ج.م)`);
-      }
-    }
-
-    // Clean sheet bonus
-    if (isCleanSheet && (resultType === 'win' || resultType === 'draw') && sp.bonusCleanSheet) {
-      sponsorsCleanSheetBonus += sp.bonusCleanSheet;
-      detailedBreakdown.push(`🛡️ ${sp.name}: مكافأة الشباك النظيفة (+${sp.bonusCleanSheet.toLocaleString()} ج.م)`);
-    }
-  }
-
-  // Stadium and matchday board advertising share (approx 1/4 of monthly retainer across all sponsors)
-  let baseFromSponsors = activeSponsors.reduce(
-    (sum, sp) => sum + Math.round((sp.monthlyPayment || 0) / 4),
-    0
-  );
-
-  // If match is at home, stadium sponsor gives full board activation; away match gets 50%
-  if (!isHome) {
-    baseFromSponsors = Math.round(baseFromSponsors * 0.7);
-  }
-
-  // Fallback ad share if no sponsors yet
-  const defaultAdShare =
-    leagueTier === 1 ? 30000 : leagueTier === 2 ? 18000 : leagueTier === 3 ? 10000 : 5000;
-  const sponsorsBaseMatchdayAd = baseFromSponsors > 0 ? baseFromSponsors : defaultAdShare;
-
-  const totalSponsorsRevenue =
-    sponsorsWinBonus +
-    sponsorsDrawBonus +
-    sponsorsCupBonus +
-    sponsorsContinentalBonus +
-    sponsorsCleanSheetBonus +
-    sponsorsDerbyBonus +
-    sponsorsBaseMatchdayAd;
-
+  // Sponsorship revenue completely removed from matchday
   return {
-    totalSponsorsRevenue,
-    sponsorsWinBonus,
-    sponsorsDrawBonus,
-    sponsorsCupBonus,
-    sponsorsContinentalBonus,
-    sponsorsCleanSheetBonus,
-    sponsorsDerbyBonus,
-    sponsorsBaseMatchdayAd,
-    detailedBreakdown,
+    totalSponsorsRevenue: 0,
+    sponsorsWinBonus: 0,
+    sponsorsDrawBonus: 0,
+    sponsorsCupBonus: 0,
+    sponsorsContinentalBonus: 0,
+    sponsorsCleanSheetBonus: 0,
+    sponsorsDerbyBonus: 0,
+    sponsorsBaseMatchdayAd: 0,
+    detailedBreakdown: [],
   };
 }

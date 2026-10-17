@@ -204,8 +204,8 @@ export function calculateSeasonEndSummary(
   const stadiumCapacity = userClub?.facilities?.stadiumCapacity || 5000;
   const userPlayed = userStanding?.played || 0;
   const ticketRevenueTotal = userPlayed * Math.round(stadiumCapacity * 15);
-  const sponsorsList = Array.isArray(userClub?.sponsors) ? userClub.sponsors : [];
-  const sponsorshipTotal = sponsorsList.reduce((sum, sp) => sum + (sp?.monthlyPayment || 0) * 6, 0);
+  // Sponsorship system cancelled: 0 sponsorship revenue
+  const sponsorshipTotal = 0;
 
   // Manager XP & Reputation Changes
   let xpEarned = 100 + ((userStanding?.won || 0) * 40) + ((userStanding?.drawn || 0) * 15);

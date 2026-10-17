@@ -952,6 +952,9 @@ class AdManagerService {
   private recordRewardedAdSuccess() {
     this.state.lastRewardedAdTimestamp = Date.now();
     this.saveState();
+    try {
+      window.dispatchEvent(new CustomEvent('anta-ad-rewarded-completed'));
+    } catch (_) {}
   }
 
   // ==========================================

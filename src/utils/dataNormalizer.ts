@@ -21,7 +21,19 @@ export function normalizeClub(t: any): Club {
     country: t.country || 'مصر',
     countryCode: t.countryCode || 'EGY',
     leagueId: t.leagueId || 'egy_tier_4',
-    budget: Number.isFinite(t.budget) ? t.budget : 250000,
+    budget: (() => {
+      let b = Number.isFinite(t.budget) ? t.budget : 250000;
+      if (Array.isArray(t.sponsors) && t.sponsors.length > 0) {
+        const sponsorshipMoneyTaken = t.sponsors.reduce((sum: number, sp: any) => {
+          const signing = sp?.signingBonus || 50000;
+          const elapsed = Math.max(0, (sp?.totalDurationMonths || 12) - (sp?.contractMonthsRemaining ?? 12));
+          const monthly = (sp?.monthlyPayment || 0) * elapsed;
+          return sum + signing + monthly;
+        }, 0);
+        b = Math.max(0, b - sponsorshipMoneyTaken);
+      }
+      return b;
+    })(),
     players: players.map((p: any) => ({
       ...p,
       nationality: p.nationality || t.country || 'مصر',
@@ -32,7 +44,7 @@ export function normalizeClub(t: any): Club {
       savings: p.savings !== undefined ? p.savings : 0,
       totalBonusesReceived: p.totalBonusesReceived ?? 0,
     })),
-    sponsors: Array.isArray(t.sponsors) ? t.sponsors : [],
+    sponsors: [],
     facilities: t.facilities || {
       stadiumName: `${t.name || 'ملعب الفريق'}`,
       stadiumCapacity: 5000,
