@@ -811,7 +811,7 @@ export const ChallengesTab: React.FC = () => {
                     <span>
                       {challenge.id === 'quest_win_streak_5'
                         ? '🔥 اكسب 5 مباريات متتالية دون تعادل أو هزيمة لنيل الجائزة الملكية'
-                        : 'خض مباريات الدوري والكأس لإكمال هذا التحدي'}
+                        : 'خض مباريات الدوري لإكمال هذا التحدي'}
                     </span>
                     <span className="font-mono text-amber-400 font-bold">{progressPercent}%</span>
                   </div>

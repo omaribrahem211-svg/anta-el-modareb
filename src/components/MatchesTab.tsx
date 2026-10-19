@@ -314,36 +314,15 @@ export const MatchesTab: React.FC = () => {
     const isUserHome = userClub ? liveMatch.homeTeam?.id === userClub.id : false;
     const userGoals = isUserHome ? liveMatch.homeScore : liveMatch.awayScore;
     const oppGoals = isUserHome ? liveMatch.awayScore : liveMatch.homeScore;
-    const isCupMatch = 
-      liveMatch.fixture?.competitionType === 'cup' || 
-      Boolean(liveMatch.fixture?.cupStage) || 
-      Boolean(liveMatch.fixture?.stageName?.includes('نهائي')) ||
-      Boolean(liveMatch.fixture?.stageName?.includes('كأس')) ||
-      Boolean(liveMatch.fixture?.stageName?.includes('الكأس')) ||
-      Boolean(liveMatch.fixture?.stageName?.includes('دور الـ')) ||
-      Boolean(liveMatch.fixture?.stageName?.includes('ثمن')) ||
-      Boolean(liveMatch.fixture?.stageName?.includes('ربع')) ||
-      Boolean(liveMatch.fixture?.stageName?.includes('نصف')) ||
-      Boolean(liveMatch.fixture?.competitionName?.includes('كأس')) ||
-      Boolean(liveMatch.fixture?.competitionName?.includes('الكأس')) ||
-      Boolean(liveMatch.fixture?.competitionName?.toLowerCase()?.includes('cup')) ||
-      Boolean(liveMatch.fixture?.id?.toLowerCase()?.includes('cup')) ||
-      (liveMatch.homePenalties !== undefined && liveMatch.awayPenalties !== undefined) ||
-      Boolean(cupTournament?.matches?.some(m => m.id === liveMatch.fixture?.id || (userClub && (m.homeTeamId === userClub.id || m.awayTeamId === userClub.id) && (m.roundTrigger === liveMatch.fixture?.round || m.roundTrigger === currentRound))));
-    const hasPenalties = isCupMatch && liveMatch.homePenalties !== undefined && liveMatch.awayPenalties !== undefined;
-    const userPenalties = isUserHome ? liveMatch.homePenalties : liveMatch.awayPenalties;
-    const oppPenalties = isUserHome ? liveMatch.awayPenalties : liveMatch.homePenalties;
+    const isCupMatch = false;
+    const hasPenalties = false;
+    const userPenalties = undefined;
+    const oppPenalties = undefined;
 
-    // In cup matches, there are NO draws: ties are decided by penalty shootouts
-    const isUserWin = isCupMatch
-      ? (hasPenalties ? (userPenalties! > oppPenalties!) : userGoals > oppGoals)
-      : userGoals > oppGoals;
-    const isUserDraw = isCupMatch
-      ? false
-      : userGoals === oppGoals;
-    const isUserLoss = isCupMatch
-      ? (hasPenalties ? (userPenalties! < oppPenalties!) : userGoals < oppGoals)
-      : userGoals < oppGoals;
+    // League match results: win, draw, or loss
+    const isUserWin = userGoals > oppGoals;
+    const isUserDraw = userGoals === oppGoals;
+    const isUserLoss = userGoals < oppGoals;
 
     // Filter events up to current minute
     const visibleEvents = (liveMatch.events || []).filter(e => e && e.minute <= liveMatch.currentMinute);
@@ -569,23 +548,11 @@ export const MatchesTab: React.FC = () => {
               }`}>
                 <Trophy className="w-4 h-4" />
                 <span>
-                  {isCupMatch ? (
-                    isUserWin ? (
-                      hasPenalties
-                        ? `🎉 فوز ملحمي وتأهل بركلات الترجيح (${userPenalties} - ${oppPenalties}) لمواصلة المشوار في مسابقة الكأس!`
-                        : '🎉 فوز رائع وتأهل مستحق إلى الدور القادم في مسابقة الكأس!'
-                    ) : (
-                      hasPenalties
-                        ? `😔 وداع مؤلم لمسابقة الكأس بعد الخسارة بركلات الترجيح (${userPenalties} - ${oppPenalties}).. حظ أوفر!`
-                        : '😔 هزيمة وتوديع لمسابقة الكأس.. حان وقت التركيز على بطولة الدوري!'
-                    )
-                  ) : (
-                    isUserWin
-                      ? '🎉 فوز رائع ومستحق! مكافأة الفوز ونقاط الخبرة أضيفت لرصيدك.'
-                      : isUserDraw
-                      ? '🤝 تعادل ونقطة إضافية في رصيد الدوري.'
-                      : '😔 هزيمة مؤسفة.. حان وقت التعويض في الجولة القادمة!'
-                  )}
+                  {isUserWin
+                    ? '🎉 فوز رائع ومستحق! مكافأة الفوز ونقاط الخبرة أضيفت لرصيدك في جدول الدوري.'
+                    : isUserDraw
+                    ? '🤝 تعادل ونقطة إضافية تضاف إلى رصيد فريقك في جدول الدوري.'
+                    : '😔 هزيمة مؤسفة.. حان وقت التعويض في الجولة القادمة!'}
                 </span>
               </div>
 
@@ -1418,9 +1385,7 @@ export const MatchesTab: React.FC = () => {
           <div className="flex items-center gap-2">
             <Swords className="w-5 h-5 text-emerald-400" />
             <h2 className="font-bold text-base text-white">
-              {userFixture?.competitionType === 'cup' 
-                ? (userFixture.stageName || 'مباراة الكأس الوطنية 🏆') 
-                : 'جدول المباريات الرسمية'}
+              جدول مباريات الدوري الرسمية
             </h2>
           </div>
           <span className="text-xs bg-slate-800 px-3 py-1 rounded-full border border-slate-700 font-bold text-amber-400">
@@ -1439,14 +1404,14 @@ export const MatchesTab: React.FC = () => {
             <span>مراجعة ختام الموسم {season.seasonNumber} وبدء الموسم التالي</span>
           </button>
         ) : !userFixture ? (
-          /* User club has no fixture in this round (e.g. knocked out of cup) */
+          /* User club has no fixture in this round (e.g. bye round in odd teams) */
           <div className="space-y-3">
             <div className="p-3.5 bg-indigo-950/50 border border-indigo-500/40 rounded-2xl flex items-center justify-between gap-3">
               <div className="flex items-center gap-2.5 text-xs font-bold text-indigo-300">
                 <span className="text-xl">☕</span>
                 <div>
-                  <div className="text-white font-black text-sm">راحة لفريقك في الجولة {currentRound}</div>
-                  <div className="text-indigo-300/80 text-[11px] font-normal">تُقام مباريات الكأس لباقي الفرق المتنافسة. سيستأنف فريقك الدوري في الجولة القادمة.</div>
+                  <div className="text-white font-black text-sm">أسبوع راحة لفريقك في الجولة {currentRound}</div>
+                  <div className="text-indigo-300/80 text-[11px] font-normal">تُقام مباريات الدوري لباقي الفرق المتنافسة. يمكنك محاكاة الجولة أو التقدم بالتقويم.</div>
                 </div>
               </div>
               <span className="text-xs bg-indigo-900/60 text-indigo-200 px-2.5 py-1 rounded-full font-mono border border-indigo-700/50 shrink-0">
@@ -1491,7 +1456,7 @@ export const MatchesTab: React.FC = () => {
               <button
                 id="advance_next_round_completed_btn"
                 disabled={isSimulationRunning}
-                onClick={() => advanceToNextDay(true)}
+                onClick={() => instantSimulateCurrentRound()}
                 className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-black text-sm py-3.5 px-4 rounded-2xl shadow-lg shadow-emerald-950/60 transition-all active:scale-95 cursor-pointer disabled:opacity-50"
               >
                 <FastForward className="w-4 h-4 text-amber-300" />
@@ -1515,11 +1480,7 @@ export const MatchesTab: React.FC = () => {
             <div className="p-3 bg-emerald-950/60 border border-emerald-500/60 rounded-2xl flex items-center justify-between gap-2">
               <div className="flex items-center gap-2 text-xs font-bold text-emerald-300">
                 <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-ping shrink-0" />
-                <span>
-                  {userFixture?.competitionType === 'cup' 
-                    ? `اليوم موعد مباراة الكأس (${userFixture?.stageName || 'الكأس الوطنية'})! 🏆` 
-                    : 'اليوم موعد المباراة الرسمية في جدول الدوري! ⚽'}
-                </span>
+                <span>اليوم موعد المباراة الرسمية في جدول الدوري! ⚽</span>
               </div>
               <span className="text-[10px] text-emerald-400 font-mono">الجولة {currentRound}</span>
             </div>

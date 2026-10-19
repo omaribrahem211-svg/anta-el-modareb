@@ -1911,36 +1911,7 @@ export const OnlineMatchPitch3D: React.FC<OnlineMatchPitch3DProps> = ({
                         : 'bg-rose-500/20 text-rose-300 border-rose-500/40'
                     }`}
                   >
-                    {effectiveIsCup ? (
-                      hasShootout ? (
-                        isEffectiveWin ? (
-                          <>
-                            <Trophy className="w-4 h-4 text-amber-400" />
-                            <span>🎉 فوز ملحمي وتأهل بركلات الترجيح ({homePenalties} - {awayPenalties}) لمواصلة المشوار!</span>
-                          </>
-                        ) : (
-                          <>
-                            <AlertCircle className="w-4 h-4 text-rose-400" />
-                            <span>😔 خسارة بركلات الترجيح ({homePenalties} - {awayPenalties}) وتوديع مسابقة الكأس</span>
-                          </>
-                        )
-                      ) : userResultType === 'win' ? (
-                        <>
-                          <Trophy className="w-4 h-4 text-amber-400" />
-                          <span>🎉 فوز رائع وتأهل مستحق في مسابقة الكأس!</span>
-                        </>
-                      ) : userResultType === 'loss' ? (
-                        <>
-                          <AlertCircle className="w-4 h-4 text-rose-400" />
-                          <span>😔 خسارة وتوديع مسابقة الكأس.. حظ أوفر!</span>
-                        </>
-                      ) : (
-                        <>
-                          <Trophy className="w-4 h-4 text-amber-400" />
-                          <span>⚖️ نهاية الوقت الأصلي والاحتكام لركلات الترجيح لحسم التأهل!</span>
-                        </>
-                      )
-                    ) : userResultType === 'win' ? (
+                    {userResultType === 'win' ? (
                       <>
                         <Trophy className="w-4 h-4 text-amber-400" />
                         <span>🎉 فوز رائع ومستحق! نقاط الانتصار أضيفت لرصيدك</span>

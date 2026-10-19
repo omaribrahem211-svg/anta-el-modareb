@@ -149,24 +149,13 @@ export function getInitialSeasonDate(seasonNumber: number = 1): CalendarDate {
 }
 
 /**
- * Determines the scheduled date for each round of fixtures in the season.
- * Standard rounds occur weekly (7 days apart).
- * The National Cup Final (the penultimate round) is scheduled exactly 2 days before the final league round.
+ * Determines the scheduled date for each round of fixtures in the league.
+ * Standard league rounds occur weekly (7 days apart).
  */
-export function getScheduledRoundDate(seasonStartDateStr?: string, roundNumber: number = 1, totalRounds: number = 44): CalendarDate {
+export function getScheduledRoundDate(seasonStartDateStr?: string, roundNumber: number = 1, totalRounds: number = 38): CalendarDate {
   const startDate = parseDateString(seasonStartDateStr);
-  let daysOffset: number;
-
   const safeRound = Math.max(1, roundNumber || 1);
-  const safeTotal = Math.max(1, totalRounds || 44);
-
-  if (safeTotal > 1 && safeRound === safeTotal - 1) {
-    // Cup final is scheduled exactly 2 days before the final league round
-    const finalLeagueOffset = (safeTotal - 1) * 7 + 6;
-    daysOffset = Math.max(0, finalLeagueOffset - 2);
-  } else {
-    daysOffset = (safeRound - 1) * 7 + 6;
-  }
+  const daysOffset = (safeRound - 1) * 7 + 6;
 
   const matchDate = new Date(startDate);
   matchDate.setDate(startDate.getDate() + daysOffset);
@@ -180,10 +169,20 @@ export function calculateDaysUntilNextMatch(
   currentDateStr?: string,
   currentRound: number = 1,
   seasonStartDateStr?: string,
-  totalRounds: number = 44
+  totalRounds: number = 38
 ): { daysRemaining: number; isMatchDay: boolean; scheduledDateStr: string; formattedScheduledDate: string } {
   const safeRound = Math.max(1, currentRound || 1);
-  const safeTotal = Math.max(1, totalRounds || 44);
+  const safeTotal = Math.max(1, totalRounds || 38);
+
+  if (safeRound > safeTotal) {
+    return {
+      daysRemaining: 0,
+      isMatchDay: false,
+      scheduledDateStr: currentDateStr || '',
+      formattedScheduledDate: 'نهاية الموسم',
+    };
+  }
+
   const nextMatchDateObj = getScheduledRoundDate(seasonStartDateStr, safeRound, safeTotal);
   const currentDate = parseDateString(currentDateStr);
   const matchDate = parseDateString(nextMatchDateObj.rawDateStr);

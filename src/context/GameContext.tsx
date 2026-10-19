@@ -372,7 +372,7 @@ const INITIAL_SEASON: SeasonInfo = {
   startDate: 'الموسم 1',
   endDate: 'نهاية الموسم 1',
   currentRound: 1,
-  totalRounds: 44,
+  totalRounds: 34,
   status: 'active',
   leagueId: 'egy_tier_4',
   leagueName: 'دوري الدرجة الرابعة المصري',
@@ -707,15 +707,13 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       if (saved) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed) && parsed.length > 0) {
-          const maxR = Math.max(...parsed.map(f => f.round || 0));
-          if (maxR >= 38) return parsed;
+          const pureLeague = parsed.filter(f => f && (!f.competitionType || f.competitionType === 'league'));
+          if (pureLeague.length > 0) return pureLeague;
         }
       }
-      const initialCup = initNationalCupTournament(1, 'مصر', INITIAL_TEAMS);
-      return generateMasterSeasonAgenda(1, EGYPT_TIER_4_LEAGUE, INITIAL_TEAMS, initialCup);
+      return generateMasterSeasonAgenda(1, EGYPT_TIER_4_LEAGUE, INITIAL_TEAMS, undefined, undefined, null);
     } catch {
-      const initialCup = initNationalCupTournament(1, 'مصر', INITIAL_TEAMS);
-      return generateMasterSeasonAgenda(1, EGYPT_TIER_4_LEAGUE, INITIAL_TEAMS, initialCup);
+      return generateMasterSeasonAgenda(1, EGYPT_TIER_4_LEAGUE, INITIAL_TEAMS, undefined, undefined, null);
     }
   });
 
@@ -774,17 +772,12 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
   });
 
-  // 5. Cup Tournament
+  // 5. Cup Tournament (Permanently Cancelled / Removed)
   const [cupTournament, setCupTournament] = useState<CupTournament | null>(() => {
     try {
-      const saved = localStorage.getItem(`${STORAGE_KEY}_cupTournament`);
-      if (saved) {
-        return normalizeCup(JSON.parse(saved));
-      }
-      return normalizeCup(initNationalCupTournament(1, 'مصر', INITIAL_TEAMS));
-    } catch {
-      return normalizeCup(initNationalCupTournament(1, 'مصر', INITIAL_TEAMS));
-    }
+      localStorage.removeItem(`${STORAGE_KEY}_cupTournament`);
+    } catch {}
+    return null;
   });
 
   // 6. Job Offers & Season End Summary
@@ -1039,11 +1032,11 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   }, [canClaimDailyReward]);
 
   const totalRounds = useMemo(() => {
-    if (fixtures.length > 0) {
+    if (fixtures && fixtures.length > 0) {
       const maxR = Math.max(...fixtures.map(f => f.round || 0));
       if (maxR > 0) return maxR;
     }
-    return season.totalRounds || 38;
+    return season.totalRounds || 34;
   }, [fixtures, season.totalRounds]);
 
   const isUnemployed = false;
@@ -1066,8 +1059,13 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     return leagueFixtures.length > 0 && leagueFixtures.every(f => f && (f.isPlayed || (f as any).played));
   }, [leagueFixtures]);
 
-  // Season is ONLY finished when status is completed, currentRound > totalRounds, or all league fixtures are played AND round reached total
-  const seasonFinished = season.status === 'completed' || currentRound > totalRounds || (allLeagueFixturesPlayed && currentRound >= totalRounds);
+  // Android Agenda Zero-Freeze Guardian: Season is completed when status is completed, currentRound > totalRounds, or all league fixtures are played
+  const seasonFinished = useMemo(() => {
+    if (season.status === 'completed') return true;
+    if (currentRound > totalRounds) return true;
+    if (allLeagueFixturesPlayed && leagueFixtures.length > 0) return true;
+    return false;
+  }, [season.status, currentRound, totalRounds, allLeagueFixturesPlayed, leagueFixtures.length]);
   const unreadMessagesCount = inbox.filter(m => !m.read).length;
 
   // World Rankings & Squad Strength Computation
@@ -1129,6 +1127,28 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       setTeams(validated.teams);
     }
   }, [manager.currentClubId]);
+
+  // Self-Healing Android Agenda Zero-Freeze Guardian: Purge cup fixtures & sync state
+  useEffect(() => {
+    try {
+      localStorage.removeItem(`${STORAGE_KEY}_cupTournament`);
+    } catch {}
+
+    setFixtures(prev => {
+      const pure = (prev || []).filter(f => f && (!f.competitionType || f.competitionType === 'league'));
+      if (pure.length !== (prev || []).length) {
+        try {
+          localStorage.setItem(`${STORAGE_KEY}_fixtures`, JSON.stringify(pure));
+        } catch {}
+        return pure;
+      }
+      return prev;
+    });
+
+    if (cupTournament !== null) {
+      setCupTournament(null);
+    }
+  }, []);
 
   // Calendar & Next Match Helpers
   const nextMatchInfo = userClub ? calculateDaysUntilNextMatch(
@@ -6048,11 +6068,10 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         setTeams(appointed.teams);
         setStandings(generateInitialStandings(appointed.teams));
         const userClubObj = appointed.teams.find(t => t.isUserClub);
-        const newCup = initNationalCupTournament(season.seasonNumber || 1, targetLeague.country, appointed.teams, userClubObj);
-        setCupTournament(newCup);
-        const newAgenda = generateMasterSeasonAgenda(season.seasonNumber || 1, targetLeague, appointed.teams, newCup, undefined, userClubObj);
+        setCupTournament(null);
+        const newAgenda = generateMasterSeasonAgenda(season.seasonNumber || 1, targetLeague, appointed.teams, undefined, undefined, userClubObj);
         setFixtures(newAgenda);
-        const maxR = Math.max(...newAgenda.map(f => f.round), 42);
+        const maxR = newAgenda.length > 0 ? Math.max(...newAgenda.map(f => f.round)) : 34;
         setSeason(prev => ({ ...prev, totalRounds: maxR, leagueId: targetLeague.id, leagueName: targetLeague.name, divisionTier: targetLeague.tier }));
       }
     }
@@ -6285,8 +6304,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
       const safeUserClub = safeTeams.find(t => t.isUserClub) || safeTeams[0];
       const safeStandings = generateInitialStandings(safeTeams);
-      const safeCup = initNationalCupTournament(safeNextSeasonNum, safeNextLeague.country, safeTeams, safeUserClub);
-      const safeFixtures = generateMasterSeasonAgenda(safeNextSeasonNum, safeNextLeague, safeTeams, safeCup, undefined, safeUserClub);
+      const safeFixtures = generateMasterSeasonAgenda(safeNextSeasonNum, safeNextLeague, safeTeams, undefined, undefined, safeUserClub);
 
       const safeManager: ManagerProfile = acceptedOffer ? {
         ...manager,
@@ -6315,7 +6333,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       setStandings(safeStandings);
       setFixtures(safeFixtures);
       setManager(safeManager);
-      setCupTournament(safeCup);
+      setCupTournament(null);
       setCurrentRound(1);
       setShowSeasonTransitionModal(false);
       setSeasonEndSummary(null);
@@ -7488,16 +7506,15 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }));
     const chosenUserClub = freshTeams.find(t => t.id === chosenClubId) || freshTeams[0];
     const freshMarket = applyWorldOverridesToMarket(INITIAL_TRANSFER_MARKET);
-    const freshCup = initNationalCupTournament(1, 'مصر', freshTeams, chosenUserClub);
 
-    const freshAgenda = generateMasterSeasonAgenda(1, EGYPT_TIER_4_LEAGUE, freshTeams, freshCup, undefined, chosenUserClub);
-    const maxR = Math.max(...freshAgenda.map(f => f.round), 44);
+    const freshAgenda = generateMasterSeasonAgenda(1, EGYPT_TIER_4_LEAGUE, freshTeams, undefined, undefined, chosenUserClub);
+    const maxR = freshAgenda.length > 0 ? Math.max(...freshAgenda.map(f => f.round)) : 34;
 
     setSeason({ ...INITIAL_SEASON, totalRounds: maxR });
     setActiveLeague(EGYPT_TIER_4_LEAGUE);
     setTeams(freshTeams);
     setStandings(generateInitialStandings(freshTeams));
-    setCupTournament(freshCup);
+    setCupTournament(null);
     setFixtures(freshAgenda);
     setCurrentRound(1);
     setManager({

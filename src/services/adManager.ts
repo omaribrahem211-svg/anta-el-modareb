@@ -590,14 +590,15 @@ class AdManagerService {
     this.state.matchesPlayedSinceLastInterstitial = (this.state.matchesPlayedSinceLastInterstitial || 0) + 1;
     this.saveState();
 
-    // Show interstitial ad every 2 matches (or on 1st match if loaded)
-    const shouldShow = this.state.matchesPlayedSinceLastInterstitial >= 2 || this.isInterstitialLoaded;
+    // Show interstitial ad strictly once every 5 matches
+    const targetFrequency = ADMOB_CONFIG.MATCHES_BETWEEN_INTERSTITIAL || 5;
+    const shouldShow = this.state.matchesPlayedSinceLastInterstitial >= targetFrequency;
 
     if (shouldShow) {
       this.showInterstitial(onAfterAd);
       return { shouldShowInterstitial: true };
     } else {
-      // Ensure it is preloaded for next time
+      // Preload in background during earlier matches so it's instantly ready when match 5 completes
       this.loadInterstitial().catch(() => {});
       if (onAfterAd) onAfterAd();
       return { shouldShowInterstitial: false };

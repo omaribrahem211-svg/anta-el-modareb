@@ -1033,163 +1033,21 @@ export function generateMasterSeasonAgenda(
     leagueRounds.push(roundMatches);
   }
 
-  const isContinentalActive = !!continentalTournament;
-  const cupMatches = cupTournament?.matches || [];
-  const startStage: 'round_of_64' | 'round_of_32' | 'round_of_16' | 'quarter' =
-    cupMatches.some(m => m?.stage === 'round_of_64')
-      ? 'round_of_64'
-      : cupMatches.some(m => m?.stage === 'round_of_32')
-      ? 'round_of_32'
-      : cupMatches.some(m => m?.stage === 'round_of_16')
-      ? 'round_of_16'
-      : 'quarter';
-
-  const roundMapping = buildMasterRoundMapping(leagueRounds.length, startStage, isContinentalActive);
-
-  roundMapping.forEach(rm => {
-    if (rm.type === 'league' && rm.leagueIndex !== undefined) {
-      const matches = leagueRounds[rm.leagueIndex] || [];
-      matches.forEach(m => {
-        masterFixtures.push({
-          id: `fix_league_r${rm.round}_${m.homeId}_${m.awayId}_s${seasonNumber}`,
-          round: rm.round,
-          homeTeamId: m.homeId,
-          awayTeamId: m.awayId,
-          competitionType: 'league',
-          competitionName: activeLeague?.name || 'الدوري العام',
-          stageName: rm.stageName,
-          isPlayed: false,
-        });
+  // Strictly Pure League Agenda: Clean sequential rounds 1 to N without cup or continental interruptions!
+  leagueRounds.forEach((roundMatches, idx) => {
+    const roundNum = idx + 1;
+    roundMatches.forEach((m) => {
+      masterFixtures.push({
+        id: `fix_league_r${roundNum}_${m.homeId}_${m.awayId}_s${seasonNumber}`,
+        round: roundNum,
+        homeTeamId: m.homeId,
+        awayTeamId: m.awayId,
+        competitionType: 'league',
+        competitionName: activeLeague?.name || 'الدوري العام',
+        stageName: `الجولة ${roundNum}`,
+        isPlayed: false,
       });
-    } else if (rm.type === 'cup' && rm.cupStage) {
-      const stageMatches = cupMatches.filter(m => m?.stage === rm.cupStage);
-      if (stageMatches.length > 0) {
-        stageMatches.forEach((qm, idx) => {
-          masterFixtures.push({
-            id: qm?.id || `fix_cup_${rm.cupStage}_${idx + 1}_s${seasonNumber}`,
-            round: rm.round,
-            homeTeamId: qm?.homeTeamId || '',
-            awayTeamId: qm?.awayTeamId || '',
-            competitionType: 'cup',
-            competitionName: cupTournament?.name || 'كأس البطولة',
-            cupStage: rm.cupStage,
-            stageName: rm.stageName,
-            isPlayed: qm?.isPlayed || false,
-          });
-        });
-      } else {
-        // Placeholder slots for future cup stages
-        const count = rm.cupStage === 'round_of_64' ? 32 : rm.cupStage === 'round_of_32' ? 16 : rm.cupStage === 'round_of_16' ? 8 : rm.cupStage === 'quarter' ? 4 : rm.cupStage === 'semi' ? 2 : 1;
-        for (let p = 1; p <= count; p++) {
-          masterFixtures.push({
-            id: `fix_cup_${rm.cupStage}_${p}_s${seasonNumber}`,
-            round: rm.round,
-            homeTeamId: '',
-            awayTeamId: '',
-            competitionType: 'cup',
-            competitionName: cupTournament?.name || 'كأس البطولة',
-            cupStage: rm.cupStage,
-            stageName: rm.stageName,
-            isPlayed: false,
-          });
-        }
-      }
-    } else if (rm.type === 'continental' && continentalTournament) {
-      if (rm.contStage === 'group' && rm.contMD) {
-        const mdMatches = (continentalTournament.matches || []).filter(
-          (m: any) => m.stage === 'group' && m.matchday === rm.contMD
-        );
-        mdMatches.forEach((cm: any, idx: number) => {
-          masterFixtures.push({
-            id: cm.id || `fix_cont_md${rm.contMD}_${idx}_s${seasonNumber}`,
-            round: rm.round,
-            homeTeamId: cm.homeTeamId,
-            awayTeamId: cm.awayTeamId,
-            competitionType: 'continental',
-            competitionName: continentalTournament.name,
-            cupStage: continentalTournament.competitionId === 'ccl' ? 'دوري أبطال إفريقيا' : 'دوري أبطال أوروبا',
-            stageName: rm.stageName,
-            groupId: cm.groupId,
-            isPlayed: cm.isPlayed || false,
-          });
-        });
-      } else if (rm.contStage === 'quarter') {
-        const qfMatches = (continentalTournament.matches || []).filter((m: any) => m.stage === 'quarter');
-        if (qfMatches.length > 0) {
-          qfMatches.forEach((qm: any, idx: number) => {
-            masterFixtures.push({
-              id: qm.id || `fix_cont_qf_${idx + 1}_s${seasonNumber}`,
-              round: rm.round,
-              homeTeamId: qm.homeTeamId,
-              awayTeamId: qm.awayTeamId,
-              competitionType: 'continental',
-              competitionName: continentalTournament.name,
-              cupStage: continentalTournament.competitionId === 'ccl' ? 'دوري أبطال إفريقيا' : 'دوري أبطال أوروبا',
-              stageName: rm.stageName,
-              isPlayed: qm.isPlayed || false,
-            });
-          });
-        } else {
-          for (let q = 1; q <= 4; q++) {
-            masterFixtures.push({
-              id: `fix_cont_qf_${q}_s${seasonNumber}`,
-              round: rm.round,
-              homeTeamId: '',
-              awayTeamId: '',
-              competitionType: 'continental',
-              competitionName: continentalTournament.name,
-              cupStage: continentalTournament.competitionId === 'ccl' ? 'دوري أبطال إفريقيا' : 'دوري أبطال أوروبا',
-              stageName: `ربع النهائي - مباراة ${q}`,
-              isPlayed: false,
-            });
-          }
-        }
-      } else if (rm.contStage === 'semi') {
-        const sfMatches = (continentalTournament.matches || []).filter((m: any) => m.stage === 'semi');
-        if (sfMatches.length > 0) {
-          sfMatches.forEach((sm: any, idx: number) => {
-            masterFixtures.push({
-              id: sm.id || `fix_cont_sf_${idx + 1}_s${seasonNumber}`,
-              round: rm.round,
-              homeTeamId: sm.homeTeamId,
-              awayTeamId: sm.awayTeamId,
-              competitionType: 'continental',
-              competitionName: continentalTournament.name,
-              cupStage: continentalTournament.competitionId === 'ccl' ? 'دوري أبطال إفريقيا' : 'دوري أبطال أوروبا',
-              stageName: rm.stageName,
-              isPlayed: sm.isPlayed || false,
-            });
-          });
-        } else {
-          for (let s = 1; s <= 2; s++) {
-            masterFixtures.push({
-              id: `fix_cont_sf_${s}_s${seasonNumber}`,
-              round: rm.round,
-              homeTeamId: '',
-              awayTeamId: '',
-              competitionType: 'continental',
-              competitionName: continentalTournament.name,
-              cupStage: continentalTournament.competitionId === 'ccl' ? 'دوري أبطال إفريقيا' : 'دوري أبطال أوروبا',
-              stageName: `نصف النهائي - مباراة ${s}`,
-              isPlayed: false,
-            });
-          }
-        }
-      } else if (rm.contStage === 'final') {
-        const finalMatch = (continentalTournament.matches || []).find((m: any) => m.stage === 'final');
-        masterFixtures.push({
-          id: finalMatch?.id || `fix_cont_final_s${seasonNumber}`,
-          round: rm.round,
-          homeTeamId: finalMatch?.homeTeamId || '',
-          awayTeamId: finalMatch?.awayTeamId || '',
-          competitionType: 'continental',
-          competitionName: continentalTournament.name,
-          cupStage: continentalTournament.competitionId === 'ccl' ? 'دوري أبطال إفريقيا' : 'دوري أبطال أوروبا',
-          stageName: rm.stageName,
-          isPlayed: finalMatch?.isPlayed || false,
-        });
-      }
-    }
+    });
   });
 
   return masterFixtures;
@@ -2616,15 +2474,15 @@ export function processNewSeasonAdvancement(
   // Also persist this active league roster to world
   updateLeagueRosterInWorld(nextActiveLeague.id, updatedLeagueTeams);
 
-  // 6. Setup Next Season Info & Cup
-  const nextCup = initNationalCupTournament(nextSeasonNumber, nextActiveLeague.country, updatedLeagueTeams, nextUserClub);
+  // 6. Setup Next Season Info (Pure League without Cup or Continental)
+  const nextCup = null as any;
 
-  // 4. Generate New Season Schedule & Standings with Cup Synchronization
+  // 4. Generate New Season Schedule & Standings (Pure League)
   const nextFixtures = generateMasterSeasonAgenda(
     nextSeasonNumber,
     nextActiveLeague,
     updatedLeagueTeams,
-    nextCup,
+    undefined,
     undefined,
     nextUserClub
   );
@@ -2711,7 +2569,7 @@ export function processNewSeasonAdvancement(
     startDate: `الموسم ${nextSeasonNumber}`,
     endDate: `نهاية الموسم ${nextSeasonNumber}`,
     currentRound: 1,
-    totalRounds: nextFixtures.length > 0 ? Math.max(...nextFixtures.map(f => f.round)) : 44,
+    totalRounds: nextFixtures.length > 0 ? Math.max(...nextFixtures.map(f => f.round)) : Math.max(10, (updatedLeagueTeams.length - 1) * 2),
     status: 'active',
     leagueId: nextActiveLeague.id,
     leagueName: nextActiveLeague.name,

@@ -743,9 +743,23 @@ export const OnlineMatchArena: React.FC<OnlineMatchArenaProps> = ({
     }
   }, [host.clubName, guest.clubName, host.playerName, guest.playerName, matchState.homeScore, matchState.awayScore]);
 
-  // Safe Exit after completed match
+  // Safe Exit after completed match (respects the 5-match interstitial cycle)
   const handleExitWithAd = () => {
-    onExitMatch();
+    if (matchState.status === 'finished' && !hasShownAdForMatchRef.current) {
+      hasShownAdForMatchRef.current = true;
+      try {
+        const res = AdManager.onMatchCompleted(undefined, () => {
+          onExitMatch();
+        });
+        if (!res.shouldShowInterstitial) {
+          onExitMatch();
+        }
+      } catch {
+        onExitMatch();
+      }
+    } else {
+      onExitMatch();
+    }
   };
 
   return (

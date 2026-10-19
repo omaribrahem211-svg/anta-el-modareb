@@ -418,19 +418,7 @@ export const SponsorshipHubModal: React.FC<SponsorshipHubModalProps> = ({
                               </strong>
                             </div>
 
-                            <div className="flex justify-between items-center bg-slate-900/40 px-2 py-1 rounded-lg">
-                              <span className="text-slate-400">مكافأة الكأس:</span>
-                              <strong className="text-cyan-400 font-mono">
-                                +{(sponsor.bonusCupWin || sponsor.bonusForWin * 1.5).toLocaleString()} ج.م
-                              </strong>
-                            </div>
 
-                            <div className="flex justify-between items-center bg-slate-900/40 px-2 py-1 rounded-lg">
-                              <span className="text-slate-400">مكافأة القارات:</span>
-                              <strong className="text-indigo-400 font-mono">
-                                +{(sponsor.bonusContinentalWin || sponsor.bonusForWin * 2.5).toLocaleString()} ج.م
-                              </strong>
-                            </div>
 
                             <div className="flex justify-between items-center bg-slate-900/40 px-2 py-1 rounded-lg">
                               <span className="text-slate-400">نظافة الشباك:</span>
@@ -695,19 +683,7 @@ export const SponsorshipHubModal: React.FC<SponsorshipHubModalProps> = ({
                                 </strong>
                               </div>
 
-                              <div className="flex justify-between bg-slate-950/60 p-1.5 rounded-lg">
-                                <span className="text-slate-400">فوز الكأس:</span>
-                                <strong className="text-cyan-400 font-mono">
-                                  +{(offer.bonusCupWin || offer.bonusForWin * 1.5).toLocaleString()} ج.م
-                                </strong>
-                              </div>
 
-                              <div className="flex justify-between bg-slate-950/60 p-1.5 rounded-lg">
-                                <span className="text-slate-400">فوز إفريقي/قاري:</span>
-                                <strong className="text-indigo-400 font-mono">
-                                  +{(offer.bonusContinentalWin || offer.bonusForWin * 2.5).toLocaleString()} ج.م
-                                </strong>
-                              </div>
 
                               <div className="flex justify-between bg-slate-950/60 p-1.5 rounded-lg">
                                 <span className="text-slate-400">مدة العقد:</span>
