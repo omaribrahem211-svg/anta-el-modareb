@@ -122,19 +122,32 @@ service cloud.firestore {
 
     // Rules for Promo & Gift Codes (نظام أكواد الهدايا والمكافآت للمدربين عبر المتصفح والأندرويد)
     match /promo_codes/{codeId} {
-      // Allow reading and listing codes across all platforms (Dashboard and Android clients)
+      // Allow reading and getting codes across all platforms (Dashboard and Android clients)
       allow read, list, get: if true;
 
-      // Allow creating codes with valid properties
-      allow create: if request.resource.data.code == codeId
+      // STRICT SECURITY: Only verified Admin can create promo codes!
+      // Completely prevents any regular user from creating or fabricating gift codes.
+      allow create: if isAdmin()
+        && request.resource.data.code == codeId
         && request.resource.data.rewardAmount > 0
         && request.resource.data.maxUses > 0;
 
-      // Allow updating / redeeming codes across web and Android
-      allow update: if true;
+      // STRICT SECURITY: Only verified Admin can delete promo codes!
+      allow delete: if isAdmin();
 
-      // Allow deleting codes
-      allow delete: if true;
+      // Updates: Admin has full unrestricted access.
+      // Regular players can ONLY record their valid redemption (increment usedCount by 1)
+      // and are strictly forbidden from modifying rewardAmount, rewardCoins, code, maxUses, or isActive!
+      allow update: if isAdmin() || (
+        request.resource.data.code == resource.data.code
+        && request.resource.data.rewardAmount == resource.data.rewardAmount
+        && request.resource.data.rewardCoins == resource.data.rewardCoins
+        && request.resource.data.maxUses == resource.data.maxUses
+        && request.resource.data.isActive == resource.data.isActive
+        && request.resource.data.usedCount == resource.data.usedCount + 1
+        && request.resource.data.usedCount <= resource.data.maxUses
+      );
     }
   }
 }
+

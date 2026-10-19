@@ -1,5 +1,6 @@
 import { Club, LeagueStanding, ManagerProfile } from '../types/game';
 import { INITIAL_MANAGER } from '../data/initialData';
+import { generateTrainerId } from '../services/trainerProfileService';
 
 export function normalizeClub(t: any): Club {
   if (!t || typeof t !== 'object') {
@@ -110,7 +111,9 @@ export function normalizeManagerProfile(parsed: any): ManagerProfile {
     name: parsed?.name || 'المدرب',
     age: parsed?.age || 35,
     nationality: parsed?.nationality || 'مصري',
-    trainerId: parsed?.trainerId || 'TRN-INIT',
+    trainerId: (!parsed?.trainerId || parsed.trainerId === 'TRN-INIT' || parsed.trainerId === 'TRN-RESTORED' || parsed.trainerId === 'TRN-LOCAL-READY' || parsed.trainerId === 'TRN-IMPORTED')
+      ? generateTrainerId()
+      : parsed.trainerId,
     monthlySalary: parsed?.monthlySalary ?? 25000,
     personalWallet: parsed?.personalWallet !== undefined ? parsed.personalWallet : 65000,
     financialTransactions: Array.isArray(parsed?.financialTransactions) ? parsed.financialTransactions : [],

@@ -521,6 +521,28 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({ setActiveTab, onSele
                     : `متابعة المباراة (${liveMatch.currentMinute}') 🔴`}
                 </span>
               </button>
+            ) : (nextFixture && nextFixture.isPlayed) ? (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <button
+                  id="dashboard_next_round_btn"
+                  onClick={() => advanceToNextDay(true)}
+                  disabled={isSimulationRunning}
+                  className="flex items-center justify-center gap-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-black text-xs sm:text-sm py-2.5 px-4 rounded-xl shadow transition-all active:scale-95 cursor-pointer disabled:opacity-50"
+                >
+                  <FastForward className="w-4 h-4 fill-white text-white" />
+                  <span>التقدم للجولة التالية ({currentRound + 1}) ⏩</span>
+                </button>
+
+                <button
+                  id="dashboard_advance_day_played_btn"
+                  onClick={() => advanceToNextDay(false)}
+                  disabled={isSimulationRunning}
+                  className="flex items-center justify-center gap-1.5 bg-slate-800 hover:bg-slate-750 text-slate-200 border border-slate-700/80 font-bold text-xs py-2.5 px-3 rounded-xl transition-all active:scale-95 cursor-pointer disabled:opacity-50"
+                >
+                  <Clock className="w-3.5 h-3.5 text-cyan-400" />
+                  <span>اليوم التالي (+1)</span>
+                </button>
+              </div>
             ) : isMatchDay ? (
               <div className="grid grid-cols-2 gap-2">
                 <button

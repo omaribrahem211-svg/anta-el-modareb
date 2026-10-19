@@ -11,10 +11,30 @@ import {
   orderBy, 
   runTransaction 
 } from 'firebase/firestore';
-import { db } from '../lib/firebase';
+import { db, auth } from '../lib/firebase';
 import { PromoCode, PromoCodeRedemption } from '../types/admin';
 import { isQuotaExceededError, markQuotaExceeded } from '../utils/firestoreErrorHelper';
 import { addDoc } from 'firebase/firestore';
+
+export const SUPER_ADMIN_EMAIL = 'omar.ibrahem211@gmail.com';
+
+/**
+ * Strict verification that caller is the authorized Super Admin.
+ * Prevents any user manipulation or unauthorized code creation.
+ */
+export function isAuthorizedAdmin(adminUser?: { uid?: string; email?: string | null }): boolean {
+  try {
+    const currentAuthEmail = auth?.currentUser?.email?.toLowerCase().trim();
+    if (currentAuthEmail && currentAuthEmail === SUPER_ADMIN_EMAIL.toLowerCase()) {
+      return true;
+    }
+  } catch {}
+  const passedEmail = adminUser?.email?.toLowerCase().trim();
+  if (passedEmail && passedEmail === SUPER_ADMIN_EMAIL.toLowerCase()) {
+    return true;
+  }
+  return false;
+}
 
 const LOCAL_PROMO_CODES_KEY = 'anta_el_modareb_cached_promo_codes_v1';
 const LOCAL_CUSTOM_PROMO_CODES_KEY = 'anta_el_modareb_custom_promo_codes_permanent_v1';
@@ -141,11 +161,65 @@ export function getLocalRedeemedCodeKeys(): string[] {
 function markCodeRedeemedLocally(code: string): void {
   try {
     const list = getLocalRedeemedCodeKeys();
-    if (!list.includes(code.toUpperCase())) {
-      list.push(code.toUpperCase());
+    const upper = code.toUpperCase().trim();
+    if (!list.includes(upper)) {
+      list.push(upper);
       localStorage.setItem(LOCAL_REDEEMED_CODES_KEY, JSON.stringify(list));
     }
   } catch {}
+}
+
+export function unmarkCodeRedeemedLocally(code: string): void {
+  try {
+    const list = getLocalRedeemedCodeKeys();
+    const clean = cleanPromoCodeInput(code);
+    const stripped = clean.replace(/[-_]/g, '');
+    const filtered = list.filter(item => {
+      const itemClean = cleanPromoCodeInput(item);
+      const itemStripped = itemClean.replace(/[-_]/g, '');
+      return itemClean !== clean && itemStripped !== stripped;
+    });
+    localStorage.setItem(LOCAL_REDEEMED_CODES_KEY, JSON.stringify(filtered));
+  } catch {}
+}
+
+/**
+ * Checks whether an ID is a shared/generic fallback string (e.g. TRN-INIT, local_user)
+ * that must NEVER be used to identify a specific player or block others!
+ */
+export function isGenericOrSharedIdentifier(id?: string | null): boolean {
+  if (!id || typeof id !== 'string') return true;
+  const trimmed = id.trim();
+  const lower = trimmed.toLowerCase();
+  if (trimmed.length < 5) return true;
+  return (
+    lower === 'anon_manager' ||
+    lower === 'local_user' ||
+    lower === 'local_trainer' ||
+    lower === 'trn-init' ||
+    lower === 'trn-restored' ||
+    lower === 'trn-local-ready' ||
+    lower === 'trn-imported' ||
+    lower === 'super_admin' ||
+    lower === 'admin'
+  );
+}
+
+/**
+ * Derives a reliable, collision-free identity for any player across devices.
+ * Prioritizes real Firebase Auth UID, then non-generic local trainerId, then unique guest device ID.
+ */
+export function getEffectiveUserIdentifier(
+  userId?: string | null,
+  trainerId?: string | null
+): string {
+  if (userId && !isGenericOrSharedIdentifier(userId)) {
+    return userId.trim();
+  }
+  if (trainerId && !isGenericOrSharedIdentifier(trainerId)) {
+    return trainerId.trim();
+  }
+  return getOrCreateGuestDeviceId();
 }
 
 // -----------------------------------------------------------
@@ -253,7 +327,8 @@ export async function fetchAllPromoCodes(): Promise<PromoCode[]> {
 }
 
 /**
- * Create a new custom promo code
+ * Create a new custom promo code.
+ * STRICT SECURITY: Only the verified Super Admin (omar.ibrahem211@gmail.com) can create promo codes.
  */
 export async function createPromoCode(params: {
   code: string;
@@ -264,6 +339,11 @@ export async function createPromoCode(params: {
   expiresAt?: number | null;
   adminUser?: { uid: string; email?: string | null };
 }): Promise<{ success: boolean; promoCode: PromoCode; message: string }> {
+  // 0. Strict Admin Access Gate - Prevents any player or unauthorized user from creating codes!
+  if (!isAuthorizedAdmin(params.adminUser)) {
+    throw new Error('غير مصرح لك بإنشاء أكواد! هذه الصلاحية محصورة فقط لمدير اللعبة العام (Admin) لمنع أي تلاعب.');
+  }
+
   const normalizedCode = params.code.trim().toUpperCase().replace(/\s+/g, '');
 
   if (!normalizedCode || normalizedCode.length < 3 || normalizedCode.length > 32) {
@@ -288,8 +368,8 @@ export async function createPromoCode(params: {
     throw new Error(`الكود (${normalizedCode}) موجود بالفعل! يرجى اختيار كود آخر أو تعديله.`);
   }
 
-  const adminEmail = params.adminUser?.email || 'omar.ibrahem211@gmail.com';
-  const adminUid = params.adminUser?.uid || 'super_admin';
+  const adminEmail = auth?.currentUser?.email || params.adminUser?.email || SUPER_ADMIN_EMAIL;
+  const adminUid = auth?.currentUser?.uid || params.adminUser?.uid || 'super_admin';
 
   const newCodeDoc: PromoCode = {
     id: normalizedCode,
@@ -307,11 +387,14 @@ export async function createPromoCode(params: {
     expiresAt: params.expiresAt || null
   };
 
-  // 2. Save to local cache & persistent store IMMEDIATELY (guarantees code is never lost)
+  // 2. Clear any accidental local redemption flag for this new code
+  unmarkCodeRedeemedLocally(normalizedCode);
+
+  // 3. Save to local cache & persistent store IMMEDIATELY (guarantees code is never lost)
   const updatedCache = [newCodeDoc, ...cachedCodes.filter(c => c.code.toUpperCase() !== normalizedCode)];
   cachePromoCodes(updatedCache);
 
-  // 3. Write to Firestore cloud with safety timeout (await it to guarantee it is persisted in cloud for Android users)
+  // 4. Write to Firestore cloud with safety timeout (await it to guarantee it is persisted in cloud for Android users)
   let cloudSynced = false;
   try {
     const setDocPromise = setDoc(doc(db, 'promo_codes', normalizedCode), newCodeDoc);
@@ -343,20 +426,26 @@ export async function createPromoCode(params: {
 }
 
 /**
- * Delete a promo code permanently
+ * Delete a promo code permanently (Admin only)
  */
 export async function deletePromoCode(
   codeId: string, 
   adminUser?: { uid: string; email?: string | null }
 ): Promise<{ success: boolean; message: string }> {
+  // Strict Admin Check
+  if (!isAuthorizedAdmin(adminUser)) {
+    throw new Error('غير مصرح لك بحذف الأكواد! هذه الصلاحية محصورة فقط لمدير اللعبة العام (Admin).');
+  }
+
   const normalized = codeId.trim().toUpperCase();
 
   // 1. Update local cache immediately
   const cached = getCachedPromoCodes().filter(c => c.code !== normalized);
   cachePromoCodes(cached);
+  unmarkCodeRedeemedLocally(normalized);
 
-  const adminEmail = adminUser?.email || 'omar.ibrahem211@gmail.com';
-  const adminUid = adminUser?.uid || 'super_admin';
+  const adminEmail = auth?.currentUser?.email || adminUser?.email || SUPER_ADMIN_EMAIL;
+  const adminUid = auth?.currentUser?.uid || adminUser?.uid || 'super_admin';
 
   // 2. Sync deletion to Firestore with safety timeout
   try {
@@ -385,13 +474,18 @@ export async function deletePromoCode(
 }
 
 /**
- * Toggle code active / inactive status
+ * Toggle code active / inactive status (Admin only)
  */
 export async function togglePromoCodeStatus(
   codeId: string,
   isActive: boolean,
   adminUser?: { uid: string; email?: string | null }
 ): Promise<{ success: boolean; message: string }> {
+  // Strict Admin Check
+  if (!isAuthorizedAdmin(adminUser)) {
+    throw new Error('غير مصرح لك بتعديل حالة الأكواد! هذه الصلاحية محصورة فقط لمدير اللعبة العام (Admin).');
+  }
+
   const normalized = codeId.trim().toUpperCase();
 
   // 1. Update cache immediately
@@ -401,8 +495,8 @@ export async function togglePromoCodeStatus(
   });
   cachePromoCodes(cached);
 
-  const adminEmail = adminUser?.email || 'omar.ibrahem211@gmail.com';
-  const adminUid = adminUser?.uid || 'super_admin';
+  const adminEmail = auth?.currentUser?.email || adminUser?.email || SUPER_ADMIN_EMAIL;
+  const adminUid = auth?.currentUser?.uid || adminUser?.uid || 'super_admin';
 
   // 2. Sync toggle to Firestore with safety timeout
   try {
@@ -427,6 +521,94 @@ export async function togglePromoCodeStatus(
   return {
     success: true,
     message: `تم ${isActive ? 'تفعيل' : 'إيقاف'} الكود [${normalized}] بنجاح.`
+  };
+}
+
+/**
+ * Reset all redemptions for a promo code (Admin only).
+ * Sets usedCount = 0, usedByManagerIds = [], redeemedBy = [].
+ * Unmarks locally on admin device so it can be re-tested or distributed cleanly!
+ */
+export async function resetPromoCodeRedemptions(
+  codeId: string,
+  adminUser?: { uid: string; email?: string | null }
+): Promise<{ success: boolean; promoCode: PromoCode; message: string }> {
+  // Strict Admin Check
+  if (!isAuthorizedAdmin(adminUser)) {
+    throw new Error('غير مصرح لك بتصفير سجل الأكواد! هذه الصلاحية محصورة فقط لمدير اللعبة العام (Admin).');
+  }
+
+  const normalized = codeId.trim().toUpperCase();
+  const cached = getCachedPromoCodes();
+  const existing = cached.find(c => c.code.toUpperCase() === normalized);
+
+  const adminEmail = auth?.currentUser?.email || adminUser?.email || SUPER_ADMIN_EMAIL;
+  const adminUid = auth?.currentUser?.uid || adminUser?.uid || 'super_admin';
+
+  const resetCode: PromoCode = existing
+    ? {
+        ...existing,
+        usedCount: 0,
+        usedByManagerIds: [],
+        redeemedBy: [],
+        isActive: true,
+      }
+    : {
+        id: normalized,
+        code: normalized,
+        rewardAmount: 10000000,
+        rewardCoins: 0,
+        maxUses: 100,
+        usedCount: 0,
+        usedByManagerIds: [],
+        redeemedBy: [],
+        description: 'كود مكافأة',
+        isActive: true,
+        createdAt: Date.now(),
+        createdBy: adminEmail,
+        expiresAt: null
+      };
+
+  // 1. Update cache
+  const updated = cached.map(c => c.code.toUpperCase() === normalized ? resetCode : c);
+  if (!updated.some(c => c.code.toUpperCase() === normalized)) {
+    updated.unshift(resetCode);
+  }
+  cachePromoCodes(updated);
+
+  // 2. Unmark locally on current device
+  unmarkCodeRedeemedLocally(normalized);
+
+  // 3. Sync reset to Firestore
+  try {
+    const codeRef = doc(db, 'promo_codes', normalized);
+    const updatePromise = updateDoc(codeRef, {
+      usedCount: 0,
+      usedByManagerIds: [],
+      redeemedBy: [],
+      isActive: true,
+    });
+    const timeoutPromise = new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error('Firestore reset timeout')), 4000)
+    );
+    await Promise.race([updatePromise, timeoutPromise]);
+  } catch (err) {
+    console.warn('[PromoCodes] Firestore reset note:', err);
+  }
+
+  logPromoAdminAudit(
+    adminUid,
+    adminEmail,
+    'create_promo_code',
+    normalized,
+    `تصفير وإعادة تعيين سجل استرداد الكود [${normalized}] ليصبح متاحاً للاستخدام من جديد لكل المدربين`,
+    { code: normalized }
+  ).catch(() => {});
+
+  return {
+    success: true,
+    promoCode: resetCode,
+    message: `تم تصفير سجل استرداد الكود [${normalized}] بنجاح، وأصبح الكود جاهزاً للاستخدام الفوري لجميع المدربين! 🔄✨`
   };
 }
 
@@ -503,11 +685,8 @@ export async function redeemPromoCode(
     throw new Error(`يرجى الانتظار (${rateLimit.waitSeconds} ثانية) قبل محاولة إدخال كود جديد لحماية الأمان.`);
   }
 
-  // Guarantee truly unique user/device identifier (never share a static 'anon_manager' across players!)
-  let userIdentifier = managerInfo.userId || managerInfo.trainerId;
-  if (!userIdentifier || userIdentifier === 'anon_manager' || userIdentifier === 'local_user') {
-    userIdentifier = getOrCreateGuestDeviceId();
-  }
+  // Guarantee truly unique user/device identifier (never share static placeholders like 'TRN-INIT' across players!)
+  const userIdentifier = getEffectiveUserIdentifier(managerInfo.userId, managerInfo.trainerId);
 
   // 2. Look up promo code: First in local cache & persistent store, then Firestore cloud fallback
   const cachedCodes = getCachedPromoCodes();
@@ -579,10 +758,10 @@ export async function redeemPromoCode(
 
   const officialCode = cleanPromoCodeInput(matchedCode.code);
 
-  // 3. Check local redemption record
+  // 3. Check local redemption record on THIS specific device
   const localRedeemed = getLocalRedeemedCodeKeys();
   if (localRedeemed.includes(officialCode) || localRedeemed.includes(normalizedCode) || localRedeemed.includes(strippedCode)) {
-    throw new Error('لقد قمت باسترداد هذا الكود بالفعل مسبقاً! لا يمكن استرداد الكود أكثر من مرة لنفس المدرب.');
+    throw new Error('لقد قمت باسترداد هذا الكود بالفعل مسبقاً على هذا الجهاز! لا يمكن استرداد الكود أكثر من مرة لنفس المدرب.');
   }
 
   // 4. Validate code business rules
@@ -601,12 +780,13 @@ export async function redeemPromoCode(
     throw new Error('عذراً، لقد استُنفد هذا الكود بالكامل ووصل للحد الأقصى المسموح من الاستخدامات!');
   }
 
-  // Filter out any stale generic placeholders like 'anon_manager' or 'local_user'
+  // Filter out any stale generic placeholders like 'TRN-INIT', 'TRN-RESTORED', 'anon_manager' or 'local_user'
+  // so no user is EVER falsely blocked by another player's generic ID!
   const rawUsedIds = Array.isArray(matchedCode.usedByManagerIds) ? matchedCode.usedByManagerIds : [];
-  const usedIds = rawUsedIds.filter(id => id !== 'anon_manager' && id !== 'local_user');
+  const usedIds = rawUsedIds.filter(id => !isGenericOrSharedIdentifier(id));
   if (usedIds.includes(userIdentifier)) {
     recordFailedAttempt();
-    throw new Error('لقد قمت باسترداد هذا الكود بالفعل مسبقاً! لا يمكن استخدام الكود مرتين لنفس الحساب.');
+    throw new Error('لقد قمت باسترداد هذا الكود بالفعل مسبقاً! لا يمكن استخدام الكود مرتين لنفس الحساب أو الجهاز.');
   }
 
   // 5. Apply redemption locally

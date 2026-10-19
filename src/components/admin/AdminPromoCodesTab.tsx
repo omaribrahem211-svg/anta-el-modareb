@@ -14,6 +14,7 @@ import {
   Clock, 
   Power, 
   RefreshCw,
+  RotateCcw,
   Eye,
   X,
   Calendar,
@@ -24,7 +25,8 @@ import {
   fetchAllPromoCodes, 
   createPromoCode, 
   deletePromoCode, 
-  togglePromoCodeStatus 
+  togglePromoCodeStatus,
+  resetPromoCodeRedemptions
 } from '../../services/promoCodeService';
 import { useAuth } from '../../context/AuthContext';
 
@@ -39,6 +41,7 @@ export const AdminPromoCodesTab: React.FC = () => {
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [inspectCode, setInspectCode] = useState<PromoCode | null>(null);
   const [deleteConfirmCode, setDeleteConfirmCode] = useState<PromoCode | null>(null);
+  const [resetConfirmCode, setResetConfirmCode] = useState<PromoCode | null>(null);
   const [copiedCode, setCopiedCode] = useState<string | null>(null);
   const [toast, setToast] = useState<{ message: string; isError: boolean } | null>(null);
 
@@ -170,6 +173,25 @@ export const AdminPromoCodesTab: React.FC = () => {
       await deletePromoCode(targetCode, { uid: adminUid, email: adminEmail });
     } catch (err: any) {
       console.warn('Delete code warning:', err);
+    }
+  };
+
+  const handleResetConfirm = async () => {
+    if (!resetConfirmCode) return;
+    const targetCode = resetConfirmCode.code;
+    const adminUid = user?.uid || 'super_admin';
+    const adminEmail = user?.email || 'omar.ibrahem211@gmail.com';
+
+    try {
+      const res = await resetPromoCodeRedemptions(targetCode, { uid: adminUid, email: adminEmail });
+      setCodes(prev => prev.map(c => c.code === targetCode ? res.promoCode : c));
+      if (inspectCode && inspectCode.code === targetCode) {
+        setInspectCode(res.promoCode);
+      }
+      setResetConfirmCode(null);
+      showToast(res.message);
+    } catch (err: any) {
+      showToast(err?.message || 'حدث خطأ أثناء تصفير سجل الكود!', true);
     }
   };
 
@@ -487,6 +509,14 @@ export const AdminPromoCodesTab: React.FC = () => {
 
                   <div className="flex items-center gap-1.5">
                     <button
+                      onClick={() => setResetConfirmCode(code)}
+                      className="p-1.5 rounded-lg bg-amber-950/60 hover:bg-amber-900 border border-amber-800/60 text-amber-300 hover:text-amber-100 transition-colors cursor-pointer"
+                      title="تصفير استخدامات الكود وإتاحته للتجربة من جديد لجميع المدربين"
+                    >
+                      <RotateCcw className="w-3.5 h-3.5" />
+                    </button>
+
+                    <button
                       onClick={() => handleToggleStatus(code)}
                       className={`p-1.5 rounded-lg border text-xs font-bold transition-colors ${
                         code.isActive 
@@ -751,12 +781,60 @@ export const AdminPromoCodesTab: React.FC = () => {
               )}
             </div>
 
-            <div className="pt-3 border-t border-slate-800 text-left">
+            <div className="pt-3 border-t border-slate-800 flex items-center justify-between">
+              <button
+                onClick={() => {
+                  const target = inspectCode;
+                  setResetConfirmCode(target);
+                }}
+                className="px-3 py-2 bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 font-bold rounded-xl text-xs flex items-center gap-1.5 cursor-pointer"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+                <span>تصفير سجل استرداد هذا الكود 🔄</span>
+              </button>
               <button
                 onClick={() => setInspectCode(null)}
                 className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold rounded-xl text-xs"
               >
                 إغلاق النافذة
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ============================================================ */}
+      {/* Reset Confirmation Modal */}
+      {/* ============================================================ */}
+      {resetConfirmCode && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-fade-in">
+          <div className="bg-slate-900 border border-amber-500/40 rounded-3xl max-w-md w-full p-6 shadow-2xl space-y-4 text-right">
+            <div className="w-12 h-12 rounded-2xl bg-amber-500/20 text-amber-400 border border-amber-500/40 flex items-center justify-center mx-auto text-xl">
+              <RotateCcw className="w-6 h-6" />
+            </div>
+
+            <div className="text-center space-y-1">
+              <h3 className="font-black text-base text-white">هل ترغب في تصفير سجل هذا الكود؟</h3>
+              <p className="text-xs text-slate-300">
+                الكود <span className="font-mono text-amber-300 font-bold">{resetConfirmCode.code}</span>
+              </p>
+              <p className="text-xs text-amber-300/90 leading-relaxed pt-1">
+                سيتم إفراغ قائمة المدربين الذين استردوا الكود وإعادة عداد الاستخدامات إلى (0)، ليصبح الكود جاهزاً للتجربة والاستخدام مجدداً على جميع الأجهزة دون أن يظهر لهم &quot;تم استخدام الكود من قبل&quot;.
+              </p>
+            </div>
+
+            <div className="flex items-center justify-center gap-2 pt-2">
+              <button
+                onClick={() => setResetConfirmCode(null)}
+                className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold rounded-xl text-xs cursor-pointer"
+              >
+                إلغاء التراجع
+              </button>
+              <button
+                onClick={handleResetConfirm}
+                className="px-5 py-2 bg-amber-600 hover:bg-amber-500 text-white font-bold rounded-xl text-xs cursor-pointer shadow-lg shadow-amber-950/50"
+              >
+                نعم، صفّر السجل الآن 🔄
               </button>
             </div>
           </div>
