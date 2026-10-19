@@ -12,6 +12,7 @@ export interface AdMobConfigType {
   ENABLE_LOGS: boolean;
   ENABLE_REWARDS: boolean; // Master toggle for rewarded ads
   ENABLE_BANNER: boolean;  // Banner ad toggle
+  ENABLE_INTERSTITIAL_BETWEEN_MATCHES: boolean; // إيقاف ظهور الإعلانات البينية بين المباريات
   REWARDED_COOLDOWN_SECONDS: number;
   APP_ID: string;
   TOP_BANNER_ID: string;    // بانر تحت صفحة الفيسبوك (In-Content Banner)
@@ -49,6 +50,7 @@ export const ADMOB_CONFIG: AdMobConfigType = {
   ENABLE_LOGS: true,
   ENABLE_REWARDS: true, // تفعيل إعلانات المكافأة
   ENABLE_BANNER: true,  // تفعيل إعلانات البانر
+  ENABLE_INTERSTITIAL_BETWEEN_MATCHES: false, // إيقاف ظهور الإعلانات بين الماتشات تماماً كما طلب المستخدم
   REWARDED_COOLDOWN_SECONDS: 0,
   APP_ID: PRODUCTION_AD_IDS.APP_ID,
   TOP_BANNER_ID: PRODUCTION_AD_IDS.TOP_BANNER_ID,

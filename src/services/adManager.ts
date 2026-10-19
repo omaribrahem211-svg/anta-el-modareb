@@ -499,7 +499,8 @@ class AdManagerService {
   }
 
   public async showInterstitial(onDismiss?: () => void): Promise<boolean> {
-    if (this.state.isPremium) {
+    // Completely disable interstitial ads between matches if configured false or user is premium
+    if (!ADMOB_CONFIG.ENABLE_INTERSTITIAL_BETWEEN_MATCHES || this.state.isPremium) {
       if (onDismiss) onDismiss();
       return false;
     }
@@ -580,7 +581,8 @@ class AdManagerService {
   }
 
   public onMatchCompleted(fixtureId?: string, onAfterAd?: () => void): { shouldShowInterstitial: boolean } {
-    if (this.state.isPremium) {
+    // 0. Complete disable of interstitial ads between matches if toggled off or user is VIP/Premium
+    if (!ADMOB_CONFIG.ENABLE_INTERSTITIAL_BETWEEN_MATCHES || this.state.isPremium) {
       if (onAfterAd) onAfterAd();
       return { shouldShowInterstitial: false };
     }
@@ -894,7 +896,7 @@ class AdManagerService {
    * Action-specific Rewarded Ads (e.g. heal injured player, cancel suspension, double match revenue)
    */
   public async showRewardedForAction(params: {
-    actionType: 'heal_player' | 'cancel_suspension' | 'double_match_revenue';
+    actionType: 'heal_player' | 'cancel_suspension' | 'double_match_revenue' | 'rematch_match';
     onUserEarnedReward: () => void;
     onDismiss?: (rewardEarned: boolean) => void;
     onFailure?: (error: any) => void;
@@ -904,6 +906,8 @@ class AdManagerService {
         ? 'علاج اللاعب المصاب مجاناً'
         : params.actionType === 'double_match_revenue'
         ? 'مضاعفة إيراد المباراة بالكامل (2X)'
+        : params.actionType === 'rematch_match'
+        ? 'إعادة المباراة فوراً من البداية (فرصة ثانية)'
         : 'إلغاء عقوبة إيقاف اللاعب';
 
     return this.executeRewardedAd({

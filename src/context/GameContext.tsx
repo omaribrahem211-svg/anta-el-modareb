@@ -287,6 +287,7 @@ interface GameContextType {
   healPlayerWithAd: (playerId: string) => { success: boolean; message: string };
   cancelPlayerSuspensionWithAd: (playerId: string) => { success: boolean; message: string };
   doubleLiveMatchRevenueWithAd: () => Promise<{ success: boolean; message: string }>;
+  rematchLiveMatch: () => Promise<{ success: boolean; message: string }>;
   setClubTicketPrice: (price: number) => { success: boolean; message: string };
   transferBudgetToWageBudget: (cashAmount: number) => { success: boolean; message: string };
   transferWageToCashBudget: (monthlyAmount: number) => { success: boolean; message: string };
@@ -1921,8 +1922,15 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       }
     }
 
-    const homeTeam = teams.find(t => t.id === targetFixture.homeTeamId) || (targetFixture.homeTeamId ? findClubInWorld(targetFixture.homeTeamId) : undefined) || teams[0];
-    const awayTeam = teams.find(t => t.id === targetFixture.awayTeamId) || (targetFixture.awayTeamId ? findClubInWorld(targetFixture.awayTeamId) : undefined) || teams[1];
+    let homeTeam = teams.find(t => t.id === targetFixture.homeTeamId) || (targetFixture.homeTeamId ? findClubInWorld(targetFixture.homeTeamId) : undefined) || teams[0];
+    let awayTeam = teams.find(t => t.id === targetFixture.awayTeamId) || (targetFixture.awayTeamId ? findClubInWorld(targetFixture.awayTeamId) : undefined) || teams[1];
+
+    if (homeTeam && (homeTeam.id === userClub?.id || homeTeam.isUserClub)) {
+      homeTeam = { ...homeTeam, manager: (manager as any) };
+    }
+    if (awayTeam && (awayTeam.id === userClub?.id || awayTeam.isUserClub)) {
+      awayTeam = { ...awayTeam, manager: (manager as any) };
+    }
 
     const initialSimulationState = createInitialLiveMatchState(targetFixture, homeTeam, awayTeam, userClub?.tactics, userClub?.id);
     completedMatchFixtureIdRef.current = null;
@@ -5268,6 +5276,58 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     });
   };
 
+  // Rewarded Match Replay / Rematch Feature (إعادة المباراة مقابل مشاهدة إعلان)
+  const rematchLiveMatch = async (): Promise<{ success: boolean; message: string }> => {
+    if (!liveMatch) {
+      return { success: false, message: 'لا توجد مباراة نشطة لإعادتها!' };
+    }
+
+    const currentFixtureId = liveMatch.fixture?.id;
+    const targetFixture = fixtures.find(f => f.id === currentFixtureId);
+    if (!targetFixture) {
+      return { success: false, message: 'تعذر العثور على بيانات المباراة لإعادتها!' };
+    }
+
+    return new Promise((resolve) => {
+      AdManager.showRewardedForAction({
+        actionType: 'rematch_match',
+        onUserEarnedReward: () => {
+          let homeTeam = teams.find(t => t.id === targetFixture.homeTeamId) || (targetFixture.homeTeamId ? findClubInWorld(targetFixture.homeTeamId) : undefined) || teams[0];
+          let awayTeam = teams.find(t => t.id === targetFixture.awayTeamId) || (targetFixture.awayTeamId ? findClubInWorld(targetFixture.awayTeamId) : undefined) || teams[1];
+
+          if (homeTeam && (homeTeam.id === userClub?.id || homeTeam.isUserClub)) {
+            homeTeam = { ...homeTeam, manager: (manager as any) };
+          }
+          if (awayTeam && (awayTeam.id === userClub?.id || awayTeam.isUserClub)) {
+            awayTeam = { ...awayTeam, manager: (manager as any) };
+          }
+
+          // Reset match state completely back to minute 0 with fresh energy
+          const resetSimulationState = createInitialLiveMatchState(targetFixture, homeTeam, awayTeam, userClub?.tactics, userClub?.id);
+          resetSimulationState.isPlaying = true;
+          completedMatchFixtureIdRef.current = null;
+          isFinishingMatchRef.current = false;
+          isMatchFinishedRef.current = false;
+
+          setLiveMatch(resetSimulationState);
+
+          resolve({
+            success: true,
+            message: '🎬 تم تجهيز إعادة المباراة بنجاح! تنطلق صافرة البداية من جديد الآن.. حظاً موفقاً في حسم الفوز ⚽🏆',
+          });
+        },
+        onDismiss: (earned) => {
+          if (!earned) {
+            resolve({ success: false, message: 'لم تكتمل مشاهدة الإعلان، تعذر إعادة المباراة.' });
+          }
+        },
+        onFailure: () => {
+          resolve({ success: false, message: 'تعذر تحميل الإعلان حالياً، يرجى المحاولة بعد قليل.' });
+        },
+      });
+    });
+  };
+
   // Adjust Club Match Ticket Price
   const setClubTicketPrice = (price: number): { success: boolean; message: string } => {
     if (!userClub) {
@@ -8154,6 +8214,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         healPlayerWithAd,
         cancelPlayerSuspensionWithAd,
         doubleLiveMatchRevenueWithAd,
+        rematchLiveMatch,
         setClubTicketPrice,
         promoteYouthProspect,
         sellYouthProspect,

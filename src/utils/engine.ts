@@ -90,6 +90,48 @@ export interface LiveSimulationState {
   tacticalMatchReport?: TacticalMatchReport;
 }
 
+/**
+ * Calculates a manager's realistic tactical and strategic rating based on:
+ * 1. Official Coaching License tier ('ELITE', 'PRO', 'A', 'B', 'C', 'D')
+ * 2. Manager experience level and tactical courses completed
+ * 3. Career progression and tactical knowledge
+ * 
+ * Guarantees that managers who invest in higher coaching licenses and strong squads
+ * have a decisive tactical superiority, eliminating artificial big-club advantages.
+ */
+export function calculateManagerRatingFromProfile(mgr: any, fallbackReputation: number = 60): number {
+  if (!mgr) {
+    // Normal AI club baseline (fair competitive tier: 58 to 74 max, never artificial 80+ without an explicit manager)
+    return Math.max(58, Math.min(74, Math.round(52 + (fallbackReputation * 0.22))));
+  }
+
+  // If specific manual numeric rating is set without license
+  if (typeof mgr.rating === 'number' && mgr.rating > 0 && !mgr.license) {
+    return Math.min(99, Math.max(50, mgr.rating));
+  }
+
+  // Coaching License ranking (CAF / UEFA structure):
+  const license = String(mgr.license || 'D').toUpperCase();
+  let baseRating = 65;
+  if (license === 'ELITE') baseRating = 96;
+  else if (license === 'PRO') baseRating = 91;
+  else if (license === 'A') baseRating = 85;
+  else if (license === 'B') baseRating = 78;
+  else if (license === 'C') baseRating = 72;
+  else baseRating = 65;
+
+  // Level Bonus: +1 per 2.5 levels (up to +10)
+  const levelBonus = Math.min(10, Math.floor((mgr.level || 1) / 2.5));
+
+  // Courses Completed Bonus
+  const coursesBonus = Array.isArray(mgr.completedCourses) ? Math.min(8, mgr.completedCourses.length * 1.5) : 0;
+
+  // Career Reputation Bonus: +1 per 20 reputation up to +5
+  const repBonus = Math.min(5, Math.floor((mgr.reputation || 15) / 20));
+
+  return Math.min(99, Math.max(55, Math.round(baseRating + levelBonus + coursesBonus + repBonus)));
+}
+
 export function calculateTeamStrength(
   team: Club, 
   tactics?: TeamTactics,
@@ -104,23 +146,34 @@ export function calculateTeamStrength(
   managerRating: number;
   physical: number;
 } {
-  // 1. Determine Manager Rating
-  let mgrRating = 65;
-  if (customManager) {
-    mgrRating = 'rating' in customManager ? customManager.rating : (customManager.managerRating || 65);
-  } else if (team?.manager?.rating) {
-    mgrRating = team.manager.rating;
-  } else if (team?.reputation) {
-    mgrRating = Math.max(50, Math.min(96, Math.round(team.reputation * 0.95)));
+  // 1. Determine Manager Rating (Honoring Coaching License & Career Level)
+  let resolvedManager = customManager;
+  if (!resolvedManager && team?.manager) {
+    resolvedManager = team.manager;
+  }
+  if (!resolvedManager && team?.isUserClub) {
+    try {
+      const rawSavedMgr = typeof localStorage !== 'undefined' ? localStorage.getItem('anta_el_modareb_save_v1_manager') : null;
+      if (rawSavedMgr) {
+        resolvedManager = JSON.parse(rawSavedMgr);
+      }
+    } catch (_) {}
+  }
+
+  let mgrRating = 68;
+  if (resolvedManager) {
+    mgrRating = calculateManagerRatingFromProfile(resolvedManager, team?.reputation || 60);
+  } else {
+    mgrRating = calculateManagerRatingFromProfile(null, team?.reputation || 60);
   }
 
   if (!team || !team.players || team.players.length === 0) {
-    const base = team?.reputation ? team.reputation * 2 + 10 : 50;
+    const base = team?.reputation ? Math.round(team.reputation * 1.2 + 20) : 50;
     return { 
       attack: base, 
       midfield: base, 
       defense: base, 
-      overall: Math.round(base * 0.75 + mgrRating * 0.25),
+      overall: Math.round(base * 0.70 + mgrRating * 0.30),
       squadStrength: base,
       managerRating: mgrRating,
       physical: base,
@@ -207,7 +260,7 @@ export function calculateTeamStrength(
   const completenessFactor = startingPlayers.length >= 11 ? 1.0 : Math.max(0.65, startingPlayers.length / 11);
 
   // Tactical Manager Influence Factor - Substantial impact on pitch organization and tactical execution
-  let managerBoost = (mgrRating - 65) * 0.40;
+  let managerBoost = (mgrRating - 65) * 0.45;
   const staffBonuses = getClubStaffBonuses(team);
   if (staffBonuses.tacticalSynergyBonus > 0) {
     managerBoost += staffBonuses.tacticalSynergyBonus * 30; // Technical staff tactical bonus
@@ -231,9 +284,9 @@ export function calculateTeamStrength(
     midfield = Math.min(99, Math.round(midfield * 1.06)); // +6% tactical midfield dominance
   }
 
-  // Overall is composed of 65% Player Quality (تشكيلة اللاعبين) + 35% Manager Rating (قوة وخبرة المدرب)
+  // Overall is composed of 70% Player Quality (تشكيلة اللاعبين الأساسيين) + 30% Manager Rating (الرخصة التدريبية والخبرة)
   const squadOverall = Math.round((attack + midfield + defense) / 3);
-  const overall = Math.max(35, Math.min(99, Math.round(squadOverall * 0.65 + mgrRating * 0.35)));
+  const overall = Math.max(35, Math.min(99, Math.round(squadOverall * 0.70 + mgrRating * 0.30)));
 
   return { 
     attack, 
@@ -705,15 +758,15 @@ export function calculateHomeCrowdAdvantage(
   const capacity = homeTeam.facilities?.stadiumCapacity || 15000;
   const reputation = homeTeam.reputation || 50;
 
-  // Base crowd presence scales with stadium capacity and club reputation
-  const baseFacilityBoost = 1.04 + (stadiumLevel * 0.012) + (Math.min(70000, capacity) / 70000) * 0.02;
-  const repBoost = (reputation / 100) * 0.02;
+  // Base crowd presence provides a modest, realistic home atmosphere
+  const baseFacilityBoost = 1.02 + (stadiumLevel * 0.005) + (Math.min(70000, capacity) / 70000) * 0.01;
 
-  let homeAttackBonus = baseFacilityBoost + repBoost;
-  let homeMidfieldBonus = baseFacilityBoost * 0.98;
-  let homeDefenseBonus = 1.03 + (stadiumLevel * 0.008);
-  let awayIntimidationPenalty = 0.96 - (stadiumLevel * 0.008); // Visiting team shot accuracy/composure under whistle pressure
-  let staminaBuffer = 0.04;
+  let homeAttackBonus = baseFacilityBoost;
+  let homeMidfieldBonus = baseFacilityBoost * 0.99;
+  let homeDefenseBonus = 1.01 + (stadiumLevel * 0.004);
+  // Never handicap or intimidate visiting squads who have quality and strong preparation!
+  let awayIntimidationPenalty = 1.0; 
+  let staminaBuffer = 0.02;
 
   const scoreDiff = homeScore - awayScore;
 
@@ -921,13 +974,15 @@ export function simulatePenaltyShootout(
     description: `⚖️ صافرة نهاية الوقت الأصلي بالتعادل! الاحتكام رسمياً إلى ركلات الجزاء الترجيحية لحسم بطاقة التأهل.`
   });
 
-  const repDiff = (safeHome.reputation || 50) - (safeAway.reputation || 50);
+  const homeMgrRating = calculateManagerRatingFromProfile(safeHome.manager, 65);
+  const awayMgrRating = calculateManagerRatingFromProfile(safeAway.manager, 65);
+  const mgrPenaltyBonus = (homeMgrRating - awayMgrRating) * 0.002;
 
   // First 5 rounds of penalties
   for (let round = 1; round <= 5; round++) {
     // Home kick
     const hTaker = homeTakers[round - 1];
-    let hSuccessChance = 0.75 + (((hTaker as any).rating || 65) - 65) * 0.005 - (((awayGk as any).rating || 65) - 65) * 0.004 + (repDiff > 10 ? 0.03 : 0);
+    let hSuccessChance = 0.75 + (((hTaker as any).rating || 65) - 65) * 0.005 - (((awayGk as any).rating || 65) - 65) * 0.004 + mgrPenaltyBonus;
     hSuccessChance = Math.max(0.55, Math.min(0.92, hSuccessChance));
     const hScored = Math.random() < hSuccessChance;
     if (hScored) {
@@ -950,7 +1005,7 @@ export function simulatePenaltyShootout(
 
     // Away kick
     const aTaker = awayTakers[round - 1];
-    let aSuccessChance = 0.75 + (((aTaker as any).rating || 65) - 65) * 0.005 - (((homeGk as any).rating || 65) - 65) * 0.004 - (repDiff > 10 ? 0.03 : 0);
+    let aSuccessChance = 0.75 + (((aTaker as any).rating || 65) - 65) * 0.005 - (((homeGk as any).rating || 65) - 65) * 0.004 - mgrPenaltyBonus;
     aSuccessChance = Math.max(0.55, Math.min(0.92, aSuccessChance));
     const aScored = Math.random() < aSuccessChance;
     if (aScored) {
@@ -1029,7 +1084,7 @@ export function simulatePenaltyShootout(
 
   // Absolute tiebreaker guarantee (knockout penalties can never end in a draw)
   if (homeScore === awayScore) {
-    if (repDiff >= 0) {
+    if (homeMgrRating >= awayMgrRating) {
       homeScore++;
     } else {
       awayScore++;
@@ -1487,14 +1542,14 @@ export function simulateMatchStep(
   const effAwayDef = awayStrength.defense * matchup.awayDefenseMod * awaySynergy.defenseMod * awayPhysMod * awayCountFactor;
 
   // CORE USER MANDATE: Team Strength & Manager Rating Dominance
-  // "الفريق اللى قوة لاعيبينه و قوة مدربه اكبر من الفريق التانى يبقى ليه نسبه فوز اكبر ( يعنى الفوز فى المباراة يتطلب وجود لاعيبه اقوى من الفريق الخصم و المدرب قوته اقوى من الفريق الخصم )"
+  // "اللى معاه لاعيبه قوية و معاه رخص تدريبية عالية يبقى نسبه فوزه اعلى دايما حتى لو بيلاعب فرقة اسمها كبير"
   const squadDiff = homeStrength.squadStrength - awayStrength.squadStrength;
   const managerDiff = homeStrength.managerRating - awayStrength.managerRating;
   const overallDiff = homeStrength.overall - awayStrength.overall;
 
-  const qualityAdvantage = (overallDiff * 0.035) + (managerDiff * 0.022) + (squadDiff * 0.015);
-  const homeQualityMod = Math.max(0.12, Math.min(3.20, 1.0 + qualityAdvantage));
-  const awayQualityMod = Math.max(0.12, Math.min(3.20, 1.0 - qualityAdvantage));
+  const qualityAdvantage = (overallDiff * 0.045) + (managerDiff * 0.028) + (squadDiff * 0.022);
+  const homeQualityMod = Math.max(0.08, Math.min(3.80, 1.0 + qualityAdvantage));
+  const awayQualityMod = Math.max(0.08, Math.min(3.80, 1.0 - qualityAdvantage));
 
   // Dynamic Possession for this minute (strongly reflects quality gap and tactical control)
   const weightedHomeMid = effHomeMid * Math.sqrt(homeQualityMod);
@@ -1616,7 +1671,7 @@ export function simulateMatchStep(
           // Factoring Player quality and manager coaching quality
           const atkVsGk = ((effHomeAtk - (awayGkPower * gkEfficiency)) * 0.0042);
           const defSuppression = ((effAwayDef - 50) * 0.0020);
-          const qualityConversionBonus = (overallDiff * 0.009) + (managerDiff * 0.005);
+          const qualityConversionBonus = (overallDiff * 0.012) + (managerDiff * 0.007) + (squadDiff * 0.005);
           let goalProb = 0.28 + atkVsGk - defSuppression + qualityConversionBonus;
 
           if (isAwayParked) goalProb -= 0.06;
@@ -1626,8 +1681,8 @@ export function simulateMatchStep(
           else if (scoreDiff >= 2) goalProb *= 0.85;
 
           // Underdog upset limitation: when opponent is vastly weaker, clamp conversion
-          if (overallDiff < -14) {
-            goalProb = Math.min(0.20, goalProb);
+          if (overallDiff < -10) {
+            goalProb = Math.min(0.14, goalProb);
           }
 
           goalProb = Math.max(0.04, Math.min(0.65, goalProb));
@@ -1721,7 +1776,7 @@ export function simulateMatchStep(
 
           const atkVsGk = ((effAwayAtk - (homeGkPower * gkEfficiency)) * 0.0042);
           const defSuppression = ((effHomeDef - 50) * 0.0020);
-          const qualityConversionBonus = (-overallDiff * 0.009) + (-managerDiff * 0.005);
+          const qualityConversionBonus = (-overallDiff * 0.012) + (-managerDiff * 0.007) + (-squadDiff * 0.005);
           let goalProb = 0.28 + atkVsGk - defSuppression + qualityConversionBonus;
 
           if (isHomeParked) goalProb -= 0.06;
@@ -1730,8 +1785,8 @@ export function simulateMatchStep(
           else if (scoreDiff <= -2) goalProb *= 0.85;
 
           // Underdog upset limitation: when opponent is vastly stronger, clamp conversion
-          if (overallDiff > 14) {
-            goalProb = Math.min(0.20, goalProb);
+          if (overallDiff > 10) {
+            goalProb = Math.min(0.14, goalProb);
           }
 
           goalProb = Math.max(0.04, Math.min(0.65, goalProb));
@@ -2099,9 +2154,24 @@ export function simulateMatch(
     benchPlayerIds: [],
   } as unknown as TeamTactics);
 
-  // 1. Calculate Base Team Strength
-  const homeStrength = calculateTeamStrength(safeHome, homeTac);
-  const awayStrength = calculateTeamStrength(safeAway, awayTac);
+  // 1. Calculate Base Team Strength with manager resolution
+  let homeCustomMgr = safeHome.manager;
+  let awayCustomMgr = safeAway.manager;
+  if (!homeCustomMgr && safeHome.isUserClub) {
+    try {
+      const s = typeof localStorage !== 'undefined' ? localStorage.getItem('anta_el_modareb_save_v1_manager') : null;
+      if (s) homeCustomMgr = JSON.parse(s);
+    } catch (_) {}
+  }
+  if (!awayCustomMgr && safeAway.isUserClub) {
+    try {
+      const s = typeof localStorage !== 'undefined' ? localStorage.getItem('anta_el_modareb_save_v1_manager') : null;
+      if (s) awayCustomMgr = JSON.parse(s);
+    } catch (_) {}
+  }
+
+  const homeStrength = calculateTeamStrength(safeHome, homeTac, homeCustomMgr);
+  const awayStrength = calculateTeamStrength(safeAway, awayTac, awayCustomMgr);
 
   // 2. Tactical Matchup Advantage
   const matchup = calculateTacticalMatchup(homeTac, awayTac);
@@ -2124,8 +2194,8 @@ export function simulateMatch(
   const homeFitnessModifier = (homeAvgFitness - 80) * 0.12;
   const awayFitnessModifier = (awayAvgFitness - 80) * 0.12;
 
-  // 4. Home Pitch & Crowd Advantage (Fair +3.5 rating bonus to home team)
-  const homePitchAdvantage = 3.5;
+  // 4. Home Pitch & Crowd Advantage (Fair +2.5 rating bonus to home team)
+  const homePitchAdvantage = 2.5;
 
   // 5. Effective Overall Ratings
   const effHomeRating = Math.max(30, Math.min(99, homeStrength.overall + homePitchAdvantage + homeTacBonus + homeFitnessModifier));
@@ -2135,28 +2205,27 @@ export function simulateMatch(
   const ratingDelta = effHomeRating - effAwayRating;
 
   // 6. Base Expected Goals (xG) based on True Rating & Lineup Differences
-  let baseHomeXg = 1.35 + (homeStrength.attack - awayStrength.defense) * 0.040 + (ratingDelta * 0.038);
-  let baseAwayXg = 1.05 + (awayStrength.attack - homeStrength.defense) * 0.040 - (ratingDelta * 0.038);
+  let baseHomeXg = 1.35 + (homeStrength.attack - awayStrength.defense) * 0.040 + (ratingDelta * 0.042);
+  let baseAwayXg = 1.05 + (awayStrength.attack - homeStrength.defense) * 0.040 - (ratingDelta * 0.042);
 
   // 7. Controlled Luck / Surprise Factor (Strictly capped between 10% and 15% max)
-  // Negative or positive perturbation strictly inside [-0.12, +0.12]
-  const rawHomeLuck = (Math.random() - 0.5) * 0.24; // -12% to +12%
-  const rawAwayLuck = (Math.random() - 0.5) * 0.24; // -12% to +12%
+  const rawHomeLuck = (Math.random() - 0.5) * 0.20; // -10% to +10%
+  const rawAwayLuck = (Math.random() - 0.5) * 0.20; // -10% to +10%
 
-  // Prevent underdog from gaining excessive luck beyond 10% in heavy mismatch scenarios
-  const clampedHomeLuck = ratingDelta < -15 ? Math.min(0.10, rawHomeLuck) : rawHomeLuck;
-  const clampedAwayLuck = ratingDelta > 15 ? Math.min(0.10, rawAwayLuck) : rawAwayLuck;
+  // Prevent underdog from gaining excessive luck beyond 8% in heavy mismatch scenarios
+  const clampedHomeLuck = ratingDelta < -10 ? Math.min(0.08, rawHomeLuck) : rawHomeLuck;
+  const clampedAwayLuck = ratingDelta > 10 ? Math.min(0.08, rawAwayLuck) : rawAwayLuck;
 
   let finalHomeXg = Math.max(0.12, Math.min(5.2, baseHomeXg * (1 + clampedHomeLuck)));
   let finalAwayXg = Math.max(0.08, Math.min(5.2, baseAwayXg * (1 + clampedAwayLuck)));
 
-  // If a team is heavily superior (e.g., ratingDelta >= 16), guarantee strong scoring expectation
-  if (ratingDelta >= 16) {
-    finalHomeXg = Math.max(2.1, finalHomeXg);
-    finalAwayXg = Math.min(0.8, finalAwayXg);
-  } else if (ratingDelta <= -16) {
-    finalHomeXg = Math.min(0.8, finalHomeXg);
-    finalAwayXg = Math.max(2.1, finalAwayXg);
+  // If a team is noticeably superior (ratingDelta >= 8), guarantee strong scoring expectation
+  if (ratingDelta >= 10) {
+    finalHomeXg = Math.max(2.2, finalHomeXg);
+    finalAwayXg = Math.min(0.65, finalAwayXg);
+  } else if (ratingDelta <= -10) {
+    finalHomeXg = Math.min(0.65, finalHomeXg);
+    finalAwayXg = Math.max(2.2, finalAwayXg);
   }
 
   // 8. Poisson-based Goal Sampling
@@ -2174,22 +2243,20 @@ export function simulateMatch(
   let homeScore = samplePoisson(finalHomeXg);
   let awayScore = samplePoisson(finalAwayXg);
 
-  // 9. Strict Upset Protection: Underdog upset chance is capped at 10-15% max!
-  // If a team is much stronger (+12 or more) but Poisson sampled an extreme loss,
-  // evaluate whether the upset is within the 10-15% luck tolerance.
-  if (ratingDelta >= 14 && awayScore > homeScore) {
+  // 9. Strict Upset Protection: Superior squads with high coaching license dominate matches!
+  if (ratingDelta >= 8 && awayScore > homeScore) {
     const upsetRoll = Math.random();
-    if (upsetRoll > 0.12) { // 88% of the time, the superior team corrects to win or draw
-      if (Math.random() < 0.65) {
+    if (upsetRoll > 0.10) { // 90% of the time, the superior team corrects to win or draw
+      if (Math.random() < 0.70) {
         homeScore = awayScore + Math.floor(Math.random() * 2 + 1); // Win for strong team
       } else {
         homeScore = awayScore; // Draw
       }
     }
-  } else if (ratingDelta <= -14 && homeScore > awayScore) {
+  } else if (ratingDelta <= -8 && homeScore > awayScore) {
     const upsetRoll = Math.random();
-    if (upsetRoll > 0.12) {
-      if (Math.random() < 0.65) {
+    if (upsetRoll > 0.10) {
+      if (Math.random() < 0.70) {
         awayScore = homeScore + Math.floor(Math.random() * 2 + 1);
       } else {
         awayScore = homeScore;

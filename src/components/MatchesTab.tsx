@@ -33,6 +33,7 @@ import {
   ArrowRight,
   Sliders,
   RefreshCw,
+  RotateCcw,
   Sparkles,
   UserCheck,
   ChevronRight,
@@ -97,6 +98,7 @@ export const MatchesTab: React.FC = () => {
     scoutOpponent,
     calendarDate,
     doubleLiveMatchRevenueWithAd,
+    rematchLiveMatch,
   } = useGame();
 
   const { t, language } = useLanguage();
@@ -109,6 +111,25 @@ export const MatchesTab: React.FC = () => {
   const [showScoutingModal, setShowScoutingModal] = useState(false);
   const [isAdLoading, setIsAdLoading] = useState(false);
   const [adToast, setAdToast] = useState<{ text: string; isError: boolean } | null>(null);
+  const [isRematchLoading, setIsRematchLoading] = useState(false);
+  const [rematchToast, setRematchToast] = useState<{ text: string; isError: boolean } | null>(null);
+
+  const handleRematchWithAd = async () => {
+    if (isRematchLoading || !liveMatch || !liveMatch.isFinished) return;
+    setIsRematchLoading(true);
+    setRematchToast(null);
+    try {
+      const res = await rematchLiveMatch();
+      setRematchToast({ text: res.message, isError: !res.success });
+      if (res.success) {
+        setTimeout(() => setRematchToast(null), 5000);
+      }
+    } catch (err: any) {
+      setRematchToast({ text: err?.message || 'حدث خطأ أثناء طلب إعادة المباراة.', isError: true });
+    } finally {
+      setIsRematchLoading(false);
+    }
+  };
 
   const handleDoubleRevenueWithAd = async () => {
     if (isAdLoading || !liveMatch?.matchRevenue) return;
@@ -567,6 +588,50 @@ export const MatchesTab: React.FC = () => {
                   )}
                 </span>
               </div>
+
+              {/* Rewarded Rematch Feature (إعادة المباراة عند الهزيمة أو التعادل مقابل مشاهدة إعلان) */}
+              {!isUserWin && (
+                <div className="bg-gradient-to-r from-purple-950/80 via-slate-900 to-indigo-950/80 border-2 border-indigo-500/50 rounded-2xl p-4 shadow-xl space-y-3 text-right">
+                  <div className="flex items-center justify-between border-b border-indigo-500/30 pb-2">
+                    <div className="flex items-center gap-2">
+                      <RotateCcw className="w-5 h-5 text-indigo-400" />
+                      <h4 className="font-black text-sm text-white">فرصة ذهبية: إعادة المباراة فوراً (Rematch)</h4>
+                    </div>
+                    <span className="text-xs font-bold px-2.5 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 border border-indigo-500/40 flex items-center gap-1">
+                      <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+                      <span>مكافأة إعلان AdMob</span>
+                    </span>
+                  </div>
+
+                  <p className="text-xs text-slate-300 leading-relaxed">
+                    {isUserDraw 
+                      ? 'لم تكن راضياً عن نتيجة التعادل؟ شاهد إعلاناً واحصل على فرصة ثانية لإعادة المباراة من البداية لتحقيق الفوز واقتناص النقاط الثلاث كاملة!' 
+                      : 'خسارة غير مرضية؟ لا تقلق يا كابتن! يمكنك مشاهدة إعلان قصير لإعادة المباراة فوراً من الدقيقة صفر واللعب من جديد لتعديل النتيجة وتحقيق الفوز!'}
+                  </p>
+
+                  <div className="flex flex-col sm:flex-row items-center gap-2 pt-1">
+                    <button
+                      id="btn_rematch_match_with_ad"
+                      type="button"
+                      onClick={handleRematchWithAd}
+                      disabled={isRematchLoading || isSimulationRunning}
+                      className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-indigo-600 via-purple-600 to-pink-600 hover:from-indigo-500 hover:via-purple-500 hover:to-pink-500 text-white font-black text-xs py-3 px-4 rounded-xl shadow-lg shadow-indigo-950/70 transition-all active:scale-95 disabled:opacity-60 cursor-pointer"
+                    >
+                      <RotateCcw className={`w-4 h-4 text-white ${isRematchLoading ? 'animate-spin' : ''}`} />
+                      <span>{isRematchLoading ? 'جاري تجهيز الإعلان وإعادة المباراة...' : '🎬 شاهد إعلاناً وأعد المباراة فوراً'}</span>
+                    </button>
+                  </div>
+
+                  {rematchToast && (
+                    <div className={`p-2.5 rounded-xl text-xs font-bold flex items-center gap-2 animate-fade-in ${
+                      rematchToast.isError ? 'bg-rose-950/90 text-rose-200 border border-rose-600' : 'bg-emerald-950/90 text-emerald-200 border border-emerald-600'
+                    }`}>
+                      <AlertTriangle className="w-4 h-4 shrink-0" />
+                      <span>{rematchToast.text}</span>
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* Match Revenue & Double with Ad Card */}
               {liveMatch.matchRevenue && (

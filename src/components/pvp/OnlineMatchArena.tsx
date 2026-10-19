@@ -743,20 +743,8 @@ export const OnlineMatchArena: React.FC<OnlineMatchArenaProps> = ({
     }
   }, [host.clubName, guest.clubName, host.playerName, guest.playerName, matchState.homeScore, matchState.awayScore]);
 
-  // Safe Exit with Interstitial Ad after completed match (never double-triggers)
+  // Safe Exit after completed match
   const handleExitWithAd = () => {
-    if (matchState.status === 'finished' && !hasShownAdForMatchRef.current) {
-      hasShownAdForMatchRef.current = true;
-      try {
-        AdManager.showInterstitial(() => {
-          onExitMatch();
-        });
-      } catch (err) {
-        console.warn('[OnlineMatchArena] Interstitial ad trigger error, exiting directly:', err);
-        onExitMatch();
-      }
-      return;
-    }
     onExitMatch();
   };
 
