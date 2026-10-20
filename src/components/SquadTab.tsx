@@ -155,7 +155,7 @@ export const SquadTab: React.FC<SquadTabProps> = ({ onSelectPlayer }) => {
           </div>
           <div className="bg-slate-950/60 p-2 rounded-xl border border-slate-800">
             <span className="text-[10px] text-slate-400 block">إجمالي الرواتب</span>
-            <span className="text-sm font-black text-amber-400">{totalWage.toLocaleString()} ج.م</span>
+            <span className="text-sm font-black text-amber-400">{(totalWage || 0).toLocaleString()} ج.م</span>
           </div>
           <div className="bg-slate-950/60 p-2 rounded-xl border border-slate-800">
             <span className="text-[10px] text-slate-400 block flex items-center justify-center gap-1">
@@ -174,7 +174,7 @@ export const SquadTab: React.FC<SquadTabProps> = ({ onSelectPlayer }) => {
         <div className="pt-1 flex items-center justify-between gap-2 border-t border-slate-800/80">
           <div className="text-[11px] text-slate-400 flex items-center gap-1.5">
             <Coins className="w-4 h-4 text-amber-400 shrink-0" />
-            <span>متوسط رصيد اللاعب: <strong className="text-emerald-400 font-mono font-bold">{avgPlayerSavings.toLocaleString()} ج.م</strong></span>
+            <span>متوسط رصيد اللاعب: <strong className="text-emerald-400 font-mono font-bold">{(avgPlayerSavings || 0).toLocaleString()} ج.م</strong></span>
           </div>
           
           <button
@@ -351,11 +351,11 @@ export const SquadTab: React.FC<SquadTabProps> = ({ onSelectPlayer }) => {
                   </div>
 
                   <div className="text-[11px] font-bold text-emerald-400 mt-0.5">
-                    {(player.marketValue / 1000).toFixed(0)}k ج.م
+                    {((player.marketValue || 50000) / 1000).toFixed(0)}k ج.م
                   </div>
 
                   <div className="text-[9px] text-slate-500">
-                    {player.salary.toLocaleString()} ج.م/ش
+                    {((player.salary || 2500)).toLocaleString()} ج.م/ش
                   </div>
                 </div>
 

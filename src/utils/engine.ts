@@ -2603,6 +2603,108 @@ export function updateLeagueStandings(
   });
 }
 
+/**
+ * Robust Single Source of Truth: Reconstructs exact league standings from all played fixtures.
+ * Guarantees that points, played matches, wins, draws, losses, and goal difference are 100% accurate.
+ */
+export function recalculateStandingsFromFixtures(
+  currentStandings: LeagueStanding[],
+  teams: Club[],
+  fixtures: Fixture[]
+): LeagueStanding[] {
+  const teamMap = new Map<string, LeagueStanding>();
+
+  // 1. Initialize from active teams list
+  (teams || []).forEach(team => {
+    if (team && team.id) {
+      teamMap.set(team.id, {
+        teamId: team.id,
+        teamName: team.name,
+        played: 0,
+        won: 0,
+        drawn: 0,
+        lost: 0,
+        goalsFor: 0,
+        goalsAgainst: 0,
+        goalDifference: 0,
+        points: 0,
+        form: [],
+      });
+    }
+  });
+
+  // 2. Fallback: also ensure all clubs from currentStandings are registered
+  (currentStandings || []).forEach(s => {
+    if (s && s.teamId && !teamMap.has(s.teamId)) {
+      teamMap.set(s.teamId, {
+        teamId: s.teamId,
+        teamName: s.teamName || s.teamId,
+        played: 0,
+        won: 0,
+        drawn: 0,
+        lost: 0,
+        goalsFor: 0,
+        goalsAgainst: 0,
+        goalDifference: 0,
+        points: 0,
+        form: [],
+      });
+    }
+  });
+
+  if (teamMap.size === 0) return currentStandings;
+
+  const playedLeagueFixtures = (fixtures || []).filter(
+    f => f && (!f.competitionType || f.competitionType === 'league') && (f.isPlayed || (f as any).played) && typeof f.homeScore === 'number' && typeof f.awayScore === 'number'
+  );
+
+  playedLeagueFixtures.forEach(fix => {
+    const home = teamMap.get(fix.homeTeamId);
+    const away = teamMap.get(fix.awayTeamId);
+    const hs = fix.homeScore;
+    const as = fix.awayScore;
+
+    if (home) {
+      const isWin = hs > as;
+      const isDraw = hs === as;
+      const isLoss = hs < as;
+      home.played += 1;
+      home.won += isWin ? 1 : 0;
+      home.drawn += isDraw ? 1 : 0;
+      home.lost += isLoss ? 1 : 0;
+      home.goalsFor += hs;
+      home.goalsAgainst += as;
+      home.goalDifference = home.goalsFor - home.goalsAgainst;
+      home.points += isWin ? 3 : isDraw ? 1 : 0;
+      const prevForm = Array.isArray(home.form) ? home.form : [];
+      home.form = [...prevForm.slice(-4), isWin ? 'W' : isDraw ? 'D' : 'L'];
+    }
+
+    if (away) {
+      const isWin = as > hs;
+      const isDraw = hs === as;
+      const isLoss = as < hs;
+      away.played += 1;
+      away.won += isWin ? 1 : 0;
+      away.drawn += isDraw ? 1 : 0;
+      away.lost += isLoss ? 1 : 0;
+      away.goalsFor += as;
+      away.goalsAgainst += hs;
+      away.goalDifference = away.goalsFor - away.goalsAgainst;
+      away.points += isWin ? 3 : isDraw ? 1 : 0;
+      const prevForm = Array.isArray(away.form) ? away.form : [];
+      away.form = [...prevForm.slice(-4), isWin ? 'W' : isDraw ? 'D' : 'L'];
+    }
+  });
+
+  return Array.from(teamMap.values()).sort((a, b) => {
+    if (b.points !== a.points) return b.points - a.points;
+    if (b.goalDifference !== a.goalDifference) return b.goalDifference - a.goalDifference;
+    if (b.goalsFor !== a.goalsFor) return b.goalsFor - a.goalsFor;
+    return a.teamName.localeCompare(b.teamName, 'ar');
+  });
+}
+
 export interface MatchParticipationInfo {
   homeTeam: Club;
   awayTeam: Club;

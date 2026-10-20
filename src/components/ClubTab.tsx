@@ -218,7 +218,7 @@ export const ClubTab: React.FC = () => {
             <div className="bg-emerald-950/80 border border-emerald-700/60 px-3 py-1.5 rounded-xl text-left">
               <span className="text-[10px] text-emerald-300 block">الرصيد المالي النادي</span>
               <span className="font-black text-xs text-emerald-400 font-mono">
-                {userClub.budget.toLocaleString()} ج.م
+                {(userClub.budget || 0).toLocaleString()} ج.م
               </span>
             </div>
           </div>
@@ -230,28 +230,28 @@ export const ClubTab: React.FC = () => {
           <div className="bg-slate-950/60 p-2.5 rounded-2xl border border-slate-800">
             <span className="text-[10px] text-slate-400 block">تذاكر المباريات (تقديري)</span>
             <span className="font-black text-cyan-400 font-mono text-sm">
-              +{estimatedTicketMonthly.toLocaleString()} ج.م
+              +{(estimatedTicketMonthly || 0).toLocaleString()} ج.م
             </span>
           </div>
 
           <div className="bg-slate-950/60 p-2.5 rounded-2xl border border-slate-800">
             <span className="text-[10px] text-slate-400 block">رواتب اللاعبين الحالية</span>
             <span className="font-black text-red-400 font-mono text-sm">
-              -{totalMonthlyWages.toLocaleString()} ج.م
+              -{(totalMonthlyWages || 0).toLocaleString()} ج.م
             </span>
           </div>
 
           <div className="bg-slate-950/60 p-2.5 rounded-2xl border border-slate-800">
             <span className="text-[10px] text-slate-400 block">سقف الرواتب المتاح</span>
             <span className={`font-black font-mono text-sm ${remainingWageBudget > 0 ? 'text-amber-400' : 'text-red-400'}`}>
-              {remainingWageBudget.toLocaleString()} ج.م
+              {(remainingWageBudget || 0).toLocaleString()} ج.م
             </span>
           </div>
 
           <div className="bg-slate-950/60 p-2.5 rounded-2xl border border-slate-800">
             <span className="text-[10px] text-slate-400 block">صافي التدفق الشهري</span>
             <span className={`font-black font-mono text-sm ${netMonthlyIncome >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-              {netMonthlyIncome >= 0 ? `+${netMonthlyIncome.toLocaleString()}` : netMonthlyIncome.toLocaleString()} ج.م
+              {netMonthlyIncome >= 0 ? `+${(netMonthlyIncome || 0).toLocaleString()}` : (netMonthlyIncome || 0).toLocaleString()} ج.م
             </span>
           </div>
         </div>

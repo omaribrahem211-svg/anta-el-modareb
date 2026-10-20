@@ -105,9 +105,9 @@ export function calculatePlayerFairValue(
   recommendedMonthlyWage: number;
   valuationTier: 'low' | 'medium' | 'high' | 'world_class';
 } {
-  const ovr = player.overallRating || 60;
-  const pot = player.potentialRating || ovr;
-  const age = player.age || 25;
+  const ovr = (player && typeof player.overallRating === 'number' && !isNaN(player.overallRating)) ? player.overallRating : 60;
+  const pot = (player && typeof player.potentialRating === 'number' && !isNaN(player.potentialRating)) ? player.potentialRating : ovr;
+  const age = (player && typeof player.age === 'number' && !isNaN(player.age)) ? player.age : 25;
 
   // Base value scale exponential by rating
   let baseValue = 10000;
@@ -138,23 +138,25 @@ export function calculatePlayerFairValue(
   }
 
   // Contract duration multiplier
-  const contractYears = player.contractYears ?? 2;
+  const contractYears = (player && typeof player.contractYears === 'number' && !isNaN(player.contractYears)) ? player.contractYears : 2;
   let contractMultiplier = 1.0;
   if (contractYears === 0) contractMultiplier = 0.0; // Free agent (no transfer fee to club)
   else if (contractYears === 1) contractMultiplier = 0.8;
   else if (contractYears >= 3) contractMultiplier = 1.15;
 
   const rawFairFee = Math.max(25000, Math.round(baseValue * ageMultiplier * (contractYears === 0 ? 0.75 : contractMultiplier)));
-  const fairMarketValue = Math.max(25000, player.marketValue > 0 ? player.marketValue : rawFairFee);
+  const mv = (player && typeof player.marketValue === 'number' && !isNaN(player.marketValue) && player.marketValue > 0) ? player.marketValue : 0;
+  const fairMarketValue = Math.max(25000, mv > 0 ? mv : rawFairFee);
   
   // If player is listed for transfer, minimum acceptable fee is slightly lower
-  const discountFactor = player.isListedForTransfer ? 0.85 : 0.95;
+  const discountFactor = player?.isListedForTransfer ? 0.85 : 0.95;
   const minimumAcceptableFee = Math.max(25000, Math.round(fairMarketValue * discountFactor));
 
   // Recommended wage
   let baseSalary = Math.max(2500, Math.round(fairMarketValue * 0.008));
-  if (player.salary > 0) {
-    baseSalary = Math.max(baseSalary, player.salary);
+  const curSal = (player && typeof player.salary === 'number' && !isNaN(player.salary)) ? player.salary : 0;
+  if (curSal > 0) {
+    baseSalary = Math.max(baseSalary, curSal);
   }
 
   let valuationTier: 'low' | 'medium' | 'high' | 'world_class' = 'low';
@@ -1622,6 +1624,37 @@ export function generateTransferRumors(
 // In-memory cache for generated global clubs to ensure fast retrieval
 const globalClubsPlayerCache = new Map<string, Player[]>();
 
+export function normalizePlayerKey(name?: string): string {
+  if (!name) return '';
+  let cleaned = name.trim().toLowerCase()
+    .replace(/[أإآ]/g, 'ا')
+    .replace(/ة/g, 'ه')
+    .replace(/ى/g, 'ي')
+    .replace(/[\(\)\[\]\{\}\-_\.]/g, ' ')
+    .replace(/\s+/g, ' ');
+
+  // Strip common honorary football nicknames / titles
+  const titles = [
+    'المايسترو', 'الاسطوره', 'الاسطورة', 'النجم الاول', 'الحاوي', 'القناص', 'الساحر',
+    'الدبابه', 'الدبابة', 'السفاح', 'الصاروخ', 'الموهوب', 'البلدوزر', 'الفرعون',
+    'العقرب', 'البرنس', 'الاباتشي', 'العميد', 'الجوكر', 'الكابيتانو', 'العملاق',
+    'المقاتل', 'الفنان', 'الصخره', 'الصخرة', 'المسمار', 'الداهيه', 'الداهية',
+    'المدفعجي', 'الجناح الطائر', 'السد العالي', 'فخر العرب', 'المرعب', 'الانيق'
+  ];
+  for (const t of titles) {
+    cleaned = cleaned.replace(new RegExp(`\\b${t}\\b`, 'g'), '').trim();
+  }
+
+  // Special iconic single-token aliases in Egyptian football
+  if (cleaned.includes('زيزو')) return 'احمد سيد زيزو';
+  if (cleaned.includes('شيكابالا')) return 'محمود شيكابالا';
+  if (cleaned.includes('افشه') || cleaned.includes('قفشه')) return 'محمد مجدي افشه';
+  if (cleaned.includes('كهربا')) return 'محمود كهربا';
+  if (cleaned.includes('تريزيجيه') || cleaned.includes('تريزيجه')) return 'محمود حسن تريزيجيه';
+
+  return cleaned.replace(/\s+/g, '');
+}
+
 /**
  * Gathers all players registered across the entire game database without duplication.
  * Single Source of Truth: Integrates active universe teams, global league squads, and transfer market.
@@ -1635,15 +1668,6 @@ export function getAllDatabasePlayers(
   const seenPlayerIds = new Set<string>();
   const seenPlayerNames = new Set<string>();
   const results: MarketPlayerItem[] = [];
-
-  const normalizePlayerKey = (name?: string): string => {
-    if (!name) return '';
-    return name.trim().toLowerCase()
-      .replace(/[أإآ]/g, 'ا')
-      .replace(/ة/g, 'ه')
-      .replace(/ى/g, 'ي')
-      .replace(/[\s\-_]/g, '');
-  };
 
   // Helper to resolve human-readable league name
   const getLeagueName = (leagueId?: string, fallbackCountry?: string): string => {

@@ -475,7 +475,16 @@ class AdManagerService {
           const errCode = (err && (err.code ?? err.errorCode)) ?? 'UNKNOWN';
           const errMsg = (err && (err.message ?? err.errorMessage)) ?? (typeof err === 'object' ? JSON.stringify(err) : String(err));
           console.warn(`[ADMOB_INTERSTITIAL_FAILED] Code: ${errCode} | Message: ${errMsg}`);
-          finish(false);
+          // Fallback to official test ad unit if production ad failed to load
+          if (interstitialAdId !== TEST_AD_IDS.INTERSTITIAL_ID) {
+            console.log('[ADMOB_INTERSTITIAL] Retrying with Google test interstitial unit');
+            AdMob.prepareInterstitial({
+              adId: TEST_AD_IDS.INTERSTITIAL_ID,
+              isTesting: true,
+            }).catch(() => finish(false));
+          } else {
+            finish(false);
+          }
         });
         this.interstitialListenerHandles.push(failedHandle);
 

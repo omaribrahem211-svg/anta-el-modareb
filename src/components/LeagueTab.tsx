@@ -1,6 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useGame } from '../context/GameContext';
 import { useAuth } from '../context/AuthContext';
+import { recalculateStandingsFromFixtures } from '../utils/engine';
 import {
   Trophy,
   Award,
@@ -27,6 +28,7 @@ import { getClubDisplayName, findClubInWorld } from '../data/leaguesData';
 export const LeagueTab: React.FC = () => {
   const {
     standings,
+    fixtures,
     userClub,
     teams,
     currentRound,
@@ -82,9 +84,20 @@ export const LeagueTab: React.FC = () => {
   const topScorers = [...allPlayers].sort((a, b) => (b.stats?.goals || 0) - (a.stats?.goals || 0)).filter(p => (p.stats?.goals || 0) > 0);
   const topAssisters = [...allPlayers].sort((a, b) => (b.stats?.assists || 0) - (a.stats?.assists || 0)).filter(p => (p.stats?.assists || 0) > 0);
 
+  const effectiveStandings = useMemo(() => {
+    const isAllZero = standings.length === 0 || standings.every(s => (s.played || 0) === 0);
+    const hasPlayedFixtures = (fixtures || []).some(
+      f => f && (!f.competitionType || f.competitionType === 'league') && (f.isPlayed || (f as any).played)
+    );
+    if ((isAllZero && hasPlayedFixtures) || standings.length === 0) {
+      return recalculateStandingsFromFixtures(standings, teams, fixtures);
+    }
+    return standings;
+  }, [standings, teams, fixtures]);
+
   const promotionSpots = activeLeague.promotionSpots || 1;
   const relegationSpots = activeLeague.relegationSpots || 0;
-  const totalTeams = standings.length;
+  const totalTeams = effectiveStandings.length;
 
   return (
     <div className="space-y-4 pb-20 animate-fade-in" dir="rtl">
@@ -186,7 +199,7 @@ export const LeagueTab: React.FC = () => {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-800/60">
-                {standings.map((team, idx) => {
+                {effectiveStandings.map((team, idx) => {
                   if (!team) return null;
                   const isUser = userClub?.id ? team.teamId === userClub.id : false;
                   const isLeader = idx === 0;

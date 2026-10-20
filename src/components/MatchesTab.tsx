@@ -618,34 +618,34 @@ export const MatchesTab: React.FC = () => {
                     <div className="bg-slate-900/90 p-2.5 rounded-xl border border-slate-800">
                       <span className="text-[10px] text-slate-400 block">الحضور الجماهيري</span>
                       <span className="text-xs font-bold text-white">
-                        {liveMatch.matchRevenue.attendance.toLocaleString()} / {liveMatch.matchRevenue.stadiumCapacity.toLocaleString()}
+                        {(liveMatch.matchRevenue.attendance || 0).toLocaleString()} / {(liveMatch.matchRevenue.stadiumCapacity || 0).toLocaleString()}
                       </span>
                       <span className="text-[10px] text-emerald-400 block font-bold">
-                        نسبة الامتلاء: {liveMatch.matchRevenue.attendancePercentage}%
+                        نسبة الامتلاء: {liveMatch.matchRevenue.attendancePercentage || 0}%
                       </span>
                     </div>
 
                     <div className="bg-slate-900/90 p-2.5 rounded-xl border border-slate-800">
                       <span className="text-[10px] text-slate-400 block">سعر التذكرة</span>
                       <span className="text-xs font-black text-amber-400 font-mono">
-                        {liveMatch.matchRevenue.ticketPrice} ج.م
+                        {liveMatch.matchRevenue.ticketPrice || 0} ج.م
                       </span>
                       <span className="text-[10px] text-slate-500 block">
-                        (المعيار: {liveMatch.matchRevenue.benchmarkTicketPrice} ج.م)
+                        (المعيار: {liveMatch.matchRevenue.benchmarkTicketPrice || 0} ج.م)
                       </span>
                     </div>
 
                     <div className="bg-slate-900/90 p-2.5 rounded-xl border border-slate-800">
                       <span className="text-[10px] text-slate-400 block">إيراد بيع التذاكر</span>
                       <span className="text-xs font-black text-emerald-400 font-mono">
-                        {liveMatch.matchRevenue.ticketRevenue.toLocaleString()} ج.م
+                        {(liveMatch.matchRevenue.ticketRevenue || 0).toLocaleString()} ج.م
                       </span>
                     </div>
 
                     <div className="bg-slate-900/90 p-2.5 rounded-xl border border-slate-800">
                       <span className="text-[10px] text-slate-400 block">مكافأة الفوز / النتيجة</span>
-                      <span className={`text-xs font-black font-mono ${liveMatch.matchRevenue.resultBonus > 0 ? 'text-purple-400' : 'text-slate-500'}`}>
-                        {liveMatch.matchRevenue.resultBonus > 0 ? `+${liveMatch.matchRevenue.resultBonus.toLocaleString()} ج.م` : '0 ج.م'}
+                      <span className={`text-xs font-black font-mono ${(liveMatch.matchRevenue.resultBonus || 0) > 0 ? 'text-purple-400' : 'text-slate-500'}`}>
+                        {(liveMatch.matchRevenue.resultBonus || 0) > 0 ? `+${(liveMatch.matchRevenue.resultBonus || 0).toLocaleString()} ج.م` : '0 ج.م'}
                       </span>
                     </div>
                   </div>
@@ -654,24 +654,24 @@ export const MatchesTab: React.FC = () => {
                   <div className="bg-slate-900/60 p-2.5 rounded-xl border border-slate-800/80 space-y-1 text-[11px]">
                     <div className="flex items-center justify-between text-slate-300">
                       <span>• إيراد التذاكر:</span>
-                      <span className="font-mono text-emerald-400 font-bold">+{liveMatch.matchRevenue.ticketRevenue.toLocaleString()} ج.م</span>
+                      <span className="font-mono text-emerald-400 font-bold">+{(liveMatch.matchRevenue.ticketRevenue || 0).toLocaleString()} ج.م</span>
                     </div>
                     <div className="flex items-center justify-between text-slate-300">
                       <span>• مكافأة النتيجة ({liveMatch.matchRevenue.resultType === 'win' ? 'فوز بالمباراة 🏆' : liveMatch.matchRevenue.resultType === 'draw' ? 'تعادل 🤝' : 'هزيمة ❌'}):</span>
                       <span className="font-mono text-purple-400 font-bold">
-                        {liveMatch.matchRevenue.resultBonus > 0 ? `+${liveMatch.matchRevenue.resultBonus.toLocaleString()} ج.م` : '0 ج.م (لا يوجد مكافأة عند الهزيمة)'}
+                        {(liveMatch.matchRevenue.resultBonus || 0) > 0 ? `+${(liveMatch.matchRevenue.resultBonus || 0).toLocaleString()} ج.م` : '0 ج.م (لا يوجد مكافأة عند الهزيمة)'}
                       </span>
                     </div>
                     {liveMatch.matchRevenue.isSkippedMatch && (
                       <div className="flex items-center justify-between text-rose-300 font-bold pt-1 border-t border-slate-800">
                         <span>⚠️ خصم تخطي المباراة (نصف الإيرادات 50%):</span>
-                        <span className="font-mono text-rose-400">-{liveMatch.matchRevenue.skipPenaltyAmount?.toLocaleString()} ج.م</span>
+                        <span className="font-mono text-rose-400">-{(liveMatch.matchRevenue.skipPenaltyAmount || 0).toLocaleString()} ج.م</span>
                       </div>
                     )}
                     {liveMatch.matchRevenue.isDoubledWithAd && (
                       <div className="flex items-center justify-between text-amber-300 font-bold pt-1 border-t border-slate-800">
                         <span>🎁 مكافأة مشاهدة إعلان AdMob (مضاعفة 2X):</span>
-                        <span className="font-mono text-amber-400">+{liveMatch.matchRevenue.adDoubledBonus?.toLocaleString()} ج.م</span>
+                        <span className="font-mono text-amber-400">+{(liveMatch.matchRevenue.adDoubledBonus || 0).toLocaleString()} ج.م</span>
                       </div>
                     )}
                   </div>
@@ -681,14 +681,14 @@ export const MatchesTab: React.FC = () => {
                     <div>
                       <span className="text-[11px] text-slate-300 block font-medium">إجمالي إيراد المباراة المودع:</span>
                       <span className="text-xl font-black text-amber-300 font-mono">
-                        {liveMatch.matchRevenue.totalRevenue.toLocaleString()} ج.م
+                        {(liveMatch.matchRevenue.totalRevenue || 0).toLocaleString()} ج.م
                       </span>
                     </div>
 
                     {liveMatch.matchRevenue.isDoubledWithAd ? (
                       <div className="flex items-center gap-1.5 bg-emerald-950 border border-emerald-500/60 text-emerald-300 px-3.5 py-2 rounded-xl text-xs font-bold">
                         <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-                        <span>تمت مضاعفة الإيراد بنجاح! (+{liveMatch.matchRevenue.adDoubledBonus?.toLocaleString()} ج.م)</span>
+                        <span>تمت مضاعفة الإيراد بنجاح! (+{(liveMatch.matchRevenue.adDoubledBonus || 0).toLocaleString()} ج.م)</span>
                       </div>
                     ) : (
                       <button

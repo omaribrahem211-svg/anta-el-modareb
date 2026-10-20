@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { ActiveNegotiation, Club, Player } from '../types/game';
 import { calculatePlayerFairValue } from '../utils/transferEngine';
 import { calculateClubMonthlyIncome, calculateClubTotalMonthlyWages, validateTransferFinancials } from '../services/economyService';
@@ -49,26 +49,23 @@ export const NegotiationModal: React.FC<NegotiationModalProps> = ({
   onSubmitProposal,
   onRespondToCounter,
 }) => {
-  if (!isOpen || (!player && !existingNegotiation)) return null;
-
-  const targetPlayer = player || (existingNegotiation ? ({
+  // Always resolve targetPlayer safely
+  const targetPlayer: Player | null = player || (existingNegotiation ? ({
     id: existingNegotiation.playerId,
     name: existingNegotiation.playerName,
-    overallRating: existingNegotiation.playerOverall,
-    position: existingNegotiation.playerPosition,
-    age: existingNegotiation.playerAge,
-    marketValue: existingNegotiation.bidFee,
-    salary: existingNegotiation.offeredSalary,
+    overallRating: existingNegotiation.playerOverall || 65,
+    position: existingNegotiation.playerPosition || 'CM',
+    age: existingNegotiation.playerAge || 24,
+    marketValue: existingNegotiation.bidFee || 50000,
+    salary: existingNegotiation.offeredSalary || 5000,
   } as Player) : null);
 
-  if (!targetPlayer) return null;
-
-  const fairVal = calculatePlayerFairValue(targetPlayer, userClub || undefined);
+  const fairVal = targetPlayer ? calculatePlayerFairValue(targetPlayer, userClub || undefined) : { fairMarketValue: 50000, minimumAcceptableFee: 50000, recommendedMonthlyWage: 5000, valuationTier: 'low' as const };
   const isFreeAgent = !sellingClub && !existingNegotiation?.playerClubId;
-  const minRequiredSalary = Math.max(1000, targetPlayer.salary || 0);
+  const minRequiredSalary = Math.max(1000, targetPlayer?.salary || 0);
   const minRequiredFee = isFreeAgent ? Math.max(25000, Math.round(fairVal.fairMarketValue * 0.75)) : Math.max(25000, fairVal.fairMarketValue);
 
-  // Initial Form State
+  // Initial Form State - MUST be unconditionally called at top level (Rule of Hooks)
   const [fee, setFee] = useState<number | string>(existingNegotiation?.bidFee || minRequiredFee);
   const [salary, setSalary] = useState<number | string>(
     existingNegotiation?.offeredSalary || Math.max(minRequiredSalary, fairVal.recommendedMonthlyWage)
@@ -77,6 +74,25 @@ export const NegotiationModal: React.FC<NegotiationModalProps> = ({
   const [role, setRole] = useState<'key_player' | 'first_team' | 'rotation' | 'prospect'>(
     existingNegotiation?.squadRole || 'first_team'
   );
+
+  useEffect(() => {
+    if (existingNegotiation) {
+      setFee(existingNegotiation.bidFee || minRequiredFee);
+      setSalary(existingNegotiation.offeredSalary || Math.max(minRequiredSalary, fairVal.recommendedMonthlyWage));
+      setYears(existingNegotiation.contractYears || 3);
+      setRole(existingNegotiation.squadRole || 'first_team');
+    } else if (targetPlayer) {
+      setFee(minRequiredFee);
+      setSalary(Math.max(minRequiredSalary, fairVal.recommendedMonthlyWage));
+      setYears(3);
+      setRole('first_team');
+    }
+  }, [targetPlayer?.id, existingNegotiation?.id, minRequiredFee, minRequiredSalary, fairVal.recommendedMonthlyWage]);
+
+  // Now conditional render can safely return null without breaking React Hook order
+  if (!isOpen || (!player && !existingNegotiation) || !targetPlayer) {
+    return null;
+  }
 
   const numFee = typeof fee === 'number' ? fee : (Number(fee) || 0);
   const numSalary = typeof salary === 'number' ? salary : (Number(salary) || 0);
@@ -100,17 +116,21 @@ export const NegotiationModal: React.FC<NegotiationModalProps> = ({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (isSalaryBelowCurrent || isFeeExceedingBudget || isSalaryExceedingCap) return;
-    if (!transferValidation.allowed && !isFreeAgent) return;
+    try {
+      if (isSalaryBelowCurrent || isFeeExceedingBudget || isSalaryExceedingCap) return;
+      if (!transferValidation.allowed && !isFreeAgent) return;
 
-    onSubmitProposal({
-      playerId: targetPlayer.id,
-      transferFee: numFee,
-      monthlySalary: numSalary,
-      contractYears: years,
-      squadRole: role,
-    });
-    onClose();
+      onSubmitProposal({
+        playerId: targetPlayer.id,
+        transferFee: numFee,
+        monthlySalary: numSalary,
+        contractYears: years,
+        squadRole: role,
+      });
+      onClose();
+    } catch (err) {
+      console.error('[NegotiationModal] Submit error:', err);
+    }
   };
 
   return (
@@ -149,15 +169,15 @@ export const NegotiationModal: React.FC<NegotiationModalProps> = ({
               <div>
                 <span className="text-[10px] text-slate-400 block font-medium">ميزانية الانتقالات المتوفرة</span>
                 <span className="text-sm font-black text-emerald-400 font-mono">
-                  {userClub.budget.toLocaleString()} ج.م
+                  {(userClub.budget || 0).toLocaleString()} ج.م
                 </span>
               </div>
               <div>
                 <span className="text-[10px] text-slate-400 block font-medium">سقف الرواتب الشهري المتاح</span>
                 <span className={`text-sm font-black font-mono ${remainingWageBudget > 0 ? 'text-amber-400' : 'text-rose-400'}`}>
-                  {remainingWageBudget.toLocaleString()} ج.م/ش
+                  {(remainingWageBudget || 0).toLocaleString()} ج.م/ش
                 </span>
-                <span className="text-[9px] text-slate-500 block">من إجمالي دخل: {clubMonthlyIncome.toLocaleString()} ج.م</span>
+                <span className="text-[9px] text-slate-500 block">من إجمالي دخل: {(clubMonthlyIncome || 0).toLocaleString()} ج.م</span>
               </div>
             </div>
           )}
@@ -257,7 +277,7 @@ export const NegotiationModal: React.FC<NegotiationModalProps> = ({
                     <span>{isFreeAgent ? 'مكافأة التوقيع ورسوم الوكيل (تُخصم من ميزانيتك)' : `قيمة عرض الشراء لنادي ${sellingClub ? sellingClub.name : 'اللاعب'}`}</span>
                   </label>
                   <span className="text-[11px] text-slate-400">
-                    {isFreeAgent ? 'الحد الأدنى للتوقيع:' : 'القيمة السوقية:'} {fairVal.fairMarketValue.toLocaleString()} ج.م
+                    {isFreeAgent ? 'الحد الأدنى للتوقيع:' : 'القيمة السوقية:'} {(fairVal?.fairMarketValue || 0).toLocaleString()} ج.م
                   </span>
                 </div>
                 <input

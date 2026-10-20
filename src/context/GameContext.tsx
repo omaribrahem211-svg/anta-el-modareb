@@ -77,6 +77,7 @@ import {
 import {
   simulateMatch,
   updateLeagueStandings,
+  recalculateStandingsFromFixtures,
   createInitialLiveMatchState,
   simulateMatchStep,
   simulatePenaltyShootout,
@@ -137,6 +138,7 @@ import {
   getAllDatabasePlayers,
   resolveClubInfo,
   resolveFullPlayerObject,
+  normalizePlayerKey,
   TransferNegotiationProposal,
   NegotiationResult,
 } from '../utils/transferEngine';
@@ -1264,6 +1266,77 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           migrated.fixtures = repaired.updatedFixtures;
         }
       }
+    }
+
+    // =========================================================================
+    // SELF-HEALING 1: SQUAD DE-DUPLICATION (PREVENT DUPLICATE PLAYERS)
+    // Remove duplicate players inside clubs by ID and normalized name
+    // =========================================================================
+    if (Array.isArray(migrated.teams)) {
+      migrated.teams = migrated.teams.map((t: any) => {
+        if (!t || !Array.isArray(t.players)) return t;
+        const seenIds = new Set<string>();
+        const seenNames = new Set<string>();
+        const cleanPlayers: Player[] = [];
+        for (const p of t.players) {
+          if (!p || !p.id) continue;
+          const nKey = normalizePlayerKey(p.name);
+          if (seenIds.has(p.id) || (nKey && seenNames.has(nKey))) {
+            continue; // Skip duplicate!
+          }
+          seenIds.add(p.id);
+          if (nKey) seenNames.add(nKey);
+          cleanPlayers.push(p);
+        }
+        return { ...t, players: cleanPlayers };
+      });
+    }
+
+    // =========================================================================
+    // SELF-HEALING 2: REPAIR LEAGUE STANDINGS & PAST ROUND FIXTURES
+    // If the league is frozen (standings all 0s) or past round fixtures are unplayed,
+    // simulate past unplayed fixtures and recalculate standings accurately!
+    // =========================================================================
+    try {
+      let healedFixtures = Array.isArray(migrated.fixtures) ? [...migrated.fixtures] : [];
+      const curRound = typeof migrated.currentRound === 'number' ? migrated.currentRound : 1;
+      const leagueClubs: Club[] = (Array.isArray(migrated.teams) && migrated.teams.length > 0)
+        ? migrated.teams.map(normalizeClub)
+        : (migrated.activeLeague?.teams || []);
+
+      // 1. Simulate any unplayed past league fixtures (round < curRound)
+      let hasUnplayedPastFixtures = false;
+      healedFixtures = healedFixtures.map(f => {
+        if (f && f.round < curRound && (!f.competitionType || f.competitionType === 'league') && (!f.isPlayed || typeof f.homeScore !== 'number')) {
+          hasUnplayedPastFixtures = true;
+          const hTeam = leagueClubs.find(t => t.id === f.homeTeamId) || findClubInWorld(f.homeTeamId) || leagueClubs[0];
+          const aTeam = leagueClubs.find(t => t.id === f.awayTeamId) || findClubInWorld(f.awayTeamId) || leagueClubs[1];
+          const simRes = simulateMatch(hTeam, aTeam, hTeam?.tactics, aTeam?.tactics);
+          return {
+            ...f,
+            homeScore: simRes.homeScore,
+            awayScore: simRes.awayScore,
+            isPlayed: true,
+            stats: simRes.stats,
+            events: (simRes.events || []).filter(e => e && e.type !== 'commentary').slice(0, 10),
+          };
+        }
+        return f;
+      });
+
+      // 2. Check if standings are zeroed or desynced from fixtures
+      const currentStandingsArr = Array.isArray(migrated.standings) ? migrated.standings : [];
+      const isStandingsAllZero = currentStandingsArr.length === 0 || currentStandingsArr.every(s => (s.played || 0) === 0);
+      const shouldRecompute = hasUnplayedPastFixtures || (isStandingsAllZero && curRound > 1) || (curRound > 1 && healedFixtures.some(f => f.isPlayed));
+
+      if (shouldRecompute) {
+        console.log('[SelfHealing] Reconstructing and repairing league standings from fixtures up to round', curRound);
+        const healedStandings = recalculateStandingsFromFixtures(currentStandingsArr, leagueClubs, healedFixtures);
+        migrated.standings = healedStandings;
+        migrated.fixtures = healedFixtures;
+      }
+    } catch (healErr) {
+      console.warn('[SelfHealing] Standings integrity check warning:', healErr);
     }
 
     if (migrated.season) setSeason(migrated.season);
@@ -3217,12 +3290,17 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       updatedSeason.status = 'completed';
     }
 
+    // Robust Single Source of Truth: Reconstruct exact league standings from all played fixtures
+    try {
+      updatedStandings = recalculateStandingsFromFixtures(updatedStandings, teams, updatedFixtures);
+    } catch (stErr) {
+      console.warn('[MatchEndingFlow] Standings recalculate error:', stErr);
+    }
+
     // Commit changes immediately to React state
     console.log('[MatchEndingFlow] Committing updated states to React: fixtures, standings, manager, cup, inbox, teams, currentRound, calendarDate');
     setFixtures(updatedFixtures);
-    if (DIAGNOSTIC_CONFIG.ENABLE_STANDINGS_UPDATE) {
-      setStandings(updatedStandings);
-    }
+    setStandings(updatedStandings);
     setManager(updatedManager);
     setCupTournament(updatedCupTournament);
     setInbox(prev => [...newInboxMsgs, ...prev]);
@@ -3279,12 +3357,8 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       localStorage.setItem(`${STORAGE_KEY}_calendarDate`, JSON.stringify(updatedCalendarDate));
       localStorage.setItem(`${STORAGE_KEY}_season`, JSON.stringify(updatedSeason));
       localStorage.setItem(`${STORAGE_KEY}_fixtures`, JSON.stringify(updatedFixtures));
-      if (DIAGNOSTIC_CONFIG.ENABLE_STANDINGS_UPDATE) {
-        localStorage.setItem(`${STORAGE_KEY}_standings`, JSON.stringify(updatedStandings));
-      }
-      if (DIAGNOSTIC_CONFIG.ENABLE_PLAYER_PROCESSING) {
-        localStorage.setItem(`${STORAGE_KEY}_teams`, JSON.stringify(updatedAllTeams));
-      }
+      localStorage.setItem(`${STORAGE_KEY}_standings`, JSON.stringify(updatedStandings));
+      localStorage.setItem(`${STORAGE_KEY}_teams`, JSON.stringify(updatedAllTeams));
       localStorage.setItem(`${STORAGE_KEY}_manager`, JSON.stringify(updatedManager));
       localStorage.removeItem(`${STORAGE_KEY}_active_live_match`);
     } catch (lsErr) {
@@ -4109,6 +4183,13 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const safeDayIdx = (calendarDate?.dayIndexInSeason || 1) + 1;
     const updatedCalendarDate = addDaysToDate(currentRaw, 1, safeDayIdx);
 
+    // Robust Single Source of Truth: Reconstruct exact league standings from all played fixtures
+    try {
+      updatedStandings = recalculateStandingsFromFixtures(updatedStandings, updatedAllTeams, updatedFixtures);
+    } catch (stErr) {
+      console.warn('[instantSimulateCurrentRound] Standings recalculate error:', stErr);
+    }
+
     // Commit changes immediately to React state
     setFixtures(updatedFixtures);
     setStandings(updatedStandings);
@@ -4210,16 +4291,40 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         const currentRaw = calendarDate?.rawDateStr || getInitialSeasonDate(season?.seasonNumber || 1).rawDateStr;
         const safeDayIdx = (calendarDate?.dayIndexInSeason || 1) + 1;
         const fallbackCalendar = addDaysToDate(currentRaw, 1, safeDayIdx);
-        const fallbackSeason = { ...season, currentRound: fallbackNextRound };
+        const fallbackSeason = { ...season, currentRound: fallbackNextRound, status: fallbackNextRound > totalRounds ? ('completed' as const) : season.status };
+
+        // Guarantee this round's fixtures are marked as played so league doesn't freeze
+        let fallbackFixtures = (fixtures || []).map(f => {
+          if (f && f.round === currentRound && !f.isPlayed) {
+            const hTeam = teams.find(t => t.id === f.homeTeamId) || teams[0];
+            const aTeam = teams.find(t => t.id === f.awayTeamId) || teams[1];
+            const res = simulateMatch(hTeam, aTeam);
+            return {
+              ...f,
+              homeScore: res.homeScore,
+              awayScore: res.awayScore,
+              isPlayed: true,
+              stats: res.stats,
+              events: (res.events || []).filter(e => e && e.type !== 'commentary').slice(0, 5),
+            };
+          }
+          return f;
+        });
+
+        const fallbackStandings = recalculateStandingsFromFixtures(standings, teams, fallbackFixtures);
 
         setCurrentRound(fallbackNextRound);
         setCalendarDate(fallbackCalendar);
         setSeason(fallbackSeason);
+        setFixtures(fallbackFixtures);
+        setStandings(fallbackStandings);
         setLiveMatch(null);
 
         localStorage.setItem(`${STORAGE_KEY}_currentRound`, JSON.stringify(fallbackNextRound));
         localStorage.setItem(`${STORAGE_KEY}_calendarDate`, JSON.stringify(fallbackCalendar));
         localStorage.setItem(`${STORAGE_KEY}_season`, JSON.stringify(fallbackSeason));
+        localStorage.setItem(`${STORAGE_KEY}_fixtures`, JSON.stringify(fallbackFixtures));
+        localStorage.setItem(`${STORAGE_KEY}_standings`, JSON.stringify(fallbackStandings));
         localStorage.removeItem(`${STORAGE_KEY}_active_live_match`);
       } catch (recoveryErr) {
         console.error('[MatchEndingFlow] Emergency recovery notice:', recoveryErr);
@@ -6532,8 +6637,9 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
             calculatedNextTeams = calculatedNextTeams.map(t => {
               if (!t) return t;
+              const normTargetName = normalizePlayerKey(targetPlayer.name);
               if (t.isUserClub || t.id === userClub.id) {
-                const filtered = (t.players || []).filter(p => p && p.id !== targetPlayer.id);
+                const filtered = (t.players || []).filter(p => p && p.id !== targetPlayer.id && (normTargetName ? normalizePlayerKey(p.name) !== normTargetName : true));
                 return {
                   ...t,
                   budget: Math.max(0, (t.budget || 0) - safeFee),
@@ -6544,13 +6650,13 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                 return {
                   ...t,
                   budget: (t.budget || 0) + safeFee,
-                  players: (t.players || []).filter(p => p && p.id !== targetPlayer.id),
+                  players: (t.players || []).filter(p => p && p.id !== targetPlayer.id && (normTargetName ? normalizePlayerKey(p.name) !== normTargetName : true)),
                 };
               }
-              if (t.players && t.players.some(p => p && p.id === targetPlayer.id)) {
+              if (t.players && t.players.some(p => p && (p.id === targetPlayer.id || (normTargetName && normalizePlayerKey(p.name) === normTargetName)))) {
                 return {
                   ...t,
-                  players: t.players.filter(p => p && p.id !== targetPlayer.id),
+                  players: t.players.filter(p => p && p.id !== targetPlayer.id && (normTargetName ? normalizePlayerKey(p.name) !== normTargetName : true)),
                 };
               }
               return t;
@@ -6566,8 +6672,9 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           if (targetPlayer && deal) {
             const safeFee = deal.bidFee || 0;
             const safeSalary = deal.offeredSalary || targetPlayer.salary || 10000;
-            // Remove from market
-            setTransferMarket(prev => (prev || []).filter(p => p && p.id !== targetPlayer.id));
+            const normDealName = normalizePlayerKey(deal.playerName || targetPlayer.name);
+            // Remove from market by both ID and normalized name
+            setTransferMarket(prev => (prev || []).filter(p => p && p.id !== targetPlayer.id && (normDealName ? normalizePlayerKey(p.name) !== normDealName : true)));
 
             // Log to transfer history
             const historyEntry: TransferHistoryEntry = {
@@ -6777,91 +6884,99 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     contractYears: number;
     squadRole: 'key_player' | 'first_team' | 'rotation' | 'prospect';
   }): { success: boolean; message: string } => {
-    if (!userClub) return { success: false, message: 'أنت غير مرتبط بنادٍ حالياً.' };
+    try {
+      if (!userClub) return { success: false, message: 'أنت غير مرتبط بنادٍ حالياً.' };
 
-    let targetPlayer: Player | undefined = transferMarket.find(p => p.id === proposal.playerId) ||
-      teams.flatMap(t => Array.isArray(t.players) ? t.players : []).find(p => p.id === proposal.playerId);
+      let targetPlayer: Player | undefined = transferMarket.find(p => p.id === proposal.playerId) ||
+        teams.flatMap(t => Array.isArray(t.players) ? t.players : []).find(p => p.id === proposal.playerId);
 
-    if (!targetPlayer) {
-      const allDb = getAllDatabasePlayers(teams, transferMarket, activeNegotiations, userClub?.id);
-      const foundItem = allDb.find(i => i.player.id === proposal.playerId);
-      if (foundItem) {
-        targetPlayer = foundItem.player;
+      if (!targetPlayer) {
+        const allDb = getAllDatabasePlayers(teams, transferMarket, activeNegotiations, userClub?.id);
+        const foundItem = allDb.find(i => i.player.id === proposal.playerId);
+        if (foundItem) {
+          targetPlayer = foundItem.player;
+        }
       }
-    }
 
-    if (!targetPlayer) {
-      return { success: false, message: 'اللاعب غير موجود في قاعدة البيانات.' };
-    }
+      if (!targetPlayer) {
+        return { success: false, message: 'اللاعب غير موجود في قاعدة البيانات.' };
+      }
 
-    // Check if already in active negotiations
-    if (activeNegotiations.some(n => n.playerId === proposal.playerId && n.stage !== 'completed' && n.stage !== 'rejected')) {
-      return { success: false, message: 'توجد مفاوضات جارية بالفعل مع هذا اللاعب.' };
-    }
+      // Check if already in active negotiations
+      if (activeNegotiations.some(n => n.playerId === proposal.playerId && n.stage !== 'completed' && n.stage !== 'rejected')) {
+        return { success: false, message: 'توجد مفاوضات جارية بالفعل مع هذا اللاعب.' };
+      }
 
-    const sellingClub = teams.find(t => (t.players || []).some(p => p.id === proposal.playerId) && !t.isUserClub);
-    const resolvedClub = resolveClubInfo(
-      targetPlayer.currentClubId || sellingClub?.id,
-      (targetPlayer as any).currentClubName || sellingClub?.name,
-      teams
-    );
-    const isFreeAgent = !targetPlayer.currentClubId && !sellingClub && resolvedClub.clubName.includes('وكيل حر');
-    const displaySellingClubName = resolvedClub.clubName;
+      const sellingClub = teams.find(t => (t.players || []).some(p => p.id === proposal.playerId) && !t.isUserClub);
+      const resolvedClub = resolveClubInfo(
+        targetPlayer.currentClubId || sellingClub?.id,
+        (targetPlayer as any).currentClubName || sellingClub?.name,
+        teams
+      );
+      const isFreeAgent = !targetPlayer.currentClubId && !sellingClub && resolvedClub.clubName.includes('وكيل حر');
+      const displaySellingClubName = resolvedClub.clubName;
 
-    if (!isFreeAgent && proposal.transferFee > userClub.budget) {
-      return { success: false, message: `قيمة عرض الشراء المطلوب (${proposal.transferFee.toLocaleString()} ج.م) تتجاوز ميزانية النادي المتاحة (${userClub.budget.toLocaleString()} ج.م). يجب توفير سعر اللاعب أولاً!` };
-    }
+      if (!isFreeAgent && proposal.transferFee > userClub.budget) {
+        return { success: false, message: `قيمة عرض الشراء المطلوب (${proposal.transferFee.toLocaleString()} ج.م) تتجاوز ميزانية النادي المتاحة (${userClub.budget.toLocaleString()} ج.م). يجب توفير سعر اللاعب أولاً!` };
+      }
 
-    const currentWages = calculateClubTotalMonthlyWages(userClub);
-    const monthlyIncome = calculateClubMonthlyIncome(userClub);
-    if (currentWages + proposal.monthlySalary > monthlyIncome) {
-      const remainingWageBudget = Math.max(0, monthlyIncome - currentWages);
-      return {
-        success: false,
-        message: `لا يمكن تقديم العرض! الراتب المقترح (${proposal.monthlySalary.toLocaleString()} ج.م) سيتسبب في تجاوز إجمالي رواتب الفريق لسقف دخل النادي الشهري (${monthlyIncome.toLocaleString()} ج.م). إجمالي الرواتب الحالي: ${currentWages.toLocaleString()} ج.م، والمتبقي لسقف الرواتب هو ${remainingWageBudget.toLocaleString()} ج.م فقط!`,
+      const currentWages = calculateClubTotalMonthlyWages(userClub);
+      const monthlyIncome = calculateClubMonthlyIncome(userClub);
+      if (currentWages + proposal.monthlySalary > monthlyIncome) {
+        const remainingWageBudget = Math.max(0, monthlyIncome - currentWages);
+        return {
+          success: false,
+          message: `لا يمكن تقديم العرض! الراتب المقترح (${proposal.monthlySalary.toLocaleString()} ج.م) سيتسبب في تجاوز إجمالي رواتب الفريق لسقف دخل النادي الشهري (${monthlyIncome.toLocaleString()} ج.م). إجمالي الرواتب الحالي: ${currentWages.toLocaleString()} ج.م، والمتبقي لسقف الرواتب هو ${remainingWageBudget.toLocaleString()} ج.م فقط!`,
+        };
+      }
+
+      const safeRawDate = calendarDate?.rawDateStr || new Date().toISOString().slice(0, 10);
+      const safeDateArabic = calendarDate?.formattedArabic || 'اليوم';
+
+      const newNegotiation: ActiveNegotiation = {
+        id: `neg_${Date.now()}_${targetPlayer.id}`,
+        type: 'buy',
+        playerId: targetPlayer.id,
+        playerName: targetPlayer.name,
+        playerOverall: targetPlayer.overallRating || 70,
+        playerPosition: targetPlayer.position || 'CM',
+        playerAge: targetPlayer.age || 25,
+        playerClubId: targetPlayer.currentClubId || sellingClub?.id || resolvedClub.leagueId,
+        playerClubName: displaySellingClubName,
+        sellingClubName: displaySellingClubName,
+        buyerClubId: userClub.id,
+        buyerClubName: userClub.name,
+        bidFee: proposal.transferFee,
+        offeredSalary: proposal.monthlySalary,
+        contractYears: proposal.contractYears || 3,
+        squadRole: proposal.squadRole || 'first_team',
+        stage: isFreeAgent ? 'player_terms' : 'club_review',
+        daysRemainingInStage: isFreeAgent ? 1 : 2,
+        statusMessage: isFreeAgent
+          ? 'تم تقديم شروط العقد الشخصي للاعب، في انتظار رد وكيل أعماله.'
+          : `تم إرسال عرض الشراء الرسمي إلى إدارة ${displaySellingClubName}، في انتظار مراجعتهم.`,
+        actionRequired: false,
+        history: [
+          {
+            dateStr: safeRawDate,
+            message: `[${safeDateArabic}] بدء المفاوضات وتقديم العرض المبدئي.`,
+            from: 'manager',
+          },
+        ],
       };
+
+      setActiveNegotiations(prev => [newNegotiation, ...prev]);
+
+      return {
+        success: true,
+        message: isFreeAgent
+          ? `تم تقديم العقد للاعب ${targetPlayer.name}. سيصلك الرد خلال الأيام القادمة عبر تقدم التقويم.`
+          : `تم إرسال عرض الشراء لنادي ${displaySellingClubName}. تابع تقدم الردود يومياً.`,
+      };
+    } catch (err: any) {
+      console.error('[startPlayerNegotiation] Exception caught:', err);
+      return { success: false, message: err?.message || 'حدث خطأ أثناء بدء المفاوضات.' };
     }
-
-    const newNegotiation: ActiveNegotiation = {
-      id: `neg_${Date.now()}_${targetPlayer.id}`,
-      type: 'buy',
-      playerId: targetPlayer.id,
-      playerName: targetPlayer.name,
-      playerOverall: targetPlayer.overallRating,
-      playerPosition: targetPlayer.position,
-      playerAge: targetPlayer.age,
-      playerClubId: targetPlayer.currentClubId || sellingClub?.id || resolvedClub.leagueId,
-      playerClubName: displaySellingClubName,
-      sellingClubName: displaySellingClubName,
-      buyerClubId: userClub.id,
-      buyerClubName: userClub.name,
-      bidFee: proposal.transferFee,
-      offeredSalary: proposal.monthlySalary,
-      contractYears: proposal.contractYears,
-      squadRole: proposal.squadRole,
-      stage: isFreeAgent ? 'player_terms' : 'club_review',
-      daysRemainingInStage: isFreeAgent ? 1 : 2,
-      statusMessage: isFreeAgent
-        ? 'تم تقديم شروط العقد الشخصي للاعب، في انتظار رد وكيل أعماله.'
-        : `تم إرسال عرض الشراء الرسمي إلى إدارة ${displaySellingClubName}، في انتظار مراجعتهم.`,
-      actionRequired: false,
-      history: [
-        {
-          dateStr: calendarDate.rawDateStr,
-          message: `[${calendarDate.formattedArabic}] بدء المفاوضات وتقديم العرض المبدئي.`,
-          from: 'manager',
-        },
-      ],
-    };
-
-    setActiveNegotiations(prev => [newNegotiation, ...prev]);
-
-    return {
-      success: true,
-      message: isFreeAgent
-        ? `تم تقديم العقد للاعب ${targetPlayer.name}. سيصلك الرد خلال الأيام القادمة عبر تقدم التقويم.`
-        : `تم إرسال عرض الشراء لنادي ${displaySellingClubName}. تابع تقدم الردود يومياً.`,
-    };
   };
 
   // Respond to Counter-Offers in Negotiations
@@ -6947,10 +7062,11 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       };
 
       // Add to userClub squad & deduct transfer fee
+      const normSignedName = normalizePlayerKey(signedPlayer.name);
       setTeams(prevTeams => (Array.isArray(prevTeams) ? prevTeams : []).map(t => {
         if (!t) return t;
         if (t.isUserClub || t.id === userClub.id) {
-          const filtered = (t.players || []).filter(p => p && p.id && p.id !== neg.playerId);
+          const filtered = (t.players || []).filter(p => p && p.id && p.id !== neg.playerId && (normSignedName ? normalizePlayerKey(p.name) !== normSignedName : true));
           return {
             ...t,
             budget: Math.max(0, (t.budget || 0) - neg.bidFee),
@@ -6961,20 +7077,20 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           return {
             ...t,
             budget: (t.budget || 0) + neg.bidFee,
-            players: (t.players || []).filter(p => p && p.id && p.id !== neg.playerId),
+            players: (t.players || []).filter(p => p && p.id && p.id !== neg.playerId && (normSignedName ? normalizePlayerKey(p.name) !== normSignedName : true)),
           };
         }
-        if (t.players && t.players.some(p => p && p.id === neg.playerId)) {
+        if (t.players && t.players.some(p => p && (p.id === neg.playerId || (normSignedName && normalizePlayerKey(p.name) === normSignedName)))) {
           return {
             ...t,
-            players: (t.players || []).filter(p => p && p.id && p.id !== neg.playerId),
+            players: (t.players || []).filter(p => p && p.id && p.id !== neg.playerId && (normSignedName ? normalizePlayerKey(p.name) !== normSignedName : true)),
           };
         }
         return t;
       }));
 
-      // Remove from market
-      setTransferMarket(prev => (Array.isArray(prev) ? prev : []).filter(p => p && p.id && p.id !== neg.playerId));
+      // Remove from market by both ID and normalized name
+      setTransferMarket(prev => (Array.isArray(prev) ? prev : []).filter(p => p && p.id && p.id !== neg.playerId && (normSignedName ? normalizePlayerKey(p.name) !== normSignedName : true)));
 
       // Transfer history entry
       const historyEntry: TransferHistoryEntry = {

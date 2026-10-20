@@ -274,7 +274,7 @@ export const DailyLoginRewardModal: React.FC<DailyLoginRewardModalProps> = ({
                     {item.clubFunds > 0 && (
                       <div className="flex items-center gap-1.5 text-xs font-bold text-emerald-300">
                         <Wallet className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                        <span>+{item.clubFunds.toLocaleString()} ج.م</span>
+                        <span>+{((item.clubFunds || 0)).toLocaleString()} ج.م</span>
                       </div>
                     )}
                     {item.developmentPoints > 0 && (

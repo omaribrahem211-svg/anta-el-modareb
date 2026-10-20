@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { useGame } from '../context/GameContext';
 import { ActiveNegotiation, Player, PositionCategory } from '../types/game';
 import { NegotiationModal } from './NegotiationModal';
@@ -9,6 +9,7 @@ import {
   TransferRumor,
   resolveClubInfo,
   calculateAskingPrice,
+  normalizePlayerKey,
 } from '../utils/transferEngine';
 import { canPlayerJoinClub, calculateClubMonthlyIncome, calculateClubTotalMonthlyWages, validateTransferFinancials } from '../services/economyService';
 import { GLOBAL_LEAGUES } from '../data/leaguesData';
@@ -80,6 +81,20 @@ export const TransfersTab: React.FC<TransfersTabProps> = ({ onSelectPlayer }) =>
   const [negotiatingPlayer, setNegotiatingPlayer] = useState<Player | null>(null);
   const [selectedNegotiation, setSelectedNegotiation] = useState<ActiveNegotiation | null>(null);
   const [isNegotiationModalOpen, setIsNegotiationModalOpen] = useState(false);
+
+  // Global listener to open negotiations from any screen (e.g. PlayerModal)
+  useEffect(() => {
+    const handleOpenNeg = (e: any) => {
+      if (e.detail?.player) {
+        setNegotiatingPlayer(e.detail.player);
+        setSelectedNegotiation(null);
+        setIsNegotiationModalOpen(true);
+        setActiveTabMode('buy');
+      }
+    };
+    window.addEventListener('open-player-negotiation', handleOpenNeg);
+    return () => window.removeEventListener('open-player-negotiation', handleOpenNeg);
+  }, []);
 
   // ----------------------------------------------------
   // ADVANCED FILTER & SEARCH STATE
@@ -156,9 +171,14 @@ export const TransfersTab: React.FC<TransfersTabProps> = ({ onSelectPlayer }) =>
       const p = item.player;
       if (!p) return false;
 
-      // Never show user's own players in the buy market
+      // Never show user's own players in the buy market (strict de-duplication by ID and normalized name)
       if (userClub?.id) {
-        if (item.isUserClubPlayer || item.club?.id === userClub.id || (userClub.players || []).some(myP => myP && p && myP.id === p.id)) {
+        const normPName = normalizePlayerKey(p.name);
+        if (
+          item.isUserClubPlayer || 
+          item.club?.id === userClub.id || 
+          (userClub.players || []).some(myP => myP && (myP.id === p.id || (normPName && normalizePlayerKey(myP.name) === normPName)))
+        ) {
           return false;
         }
       }
@@ -793,10 +813,10 @@ export const TransfersTab: React.FC<TransfersTabProps> = ({ onSelectPlayer }) =>
                       {/* Market Value & Salary */}
                       <div className="text-left shrink-0">
                         <span className="text-xs font-bold text-emerald-400 font-mono block">
-                          {player.marketValue > 0 ? `${player.marketValue.toLocaleString()} ج.م` : 'انتقال حر (مجاني)'}
+                          {(player.marketValue || 0) > 0 ? `${(player.marketValue || 0).toLocaleString()} ج.م` : 'انتقال حر (مجاني)'}
                         </span>
                         <span className="text-[10px] text-slate-400 block font-mono">
-                          راتب: {player.salary.toLocaleString()} ج.م/ش
+                          راتب: {(player.salary || 2500).toLocaleString()} ج.م/ش
                         </span>
                         <span className={`inline-block text-[9px] px-2 py-0.5 rounded mt-1 font-bold border ${item.statusColor}`}>
                           {item.statusLabel}
@@ -847,7 +867,7 @@ export const TransfersTab: React.FC<TransfersTabProps> = ({ onSelectPlayer }) =>
                             className="bg-cyan-950 hover:bg-cyan-900 text-cyan-300 border border-cyan-700 font-bold text-xs py-2.5 rounded-xl flex items-center justify-center gap-1.5 transition-all active:scale-95"
                           >
                             <Briefcase className="w-3.5 h-3.5" />
-                            <span>تفاوض رسمي</span>
+                            <span>تفاصيل وتفاوض</span>
                           </button>
 
                           {(() => {
@@ -864,8 +884,8 @@ export const TransfersTab: React.FC<TransfersTabProps> = ({ onSelectPlayer }) =>
                                 disabled={!canDirectBuy}
                                 title={
                                   !userClub ? 'يجب تولي تدريب نادٍ' :
-                                  !isAffordableFee ? `الميزانية غير كافية (${clubBudget.toLocaleString()} / ${effectiveAskingPrice.toLocaleString()} ج.م)` :
-                                  !isAffordableWage ? `الراتب (${effectiveSalary.toLocaleString()} ج.م) يتجاوز سقف دخل النادي` :
+                                  !isAffordableFee ? `الميزانية غير كافية (${clubBudget.toLocaleString()} / ${(effectiveAskingPrice || 0).toLocaleString()} ج.م)` :
+                                  !isAffordableWage ? `الراتب (${(effectiveSalary || 0).toLocaleString()} ج.م) يتجاوز سقف دخل النادي` :
                                   'شراء مباشر'
                                 }
                                 className="bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 disabled:opacity-40 disabled:cursor-not-allowed text-white font-bold text-xs py-2.5 rounded-xl shadow-md transition-all active:scale-95 flex items-center justify-center gap-1"
@@ -1090,11 +1110,11 @@ export const TransfersTab: React.FC<TransfersTabProps> = ({ onSelectPlayer }) =>
                         <p className="text-xs text-slate-400 mt-1">
                           {isSell ? (
                             <>
-                              النادي المشتري: <strong className="text-emerald-400 font-bold">{buyerClubDisplay}</strong> {buyerClubObj && <span className="text-[10px] text-slate-500 font-mono">(الميزانية: {buyerClubObj.budget.toLocaleString()} ج.م)</span>} | قيمة العرض: <strong className="text-emerald-400 font-mono font-bold">{neg.bidFee.toLocaleString()} ج.م</strong>
+                              النادي المشتري: <strong className="text-emerald-400 font-bold">{buyerClubDisplay}</strong> {buyerClubObj && <span className="text-[10px] text-slate-500 font-mono">(الميزانية: {(buyerClubObj.budget || 0).toLocaleString()} ج.م)</span>} | قيمة العرض: <strong className="text-emerald-400 font-mono font-bold">{(neg.bidFee || 0).toLocaleString()} ج.م</strong>
                             </>
                           ) : (
                             <>
-                              النادي البائع: <strong className="text-slate-200 font-bold">{safeSellingClub}</strong> | العرض المقدم: <strong className="text-emerald-400 font-mono">{neg.bidFee.toLocaleString()} ج.م</strong> | راتب: <strong className="text-slate-200 font-mono">{neg.offeredSalary.toLocaleString()} ج.م/ش</strong>
+                              النادي البائع: <strong className="text-slate-200 font-bold">{safeSellingClub}</strong> | العرض المقدم: <strong className="text-emerald-400 font-mono">{(neg.bidFee || 0).toLocaleString()} ج.م</strong> | راتب: <strong className="text-slate-200 font-mono">{(neg.offeredSalary || 0).toLocaleString()} ج.م/ش</strong>
                             </>
                           )}
                         </p>
@@ -1133,11 +1153,11 @@ export const TransfersTab: React.FC<TransfersTabProps> = ({ onSelectPlayer }) =>
                       <div className="p-3 bg-slate-950 border border-amber-500/50 rounded-xl space-y-2.5 animate-fade-in">
                         <div className="flex items-center justify-between text-xs">
                           <span className="text-amber-300 font-bold">تحديد المقابل المالي المطلوب (عرض مقابل وحيد):</span>
-                          <span className="text-slate-400 font-mono">العرض الحالي: {neg.bidFee.toLocaleString()} ج.م</span>
+                          <span className="text-slate-400 font-mono">العرض الحالي: {(neg.bidFee || 0).toLocaleString()} ج.م</span>
                         </div>
                         {buyerClubObj && (
                           <div className="text-[11px] text-slate-400 flex items-center justify-between bg-slate-900/80 p-2 rounded-lg border border-slate-800 flex-wrap gap-1">
-                            <span>ميزانية {buyerClubObj.name} المتاحة: <strong className="text-emerald-400 font-mono">{buyerClubObj.budget.toLocaleString()} ج.م</strong></span>
+                            <span>ميزانية {buyerClubObj.name} المتاحة: <strong className="text-emerald-400 font-mono">{(buyerClubObj.budget || 0).toLocaleString()} ج.م</strong></span>
                             <span className="text-rose-400">⚠️ طلب مبلغ أعلى من ميزانية النادي سيؤدي لانسحاب النادي فوراً</span>
                           </div>
                         )}
@@ -1195,14 +1215,14 @@ export const TransfersTab: React.FC<TransfersTabProps> = ({ onSelectPlayer }) =>
                                 className="flex-1 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-xs py-2 px-3 rounded-xl transition-all shadow-md active:scale-95 flex items-center justify-center gap-1.5"
                               >
                                 <Check className="w-4 h-4" />
-                                <span>قبول البيع ({neg.bidFee.toLocaleString()} ج.م) وإتمام الصفقة 💰</span>
+                                <span>قبول البيع ({((neg.bidFee || 0)).toLocaleString()} ج.م) وإتمام الصفقة 💰</span>
                               </button>
 
                               {!neg.managerHasCountered && (
                                 <button
                                   onClick={() => {
                                     setCounteringNegId(neg.id);
-                                    setCounterPriceInput(Math.round(neg.bidFee * 1.15));
+                                    setCounterPriceInput(Math.round((neg.bidFee || 50000) * 1.15));
                                   }}
                                   className="bg-amber-600/20 hover:bg-amber-600/30 border border-amber-500/60 text-amber-300 font-bold text-xs py-2 px-3 rounded-xl transition-all"
                                 >
@@ -1226,7 +1246,7 @@ export const TransfersTab: React.FC<TransfersTabProps> = ({ onSelectPlayer }) =>
                           {neg.stage === 'club_counter' && (
                             <>
                               <span className="text-xs text-amber-300 flex-1 font-bold">
-                                تم طلب مبلغ ({neg.demandedFee?.toLocaleString()} ج.م) • سيصل رد {buyerClubDisplay} مع تقدم الأيام.
+                                تم طلب مبلغ ({(neg.demandedFee || 0).toLocaleString()} ج.م) • سيصل رد {buyerClubDisplay} مع تقدم الأيام.
                               </span>
                               <button
                                 onClick={() => {
@@ -1268,7 +1288,7 @@ export const TransfersTab: React.FC<TransfersTabProps> = ({ onSelectPlayer }) =>
                               }}
                               className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs px-3 py-2 rounded-xl transition-all"
                             >
-                              قبول راتب اللاعب ({neg.demandedSalary.toLocaleString()} ج.م)
+                              قبول راتب اللاعب ({(neg.demandedSalary || 0).toLocaleString()} ج.م)
                             </button>
                           )}
 
@@ -1281,7 +1301,7 @@ export const TransfersTab: React.FC<TransfersTabProps> = ({ onSelectPlayer }) =>
                               }}
                               className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs px-3 py-2 rounded-xl transition-all"
                             >
-                              قبول طلب النادي ({neg.demandedFee.toLocaleString()} ج.م)
+                              قبول طلب النادي ({(neg.demandedFee || 0).toLocaleString()} ج.م)
                             </button>
                           )}
 
@@ -1356,18 +1376,18 @@ export const TransfersTab: React.FC<TransfersTabProps> = ({ onSelectPlayer }) =>
                           )}
                         </div>
                         <div className="text-[11px] text-slate-400 mt-0.5">
-                          {player.position} • {player.age} سنة • القيمة السوقية: <strong className="text-slate-200 font-mono">{player.marketValue.toLocaleString()} ج.م</strong> • راتب {player.salary.toLocaleString()} ج.م/ش
+                          {player.position} • {player.age} سنة • القيمة السوقية: <strong className="text-slate-200 font-mono">{((player.marketValue || 0)).toLocaleString()} ج.م</strong> • راتب {((player.salary || 2500)).toLocaleString()} ج.م/ش
                         </div>
 
                         {incomingBid && (
                           <div className="text-[11px] text-emerald-400 mt-1 flex items-center gap-1 font-bold">
-                            <span>🔥 عرض شراء رسمي من ({incomingBid.toClubName}) بمبلغ {incomingBid.bidAmount.toLocaleString()} ج.م</span>
+                            <span>🔥 عرض شراء رسمي من ({incomingBid.toClubName}) بمبلغ {((incomingBid.bidAmount || 0)).toLocaleString()} ج.م</span>
                           </div>
                         )}
 
                         {activeSellNeg && !incomingBid && (
                           <div className="text-[11px] text-emerald-400 mt-1 flex items-center gap-1 font-bold">
-                            <span>🔥 عرض مفاوضات من ({activeSellNeg.buyerClubName}) بمبلغ {activeSellNeg.bidFee.toLocaleString()} ج.م</span>
+                            <span>🔥 عرض مفاوضات من ({activeSellNeg.buyerClubName}) بمبلغ {((activeSellNeg.bidFee || 0)).toLocaleString()} ج.م</span>
                           </div>
                         )}
                       </div>
@@ -1385,7 +1405,7 @@ export const TransfersTab: React.FC<TransfersTabProps> = ({ onSelectPlayer }) =>
                             className="bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-2 rounded-xl text-xs font-bold flex items-center gap-1 transition-all active:scale-95 shadow cursor-pointer"
                           >
                             <Check className="w-3.5 h-3.5" />
-                            <span>قبول البيع ({incomingBid.bidAmount.toLocaleString()} ج.م)</span>
+                            <span>قبول البيع ({((incomingBid.bidAmount || 0)).toLocaleString()} ج.م)</span>
                           </button>
 
                           <button
@@ -1410,7 +1430,7 @@ export const TransfersTab: React.FC<TransfersTabProps> = ({ onSelectPlayer }) =>
                             className="bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-2 rounded-xl text-xs font-bold flex items-center gap-1 transition-all active:scale-95 shadow cursor-pointer"
                           >
                             <Check className="w-3.5 h-3.5" />
-                            <span>قبول بيع ({activeSellNeg.bidFee.toLocaleString()} ج.م)</span>
+                            <span>قبول بيع ({((activeSellNeg.bidFee || 0)).toLocaleString()} ج.م)</span>
                           </button>
 
                           <button
@@ -1443,7 +1463,7 @@ export const TransfersTab: React.FC<TransfersTabProps> = ({ onSelectPlayer }) =>
                         className="bg-red-950/60 hover:bg-red-900/80 border border-red-800 text-red-300 px-2.5 py-2 rounded-xl text-xs font-bold flex items-center gap-1 transition-all active:scale-95 cursor-pointer"
                       >
                         <DollarSign className="w-3.5 h-3.5 text-red-400" />
-                        <span>بيع فوري ({salePrice.toLocaleString()} ج.م)</span>
+                        <span>بيع فوري ({((salePrice || 0)).toLocaleString()} ج.م)</span>
                       </button>
                     </div>
                   </div>
@@ -1455,30 +1475,48 @@ export const TransfersTab: React.FC<TransfersTabProps> = ({ onSelectPlayer }) =>
       )}
 
       {/* Interactive Negotiation Modal */}
-      <NegotiationModal
-        player={negotiatingPlayer}
-        userClub={userClub}
-        existingNegotiation={selectedNegotiation}
-        isOpen={isNegotiationModalOpen}
-        onClose={() => {
-          setIsNegotiationModalOpen(false);
-          setNegotiatingPlayer(null);
-          setSelectedNegotiation(null);
-        }}
-        onSubmitProposal={(proposal) => {
-          const res = startPlayerNegotiation(proposal);
-          setNotification({ text: res.message, type: res.success ? 'success' : 'error' });
-          setTimeout(() => setNotification(null), 3500);
-          setIsNegotiationModalOpen(false);
-          setActiveTabMode('negotiations');
-        }}
-        onRespondToCounter={(negId, action, extraVal) => {
-          const res = respondToNegotiationOffer(negId, action, extraVal);
-          setNotification({ text: res.message, type: res.success ? 'success' : 'error' });
-          setTimeout(() => setNotification(null), 3500);
-          setIsNegotiationModalOpen(false);
-        }}
-      />
+      {(() => {
+        const negotiatingSellingClub = negotiatingPlayer ? (allDbPlayers.find(i => i.player && i.player.id === negotiatingPlayer.id)?.club || teams.find(t => (t.players || []).some(p => p && p.id === negotiatingPlayer.id)) || null) : null;
+        return (
+          <NegotiationModal
+            player={negotiatingPlayer}
+            sellingClub={negotiatingSellingClub}
+            userClub={userClub}
+            existingNegotiation={selectedNegotiation}
+            isOpen={isNegotiationModalOpen}
+            onClose={() => {
+              setIsNegotiationModalOpen(false);
+              setNegotiatingPlayer(null);
+              setSelectedNegotiation(null);
+            }}
+            onSubmitProposal={(proposal) => {
+              try {
+                const res = startPlayerNegotiation(proposal);
+                setNotification({ text: res.message, type: res.success ? 'success' : 'error' });
+                setTimeout(() => setNotification(null), 3500);
+                setIsNegotiationModalOpen(false);
+                setActiveTabMode('negotiations');
+              } catch (err: any) {
+                console.error('[TransfersTab] startPlayerNegotiation exception:', err);
+                setNotification({ text: err?.message || 'حدث خطأ أثناء إرسال العرض', type: 'error' });
+                setTimeout(() => setNotification(null), 3500);
+              }
+            }}
+            onRespondToCounter={(negId, action, extraVal) => {
+              try {
+                const res = respondToNegotiationOffer(negId, action, extraVal);
+                setNotification({ text: res.message, type: res.success ? 'success' : 'error' });
+                setTimeout(() => setNotification(null), 3500);
+                setIsNegotiationModalOpen(false);
+              } catch (err: any) {
+                console.error('[TransfersTab] respondToNegotiationOffer exception:', err);
+                setNotification({ text: err?.message || 'حدث خطأ أثناء الرد على العرض', type: 'error' });
+                setTimeout(() => setNotification(null), 3500);
+              }
+            }}
+          />
+        );
+      })()}
 
     </div>
   );

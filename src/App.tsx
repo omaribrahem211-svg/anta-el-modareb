@@ -325,6 +325,13 @@ function GameApp() {
         <PlayerModal 
           player={selectedPlayer} 
           onClose={() => setSelectedPlayer(null)} 
+          onStartNegotiation={(targetP) => {
+            setSelectedPlayer(null);
+            handleTabChange('transfers');
+            setTimeout(() => {
+              window.dispatchEvent(new CustomEvent('open-player-negotiation', { detail: { player: targetP } }));
+            }, 100);
+          }}
         />
       )}
 
