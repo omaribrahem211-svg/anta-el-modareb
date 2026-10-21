@@ -231,6 +231,24 @@ export function calculateSeasonEndSummary(
 
   const finalBudget = userClub ? ((userClub.budget || 0) + prizeMoney) : prizeMoney;
 
+  // World Domination (السيطرة على العالم) calculation
+  let worldDominationInfo: SeasonEndSummary['worldDominationInfo'] = undefined;
+  if (resultStatus === 'champion') {
+    const prevConquered = manager.conqueredLeagues || [];
+    const isNew = !prevConquered.includes(activeLeague.id);
+    const updatedConqueredList = isNew ? [...prevConquered, activeLeague.id] : prevConquered;
+    const totalLeaguesCount = Object.keys(GLOBAL_LEAGUES).length;
+    const percentage = Math.min(100, Math.round((updatedConqueredList.length / totalLeaguesCount) * 100));
+
+    worldDominationInfo = {
+      percentage,
+      conqueredCount: updatedConqueredList.length,
+      totalCount: totalLeaguesCount,
+      isNewConquest: isNew,
+      leagueName: activeLeague.name,
+    };
+  }
+
   return {
     seasonNumber: season.seasonNumber,
     leagueId: activeLeague.id,
@@ -265,6 +283,7 @@ export function calculateSeasonEndSummary(
     finalBudget,
     developmentPointsEarned,
     developmentPointsBreakdown,
+    worldDominationInfo,
   };
 }
 
@@ -2526,6 +2545,15 @@ export function processNewSeasonAdvancement(
   const allCountriesManaged = Array.from(new Set([...(manager.countriesManaged || []), effectiveUserClub?.country || 'مصر', nextActiveLeague.country]));
   const allTrophies = [...(manager.trophies || []), ...trophiesWonThisSeason];
 
+  // Conquered Leagues & World Domination calculation
+  const prevConquered = manager.conqueredLeagues || [];
+  const wonLeagueId = (summary.resultStatus === 'champion' && summary.leagueId) ? summary.leagueId : null;
+  const newConqueredLeagues = wonLeagueId && !prevConquered.includes(wonLeagueId)
+    ? [...prevConquered, wonLeagueId]
+    : prevConquered;
+  const totalPossibleLeagues = Object.keys(GLOBAL_LEAGUES).length;
+  const worldDominationPercentage = Math.min(100, Math.round((newConqueredLeagues.length / totalPossibleLeagues) * 100));
+
   const updatedManager: ManagerProfile = {
     ...manager,
     currentClubId: nextUserClub.id,
@@ -2549,6 +2577,8 @@ export function processNewSeasonAdvancement(
     careerEarnings: manager.careerEarnings + summary.prizeMoney,
     personalWallet: (manager.personalWallet || 0) + Math.round(summary.prizeMoney * 0.15),
     totalBonusesEarned: (manager.totalBonusesEarned || 0) + Math.round(summary.prizeMoney * 0.15),
+    conqueredLeagues: newConqueredLeagues,
+    worldDominationPercentage,
     financialTransactions: [
       {
         id: `tx_season_end_${Date.now()}`,

@@ -560,6 +560,7 @@ export interface SeasonEndSummary {
   totalDevelopmentPoints?: number;
   developmentPointsEarned?: number;
   developmentPointsBreakdown?: { reason: string; points: number }[];
+  worldDominationInfo?: { percentage: number; conqueredCount: number; totalCount: number; isNewConquest: boolean; leagueName: string };
 }
 
 export interface LeagueDefinition {
@@ -794,6 +795,10 @@ export interface ManagerProfile {
   totalPlayersDeveloped?: number; // Total players trained / leveled up
   totalPlayTimeMinutes?: number; // Real active in-game minutes
   bestClubManaged?: string; // Best club managed
+
+  // World Domination & League Conquest System (السيطرة على العالم)
+  conqueredLeagues?: string[]; // قائمة الدوريات الفريدة التي فاز بها المدرب
+  worldDominationPercentage?: number; // نسبة السيطرة على العالم (0 - 100%)
 
   // Global Manager Ranking, Daily Points & Monthly Points
   rankingPoints?: number;

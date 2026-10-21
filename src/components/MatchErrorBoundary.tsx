@@ -58,6 +58,12 @@ export class MatchErrorBoundary extends Component<Props, State> {
       const errorMsg = this.state.error?.message || 'خطأ غير متوقع أثناء معالجة المباراة';
       const errorStack = this.state.error?.stack || '';
 
+      const componentTitle = this.props.componentName === 'TransfersTab'
+        ? 'نظام الانتقالات والمفاوضات'
+        : this.props.componentName === 'MatchesTab'
+        ? 'نظام المباريات'
+        : 'نظام اللعبة';
+
       return (
         <div 
           id="match_error_boundary_fallback"
@@ -70,10 +76,10 @@ export class MatchErrorBoundary extends Component<Props, State> {
 
           <div className="space-y-1 max-w-md">
             <h3 className="text-lg font-black text-white">
-              تنبيه استعادة نظام المباريات
+              تنبيه استعادة {componentTitle}
             </h3>
             <p className="text-xs text-slate-300 leading-relaxed">
-              تم رصد استثناء برمجي وتطويقه بنجاح لمنع إغلاق التطبيق أو ظهور شاشة بيضاء. تم حفظ تقدم مسيرتك التدريبية بأمان.
+              تم رصد استثناء برمجي وتطويقه بنجاح لمنع إغلاق التطبيق أو ظهور شاشة بيضاء. تم حفظ تقدم مسيرتك التدريبية بأمان دون فقدان أي بيانات.
             </p>
           </div>
 

@@ -18,6 +18,7 @@ import {
 import { getLocalTrainerProfile } from '../services/trainerProfileService';
 import { SettingsBackupModal } from './SettingsBackupModal';
 import { PromoCodeRedeemModal } from './PromoCodeRedeemModal';
+import { RestartSeasonModal } from './RestartSeasonModal';
 
 interface UserProfileMenuProps {
   onOpenAdmin?: () => void;
@@ -30,6 +31,7 @@ export const UserProfileMenu: React.FC<UserProfileMenuProps> = ({ onOpenAdmin, o
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [showSettingsModal, setShowSettingsModal] = useState(false);
   const [showPromoModal, setShowPromoModal] = useState(false);
+  const [showRestartSeasonModal, setShowRestartSeasonModal] = useState(false);
 
   const trainerProfile = getLocalTrainerProfile();
   const trainerName = manager.name || trainerProfile?.name || 'المدرب';
@@ -207,21 +209,32 @@ export const UserProfileMenu: React.FC<UserProfileMenuProps> = ({ onOpenAdmin, o
               </button>
             </div>
 
-            {/* Danger Zone: Reset Career */}
-            {onOpenResetConfirm && (
-              <div className="mt-2.5 pt-2 border-t border-slate-800">
+            {/* Season Operations & Reset */}
+            <div className="mt-2.5 pt-2 border-t border-slate-800 space-y-1">
+              <button
+                onClick={() => {
+                  setIsDropdownOpen(false);
+                  setShowRestartSeasonModal(true);
+                }}
+                className="w-full flex items-center justify-center gap-1.5 py-1.5 text-[11px] font-bold text-amber-400 hover:bg-amber-950/40 rounded-lg transition-colors cursor-pointer"
+              >
+                <RotateCcw className="w-3.5 h-3.5 text-amber-400" />
+                <span>إعادة بداية الموسم الحالي</span>
+              </button>
+
+              {onOpenResetConfirm && (
                 <button
                   onClick={() => {
                     setIsDropdownOpen(false);
                     onOpenResetConfirm();
                   }}
-                  className="w-full flex items-center justify-center gap-1.5 py-1.5 text-[11px] font-semibold text-red-400 hover:bg-red-950/30 rounded-lg transition-colors"
+                  className="w-full flex items-center justify-center gap-1.5 py-1.5 text-[11px] font-semibold text-red-400 hover:bg-red-950/30 rounded-lg transition-colors cursor-pointer"
                 >
                   <RotateCcw className="w-3 h-3" />
-                  <span>إعادة ضبط المسيرة</span>
+                  <span>إعادة ضبط المسيرة بالكامل</span>
                 </button>
-              </div>
-            )}
+              )}
+            </div>
 
           </div>
         </>
@@ -238,6 +251,12 @@ export const UserProfileMenu: React.FC<UserProfileMenuProps> = ({ onOpenAdmin, o
       <PromoCodeRedeemModal
         isOpen={showPromoModal}
         onClose={() => setShowPromoModal(false)}
+      />
+
+      {/* Restart Season Modal */}
+      <RestartSeasonModal
+        isOpen={showRestartSeasonModal}
+        onClose={() => setShowRestartSeasonModal(false)}
       />
     </div>
   );

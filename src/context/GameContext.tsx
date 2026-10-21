@@ -313,6 +313,7 @@ interface GameContextType {
   openSeasonModal: () => void;
   closeSeasonModal: () => void;
   resignToUnemployed: () => void;
+  restartCurrentSeason: () => { success: boolean; message: string };
 
   // World Rankings & Squad Strength Metrics
   worldRankings: WorldRankingsData | null;
@@ -2800,12 +2801,12 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
             cupRewardMessages.push({
               id: `msg_cup_stage_reward_${reward.stageKey}_${Date.now()}_${Math.random()}`,
-              title: `💰 مكافأة إنجاز الكأس: ${reward.stageName} (+${reward.prizeMoney.toLocaleString()} ج.م و +${reward.developmentPoints} ⚡ نقاط تطوير)`,
+              title: `💰 مكافأة إنجاز الكأس: ${reward.stageName} (+${((reward.prizeMoney || 0)).toLocaleString()} ج.م و +${reward.developmentPoints || 0} ⚡ نقاط تطوير)`,
               sender: 'لجنة تنظيم الكأس والمسابقات',
               date: `الجولة ${currentRound}`,
               type: 'board',
               read: false,
-              content: `تهانينا الحارة لنادي ${userClub.name} وإدارته الفنية واللاعبين!\n\nتقديراً للإنجاز الرائع والوصول إلى [${reward.stageName}] في مسابقة الكأس، تم إيداع مكافأة مالية قدرها ${reward.prizeMoney.toLocaleString()} جنيه مباشرة في خزينة النادي، بالإضافة إلى منح لاعبيك (${reward.developmentPoints}) نقطة تطوير مخصصة لترقية مهاراتهم وقدراتهم في مركز التدريب.`,
+              content: `تهانينا الحارة لنادي ${userClub.name} وإدارته الفنية واللاعبين!\n\nتقديراً للإنجاز الرائع والوصول إلى [${reward.stageName}] في مسابقة الكأس، تم إيداع مكافأة مالية قدرها ${((reward.prizeMoney || 0)).toLocaleString()} جنيه مباشرة في خزينة النادي، بالإضافة إلى منح لاعبيك (${reward.developmentPoints || 0}) نقطة تطوير مخصصة لترقية مهاراتهم وقدراتهم في مركز التدريب.`,
             });
           });
         }
@@ -2863,22 +2864,22 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     if (userClub && resolvedRevenue) {
       cupRewardMessages.push({
         id: `msg_match_rev_${fixture.id}_${Date.now()}`,
-        title: `💰 تقرير إيراد مباراة الجولة ${currentRound}: +${totalMatchRevenue.toLocaleString()} ج.م${resolvedRevenue.isSkippedMatch ? ' (تخطي 50%)' : ''}`,
+        title: `💰 تقرير إيراد مباراة الجولة ${currentRound}: +${(totalMatchRevenue || 0).toLocaleString()} ج.م${resolvedRevenue.isSkippedMatch ? ' (تخطي 50%)' : ''}`,
         sender: 'الإدارة المالية للنادي',
         date: `الجولة ${currentRound}`,
         type: 'board',
         read: false,
         content: `كشف الإيرادات المالية الرسمية لمباراة الجولة ${currentRound}:\n\n` +
-          `🏟️ الحضور الجماهيري: ${resolvedRevenue.attendance.toLocaleString()} مشجع من أصل ${resolvedRevenue.stadiumCapacity.toLocaleString()} مقعد (${resolvedRevenue.attendancePercentage}%)\n` +
-          `🎟️ سعر التذكرة: ${resolvedRevenue.ticketPrice} ج.م • دخل التذاكر الأساسي: ${resolvedRevenue.ticketRevenue.toLocaleString()} ج.م\n` +
-          `📢 رعاة النادي والإعلانات: ${resolvedRevenue.sponsorsRevenue.toLocaleString()} ج.م (مكافأة الفوز: ${resolvedRevenue.sponsorsWinBonus.toLocaleString()} ج.م)\n` +
+          `🏟️ الحضور الجماهيري: ${(resolvedRevenue.attendance || 0).toLocaleString()} مشجع من أصل ${(resolvedRevenue.stadiumCapacity || 0).toLocaleString()} مقعد (${resolvedRevenue.attendancePercentage || 0}%)\n` +
+          `🎟️ سعر التذكرة: ${resolvedRevenue.ticketPrice || 0} ج.م • دخل التذاكر الأساسي: ${(resolvedRevenue.ticketRevenue || 0).toLocaleString()} ج.م\n` +
+          `📢 رعاة النادي والإعلانات: ${(resolvedRevenue.sponsorsRevenue || 0).toLocaleString()} ج.م (مكافأة الفوز: ${(resolvedRevenue.sponsorsWinBonus || 0).toLocaleString()} ج.م)\n` +
           (resolvedRevenue.sponsorsBreakdown && resolvedRevenue.sponsorsBreakdown.length > 0
             ? resolvedRevenue.sponsorsBreakdown.map(b => `  • ${b}`).join('\n') + '\n'
             : '') +
-          `🏆 مكافأة النتيجة الرسمية (${resolvedRevenue.resultType === 'win' ? 'فوز 🏆' : resolvedRevenue.resultType === 'draw' ? 'تعادل 🤝' : 'هزيمة (0 ج.م)'}): ${resolvedRevenue.resultBonus > 0 ? `+${resolvedRevenue.resultBonus.toLocaleString()} ج.م` : '0 ج.م (لا يوجد مكافأة عند الهزيمة)'}\n` +
-          (resolvedRevenue.isSkippedMatch ? `\n⚠️ خصم تخطي المباراة (50%): -${resolvedRevenue.skipPenaltyAmount?.toLocaleString()} ج.م\n(تم منحك نصف الإيرادات فقط كخصم لتخطي المباراة، تشجيعاً لخوض المباريات كاملة)\n` : '') +
-          (resolvedRevenue.isDoubledWithAd ? `🎁 مكافأة مضاعفة الإعلان (2X): +${resolvedRevenue.adDoubledBonus?.toLocaleString()} ج.م\n` : '') +
-          `\n✅ الإجمالي النهائي المودع في رصيد النادي: ${totalMatchRevenue.toLocaleString()} جنيه مصري.`,
+          `🏆 مكافأة النتيجة الرسمية (${resolvedRevenue.resultType === 'win' ? 'فوز 🏆' : resolvedRevenue.resultType === 'draw' ? 'تعادل 🤝' : 'هزيمة (0 ج.م)'}): ${(resolvedRevenue.resultBonus || 0) > 0 ? `+${(resolvedRevenue.resultBonus || 0).toLocaleString()} ج.م` : '0 ج.م (لا يوجد مكافأة عند الهزيمة)'}\n` +
+          (resolvedRevenue.isSkippedMatch ? `\n⚠️ خصم تخطي المباراة (50%): -${(resolvedRevenue.skipPenaltyAmount || 0).toLocaleString()} ج.م\n(تم منحك نصف الإيرادات فقط كخصم لتخطي المباراة، تشجيعاً لخوض المباريات كاملة)\n` : '') +
+          (resolvedRevenue.isDoubledWithAd ? `🎁 مكافأة مضاعفة الإعلان (2X): +${(resolvedRevenue.adDoubledBonus || 0).toLocaleString()} ج.م\n` : '') +
+          `\n✅ الإجمالي النهائي المودع في رصيد النادي: ${(totalMatchRevenue || 0).toLocaleString()} جنيه مصري.`,
       });
     }
 
@@ -3678,12 +3679,12 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
           simCupRewardMessages.push({
             id: `msg_cup_stage_reward_${reward.stageKey}_${Date.now()}_${Math.random()}`,
-            title: `💰 مكافأة إنجاز الكأس: ${reward.stageName} (+${reward.prizeMoney.toLocaleString()} ج.م و +${reward.developmentPoints} ⚡ نقاط تطوير)`,
+            title: `💰 مكافأة إنجاز الكأس: ${reward.stageName} (+${((reward.prizeMoney || 0)).toLocaleString()} ج.م و +${reward.developmentPoints || 0} ⚡ نقاط تطوير)`,
             sender: 'لجنة تنظيم الكأس والمسابقات',
             date: `الجولة ${currentRound}`,
             type: 'board',
             read: false,
-            content: `تهانينا الحارة لنادي ${userClub.name} وإدارته الفنية واللاعبين!\n\nتقديراً للإنجاز الرائع والوصول إلى [${reward.stageName}] في مسابقة الكأس، تم إيداع مكافأة مالية قدرها ${reward.prizeMoney.toLocaleString()} جنيه مباشرة في خزينة النادي، بالإضافة إلى منح لاعبيك (${reward.developmentPoints}) نقطة تطوير مخصصة لترقية مهاراتهم وقدراتهم في مركز التدريب.`,
+            content: `تهانينا الحارة لنادي ${userClub.name} وإدارته الفنية واللاعبين!\n\nتقديراً للإنجاز الرائع والوصول إلى [${reward.stageName}] في مسابقة الكأس، تم إيداع مكافأة مالية قدرها ${((reward.prizeMoney || 0)).toLocaleString()} جنيه مباشرة في خزينة النادي، بالإضافة إلى منح لاعبيك (${reward.developmentPoints || 0}) نقطة تطوير مخصصة لترقية مهاراتهم وقدراتهم في مركز التدريب.`,
           });
         });
       }
@@ -6372,9 +6373,23 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           dailyNews: [],
           retiredPlayers: nextRetired,
           worldRankings,
-          scoutedOpponents,
           deletedMessageIds,
         } as any);
+
+        // Save initial snapshot for this new season to allow clean restart
+        try {
+          const nextSnapKey = `${STORAGE_KEY}_season_${result.nextSeason.seasonNumber}_snapshot`;
+          localStorage.setItem(nextSnapKey, JSON.stringify({
+            teams: finalNextTeams,
+            clubBudget: nextUserClubObj?.budget || 250000,
+            manager: result.updatedManager,
+            calendarDate: newSeasonInitialDate,
+            activeLeagueId: result.nextActiveLeague.id,
+            seasonNumber: result.nextSeason.seasonNumber,
+          }));
+        } catch (snapErr) {
+          console.warn('Failed to store season start snapshot:', snapErr);
+        }
       } catch (saveErr) {
         console.warn('Immediate save on season transition:', saveErr);
       }
@@ -6443,6 +6458,407 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       setShowSeasonTransitionModal(false);
       setSeasonEndSummary(null);
       setJobOffers([]);
+    }
+  };
+
+  /**
+   * Restart Current Season:
+   * Returns manager to round 1 of the current season, cancels all match results,
+   * reverts player transfers/contracts made this season, restores the beginning budget,
+   * resets player fitness to 100%, and synchronizes all agenda/standings/events.
+   */
+  const restartCurrentSeason = (): { success: boolean; message: string } => {
+    try {
+      if (!userClub) {
+        return { success: false, message: 'لا يوجد نادٍ نشط حالياً لإعادة بدء موسمه.' };
+      }
+
+      const currentSeasonNum = season.seasonNumber || 1;
+      const snapshotKey = `${STORAGE_KEY}_season_${currentSeasonNum}_snapshot`;
+      let savedSnapshot: any = null;
+      try {
+        const raw = localStorage.getItem(snapshotKey);
+        if (raw) savedSnapshot = JSON.parse(raw);
+      } catch (e) {
+        console.warn('[RestartSeason] Error reading season snapshot:', e);
+      }
+
+      let restoredTeams: Club[] = [];
+      let restoredBudget: number = 0;
+      const thisSeasonTransfers = (transferHistory || []).filter(t => t && t.seasonNumber === currentSeasonNum);
+      const boughtPlayerIds = new Set(thisSeasonTransfers.filter(t => t.type === 'buy').map(t => t.playerId));
+      const soldEntries = thisSeasonTransfers.filter(t => t.type === 'sell');
+
+      // 1. Restore Pristine Teams & Squads
+      if (savedSnapshot && Array.isArray(savedSnapshot.teams) && savedSnapshot.teams.length > 0) {
+        console.log(`[RestartSeason] Restoring pristine teams from season ${currentSeasonNum} snapshot.`);
+        restoredTeams = savedSnapshot.teams.map(normalizeClub);
+        restoredBudget = typeof savedSnapshot.clubBudget === 'number' && savedSnapshot.clubBudget > 0
+          ? savedSnapshot.clubBudget
+          : (userClub.budget || 100000);
+      } else {
+        console.log(`[RestartSeason] No stored snapshot found. Programmatically reverting season ${currentSeasonNum} changes.`);
+
+        // Beginning budget calculation: cancel all income made this uncompleted season and refund spending
+        const spentTransfers = clubEconomy?.transferSpendingTotal || 0;
+        const spentFacilities = clubEconomy?.facilitySpendingTotal || 0;
+        const incomeTransfers = clubEconomy?.transferIncomeTotal || 0;
+        const incomeMatches = clubEconomy?.matchIncomeTotal || 0;
+        const incomeSponsors = clubEconomy?.sponsorIncomeTotal || 0;
+
+        const baselineBudget = (userClub.budget || 100000)
+          + spentTransfers
+          + spentFacilities
+          - incomeTransfers
+          - incomeMatches
+          - incomeSponsors;
+
+        restoredBudget = Math.max(50000, baselineBudget);
+
+        restoredTeams = teams.map(team => {
+          let updatedPlayers = [...(team.players || [])];
+
+          if (team.isUserClub || team.id === userClub.id) {
+            // Remove players bought this season
+            if (boughtPlayerIds.size > 0) {
+              updatedPlayers = updatedPlayers.filter(p => !boughtPlayerIds.has(p.id));
+            }
+
+            // Restore players sold this season if not already present
+            for (const sold of soldEntries) {
+              if (!updatedPlayers.some(p => p.id === sold.playerId)) {
+                let originalPlayer: Player | undefined;
+                for (const otherTeam of teams) {
+                  const found = (otherTeam.players || []).find(p => p.id === sold.playerId);
+                  if (found) {
+                    originalPlayer = found;
+                    break;
+                  }
+                }
+                if (!originalPlayer) {
+                  originalPlayer = (transferMarket || []).find(p => p.id === sold.playerId);
+                }
+                if (!originalPlayer) {
+                  const pos = sold.position || 'CM';
+                  const posCat: PositionCategory = pos === 'GK' ? 'GK' : ['CB', 'LB', 'RB', 'LWB', 'RWB'].includes(pos) ? 'DEF' : ['ST', 'CF', 'RW', 'LW'].includes(pos) ? 'FWD' : 'MID';
+                  const baseRat = sold.playerRating || 70;
+                  originalPlayer = {
+                    id: sold.playerId,
+                    name: sold.playerName,
+                    overallRating: baseRat,
+                    potentialRating: Math.min(99, baseRat + 3),
+                    position: pos,
+                    positionCategory: posCat,
+                    attributes: {
+                      pace: baseRat,
+                      shooting: baseRat,
+                      passing: baseRat,
+                      dribbling: baseRat,
+                      defending: baseRat,
+                      physical: baseRat,
+                    },
+                    age: 24,
+                    fitness: 100,
+                    morale: 85,
+                    salary: sold.salary || 2500,
+                    marketValue: sold.fee || 50000,
+                    contractYears: 2,
+                    form: 7,
+                    number: Math.floor(Math.random() * 98) + 1,
+                    stats: { appearances: 0, goals: 0, assists: 0, cleanSheets: 0, yellowCards: 0, redCards: 0, averageRating: 6.5 },
+                  };
+                }
+                updatedPlayers.push(originalPlayer);
+              }
+            }
+          }
+
+          // Reset all players in team: full fitness 100%, morale 85, form 7, clear injuries/suspensions/cards, reset season stats to 0
+          const pristinePlayers = updatedPlayers.map(p => ({
+            ...p,
+            fitness: 100,
+            morale: 85,
+            form: 7,
+            isInjured: false,
+            injury: null,
+            injuryType: undefined,
+            isSuspended: false,
+            suspensionMatches: 0,
+            suspensionReason: undefined,
+            isListedForTransfer: false,
+            stats: { appearances: 0, goals: 0, assists: 0, cleanSheets: 0, yellowCards: 0, redCards: 0, averageRating: 6.5 },
+          }));
+
+          const isUser = Boolean(team.isUserClub || team.id === userClub.id);
+          return {
+            ...team,
+            isUserClub: isUser,
+            budget: isUser ? restoredBudget : team.budget,
+            players: pristinePlayers,
+          };
+        });
+
+        // Save this pristine baseline as season snapshot for subsequent restarts
+        try {
+          localStorage.setItem(snapshotKey, JSON.stringify({
+            teams: restoredTeams,
+            clubBudget: restoredBudget,
+            manager: {
+              ...manager,
+              matchesManaged: manager.matchesManaged,
+              wins: manager.wins,
+              draws: manager.draws,
+              losses: manager.losses,
+            },
+            activeLeagueId: activeLeague.id,
+            seasonNumber: currentSeasonNum,
+          }));
+        } catch {}
+      }
+
+      // 2. Restore Transfer Market
+      let restoredMarket: Player[] = Array.isArray(savedSnapshot?.transferMarket) && savedSnapshot.transferMarket.length > 0
+        ? savedSnapshot.transferMarket
+        : [...(transferMarket || [])];
+
+      // Return players bought this season back to the market if they were free agents/market signings
+      if (boughtPlayerIds.size > 0) {
+        for (const bpId of boughtPlayerIds) {
+          const boughtPlayer = (userClub.players || []).find(p => p.id === bpId);
+          if (boughtPlayer && !restoredMarket.some(m => m.id === bpId)) {
+            restoredMarket.push({
+              ...boughtPlayer,
+              isListedForTransfer: true,
+              isFreeAgent: true,
+            });
+          }
+        }
+      }
+      // Remove any sold players from market who were returned to userClub squad
+      for (const sold of soldEntries) {
+        restoredMarket = restoredMarket.filter(m => m.id !== sold.playerId);
+      }
+
+      // 3. Revert Manager Matches, Wins, Draws, Losses for this season
+      const userPlayedFixtures = (fixtures || []).filter(
+        f => f && f.isPlayed && (f.homeTeamId === userClub.id || f.awayTeamId === userClub.id)
+      );
+      let seasonWins = 0;
+      let seasonDraws = 0;
+      let seasonLosses = 0;
+      for (const f of userPlayedFixtures) {
+        const isHome = f.homeTeamId === userClub.id;
+        const userScore = isHome ? (f.homeScore ?? 0) : (f.awayScore ?? 0);
+        const oppScore = isHome ? (f.awayScore ?? 0) : (f.homeScore ?? 0);
+        if (userScore > oppScore) seasonWins++;
+        else if (userScore === oppScore) seasonDraws++;
+        else seasonLosses++;
+      }
+
+      const restoredManager: ManagerProfile = savedSnapshot && savedSnapshot.manager ? {
+        ...manager,
+        matchesManaged: typeof savedSnapshot.manager.matchesManaged === 'number'
+          ? savedSnapshot.manager.matchesManaged
+          : Math.max(0, (manager.matchesManaged || 0) - userPlayedFixtures.length),
+        wins: typeof savedSnapshot.manager.wins === 'number'
+          ? savedSnapshot.manager.wins
+          : Math.max(0, (manager.wins || 0) - seasonWins),
+        draws: typeof savedSnapshot.manager.draws === 'number'
+          ? savedSnapshot.manager.draws
+          : Math.max(0, (manager.draws || 0) - seasonDraws),
+        losses: typeof savedSnapshot.manager.losses === 'number'
+          ? savedSnapshot.manager.losses
+          : Math.max(0, (manager.losses || 0) - seasonLosses),
+      } : {
+        ...manager,
+        matchesManaged: Math.max(0, (manager.matchesManaged || 0) - userPlayedFixtures.length),
+        wins: Math.max(0, (manager.wins || 0) - seasonWins),
+        draws: Math.max(0, (manager.draws || 0) - seasonDraws),
+        losses: Math.max(0, (manager.losses || 0) - seasonLosses),
+      };
+
+      const restoredUserClub = restoredTeams.find(t => t.isUserClub || t.id === userClub.id) || restoredTeams[0];
+
+      // 4. Fresh unplayed fixtures for the current season and league
+      const freshFixtures = generateMasterSeasonAgenda(
+        currentSeasonNum,
+        activeLeague,
+        restoredTeams,
+        undefined,
+        undefined,
+        restoredUserClub
+      );
+
+      // 5. Fresh pristine standings (0 played, 0 points for all teams)
+      const freshStandings = generateInitialStandings(restoredTeams);
+
+      // 6. Reset Calendar Date to Season Start
+      const initialSeasonDate = getInitialSeasonDate(currentSeasonNum);
+
+      // 7. Reset Economy for the Season
+      const resetEconomy: ClubEconomySummary = {
+        clubBudget: restoredBudget,
+        transferSpendingTotal: 0,
+        transferIncomeTotal: 0,
+        salaryExpensesTotal: 0,
+        sponsorIncomeTotal: 0,
+        matchIncomeTotal: 0,
+        facilitySpendingTotal: 0,
+        currentSeasonNetProfit: 0,
+      };
+
+      // 8. Reset Board System
+      const freshBoard = generateInitialBoardSystem(
+        restoredUserClub,
+        activeLeague.tier,
+        restoredTeams.length,
+        restoredTeams,
+        restoredUserClub.isNewlyPromoted
+      );
+
+      // 9. Clean up transfer history entries for this season
+      const remainingTransferHistory = (transferHistory || []).filter(t => t.seasonNumber !== currentSeasonNum);
+
+      // 10. Clean up current season match/transfer inbox messages and prepend restart announcement
+      const announcementMsg: InboxMessage = {
+        id: `msg_season_restart_${currentSeasonNum}_${Date.now()}`,
+        title: `🔄 إعادة انطلاق الموسم ${currentSeasonNum}: العودة للجولة الأولى!`,
+        sender: 'مجلس إدارة النادي والرابطة',
+        date: 'الجولة الأولى',
+        type: 'board',
+        read: false,
+        content: `بناءً على طلبك، تم تصفير كافة نتائج الجولات السابقة والتعاقدات وإيرادات المباريات وإعادة بدء الموسم ${currentSeasonNum} رسمياً من الجولة الأولى.\n\n` +
+          `• النادي: ${restoredUserClub.name}\n` +
+          `• المسابقة: ${activeLeague.name}\n` +
+          `• الميزانية المستردة: ${restoredBudget.toLocaleString()} ج.م\n` +
+          `• اللياقة البدنية: 100% لجميع اللاعبين دون إصابات أو إيقافات.\n` +
+          `جدول المواجهات جاهز بالكامل ونتمنى لك كل التوفيق والانتصارات! 🚀`,
+      };
+
+      const filteredInbox = (inbox || []).filter(m => {
+        if (!m || !m.id) return false;
+        if (m.id.startsWith('msg_match_rev_') || m.id.startsWith('msg_trans_') || m.id.startsWith('msg_cup_') || m.id.startsWith('msg_batch_sim_')) {
+          return false;
+        }
+        return true;
+      });
+      const newInbox = [announcementMsg, ...filteredInbox];
+
+      // Clear transient live matches and temporary states
+      setLiveMatch(null);
+      try {
+        localStorage.removeItem(`${STORAGE_KEY}_active_live_match`);
+        localStorage.removeItem(`${STORAGE_KEY}_cupTournament`);
+        localStorage.removeItem(`${STORAGE_KEY}_seasonEndSummary`);
+      } catch {}
+
+      const totalRoundsCount = freshFixtures.length > 0
+        ? Math.max(...freshFixtures.map(f => f.round || 0))
+        : (restoredTeams.length - 1) * 2;
+
+      // Commit all restored states synchronously
+      setTeams(restoredTeams);
+      setStandings(freshStandings);
+      setFixtures(freshFixtures);
+      setCurrentRound(1);
+      setSeason(prev => ({
+        ...prev,
+        currentRound: 1,
+        totalRounds: totalRoundsCount,
+        status: 'active',
+        isCompleted: false,
+      }));
+      setCalendarDate(initialSeasonDate);
+      setClubEconomy(resetEconomy);
+      setBoardSystem(freshBoard);
+      setTransferHistory(remainingTransferHistory);
+      setTransferMarket(restoredMarket);
+      setManager(restoredManager);
+      setActiveNegotiations([]);
+      setIncomingBids([]);
+      setCupTournament(null);
+      setSeasonEndSummary(null);
+      setJobOffers([]);
+      setShowSeasonTransitionModal(false);
+      setInbox(newInbox);
+
+      // Persist state to local repository
+      try {
+        gameStateRepository.saveLocalGameState({
+          schemaVersion: 2,
+          saveVersion: 1,
+          lastLocalSaveAt: Date.now(),
+          season: {
+            ...season,
+            currentRound: 1,
+            totalRounds: totalRoundsCount,
+            status: 'active',
+            isCompleted: false,
+          },
+          activeLeague,
+          teams: restoredTeams,
+          standings: freshStandings,
+          fixtures: freshFixtures,
+          currentRound: 1,
+          manager: restoredManager,
+          transferMarket: restoredMarket,
+          incomingBids: [],
+          inbox: newInbox,
+          cupTournament: null,
+          jobOffers: [],
+          seasonEndSummary: null,
+          transferHistory: remainingTransferHistory,
+          clubEconomy: resetEconomy,
+          calendarDate: initialSeasonDate,
+          activeNegotiations: [],
+          boardSystem: freshBoard,
+          dailyNews: [],
+          retiredPlayers,
+          worldRankings,
+          scoutedOpponents,
+          deletedMessageIds,
+        } as any);
+
+        localStorage.setItem(`${STORAGE_KEY}_teams`, JSON.stringify(restoredTeams));
+        localStorage.setItem(`${STORAGE_KEY}_standings`, JSON.stringify(freshStandings));
+        localStorage.setItem(`${STORAGE_KEY}_fixtures`, JSON.stringify(freshFixtures));
+        localStorage.setItem(`${STORAGE_KEY}_currentRound`, '1');
+        localStorage.setItem(`${STORAGE_KEY}_season`, JSON.stringify({
+          ...season,
+          currentRound: 1,
+          totalRounds: totalRoundsCount,
+          status: 'active',
+          isCompleted: false,
+        }));
+        localStorage.setItem(`${STORAGE_KEY}_calendarDate`, JSON.stringify(initialSeasonDate));
+        localStorage.setItem(`${STORAGE_KEY}_clubEconomy`, JSON.stringify(resetEconomy));
+        localStorage.setItem(`${STORAGE_KEY}_manager`, JSON.stringify(restoredManager));
+        localStorage.setItem(`${STORAGE_KEY}_transferMarket`, JSON.stringify(restoredMarket));
+        localStorage.setItem(`${STORAGE_KEY}_transferHistory`, JSON.stringify(remainingTransferHistory));
+        localStorage.setItem(`${STORAGE_KEY}_inbox`, JSON.stringify(newInbox));
+        localStorage.setItem(`${STORAGE_KEY}_activeNegotiations`, '[]');
+        localStorage.setItem(`${STORAGE_KEY}_incomingBids`, '[]');
+      } catch (err) {
+        console.warn('[RestartSeason] Error saving game state on restart:', err);
+      }
+
+      // Synchronize with cloud in background
+      setTimeout(() => {
+        saveToCloud(true).catch(syncErr => {
+          console.warn('[RestartSeason] Cloud sync deferred/offline:', syncErr);
+        });
+      }, 200);
+
+      return {
+        success: true,
+        message: `تمت إعادة بداية الموسم ${currentSeasonNum} بنجاح! تم تصفير النتائج والتعاقدات والعودة للجولة الأولى 🚀`,
+      };
+    } catch (error: any) {
+      console.error('[RestartSeason] Failed to restart current season:', error);
+      return {
+        success: false,
+        message: `تعذر إعادة بداية الموسم: ${error?.message || 'خطأ غير متوقع'}`,
+      };
     }
   };
 
@@ -7667,6 +8083,22 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     setDailyNews([]);
     setRetiredPlayers([]);
     setScoutedOpponents({});
+
+    try {
+      localStorage.setItem(`${STORAGE_KEY}_season_1_snapshot`, JSON.stringify({
+        teams: freshTeams,
+        clubBudget: chosenUserClub.budget || 85000,
+        manager: {
+          ...INITIAL_MANAGER,
+          currentClubId: chosenUserClub.id,
+          clubsManaged: [chosenUserClub.name],
+        },
+        transferMarket: freshMarket,
+        calendarDate: getInitialSeasonDate(1),
+        activeLeagueId: EGYPT_TIER_4_LEAGUE.id,
+        seasonNumber: 1,
+      }));
+    } catch {}
   };
 
   const selectStartingClub = (clubId: string): boolean => {
@@ -7694,6 +8126,22 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       clubBudget: target.budget,
     }));
     setBoardSystem(generateInitialBoardSystem(target, 4, updatedTeams.length, updatedTeams, false));
+
+    try {
+      localStorage.setItem(`${STORAGE_KEY}_season_1_snapshot`, JSON.stringify({
+        teams: updatedTeams,
+        clubBudget: target.budget,
+        manager: {
+          ...manager,
+          currentClubId: target.id,
+          clubsManaged: Array.from(new Set([...(manager.clubsManaged || []), target.name])),
+        },
+        calendarDate: getInitialSeasonDate(1),
+        activeLeagueId: activeLeague.id,
+        seasonNumber: season.seasonNumber || 1,
+      }));
+    } catch {}
+
     return true;
   };
 
@@ -8088,6 +8536,17 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           personalWallet: res.rewardCoins ? (prev.personalWallet || 0) + (res.rewardCoins * 100) : prev.personalWallet,
         }));
 
+        if (res.rewardCoins && res.rewardCoins > 0) {
+          try {
+            const authData = localStorage.getItem('anta_el_modareb_auth_user');
+            if (authData) {
+              const parsed = JSON.parse(authData);
+              parsed.virtualCoins = (parsed.virtualCoins || 0) + res.rewardCoins;
+              localStorage.setItem('anta_el_modareb_auth_user', JSON.stringify(parsed));
+            }
+          } catch (_) {}
+        }
+
         // 3. Official banking inbox notification for the manager
         const bonusMsg: InboxMessage = {
           id: `msg_promo_${Date.now()}_${Math.random()}`,
@@ -8365,6 +8824,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         openSeasonModal,
         closeSeasonModal,
         resignToUnemployed,
+        restartCurrentSeason,
         saveToCloud,
         resetGame,
         selectStartingClub,

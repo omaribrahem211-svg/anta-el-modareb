@@ -44,6 +44,8 @@ import {
 import { CoachCardModal } from './CoachCardModal';
 import { ClubSelectionModal } from './ClubSelectionModal';
 import { CareerProgressionJourney } from './CareerProgressionJourney';
+import { RestartSeasonModal } from './RestartSeasonModal';
+import { WorldDominationCard } from './WorldDominationCard';
 
 export const CareerTab: React.FC = () => {
   const {
@@ -73,6 +75,7 @@ export const CareerTab: React.FC = () => {
       setNewName(effectiveCoachName);
     }
   }, [effectiveCoachName]);
+  const [showRestartSeasonModal, setShowRestartSeasonModal] = useState(false);
   const [showResetModal, setShowResetModal] = useState(false);
   const [showResetSuccess, setShowResetSuccess] = useState(false);
   const [showCoachCardModal, setShowCoachCardModal] = useState(false);
@@ -326,6 +329,9 @@ export const CareerTab: React.FC = () => {
           </div>
         </button>
       </div>
+
+      {/* 🌍 WORLD DOMINATION PERCENTAGE & CONQUEST MAP (نسبة السيطرة على العالم) */}
+      <WorldDominationCard manager={manager} currentLeagueId={activeLeague?.id} />
 
       {/* 🚀 COACHING LICENSES & CAREER PROGRESSION JOURNEY */}
       <CareerProgressionJourney />
@@ -826,14 +832,23 @@ export const CareerTab: React.FC = () => {
         )}
       </div>
 
-      {/* Reset Career Option */}
-      <div className="pt-4 text-center">
+      {/* Reset & Season Operations */}
+      <div className="pt-4 flex flex-col sm:flex-row items-center justify-center gap-3">
+        <button
+          id="btn_restart_season_career_tab"
+          onClick={() => setShowRestartSeasonModal(true)}
+          className="w-full sm:w-auto inline-flex items-center justify-center gap-2 text-xs text-amber-300 hover:text-amber-200 bg-amber-950/40 hover:bg-amber-950/70 border border-amber-800/80 px-5 py-2.5 rounded-2xl transition-all cursor-pointer shadow-lg active:scale-95 font-bold"
+        >
+          <RotateCcw className="w-4 h-4 text-amber-400" />
+          <span>إعادة بداية الموسم {season.seasonNumber}</span>
+        </button>
+
         <button
           onClick={() => setShowResetModal(true)}
-          className="inline-flex items-center gap-2 text-xs text-red-400 hover:text-red-300 bg-red-950/40 hover:bg-red-950/70 border border-red-900 px-5 py-2.5 rounded-2xl transition-all cursor-pointer shadow-lg active:scale-95"
+          className="w-full sm:w-auto inline-flex items-center justify-center gap-2 text-xs text-red-400 hover:text-red-300 bg-red-950/40 hover:bg-red-950/70 border border-red-900/80 px-5 py-2.5 rounded-2xl transition-all cursor-pointer shadow-lg active:scale-95 font-bold"
         >
-          <RotateCcw className="w-4 h-4" />
-          <span className="font-bold">إعادة ضبط اللعبة وبدء مسيرة جديدة</span>
+          <RotateCcw className="w-4 h-4 text-red-400" />
+          <span>إعادة ضبط اللعبة (مسيرة جديدة)</span>
         </button>
       </div>
 
@@ -1009,6 +1024,12 @@ export const CareerTab: React.FC = () => {
           initialSelectedClubId={userClub?.id}
         />
       )}
+
+      {/* Restart Season Modal */}
+      <RestartSeasonModal
+        isOpen={showRestartSeasonModal}
+        onClose={() => setShowRestartSeasonModal(false)}
+      />
 
     </div>
   );

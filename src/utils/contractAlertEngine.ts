@@ -70,7 +70,7 @@ export function checkExpiringContracts(
 
     const content = isExpired
       ? `تحذير عاجل من لجنة التعاقدات: انتهت المدة الرسمية لعقد اللاعب ${player.name} (${player.position} - تقييم ${player.overallRating}) مع الفريق، وأصبح حراً قانونياً في التوقيع مجاناً لأي نادٍ منافس دون أي عائد مالي للنادي!\n\nنوصي بفتح مفاوضات التجديد فوراً أو حسم موقفه لحماية استقرار التشكيلة.`
-      : `إشعار إداري وفني: يتبقى للاعب ${player.name} (${player.position} - تقييم ${player.overallRating} - العمر ${player.age}) سنة واحدة فقط في عقده الحالي (ينتهي بنهاية الموسم).\n\nالقيمة السوقية الحالية: ${player.marketValue.toLocaleString()} ج.م | الراتب الحالي: ${player.salary.toLocaleString()} ج.م شهرياً.\n\nلتفادي دخول اللاعب في الفترة الحرة أو رحيله دون مقابل، يُنصح بتجديد العقد الآن أو عرضه للبيع للاستفادة من قيمته السوقية.`;
+      : `إشعار إداري وفني: يتبقى للاعب ${player.name} (${player.position} - تقييم ${player.overallRating} - العمر ${player.age}) سنة واحدة فقط في عقده الحالي (ينتهي بنهاية الموسم).\n\nالقيمة السوقية الحالية: ${(player.marketValue || 0).toLocaleString()} ج.م | الراتب الحالي: ${(player.salary || 2500).toLocaleString()} ج.م شهرياً.\n\nلتفادي دخول اللاعب في الفترة الحرة أو رحيله دون مقابل، يُنصح بتجديد العقد الآن أو عرضه للبيع للاستفادة من قيمته السوقية.`;
 
     alerts.push({
       id: `msg_contract_${player.id}_${Date.now()}_${Math.floor(Math.random() * 1000)}`,

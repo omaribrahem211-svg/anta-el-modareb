@@ -8,6 +8,7 @@ import {
   APP_BUILD_VERSION 
 } from '../services/saveBackupService';
 import { getLocalTrainerProfile } from '../services/trainerProfileService';
+import { RestartSeasonModal } from './RestartSeasonModal';
 import {
   Settings,
   X,
@@ -83,6 +84,7 @@ export const SettingsBackupModal: React.FC<SettingsBackupModalProps> = ({
 
   const [isExporting, setIsExporting] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
+  const [showRestartSeasonModal, setShowRestartSeasonModal] = useState(false);
   const [isCopied, setIsCopied] = useState(false);
   const [showCodePasteArea, setShowCodePasteArea] = useState(false);
   const [pastedCode, setPastedCode] = useState('');
@@ -542,9 +544,19 @@ export const SettingsBackupModal: React.FC<SettingsBackupModalProps> = ({
             </div>
           </div>
 
-          {/* Reset Career Danger Zone Option */}
-          {onOpenResetConfirm && (
-            <div className="pt-2 border-t border-slate-800">
+          {/* Reset & Season Operations */}
+          <div className="pt-2 border-t border-slate-800 space-y-2">
+            <button
+              type="button"
+              id="btn_restart_season_settings_modal"
+              onClick={() => setShowRestartSeasonModal(true)}
+              className="w-full py-2.5 px-3 bg-amber-950/30 hover:bg-amber-950/50 border border-amber-800/50 text-amber-300 text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer active:scale-98"
+            >
+              <RotateCcw className="w-3.5 h-3.5 text-amber-400" />
+              <span>إعادة بداية الموسم الحالي {season.seasonNumber} (الجولة الأولى)</span>
+            </button>
+
+            {onOpenResetConfirm && (
               <button
                 type="button"
                 onClick={() => {
@@ -556,12 +568,18 @@ export const SettingsBackupModal: React.FC<SettingsBackupModalProps> = ({
                 <RotateCcw className="w-3.5 h-3.5" />
                 <span>إعادة ضبط اللعبة وبدء مسيرة جديدة من الصفر</span>
               </button>
-            </div>
-          )}
+            )}
+          </div>
 
         </div>
 
       </div>
+
+      {/* Restart Season Modal */}
+      <RestartSeasonModal
+        isOpen={showRestartSeasonModal}
+        onClose={() => setShowRestartSeasonModal(false)}
+      />
     </div>
   );
 };

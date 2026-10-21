@@ -211,6 +211,46 @@ export const SeasonTransitionModal: React.FC = () => {
                 </div>
               </div>
 
+              {/* 🌍 World Domination Conquest Banner */}
+              {seasonEndSummary.worldDominationInfo && (
+                <div className={`p-4 rounded-2xl border flex items-center justify-between gap-3 shadow-xl ${
+                  seasonEndSummary.worldDominationInfo.percentage >= 100
+                    ? 'bg-gradient-to-r from-amber-500/25 via-yellow-500/35 to-amber-500/25 border-amber-400'
+                    : 'bg-gradient-to-r from-indigo-950/70 via-slate-900 to-indigo-950/70 border-indigo-500/40'
+                }`}>
+                  <div className="flex items-center gap-3">
+                    <div className="w-11 h-11 rounded-2xl bg-amber-500/20 text-amber-300 border border-amber-500/40 flex items-center justify-center font-bold text-xl shrink-0">
+                      🌍
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="font-black text-sm text-white">
+                          {seasonEndSummary.worldDominationInfo.percentage >= 100
+                            ? '👑 سيطرة كاملة على العالم الكروي (100%)!'
+                            : seasonEndSummary.worldDominationInfo.isNewConquest
+                            ? `🏆 فتح دوري جديد: ${seasonEndSummary.worldDominationInfo.leagueName}`
+                            : `مواصلة الهيمنة في ${seasonEndSummary.worldDominationInfo.leagueName}`}
+                        </span>
+                        <span className="text-[10px] bg-indigo-500/30 text-indigo-200 border border-indigo-500/40 px-2 py-0.5 rounded-full font-bold">
+                          {seasonEndSummary.worldDominationInfo.conqueredCount} / {seasonEndSummary.worldDominationInfo.totalCount} دوري
+                        </span>
+                      </div>
+                      <p className="text-xs text-slate-300 mt-0.5">
+                        {seasonEndSummary.worldDominationInfo.percentage >= 100
+                          ? 'إنجاز تاريخي أسطوري! حققت جميع ألقاب الدوريات في العالم من الدرجة الرابعة حتى القمة!'
+                          : `ارتفعت نسبة سيطرتك على العالم إلى ${seasonEndSummary.worldDominationInfo.percentage}%`}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="text-left shrink-0">
+                    <span className="text-xl sm:text-2xl font-black font-mono text-amber-300">
+                      {seasonEndSummary.worldDominationInfo.percentage}%
+                    </span>
+                  </div>
+                </div>
+              )}
+
               {/* Financial, Manager XP & Player Development Rewards */}
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                 {/* Finances */}

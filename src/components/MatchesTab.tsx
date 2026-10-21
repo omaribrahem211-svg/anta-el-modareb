@@ -10,6 +10,7 @@ import { getPositionArabic } from '../utils/positionHelper';
 import { findClubInWorld, getClubDisplayName } from '../data/leaguesData';
 import { LiveTacticalAlertBanner } from './LiveTacticalAlertBanner';
 import { TacticalMatchReportCard } from './TacticalMatchReportCard';
+import { RestartSeasonModal } from './RestartSeasonModal';
 import {
   analyzeLiveMatchSituation,
   isTacticalAdviceApplied,
@@ -113,6 +114,7 @@ export const MatchesTab: React.FC = () => {
   const [adToast, setAdToast] = useState<{ text: string; isError: boolean } | null>(null);
   const [isRematchLoading, setIsRematchLoading] = useState(false);
   const [rematchToast, setRematchToast] = useState<{ text: string; isError: boolean } | null>(null);
+  const [showRestartSeasonModal, setShowRestartSeasonModal] = useState(false);
 
   const handleRematchWithAd = async () => {
     if (isRematchLoading || !liveMatch || !liveMatch.isFinished) return;
@@ -1381,16 +1383,27 @@ export const MatchesTab: React.FC = () => {
 
       {/* Header Banner & Match Day Gate */}
       <div className="bg-slate-900 border border-slate-800 p-4 sm:p-5 rounded-3xl space-y-4 shadow-xl">
-        <div className="flex items-center justify-between">
+        <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="flex items-center gap-2">
             <Swords className="w-5 h-5 text-emerald-400" />
             <h2 className="font-bold text-base text-white">
               جدول مباريات الدوري الرسمية
             </h2>
           </div>
-          <span className="text-xs bg-slate-800 px-3 py-1 rounded-full border border-slate-700 font-bold text-amber-400">
-            {seasonFinished ? 'الموسم انتهى' : `الجولة الحالية: ${currentRound} / ${totalRounds}`}
-          </span>
+          <div className="flex items-center gap-2">
+            <button
+              id="btn_restart_season_matches_tab"
+              onClick={() => setShowRestartSeasonModal(true)}
+              className="text-xs bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/40 px-3 py-1.5 rounded-xl font-bold flex items-center gap-1.5 transition-all cursor-pointer active:scale-95 shadow-sm"
+              title="إعادة بداية الموسم الحالي وإلغاء نتائج الجولات والتعاقدات"
+            >
+              <RotateCcw className="w-3.5 h-3.5 text-amber-400" />
+              <span>إعادة بداية الموسم</span>
+            </button>
+            <span className="text-xs bg-slate-800 px-3 py-1.5 rounded-xl border border-slate-700 font-bold text-amber-400">
+              {seasonFinished ? 'الموسم انتهى' : `الجولة الحالية: ${currentRound} / ${totalRounds}`}
+            </span>
+          </div>
         </div>
 
         {/* Dynamic Match Day State Dispatch */}
@@ -2055,6 +2068,12 @@ export const MatchesTab: React.FC = () => {
           })}
         </div>
       </div>
+
+      {/* Restart Season Modal */}
+      <RestartSeasonModal
+        isOpen={showRestartSeasonModal}
+        onClose={() => setShowRestartSeasonModal(false)}
+      />
 
     </div>
   );

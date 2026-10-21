@@ -671,9 +671,9 @@ export class ChallengesManager {
       freshChallenge.current = 0;
       freshChallenge.isCompleted = false;
       freshChallenge.isClaimed = false;
-      freshChallenge.reward.budget = Math.round(freshChallenge.reward.budget * 1.25);
-      freshChallenge.reward.coins = Math.round(freshChallenge.reward.coins * 1.25);
-      freshChallenge.reward.label = `✨ ${freshChallenge.reward.budget.toLocaleString()} ج.م + ${freshChallenge.reward.coins} كوينز 🪙`;
+      freshChallenge.reward.budget = Math.round((freshChallenge.reward.budget || 0) * 1.25);
+      freshChallenge.reward.coins = Math.round((freshChallenge.reward.coins || 0) * 1.25);
+      freshChallenge.reward.label = `✨ ${(freshChallenge.reward.budget || 0).toLocaleString()} ج.م + ${freshChallenge.reward.coins || 0} كوينز 🪙`;
       this.state.challenges.splice(index, 1, freshChallenge);
     }
 
@@ -858,7 +858,7 @@ export class ChallengesManager {
         this.recordAdWatched();
 
         const result = {
-          label: `✨ مضاعفة 2X خارقة: إيداع إضافي +${baseReward.budget.toLocaleString()} ج.م و +${baseReward.coins} كوينز و +${baseReward.devPoints} نقاط تطوير!`,
+          label: `✨ مضاعفة 2X خارقة: إيداع إضافي +${((baseReward.budget || 0)).toLocaleString()} ج.م و +${baseReward.coins || 0} كوينز و +${baseReward.devPoints || 0} نقاط تطوير!`,
           budget: baseReward.budget,
           coins: baseReward.coins,
           devPoints: baseReward.devPoints,
@@ -990,7 +990,7 @@ export class ChallengesManager {
             devPoints: ch.reward.devPoints,
             energyPercent: ch.reward.energyPercent,
             reputation: ch.reward.reputation,
-            label: `✨ مضاعفة 2X ناجحة: إيداع إضافي +${ch.reward.budget.toLocaleString()} ج.م و +${ch.reward.coins} كوينز! 🪙`,
+            label: `✨ مضاعفة 2X ناجحة: إيداع إضافي +${((ch.reward.budget || 0)).toLocaleString()} ج.م و +${ch.reward.coins || 0} كوينز! 🪙`,
           };
 
           onRewardApplied(secondHalfReward);

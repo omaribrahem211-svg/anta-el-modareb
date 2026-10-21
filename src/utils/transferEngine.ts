@@ -190,7 +190,7 @@ export function evaluateTransferOffer(
       decision: 'reject',
       clubApproved: false,
       playerApproved: false,
-      message: `عفواً، ميزانية ناديك الحالية (${userClub.budget.toLocaleString()} ج.م) أقل من قيمة عرض الشراء المقترح (${proposal.transferFee.toLocaleString()} ج.م)! يجب توفير سعر اللاعب أولاً.`,
+      message: `عفواً، ميزانية ناديك الحالية (${((userClub.budget || 0)).toLocaleString()} ج.م) أقل من قيمة عرض الشراء المقترح (${((proposal.transferFee || 0)).toLocaleString()} ج.م)! يجب توفير سعر اللاعب أولاً.`,
     };
   }
 
@@ -203,7 +203,7 @@ export function evaluateTransferOffer(
       decision: 'reject',
       clubApproved: false,
       playerApproved: false,
-      message: `لا يمكن تقديم هذا العرض! الراتب المقترح (${proposal.monthlySalary.toLocaleString()} ج.م) سيتجاوز سقف الدخل الشهري للنادي (${monthlyClubIncome.toLocaleString()} ج.م). إجمالي رواتب الفريق الحالي: ${currentClubWages.toLocaleString()} ج.م، والمتبقي لسقف الرواتب هو ${remainingWageBudget.toLocaleString()} ج.م فقط!`,
+      message: `لا يمكن تقديم هذا العرض! الراتب المقترح (${((proposal.monthlySalary || 0)).toLocaleString()} ج.م) سيتجاوز سقف الدخل الشهري للنادي (${((monthlyClubIncome || 0)).toLocaleString()} ج.م). إجمالي رواتب الفريق الحالي: ${((currentClubWages || 0)).toLocaleString()} ج.م، والمتبقي لسقف الرواتب هو ${((remainingWageBudget || 0)).toLocaleString()} ج.م فقط!`,
     };
   }
 
@@ -1597,7 +1597,8 @@ export function generateTransferRumors(
     const tpl = rumorTemplates[Math.floor(Math.random() * rumorTemplates.length)];
     const src = sources[Math.floor(Math.random() * sources.length)];
     const prob = Math.floor(Math.random() * (tpl.maxProb - tpl.minProb + 1)) + tpl.minProb;
-    const fee = item.askingPrice > 0 ? `${(item.askingPrice).toLocaleString()} ج.م` : `${(player.marketValue * 1.1).toLocaleString()} ج.م`;
+    const safeAsking = (item.askingPrice || 0) > 0 ? item.askingPrice : ((player?.marketValue || 50000) * 1.1);
+    const fee = `${Math.round(safeAsking).toLocaleString()} ج.م`;
 
     rumors.push({
       id: `rumor_${player.id}_${i}_${Date.now()}`,

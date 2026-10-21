@@ -28,6 +28,17 @@ import {
   BRAZIL_SERIE_A_CLUBS, 
   ARGENTINA_PRIMERA_CLUBS 
 } from './latamClubsData';
+import {
+  ENGLAND_LEAGUE_ONE_CLUBS,
+  ENGLAND_LEAGUE_TWO_CLUBS,
+  SAUDI_TIER_3_CLUBS,
+  SAUDI_TIER_4_CLUBS,
+  SPAIN_TIER_3_CLUBS,
+  SPAIN_TIER_4_CLUBS,
+  GERMANY_TIER_2_CLUBS,
+  ITALY_SERIE_B_CLUBS,
+  FRANCE_LIGUE_2_CLUBS
+} from './lowerTiersData';
 
 // Re-export for backward compatibility
 export { generateClubSquad, createClub };
@@ -76,10 +87,12 @@ export const EGYPT_TIER_2_TEAMS = EGYPT_TIER_2_CLUBS;
 export const EGYPT_TIER_1_TEAMS = EGYPT_PREMIER_CLUBS;
 
 // ----------------------------------------------------
-// 2. SAUDI ARABIAN LEAGUES
+// 2. SAUDI ARABIAN LEAGUES (TIERS 1 TO 4)
 // ----------------------------------------------------
 export const SAUDI_TIER_1_TEAMS = SAUDI_PRO_CLUBS;
 export const SAUDI_TIER_2_TEAMS = SAUDI_TIER_2_CLUBS;
+export const SAUDI_TIER_3_TEAMS = SAUDI_TIER_3_CLUBS;
+export const SAUDI_TIER_4_TEAMS = SAUDI_TIER_4_CLUBS;
 
 // ----------------------------------------------------
 // 3. UAE & QATAR
@@ -95,15 +108,26 @@ export const TUNISIA_TIER_1_TEAMS = TUNISIA_LIGUE_CLUBS;
 export const ALGERIA_TIER_1_TEAMS = ALGERIA_LIGUE_CLUBS;
 
 // ----------------------------------------------------
-// 5. EUROPEAN LEAGUES
+// 5. EUROPEAN LEAGUES (ENGLAND 4 TIERS, SPAIN 4 TIERS, GERMANY, ITALY, FRANCE)
 // ----------------------------------------------------
 export const SPAIN_TIER_1_TEAMS = SPAIN_LA_LIGA_CLUBS;
 export const SPAIN_TIER_2_TEAMS = SPAIN_LA_LIGA_2_CLUBS;
+export const SPAIN_TIER_3_TEAMS = SPAIN_TIER_3_CLUBS;
+export const SPAIN_TIER_4_TEAMS = SPAIN_TIER_4_CLUBS;
+
 export const ENGLAND_TIER_1_TEAMS = ENGLAND_PREMIER_CLUBS;
 export const ENGLAND_TIER_2_TEAMS = ENGLAND_CHAMPIONSHIP_CLUBS;
-export const FRANCE_TIER_1_TEAMS = FRANCE_LIGUE_1_CLUBS;
-export const ITALY_TIER_1_TEAMS = ITALY_SERIE_A_CLUBS;
+export const ENGLAND_TIER_3_TEAMS = ENGLAND_LEAGUE_ONE_CLUBS;
+export const ENGLAND_TIER_4_TEAMS = ENGLAND_LEAGUE_TWO_CLUBS;
+
 export const GERMANY_TIER_1_TEAMS = GERMANY_BUNDESLIGA_CLUBS;
+export const GERMANY_TIER_2_TEAMS = GERMANY_TIER_2_CLUBS;
+
+export const ITALY_TIER_1_TEAMS = ITALY_SERIE_A_CLUBS;
+export const ITALY_TIER_2_TEAMS = ITALY_SERIE_B_CLUBS;
+
+export const FRANCE_TIER_1_TEAMS = FRANCE_LIGUE_1_CLUBS;
+export const FRANCE_TIER_2_TEAMS = FRANCE_LIGUE_2_CLUBS;
 
 // ----------------------------------------------------
 // 6. SOUTH AMERICA
@@ -118,13 +142,15 @@ export const ARGENTINA_TIER_1_TEAMS = ARGENTINA_PRIMERA_CLUBS;
 export const GLOBAL_LEAGUES: Record<string, LeagueDefinition> = {
   // Egypt (4 tiers)
   'egy_tier_4': EGYPT_TIER_4_LEAGUE,
-  'egy_tier_3': { id: 'egy_tier_3', name: 'دوري الدرجة الثالثة المصري', shortName: 'الدرجة الثالثة', country: 'مصر', tier: 3, reputation: 35, promotionSpots: 2, relegationSpots: 1, playoffSpots: 0, teams: EGYPT_TIER_3_TEAMS },
-  'egy_tier_2': { id: 'egy_tier_2', name: 'دوري المحترفين المصري (الدرجة الثانية)', shortName: 'المحترفين (ب)', country: 'مصر', tier: 2, reputation: 55, promotionSpots: 2, relegationSpots: 1, playoffSpots: 0, teams: EGYPT_TIER_2_TEAMS },
+  'egy_tier_3': { id: 'egy_tier_3', name: 'دوري الدرجة الثالثة المصري', shortName: 'الدرجة الثالثة', country: 'مصر', tier: 3, reputation: 35, promotionSpots: 2, relegationSpots: 2, playoffSpots: 0, teams: EGYPT_TIER_3_TEAMS },
+  'egy_tier_2': { id: 'egy_tier_2', name: 'دوري المحترفين المصري (الدرجة الثانية)', shortName: 'المحترفين (ب)', country: 'مصر', tier: 2, reputation: 55, promotionSpots: 2, relegationSpots: 2, playoffSpots: 0, teams: EGYPT_TIER_2_TEAMS },
   'egy_tier_1': { id: 'egy_tier_1', name: 'الدوري المصري الممتاز', shortName: 'الممتاز المصري', country: 'مصر', tier: 1, reputation: 80, promotionSpots: 0, relegationSpots: 2, playoffSpots: 0, teams: EGYPT_TIER_1_TEAMS },
 
-  // Saudi Arabia (2 tiers)
+  // Saudi Arabia (4 tiers)
   'sau_tier_1': { id: 'sau_tier_1', name: 'دوري روشن السعودي للمحترفين', shortName: 'دوري روشن', country: 'المملكة العربية السعودية', tier: 1, reputation: 88, promotionSpots: 0, relegationSpots: 2, playoffSpots: 0, teams: SAUDI_TIER_1_TEAMS },
-  'sau_tier_2': { id: 'sau_tier_2', name: 'دوري يلو السعودي للدرجة الأولى', shortName: 'دوري يلو', country: 'المملكة العربية السعودية', tier: 2, reputation: 65, promotionSpots: 2, relegationSpots: 1, playoffSpots: 0, teams: SAUDI_TIER_2_TEAMS },
+  'sau_tier_2': { id: 'sau_tier_2', name: 'دوري يلو السعودي للدرجة الأولى', shortName: 'دوري يلو', country: 'المملكة العربية السعودية', tier: 2, reputation: 65, promotionSpots: 2, relegationSpots: 2, playoffSpots: 0, teams: SAUDI_TIER_2_TEAMS },
+  'sau_tier_3': { id: 'sau_tier_3', name: 'دوري الدرجة الثانية السعودي', shortName: 'الدرجة الثانية', country: 'المملكة العربية السعودية', tier: 3, reputation: 50, promotionSpots: 2, relegationSpots: 2, playoffSpots: 0, teams: SAUDI_TIER_3_TEAMS },
+  'sau_tier_4': { id: 'sau_tier_4', name: 'دوري الدرجة الثالثة السعودي', shortName: 'الدرجة الثالثة', country: 'المملكة العربية السعودية', tier: 4, reputation: 38, promotionSpots: 2, relegationSpots: 0, playoffSpots: 0, teams: SAUDI_TIER_4_TEAMS },
 
   // UAE & Qatar
   'uae_tier_1': { id: 'uae_tier_1', name: 'دوري أدنوك للمحترفين الإماراتي', shortName: 'دوري أدنوك', country: 'الإمارات العربية المتحدة', tier: 1, reputation: 82, promotionSpots: 0, relegationSpots: 1, playoffSpots: 0, teams: UAE_TIER_1_TEAMS },
@@ -135,16 +161,29 @@ export const GLOBAL_LEAGUES: Record<string, LeagueDefinition> = {
   'tun_tier_1': { id: 'tun_tier_1', name: 'الرابطة المحترفة التونسية الأولى لكرة القدم', shortName: 'الرابطة الأولى', country: 'تونس', tier: 1, reputation: 81, promotionSpots: 0, relegationSpots: 1, playoffSpots: 0, teams: TUNISIA_TIER_1_TEAMS },
   'alg_tier_1': { id: 'alg_tier_1', name: 'الرابطة الجزائرية المحترفة الأولى موبيليس', shortName: 'الرابطة الجزائرية', country: 'الجزائر', tier: 1, reputation: 82, promotionSpots: 0, relegationSpots: 1, playoffSpots: 0, teams: ALGERIA_TIER_1_TEAMS },
 
-  // Europe (Spain 2 tiers, England 2 tiers, France, Italy, Germany)
-  'esp_tier_1': { id: 'esp_tier_1', name: 'الدوري الإسباني الدرجة الأولى (لا ليغا)', shortName: 'لا ليغا', country: 'إسبانيا', tier: 1, reputation: 95, promotionSpots: 0, relegationSpots: 2, playoffSpots: 0, teams: SPAIN_TIER_1_TEAMS },
-  'esp_tier_2': { id: 'esp_tier_2', name: 'الدوري الإسباني الدرجة الثانية (لا ليغا هايبرموشن)', shortName: 'لا ليغا 2', country: 'إسبانيا', tier: 2, reputation: 75, promotionSpots: 2, relegationSpots: 1, playoffSpots: 0, teams: SPAIN_TIER_2_TEAMS },
-
+  // England (4 tiers)
   'eng_tier_1': { id: 'eng_tier_1', name: 'الدوري الإنجليزي الممتاز (البريميرليغ)', shortName: 'البريميرليغ', country: 'إنجلترا', tier: 1, reputation: 97, promotionSpots: 0, relegationSpots: 2, playoffSpots: 0, teams: ENGLAND_TIER_1_TEAMS },
-  'eng_tier_2': { id: 'eng_tier_2', name: 'دوري البطولة الإنجليزية (التشامبيونشيب)', shortName: 'التشامبيونشيب', country: 'إنجلترا', tier: 2, reputation: 78, promotionSpots: 2, relegationSpots: 1, playoffSpots: 0, teams: ENGLAND_TIER_2_TEAMS },
+  'eng_tier_2': { id: 'eng_tier_2', name: 'دوري البطولة الإنجليزية (التشامبيونشيب)', shortName: 'التشامبيونشيب', country: 'إنجلترا', tier: 2, reputation: 78, promotionSpots: 2, relegationSpots: 2, playoffSpots: 0, teams: ENGLAND_TIER_2_TEAMS },
+  'eng_tier_3': { id: 'eng_tier_3', name: 'دوري الدرجة الأولى الإنجليزي (ليغ ون)', shortName: 'ليغ ون', country: 'إنجلترا', tier: 3, reputation: 65, promotionSpots: 2, relegationSpots: 2, playoffSpots: 0, teams: ENGLAND_TIER_3_TEAMS },
+  'eng_tier_4': { id: 'eng_tier_4', name: 'دوري الدرجة الثانية الإنجليزي (ليغ تو)', shortName: 'ليغ تو', country: 'إنجلترا', tier: 4, reputation: 52, promotionSpots: 2, relegationSpots: 0, playoffSpots: 0, teams: ENGLAND_TIER_4_TEAMS },
 
-  'fra_tier_1': { id: 'fra_tier_1', name: 'الدوري الفرنسي الدرجة الأولى (ليغ 1 ماكدونالدز)', shortName: 'ليغ 1', country: 'فرنسا', tier: 1, reputation: 89, promotionSpots: 0, relegationSpots: 1, playoffSpots: 0, teams: FRANCE_TIER_1_TEAMS },
-  'ita_tier_1': { id: 'ita_tier_1', name: 'الدوري الإيطالي الدرجة الأولى (سيريا أ)', shortName: 'سيريا أ', country: 'إيطاليا', tier: 1, reputation: 92, promotionSpots: 0, relegationSpots: 2, playoffSpots: 0, teams: ITALY_TIER_1_TEAMS },
+  // Spain (4 tiers)
+  'esp_tier_1': { id: 'esp_tier_1', name: 'الدوري الإسباني الدرجة الأولى (لا ليغا)', shortName: 'لا ليغا', country: 'إسبانيا', tier: 1, reputation: 95, promotionSpots: 0, relegationSpots: 2, playoffSpots: 0, teams: SPAIN_TIER_1_TEAMS },
+  'esp_tier_2': { id: 'esp_tier_2', name: 'الدوري الإسباني الدرجة الثانية (لا ليغا هايبرموشن)', shortName: 'لا ليغا 2', country: 'إسبانيا', tier: 2, reputation: 75, promotionSpots: 2, relegationSpots: 2, playoffSpots: 0, teams: SPAIN_TIER_2_TEAMS },
+  'esp_tier_3': { id: 'esp_tier_3', name: 'الدوري الإسباني الدرجة الثالثة (بريميرا فيديراليون)', shortName: 'بريميرا فيديراليون', country: 'إسبانيا', tier: 3, reputation: 64, promotionSpots: 2, relegationSpots: 2, playoffSpots: 0, teams: SPAIN_TIER_3_TEAMS },
+  'esp_tier_4': { id: 'esp_tier_4', name: 'الدوري الإسباني الدرجة الرابعة (سيغوندا فيديراليون)', shortName: 'سيغوندا فيديراليون', country: 'إسبانيا', tier: 4, reputation: 50, promotionSpots: 2, relegationSpots: 0, playoffSpots: 0, teams: SPAIN_TIER_4_TEAMS },
+
+  // Germany (2 tiers)
   'ger_tier_1': { id: 'ger_tier_1', name: 'الدوري الألماني الدرجة الأولى (البوندسليغا)', shortName: 'البوندسليغا', country: 'ألمانيا', tier: 1, reputation: 93, promotionSpots: 0, relegationSpots: 2, playoffSpots: 0, teams: GERMANY_TIER_1_TEAMS },
+  'ger_tier_2': { id: 'ger_tier_2', name: 'الدوري الألماني الدرجة الثانية (بوندسليغا 2)', shortName: 'بوندسليغا 2', country: 'ألمانيا', tier: 2, reputation: 78, promotionSpots: 2, relegationSpots: 0, playoffSpots: 0, teams: GERMANY_TIER_2_TEAMS },
+
+  // Italy (2 tiers)
+  'ita_tier_1': { id: 'ita_tier_1', name: 'الدوري الإيطالي الدرجة الأولى (سيريا أ)', shortName: 'سيريا أ', country: 'إيطاليا', tier: 1, reputation: 92, promotionSpots: 0, relegationSpots: 2, playoffSpots: 0, teams: ITALY_TIER_1_TEAMS },
+  'ita_tier_2': { id: 'ita_tier_2', name: 'الدوري الإيطالي الدرجة الثانية (سيريا ب)', shortName: 'سيريا ب', country: 'إيطاليا', tier: 2, reputation: 77, promotionSpots: 2, relegationSpots: 0, playoffSpots: 0, teams: ITALY_TIER_2_TEAMS },
+
+  // France (2 tiers)
+  'fra_tier_1': { id: 'fra_tier_1', name: 'الدوري الفرنسي الدرجة الأولى (ليغ 1 ماكدونالدز)', shortName: 'ليغ 1', country: 'فرنسا', tier: 1, reputation: 89, promotionSpots: 0, relegationSpots: 2, playoffSpots: 0, teams: FRANCE_TIER_1_TEAMS },
+  'fra_tier_2': { id: 'fra_tier_2', name: 'الدوري الفرنسي الدرجة الثانية (ليغ 2)', shortName: 'ليغ 2', country: 'فرنسا', tier: 2, reputation: 75, promotionSpots: 2, relegationSpots: 0, playoffSpots: 0, teams: FRANCE_TIER_2_TEAMS },
 
   // South America
   'bra_tier_1': { id: 'bra_tier_1', name: 'الدوري البرازيلي الدرجة الأولى (البرازيليرو)', shortName: 'البرازيليرو', country: 'البرازيل', tier: 1, reputation: 85, promotionSpots: 0, relegationSpots: 1, playoffSpots: 0, teams: BRAZIL_TIER_1_TEAMS },
@@ -347,12 +386,23 @@ export function getLeagueByCountryAndTier(country: string, tier: number, preferr
   // Normalize UK / Welsh clubs playing in English league system (e.g. Cardiff, Swansea, Wrexham)
   if (safeCountry === 'ويلز' || safeCountry === 'WAL' || safeCountry.includes('ويلز') || safeCountry.toLowerCase().includes('wales')) {
     safeCountry = 'إنجلترا';
-  }
-  if (safeCountry.toLowerCase() === 'england' || safeCountry === 'ENG') {
+  } else if (safeCountry.toLowerCase() === 'england' || safeCountry === 'ENG') {
     safeCountry = 'إنجلترا';
+  } else if (safeCountry.includes('السعودية') || safeCountry === 'KSA' || safeCountry.toLowerCase().includes('saudi')) {
+    safeCountry = 'المملكة العربية السعودية';
+  } else if (safeCountry.toLowerCase() === 'spain' || safeCountry === 'ESP' || safeCountry.includes('إسبانيا')) {
+    safeCountry = 'إسبانيا';
+  } else if (safeCountry.toLowerCase() === 'germany' || safeCountry === 'GER' || safeCountry.includes('ألمانيا')) {
+    safeCountry = 'ألمانيا';
+  } else if (safeCountry.toLowerCase() === 'italy' || safeCountry === 'ITA' || safeCountry.includes('إيطاليا')) {
+    safeCountry = 'إيطاليا';
+  } else if (safeCountry.toLowerCase() === 'france' || safeCountry === 'FRA' || safeCountry.includes('فرنسا')) {
+    safeCountry = 'فرنسا';
+  } else if (safeCountry.toLowerCase() === 'egypt' || safeCountry === 'EGY' || safeCountry.includes('مصر')) {
+    safeCountry = 'مصر';
   }
 
-  // 1. If preferredLeagueId pattern is specified (e.g. promoting from eng_tier_2 to tier 1):
+  // 1. If preferredLeagueId pattern is specified (e.g. promoting from tier 4 to tier 3):
   if (preferredLeagueId) {
     if (preferredLeagueId.startsWith('eng_')) {
       const targetId = `eng_tier_${tier}`;
@@ -362,26 +412,67 @@ export function getLeagueByCountryAndTier(country: string, tier: number, preferr
       const targetId = `egy_tier_${tier}`;
       if (custom[targetId]) return custom[targetId];
       if (GLOBAL_LEAGUES[targetId]) return GLOBAL_LEAGUES[targetId];
-    } else if (preferredLeagueId.startsWith('sa_')) {
-      const targetId = `sa_tier_${tier}`;
+    } else if (preferredLeagueId.startsWith('sau_') || preferredLeagueId.startsWith('sa_')) {
+      const targetId = `sau_tier_${tier}`;
       if (custom[targetId]) return custom[targetId];
       if (GLOBAL_LEAGUES[targetId]) return GLOBAL_LEAGUES[targetId];
-    } else if (preferredLeagueId.startsWith('spain_')) {
-      const targetId = `spain_tier_${tier}`;
+    } else if (preferredLeagueId.startsWith('esp_') || preferredLeagueId.startsWith('spain_')) {
+      const targetId = `esp_tier_${tier}`;
+      if (custom[targetId]) return custom[targetId];
+      if (GLOBAL_LEAGUES[targetId]) return GLOBAL_LEAGUES[targetId];
+    } else if (preferredLeagueId.startsWith('ger_')) {
+      const targetId = `ger_tier_${tier}`;
+      if (custom[targetId]) return custom[targetId];
+      if (GLOBAL_LEAGUES[targetId]) return GLOBAL_LEAGUES[targetId];
+    } else if (preferredLeagueId.startsWith('ita_')) {
+      const targetId = `ita_tier_${tier}`;
+      if (custom[targetId]) return custom[targetId];
+      if (GLOBAL_LEAGUES[targetId]) return GLOBAL_LEAGUES[targetId];
+    } else if (preferredLeagueId.startsWith('fra_')) {
+      const targetId = `fra_tier_${tier}`;
       if (custom[targetId]) return custom[targetId];
       if (GLOBAL_LEAGUES[targetId]) return GLOBAL_LEAGUES[targetId];
     }
   }
 
-  // 2. Direct English system mapping
-  if (safeCountry === 'إنجلترا' || safeCountry.includes('إنجلترا')) {
-    const id = `eng_tier_${tier}`;
+  // 2. Direct system mappings by country
+  if (safeCountry === 'إنجلترا') {
+    const id = `eng_tier_${Math.min(4, Math.max(1, tier))}`;
     if (custom[id]) return custom[id];
     if (GLOBAL_LEAGUES[id]) return GLOBAL_LEAGUES[id];
-    return custom['eng_tier_1'] || GLOBAL_LEAGUES['eng_tier_1'];
+  }
+  if (safeCountry === 'المملكة العربية السعودية') {
+    const id = `sau_tier_${Math.min(4, Math.max(1, tier))}`;
+    if (custom[id]) return custom[id];
+    if (GLOBAL_LEAGUES[id]) return GLOBAL_LEAGUES[id];
+  }
+  if (safeCountry === 'إسبانيا') {
+    const id = `esp_tier_${Math.min(4, Math.max(1, tier))}`;
+    if (custom[id]) return custom[id];
+    if (GLOBAL_LEAGUES[id]) return GLOBAL_LEAGUES[id];
+  }
+  if (safeCountry === 'ألمانيا') {
+    const id = `ger_tier_${Math.min(2, Math.max(1, tier))}`;
+    if (custom[id]) return custom[id];
+    if (GLOBAL_LEAGUES[id]) return GLOBAL_LEAGUES[id];
+  }
+  if (safeCountry === 'إيطاليا') {
+    const id = `ita_tier_${Math.min(2, Math.max(1, tier))}`;
+    if (custom[id]) return custom[id];
+    if (GLOBAL_LEAGUES[id]) return GLOBAL_LEAGUES[id];
+  }
+  if (safeCountry === 'فرنسا') {
+    const id = `fra_tier_${Math.min(2, Math.max(1, tier))}`;
+    if (custom[id]) return custom[id];
+    if (GLOBAL_LEAGUES[id]) return GLOBAL_LEAGUES[id];
+  }
+  if (safeCountry === 'مصر') {
+    const id = `egy_tier_${Math.min(4, Math.max(1, tier))}`;
+    if (custom[id]) return custom[id];
+    if (GLOBAL_LEAGUES[id]) return GLOBAL_LEAGUES[id];
   }
 
-  // 3. Direct match by country and tier across all leagues
+  // 3. Match across any other country registered in custom/global leagues
   if (safeCountry) {
     for (const league of Object.values(custom)) {
       const leagueCountry = (league.country || '').trim();
@@ -390,7 +481,6 @@ export function getLeagueByCountryAndTier(country: string, tier: number, preferr
       }
     }
 
-    // 4. If tier not found for that country, find closest tier in that exact country
     const countryLeagues = Object.values(custom).filter(league => {
       const leagueCountry = (league.country || '').trim();
       return leagueCountry === safeCountry || safeCountry.includes(leagueCountry) || leagueCountry.includes(safeCountry);
@@ -401,12 +491,7 @@ export function getLeagueByCountryAndTier(country: string, tier: number, preferr
     }
   }
 
-  // 5. Fallback for Egyptian league system
-  if (!safeCountry || safeCountry === 'مصر' || safeCountry.includes('مصر')) {
-    const id = `egy_tier_${tier}`;
-    if (custom[id]) return custom[id];
-    if (GLOBAL_LEAGUES[id]) return GLOBAL_LEAGUES[id];
-  }
+  // Fallback
   return custom['egy_tier_1'] || GLOBAL_LEAGUES['egy_tier_1'] || EGYPT_TIER_4_LEAGUE;
 }
 
@@ -415,7 +500,7 @@ export function getAllClubsForCountry(country: string): Club[] {
   const clubsMap = new Map<string, Club>();
   const safeCountry = String(country || 'مصر').trim();
   
-  // Static registry fallback for Egypt and all major nations
+  // Static registry fallback for all tiers across all nations
   if (safeCountry === 'مصر' || safeCountry.includes('مصر')) {
     EGYPT_PREMIER_CLUBS.forEach(t => clubsMap.set(t.id, t));
     EGYPT_TIER_2_CLUBS.forEach(t => clubsMap.set(t.id, t));
@@ -424,12 +509,27 @@ export function getAllClubsForCountry(country: string): Club[] {
   } else if (safeCountry === 'المملكة العربية السعودية' || safeCountry.includes('السعودية')) {
     SAUDI_PRO_CLUBS.forEach(t => clubsMap.set(t.id, t));
     SAUDI_TIER_2_CLUBS.forEach(t => clubsMap.set(t.id, t));
+    SAUDI_TIER_3_CLUBS.forEach(t => clubsMap.set(t.id, t));
+    SAUDI_TIER_4_CLUBS.forEach(t => clubsMap.set(t.id, t));
   } else if (safeCountry === 'إسبانيا' || safeCountry.includes('إسبانيا')) {
     SPAIN_LA_LIGA_CLUBS.forEach(t => clubsMap.set(t.id, t));
     SPAIN_LA_LIGA_2_CLUBS.forEach(t => clubsMap.set(t.id, t));
+    SPAIN_TIER_3_CLUBS.forEach(t => clubsMap.set(t.id, t));
+    SPAIN_TIER_4_CLUBS.forEach(t => clubsMap.set(t.id, t));
   } else if (safeCountry === 'إنجلترا' || safeCountry.includes('إنجلترا')) {
     ENGLAND_PREMIER_CLUBS.forEach(t => clubsMap.set(t.id, t));
     ENGLAND_CHAMPIONSHIP_CLUBS.forEach(t => clubsMap.set(t.id, t));
+    ENGLAND_LEAGUE_ONE_CLUBS.forEach(t => clubsMap.set(t.id, t));
+    ENGLAND_LEAGUE_TWO_CLUBS.forEach(t => clubsMap.set(t.id, t));
+  } else if (safeCountry === 'ألمانيا' || safeCountry.includes('ألمانيا')) {
+    GERMANY_BUNDESLIGA_CLUBS.forEach(t => clubsMap.set(t.id, t));
+    GERMANY_TIER_2_CLUBS.forEach(t => clubsMap.set(t.id, t));
+  } else if (safeCountry === 'إيطاليا' || safeCountry.includes('إيطاليا')) {
+    ITALY_SERIE_A_CLUBS.forEach(t => clubsMap.set(t.id, t));
+    ITALY_SERIE_B_CLUBS.forEach(t => clubsMap.set(t.id, t));
+  } else if (safeCountry === 'فرنسا' || safeCountry.includes('فرنسا')) {
+    FRANCE_LIGUE_1_CLUBS.forEach(t => clubsMap.set(t.id, t));
+    FRANCE_LIGUE_2_CLUBS.forEach(t => clubsMap.set(t.id, t));
   }
 
   // Merge with custom persistent state
@@ -476,6 +576,8 @@ export function findClubInWorld(clubId: string): Club | undefined {
     ...INITIAL_TEAMS,
     ...SAUDI_PRO_CLUBS,
     ...SAUDI_TIER_2_CLUBS,
+    ...SAUDI_TIER_3_CLUBS,
+    ...SAUDI_TIER_4_CLUBS,
     ...UAE_PRO_CLUBS,
     ...QATAR_STARS_CLUBS,
     ...MOROCCO_BOTOLA_CLUBS,
@@ -483,11 +585,18 @@ export function findClubInWorld(clubId: string): Club | undefined {
     ...ALGERIA_LIGUE_CLUBS,
     ...SPAIN_LA_LIGA_CLUBS,
     ...SPAIN_LA_LIGA_2_CLUBS,
+    ...SPAIN_TIER_3_CLUBS,
+    ...SPAIN_TIER_4_CLUBS,
     ...ENGLAND_PREMIER_CLUBS,
     ...ENGLAND_CHAMPIONSHIP_CLUBS,
+    ...ENGLAND_LEAGUE_ONE_CLUBS,
+    ...ENGLAND_LEAGUE_TWO_CLUBS,
     ...FRANCE_LIGUE_1_CLUBS,
+    ...FRANCE_LIGUE_2_CLUBS,
     ...ITALY_SERIE_A_CLUBS,
+    ...ITALY_SERIE_B_CLUBS,
     ...GERMANY_BUNDESLIGA_CLUBS,
+    ...GERMANY_TIER_2_CLUBS,
     ...BRAZIL_SERIE_A_CLUBS,
     ...ARGENTINA_PRIMERA_CLUBS,
   ];
