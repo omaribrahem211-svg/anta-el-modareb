@@ -875,7 +875,7 @@ export const TransfersTab: React.FC<TransfersTabProps> = ({ onSelectPlayer }) =>
                             const effectiveSalary = player.salary || 2500;
                             const clubBudget = userClub?.budget || 0;
                             const isAffordableFee = userClub ? clubBudget >= effectiveAskingPrice : false;
-                            const isAffordableWage = userClub ? (clubTotalWages + effectiveSalary <= clubMonthlyIncome) : false;
+                            const isAffordableWage = userClub ? (remainingWageBudget >= effectiveSalary) : false;
                             const canDirectBuy = Boolean(userClub && isAffordableFee && isAffordableWage);
 
                             return (
@@ -885,7 +885,7 @@ export const TransfersTab: React.FC<TransfersTabProps> = ({ onSelectPlayer }) =>
                                 title={
                                   !userClub ? 'يجب تولي تدريب نادٍ' :
                                   !isAffordableFee ? `الميزانية غير كافية (${clubBudget.toLocaleString()} / ${(effectiveAskingPrice || 0).toLocaleString()} ج.م)` :
-                                  !isAffordableWage ? `الراتب (${(effectiveSalary || 0).toLocaleString()} ج.م) يتجاوز سقف دخل النادي` :
+                                  !isAffordableWage ? `الراتب (${(effectiveSalary || 0).toLocaleString()} ج.م) يتجاوز سقف الرواتب المتاح (${remainingWageBudget.toLocaleString()} ج.م)` :
                                   'شراء مباشر'
                                 }
                                 className="bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 disabled:opacity-40 disabled:cursor-not-allowed text-white font-bold text-xs py-2.5 rounded-xl shadow-md transition-all active:scale-95 flex items-center justify-center gap-1"

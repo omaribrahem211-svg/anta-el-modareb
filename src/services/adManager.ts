@@ -822,9 +822,14 @@ class AdManagerService {
         });
         this.rewardedListenerHandles.push(rewardHandle);
 
-        // C. Listen for Dismissed
+        // C. Listen for Dismissed (with grace wait to avoid event race condition where Dismissed arrives before Rewarded)
         const dismissHandle = await AdMob.addListener(RewardAdPluginEvents.Dismissed, async () => {
-          console.log(`[ADMOB_REWARDED] Dismissed (rewardEarned: ${rewardEarned})`);
+          console.log(`[ADMOB_REWARDED] Dismissed event received (pre-reward: ${rewardEarned})`);
+          if (!rewardEarned) {
+            // Allow 350ms grace period for Android/iOS native bridge to deliver the Rewarded event before tearing down listeners
+            await new Promise(res => setTimeout(res, 350));
+          }
+          console.log(`[ADMOB_REWARDED] Dismissed finalized (final rewardEarned: ${rewardEarned})`);
           await cleanup();
 
           if (params.onDismiss) {
@@ -867,24 +872,32 @@ class AdManagerService {
           }
         });
       } else {
-        // Web Simulation Mode
-        this.log('Rewarded Ad - Web Simulation');
-        const confirmed = window.confirm(
-          `🎬 [إعلان AdMob بمكافأة - Rewarded Ad]\n\nهل ترغب في مشاهدة إعلان الفيديو بالكامل لـ (${params.rewardTypeLabel})؟\n\n- موافق (OK): اكتمال الإعلان بنجاح ومنح المكافأة فوراً.\n- إلغاء (Cancel): إغلاق الإعلان قبل اكتماله.`
-        );
+        // Web Simulation Mode (safe in-memory completion without blocking window.confirm which fails in sandboxed iframes)
+        this.log('Rewarded Ad - Web Simulation Mode Activated');
+        
+        // Asynchronously simulate a quick 500ms ad stream, guaranteed to reward the player
+        await new Promise(resolve => setTimeout(resolve, 600));
 
-        if (confirmed) {
-          rewardEarned = true;
-          this.recordRewardedAdSuccess();
-          console.log('[REWARDED] rewarded (web simulation)');
+        rewardEarned = true;
+        this.recordRewardedAdSuccess();
+        console.log('[REWARDED] Reward successfully verified and earned (web mode)');
+
+        try {
           params.onRewardEarned();
+        } catch (cbErr) {
+          console.error('Error in onRewardEarned callback:', cbErr);
         }
 
         this.isRewardedShowing = false;
         this.isRewardedLoaded = false;
         this.isRewardedLoading = false;
+
         if (params.onDismiss) {
-          params.onDismiss(rewardEarned);
+          try {
+            params.onDismiss(true);
+          } catch (dErr) {
+            console.error('Error in onDismiss callback:', dErr);
+          }
         }
       }
 

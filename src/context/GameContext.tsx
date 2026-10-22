@@ -5504,8 +5504,10 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       };
     }
 
+    const targetClubId = userClub.id;
     setTeams(prev => prev.map(t => {
-      if (!t.isUserClub) return t;
+      const isMatch = t.id === targetClubId || Boolean(t.isUserClub && (!targetClubId || t.id === targetClubId));
+      if (!isMatch) return t;
       return {
         ...t,
         budget: Math.max(0, t.budget - cashAmount),
@@ -5556,9 +5558,11 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
 
     const cashGain = monthlyAmount * 12;
+    const targetClubId = userClub.id;
 
     setTeams(prev => prev.map(t => {
-      if (!t.isUserClub) return t;
+      const isMatch = t.id === targetClubId || Boolean(t.isUserClub && (!targetClubId || t.id === targetClubId));
+      if (!isMatch) return t;
       return {
         ...t,
         budget: t.budget + cashGain,

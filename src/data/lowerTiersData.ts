@@ -175,7 +175,7 @@ export const ENGLAND_LEAGUE_ONE_CLUBS: Club[] = [
     createLowerTierPlayer('eng3_bol_7', 'كايل ديمبسي', 'CAM', 28, 71, 1200000, 26000, 22, 'إنجلترا', 'ENG', 'eng3_bolton', 'eng_tier_3'),
     createLowerTierPlayer('eng3_bol_8', 'ديون تشارلز', 'ST', 28, 74, 2500000, 40000, 10, 'أيرلندا الشمالية', 'NIR', 'eng3_bolton', 'eng_tier_3'),
     createLowerTierPlayer('eng3_bol_9', 'فيكتور أديبوييجو', 'ST', 26, 71, 1300000, 25000, 14, 'نيجيريا', 'NGA', 'eng3_bolton', 'eng_tier_3'),
-    createLowerTierPlayer('eng3_bol_10', 'جون مكأتي', 'CF', 25, 72, 1700000, 28000, 7, 'إنجلترا', 'ENG', 'eng3_bolton', 'eng_tier_3'),
+    createLowerTierPlayer('eng3_bol_10', 'جون مكأتي', 'ST', 25, 72, 1700000, 28000, 7, 'إنجلترا', 'ENG', 'eng3_bolton', 'eng_tier_3'),
   ]),
 
   createLowerTierClub('eng3_huddersfield', 'هدرسفيلد تاون', 'هدرسفيلد', 'هدرسفيلد', 'إنجلترا', 'ENG', 3, 'eng_tier_3', 64, '#0284c7', '#ffffff', 8500000, 3200000, 900000, 'جون سميثز ستاديوم', 24100, [
@@ -904,7 +904,7 @@ export const SPAIN_TIER_4_CLUBS: Club[] = [
   createLowerTierClub('esp4_pontevedra', 'بونتيفيدرا سي إف الغاليسي', 'بونتيفيدرا', 'بونتيفيدرا', 'إسبانيا', 'ESP', 4, 'esp_tier_4', 58, '#831843', '#ffffff', 3200000, 1000000, 360000, 'باسارون', 10500, [
     createLowerTierPlayer('esp4_pon_1', 'إيدو سوزا الحارس', 'GK', 33, 68, 300000, 15000, 1, 'إسبانيا', 'ESP', 'esp4_pontevedra', 'esp_tier_4'),
     createLowerTierPlayer('esp4_pon_2', 'روفو الهداف التاريخي', 'ST', 31, 69, 400000, 17000, 9, 'إسبانيا', 'ESP', 'esp4_pontevedra', 'esp_tier_4'),
-    createLowerTierPlayer('esp4_pon_3', 'أليكس غونزاليس', 'LM', 32, 68, 320000, 15000, 7, 'إسبانيا', 'ESP', 'esp4_pontevedra', 'esp_tier_4'),
+    createLowerTierPlayer('esp4_pon_3', 'أليكس غونزاليس', 'LW', 32, 68, 320000, 15000, 7, 'إسبانيا', 'ESP', 'esp4_pontevedra', 'esp_tier_4'),
   ]),
 
   createLowerTierClub('esp4_compostela', 'إس دي كومبوستيلا العريق', 'كومبوستيلا', 'سانتياغو', 'إسبانيا', 'ESP', 4, 'esp_tier_4', 58, '#0284c7', '#ffffff', 3100000, 950000, 350000, 'سان لازارو', 12000, [

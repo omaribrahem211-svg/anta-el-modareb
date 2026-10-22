@@ -246,28 +246,52 @@ export function calculateRealisticSalary(
  */
 export function calculateClubMonthlyIncome(club: Club): number {
   if (!club) return 0;
-  // Sponsorship completely cancelled - no sponsor revenue
-  const sponsorIncome = 0;
   const tier = club.division || 4;
 
+  // 1. Division Board Payroll Grant (المخصص الأساسي للرواتب من مجلس الإدارة والاتحاد)
+  const divisionBoardGrantByTier: Record<number, number> = {
+    1: 3500000, // الدوري الممتاز: 3.5 مليون ج.م شهرياً
+    2: 1200000, // دوري المحترفين: 1.2 مليون ج.م شهرياً
+    3: 550000,  // القسم الثاني ب: 550 ألف ج.م شهرياً
+    4: 280000,  // القسم الثالث / الدرجة الرابعة: 280 ألف ج.م شهرياً
+  };
+  const baseBoardGrant = divisionBoardGrantByTier[tier] || 300000;
+
+  // 2. Existing contracted squad wages
+  const currentWages = calculateClubTotalMonthlyWages(club);
+
+  // Board Invariant: Guarantee minimum 20% + 40,000 EGP headroom above existing wages so clubs always have operational wage space
+  const guaranteedPayrollFloor = Math.max(baseBoardGrant, Math.round(currentWages * 1.20 + 40000));
+
+  // 3. Matchday Ticket Revenue (تقدير مباراتين على أرض الفريق شهرياً)
   const facilities = club.facilities || { stadiumCapacity: 5000, stadiumLevel: 1 };
   const stadiumCapacity = facilities.stadiumCapacity || 5000;
-  const ticketPrice = tier === 1 ? 50 : tier === 2 ? 35 : tier === 3 ? 25 : 20;
-  const estimatedTicketIncome = stadiumCapacity * ticketPrice * 2; // approx 2 home matches per month
+  const ticketPrice = (facilities as any)?.ticketPrice || (tier === 1 ? 50 : tier === 2 ? 35 : tier === 3 ? 25 : 20);
+  const estimatedTicketIncome = stadiumCapacity * ticketPrice * 2;
 
+  // 4. Commercial & TV Rights
   const tvAndCommercialByTier: Record<number, number> = {
-    1: 100000,
-    2: 40000,
-    3: 15000,
-    4: 8000,
+    1: 150000,
+    2: 60000,
+    3: 25000,
+    4: 15000,
   };
-  const tvCommercial = tvAndCommercialByTier[tier] || 10000;
+  const tvCommercial = tvAndCommercialByTier[tier] || 15000;
 
-  const totalCalculated = sponsorIncome + estimatedTicketIncome + tvCommercial;
-  
-  // Plus any wage budget supplement transferred from club cash budget
+  // 5. User-transferred wage budget supplement (المحول من الخزينة النقدية)
   const wageBonus = Math.max(0, club.wageBudgetMonthly || 0);
-  return totalCalculated + wageBonus;
+
+  return guaranteedPayrollFloor + estimatedTicketIncome + tvCommercial + wageBonus;
+}
+
+/**
+ * Returns the exact remaining monthly wage capacity available for new signings.
+ */
+export function calculateClubRemainingWageBudget(club: Club): number {
+  if (!club) return 0;
+  const totalIncome = calculateClubMonthlyIncome(club);
+  const totalWages = calculateClubTotalMonthlyWages(club);
+  return Math.max(0, totalIncome - totalWages);
 }
 
 /**

@@ -284,9 +284,9 @@ export function calculateTeamStrength(
     midfield = Math.min(99, Math.round(midfield * 1.06)); // +6% tactical midfield dominance
   }
 
-  // Overall is composed of 70% Player Quality (تشكيلة اللاعبين الأساسيين) + 30% Manager Rating (الرخصة التدريبية والخبرة)
+  // Overall is composed of 88% Player Quality (تشكيلة اللاعبين الأساسيين) + 12% Manager Rating (الرخصة التدريبية والخبرة)
   const squadOverall = Math.round((attack + midfield + defense) / 3);
-  const overall = Math.max(35, Math.min(99, Math.round(squadOverall * 0.70 + mgrRating * 0.30)));
+  const overall = Math.max(35, Math.min(99, Math.round(squadOverall * 0.88 + mgrRating * 0.12)));
 
   return { 
     attack, 
@@ -1541,15 +1541,14 @@ export function simulateMatchStep(
   const effAwayMid = awayStrength.midfield * matchup.awayMidfieldMod * awaySynergy.midfieldMod * awayPhysMod * awayCountFactor * (1 + awayStaffBonuses.tacticalSynergyBonus);
   const effAwayDef = awayStrength.defense * matchup.awayDefenseMod * awaySynergy.defenseMod * awayPhysMod * awayCountFactor;
 
-  // CORE USER MANDATE: Team Strength & Manager Rating Dominance
-  // "اللى معاه لاعيبه قوية و معاه رخص تدريبية عالية يبقى نسبه فوزه اعلى دايما حتى لو بيلاعب فرقة اسمها كبير"
+  // Balanced Quality Advantage incorporating Squad Strength, Overall, and Tactical Coaching
   const squadDiff = homeStrength.squadStrength - awayStrength.squadStrength;
   const managerDiff = homeStrength.managerRating - awayStrength.managerRating;
   const overallDiff = homeStrength.overall - awayStrength.overall;
 
-  const qualityAdvantage = (overallDiff * 0.045) + (managerDiff * 0.028) + (squadDiff * 0.022);
-  const homeQualityMod = Math.max(0.08, Math.min(3.80, 1.0 + qualityAdvantage));
-  const awayQualityMod = Math.max(0.08, Math.min(3.80, 1.0 - qualityAdvantage));
+  const qualityAdvantage = Math.max(-0.40, Math.min(0.40, (overallDiff * 0.020) + (managerDiff * 0.008) + (squadDiff * 0.006)));
+  const homeQualityMod = Math.max(0.60, Math.min(1.40, 1.0 + qualityAdvantage));
+  const awayQualityMod = Math.max(0.60, Math.min(1.40, 1.0 - qualityAdvantage));
 
   // Dynamic Possession for this minute (strongly reflects quality gap and tactical control)
   const weightedHomeMid = effHomeMid * Math.sqrt(homeQualityMod);
@@ -1680,12 +1679,8 @@ export function simulateMatchStep(
           else if (scoreDiff >= 3) goalProb *= 0.70;
           else if (scoreDiff >= 2) goalProb *= 0.85;
 
-          // Underdog upset limitation: when opponent is vastly weaker, clamp conversion
-          if (overallDiff < -10) {
-            goalProb = Math.min(0.14, goalProb);
-          }
-
-          goalProb = Math.max(0.04, Math.min(0.65, goalProb));
+          // Realistic conversion clamp
+          goalProb = Math.max(0.06, Math.min(0.60, goalProb));
 
           if (Math.random() < goalProb) {
             homeScore++;
@@ -1784,12 +1779,8 @@ export function simulateMatchStep(
           else if (scoreDiff <= -3) goalProb *= 0.70;
           else if (scoreDiff <= -2) goalProb *= 0.85;
 
-          // Underdog upset limitation: when opponent is vastly stronger, clamp conversion
-          if (overallDiff > 10) {
-            goalProb = Math.min(0.14, goalProb);
-          }
-
-          goalProb = Math.max(0.04, Math.min(0.65, goalProb));
+          // Realistic conversion clamp
+          goalProb = Math.max(0.06, Math.min(0.60, goalProb));
 
           if (Math.random() < goalProb) {
             awayScore++;
@@ -2204,31 +2195,22 @@ export function simulateMatch(
   // True Rating Disparity (Rating Delta)
   const ratingDelta = effHomeRating - effAwayRating;
 
-  // 6. Base Expected Goals (xG) based on True Rating & Lineup Differences
-  let baseHomeXg = 1.35 + (homeStrength.attack - awayStrength.defense) * 0.040 + (ratingDelta * 0.042);
-  let baseAwayXg = 1.05 + (awayStrength.attack - homeStrength.defense) * 0.040 - (ratingDelta * 0.042);
+  // 6. Base Expected Goals (xG) incorporating Home Advantage, Attack vs Defense, and Tactical Fit
+  const attackDefDeltaHome = (homeStrength.attack - awayStrength.defense) * 0.024;
+  const attackDefDeltaAway = (awayStrength.attack - homeStrength.defense) * 0.024;
+  const ratingDeltaEffect = ratingDelta * 0.032;
 
-  // 7. Controlled Luck / Surprise Factor (Strictly capped between 10% and 15% max)
-  const rawHomeLuck = (Math.random() - 0.5) * 0.20; // -10% to +10%
-  const rawAwayLuck = (Math.random() - 0.5) * 0.20; // -10% to +10%
+  let baseHomeXg = 1.35 + (homePitchAdvantage * 0.06) + attackDefDeltaHome + ratingDeltaEffect;
+  let baseAwayXg = 1.05 + attackDefDeltaAway - ratingDeltaEffect;
 
-  // Prevent underdog from gaining excessive luck beyond 8% in heavy mismatch scenarios
-  const clampedHomeLuck = ratingDelta < -10 ? Math.min(0.08, rawHomeLuck) : rawHomeLuck;
-  const clampedAwayLuck = ratingDelta > 10 ? Math.min(0.08, rawAwayLuck) : rawAwayLuck;
+  // 7. Realistic Football Variance & Form Momentum (-12% to +12%)
+  const homeVariance = (Math.random() - 0.5) * 0.24;
+  const awayVariance = (Math.random() - 0.5) * 0.24;
 
-  let finalHomeXg = Math.max(0.12, Math.min(5.2, baseHomeXg * (1 + clampedHomeLuck)));
-  let finalAwayXg = Math.max(0.08, Math.min(5.2, baseAwayXg * (1 + clampedAwayLuck)));
+  let finalHomeXg = Math.max(0.20, Math.min(4.8, baseHomeXg * (1 + homeVariance)));
+  let finalAwayXg = Math.max(0.15, Math.min(4.8, baseAwayXg * (1 + awayVariance)));
 
-  // If a team is noticeably superior (ratingDelta >= 8), guarantee strong scoring expectation
-  if (ratingDelta >= 10) {
-    finalHomeXg = Math.max(2.2, finalHomeXg);
-    finalAwayXg = Math.min(0.65, finalAwayXg);
-  } else if (ratingDelta <= -10) {
-    finalHomeXg = Math.min(0.65, finalHomeXg);
-    finalAwayXg = Math.max(2.2, finalAwayXg);
-  }
-
-  // 8. Poisson-based Goal Sampling
+  // 8. Poisson-based Goal Sampling (Authentic probabilistic football engine)
   const samplePoisson = (lambda: number): number => {
     const l = Math.exp(-lambda);
     let k = 0;
@@ -2242,27 +2224,6 @@ export function simulateMatch(
 
   let homeScore = samplePoisson(finalHomeXg);
   let awayScore = samplePoisson(finalAwayXg);
-
-  // 9. Strict Upset Protection: Superior squads with high coaching license dominate matches!
-  if (ratingDelta >= 8 && awayScore > homeScore) {
-    const upsetRoll = Math.random();
-    if (upsetRoll > 0.10) { // 90% of the time, the superior team corrects to win or draw
-      if (Math.random() < 0.70) {
-        homeScore = awayScore + Math.floor(Math.random() * 2 + 1); // Win for strong team
-      } else {
-        homeScore = awayScore; // Draw
-      }
-    }
-  } else if (ratingDelta <= -8 && homeScore > awayScore) {
-    const upsetRoll = Math.random();
-    if (upsetRoll > 0.10) {
-      if (Math.random() < 0.70) {
-        awayScore = homeScore + Math.floor(Math.random() * 2 + 1);
-      } else {
-        awayScore = homeScore;
-      }
-    }
-  }
 
   // 10. Generate Match Events (Goals, Cards, Subs, Stats)
   const events: MatchEvent[] = [];
