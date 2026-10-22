@@ -189,14 +189,12 @@ public class MainActivity extends BridgeActivity {
 
     @Override
     public void onPause() {
-        try {
-            if (getBridge() != null && getBridge().getWebView() != null) {
-                WebView webView = getBridge().getWebView();
-                webView.onPause();
-                // Pause JavaScript execution and canvas rendering when app is backgrounded
-                webView.pauseTimers();
-            }
-        } catch (Exception ignored) {}
+        // CRITICAL ADMOB FIX:
+        // NEVER call webView.pauseTimers() or webView.onPause() here!
+        // In Android Chromium, WebView.pauseTimers() is a PROCESS-GLOBAL static call.
+        // When AdMob opens full-screen AdActivity, MainActivity is paused.
+        // If pauseTimers() is called, it freezes all JavaScript timers and countdowns
+        // ("Reward in X seconds") inside AdMob's AdActivity WebView, causing ads to permanently freeze!
         super.onPause();
     }
 
