@@ -49,7 +49,7 @@ export const AD_REWARD_DEFINITIONS: Record<AdRewardType, AdRewardDefinition> = {
     iconName: 'Coins',
     colorClass: 'from-amber-500/20 to-yellow-500/20 text-amber-300 border-amber-500/30',
     badge: 'شائع',
-    cooldownSeconds: 60,
+    cooldownSeconds: 0,
   },
   club_funds: {
     type: 'club_funds',
@@ -61,7 +61,7 @@ export const AD_REWARD_DEFINITIONS: Record<AdRewardType, AdRewardDefinition> = {
     iconName: 'DollarSign',
     colorClass: 'from-emerald-500/20 to-teal-500/20 text-emerald-300 border-emerald-500/30',
     badge: 'تمويل مباشر',
-    cooldownSeconds: 90,
+    cooldownSeconds: 0,
   },
   team_energy: {
     type: 'team_energy',
@@ -73,7 +73,7 @@ export const AD_REWARD_DEFINITIONS: Record<AdRewardType, AdRewardDefinition> = {
     iconName: 'Activity',
     colorClass: 'from-sky-500/20 to-blue-500/20 text-sky-300 border-sky-500/30',
     badge: 'طاقم طبي',
-    cooldownSeconds: 120,
+    cooldownSeconds: 0,
   },
   training_boost: {
     type: 'training_boost',
@@ -85,7 +85,7 @@ export const AD_REWARD_DEFINITIONS: Record<AdRewardType, AdRewardDefinition> = {
     iconName: 'Dumbbell',
     colorClass: 'from-purple-500/20 to-indigo-500/20 text-purple-300 border-purple-500/30',
     badge: 'تكتيك',
-    cooldownSeconds: 60,
+    cooldownSeconds: 0,
   },
 };
 
@@ -109,11 +109,12 @@ class AdRewardService {
    * Checks whether a specific reward is on cooldown
    */
   public getCooldownRemaining(rewardType: AdRewardType): number {
+    const configCooldown = ADMOB_CONFIG.REWARDED_COOLDOWN_SECONDS ?? 0;
+    if (configCooldown <= 0) return 0;
     const lastTimestamp = this.lastClaimTimestamps[rewardType] || 0;
     if (lastTimestamp <= 0) return 0;
-    const def = AD_REWARD_DEFINITIONS[rewardType];
     const elapsedSec = (Date.now() - lastTimestamp) / 1000;
-    return Math.max(0, Math.ceil(def.cooldownSeconds - elapsedSec));
+    return Math.max(0, Math.ceil(configCooldown - elapsedSec));
   }
 
   public canClaimReward(rewardType: AdRewardType): boolean {

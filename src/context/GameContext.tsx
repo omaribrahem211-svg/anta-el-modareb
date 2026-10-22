@@ -5323,6 +5323,22 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const bonusAmount = currentRev.baseTotalRevenue;
 
     return new Promise((resolve) => {
+      let resolved = false;
+
+      const safeResolve = (result: { success: boolean; message: string }) => {
+        if (resolved) return;
+        resolved = true;
+        if (safetyTimer) clearTimeout(safetyTimer);
+        resolve(result);
+      };
+
+      const safetyTimer = setTimeout(() => {
+        safeResolve({
+          success: false,
+          message: 'انتهت مهلة استجابة الإعلان، يرجى المحاولة بعد لحظات.',
+        });
+      }, 7000);
+
       AdManager.showRewardedForAction({
         actionType: 'double_match_revenue',
         onUserEarnedReward: () => {
@@ -5385,19 +5401,28 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           };
           setInbox(prev => [bonusMsg, ...prev]);
 
-          resolve({
+          safeResolve({
             success: true,
             message: `🎉 مبروك! تمت مضاعفة إيراد المباراة بنجاح وحصلت على +${bonusAmount.toLocaleString()} ج.م إضافية!`,
           });
         },
         onDismiss: (earned) => {
           if (!earned) {
-            resolve({ success: false, message: 'لم تكتمل مشاهدة الإعلان حتى نهايته، لم يتم منح المضاعفة.' });
+            safeResolve({ success: false, message: 'لم تكتمل مشاهدة الإعلان حتى نهايته، لم يتم منح المضاعفة.' });
           }
         },
-        onFailure: () => {
-          resolve({ success: false, message: 'تعذر تحميل الإعلان حالياً، يرجى المحاولة بعد قليل.' });
+        onFailure: (err) => {
+          safeResolve({
+            success: false,
+            message: (err && err.message) ? err.message : 'تعذر تحميل الإعلان حالياً، يرجى المحاولة بعد قليل.',
+          });
         },
+      }).then((started) => {
+        if (!started) {
+          safeResolve({ success: false, message: 'تعذر تشغيل الإعلان حالياً، يرجى المحاولة لاحقاً.' });
+        }
+      }).catch(() => {
+        safeResolve({ success: false, message: 'حدث خطأ غير متوقع أثناء تجهيز الإعلان.' });
       });
     });
   };
@@ -5415,6 +5440,22 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
 
     return new Promise((resolve) => {
+      let resolved = false;
+
+      const safeResolve = (result: { success: boolean; message: string }) => {
+        if (resolved) return;
+        resolved = true;
+        if (safetyTimer) clearTimeout(safetyTimer);
+        resolve(result);
+      };
+
+      const safetyTimer = setTimeout(() => {
+        safeResolve({
+          success: false,
+          message: 'انتهت مهلة استجابة الإعلان، يرجى المحاولة بعد لحظات.',
+        });
+      }, 7000);
+
       AdManager.showRewardedForAction({
         actionType: 'rematch_match',
         onUserEarnedReward: () => {
@@ -5437,19 +5478,28 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
           setLiveMatch(resetSimulationState);
 
-          resolve({
+          safeResolve({
             success: true,
             message: '🎬 تم تجهيز إعادة المباراة بنجاح! تنطلق صافرة البداية من جديد الآن.. حظاً موفقاً في حسم الفوز ⚽🏆',
           });
         },
         onDismiss: (earned) => {
           if (!earned) {
-            resolve({ success: false, message: 'لم تكتمل مشاهدة الإعلان، تعذر إعادة المباراة.' });
+            safeResolve({ success: false, message: 'لم تكتمل مشاهدة الإعلان، تعذر إعادة المباراة.' });
           }
         },
-        onFailure: () => {
-          resolve({ success: false, message: 'تعذر تحميل الإعلان حالياً، يرجى المحاولة بعد قليل.' });
+        onFailure: (err) => {
+          safeResolve({
+            success: false,
+            message: (err && err.message) ? err.message : 'تعذر تحميل الإعلان حالياً، يرجى المحاولة بعد قليل.',
+          });
         },
+      }).then((started) => {
+        if (!started) {
+          safeResolve({ success: false, message: 'تعذر تشغيل الإعلان حالياً، يرجى المحاولة لاحقاً.' });
+        }
+      }).catch(() => {
+        safeResolve({ success: false, message: 'حدث خطأ غير متوقع أثناء تجهيز الإعلان.' });
       });
     });
   };
@@ -8368,10 +8418,10 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       }
 
       setTeams(prev => prev.map(t => {
-        if (!t.isUserClub) return t;
+        if (!t.isUserClub && t.id !== userClub.id) return t;
         return {
           ...t,
-          budget: t.budget + fundAmount,
+          budget: (t.budget || 0) + fundAmount,
           transferBudget: (t.transferBudget || 0) + fundAmount,
         };
       }));
@@ -8404,7 +8454,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       }
 
       setTeams(prev => prev.map(t => {
-        if (!t.isUserClub) return t;
+        if (!t.isUserClub && t.id !== userClub.id) return t;
         return {
           ...t,
           players: t.players.map(p => ({

@@ -76,32 +76,47 @@ export const RewardedAdCenterModal: React.FC<RewardedAdCenterModalProps> = ({
     setErrorMessage(null);
     setSuccessMessage(null);
 
-    const success = await AdManager.showRewardedAd(
-      selectedType,
-      // 1. Reward verified and earned
-      (claimResult: AdRewardClaimResult) => {
-        setIsLoadingAd(false);
-        const gameResult = claimAdReward(selectedType);
-
-        if (gameResult.success) {
-          setSuccessMessage(gameResult.message);
-        } else {
-          setErrorMessage(gameResult.message);
-        }
-      },
-      // 2. Ad dismissed
-      () => {
-        setIsLoadingAd(false);
-      },
-      // 3. Ad failed to show
-      (error) => {
-        setIsLoadingAd(false);
-        setErrorMessage('تعذر تشغيل الإعلان حالياً. يرجى التأكد من اتصال الإنترنت والمحاولة لاحقاً.');
-      }
-    );
-
-    if (!success) {
+    // Safeguard timer so UI never gets stuck in loading
+    const safetyTimer = setTimeout(() => {
       setIsLoadingAd(false);
+    }, 8000);
+
+    try {
+      const success = await AdManager.showRewardedAd(
+        selectedType,
+        // 1. Reward verified and earned
+        (claimResult: AdRewardClaimResult) => {
+          clearTimeout(safetyTimer);
+          setIsLoadingAd(false);
+          const gameResult = claimAdReward(selectedType);
+
+          if (gameResult.success) {
+            setSuccessMessage(gameResult.message);
+          } else {
+            setErrorMessage(gameResult.message);
+          }
+        },
+        // 2. Ad dismissed
+        () => {
+          clearTimeout(safetyTimer);
+          setIsLoadingAd(false);
+        },
+        // 3. Ad failed to show
+        (error) => {
+          clearTimeout(safetyTimer);
+          setIsLoadingAd(false);
+          setErrorMessage('تعذر تشغيل الإعلان حالياً. يرجى التأكد من اتصال الإنترنت والمحاولة لاحقاً.');
+        }
+      );
+
+      if (!success) {
+        clearTimeout(safetyTimer);
+        setIsLoadingAd(false);
+      }
+    } catch {
+      clearTimeout(safetyTimer);
+      setIsLoadingAd(false);
+      setErrorMessage('حدث خطأ غير متوقع أثناء استدعاء الإعلان.');
     }
   };
 

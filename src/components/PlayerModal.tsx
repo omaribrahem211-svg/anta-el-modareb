@@ -127,27 +127,40 @@ export const PlayerModal: React.FC<PlayerModalProps> = ({ player, onClose, onSta
     if (isAdLoading) return;
     setIsAdLoading(true);
 
+    const safetyTimer = setTimeout(() => {
+      setIsAdLoading(false);
+    }, 8000);
+
     try {
-      await AdManager.showRewardedForAction({
+      const started = await AdManager.showRewardedForAction({
         actionType: 'heal_player',
         onUserEarnedReward: () => {
+          clearTimeout(safetyTimer);
           const res = healPlayerWithAd(livePlayer.id);
           setNotification({ text: res.message, type: 'success' });
         },
         onDismiss: (rewardEarned) => {
+          clearTimeout(safetyTimer);
           setIsAdLoading(false);
           if (!rewardEarned) {
-            setNotification({ text: 'لم تكتمل مشاهدة الإعلان! لم يتم منح المكافأة.', type: 'error' });
+            setNotification({ text: 'لم تكتمل مشاهدة الإعلان! لم يتم تطبيق الشفاء.', type: 'error' });
           }
           setTimeout(() => setNotification(null), 4000);
         },
         onFailure: () => {
+          clearTimeout(safetyTimer);
           setIsAdLoading(false);
           setNotification({ text: 'تعذر تشغيل الإعلان حالياً، يرجى المحاولة لاحقاً.', type: 'error' });
           setTimeout(() => setNotification(null), 4000);
         },
       });
+
+      if (!started) {
+        clearTimeout(safetyTimer);
+        setIsAdLoading(false);
+      }
     } catch {
+      clearTimeout(safetyTimer);
       setIsAdLoading(false);
       setNotification({ text: 'حدث خطأ أثناء تشغيل الإعلان.', type: 'error' });
       setTimeout(() => setNotification(null), 4000);
@@ -158,27 +171,40 @@ export const PlayerModal: React.FC<PlayerModalProps> = ({ player, onClose, onSta
     if (isAdLoading) return;
     setIsAdLoading(true);
 
+    const safetyTimer = setTimeout(() => {
+      setIsAdLoading(false);
+    }, 8000);
+
     try {
-      await AdManager.showRewardedForAction({
+      const started = await AdManager.showRewardedForAction({
         actionType: 'cancel_suspension',
         onUserEarnedReward: () => {
+          clearTimeout(safetyTimer);
           const res = cancelPlayerSuspensionWithAd(livePlayer.id);
           setNotification({ text: res.message, type: 'success' });
         },
         onDismiss: (rewardEarned) => {
+          clearTimeout(safetyTimer);
           setIsAdLoading(false);
           if (!rewardEarned) {
-            setNotification({ text: 'لم تكتمل مشاهدة الإعلان! لم يتم منح المكافأة.', type: 'error' });
+            setNotification({ text: 'لم تكتمل مشاهدة الإعلان! لم يتم إلغاء الإيقاف.', type: 'error' });
           }
           setTimeout(() => setNotification(null), 4000);
         },
         onFailure: () => {
+          clearTimeout(safetyTimer);
           setIsAdLoading(false);
           setNotification({ text: 'تعذر تشغيل الإعلان حالياً، يرجى المحاولة لاحقاً.', type: 'error' });
           setTimeout(() => setNotification(null), 4000);
         },
       });
+
+      if (!started) {
+        clearTimeout(safetyTimer);
+        setIsAdLoading(false);
+      }
     } catch {
+      clearTimeout(safetyTimer);
       setIsAdLoading(false);
       setNotification({ text: 'حدث خطأ أثناء تشغيل الإعلان.', type: 'error' });
       setTimeout(() => setNotification(null), 4000);

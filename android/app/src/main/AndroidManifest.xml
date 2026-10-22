@@ -54,6 +54,14 @@
 
         </activity>
 
+        <!-- AdMob Fullscreen Video Activity: Force Hardware Acceleration & config changes to prevent video & timer freezing -->
+        <activity
+            android:name="com.google.android.gms.ads.AdActivity"
+            android:configChanges="keyboard|keyboardHidden|orientation|screenLayout|uiMode|screenSize|smallestScreenSize"
+            android:hardwareAccelerated="true"
+            android:theme="@android:style/Theme.Translucent"
+            tools:replace="android:configChanges,android:theme,android:hardwareAccelerated" />
+
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.fileprovider"

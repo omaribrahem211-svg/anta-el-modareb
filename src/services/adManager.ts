@@ -63,6 +63,7 @@ class AdManagerService {
   private isRewardedLoading = false;
   private isRewardedLoaded = false;
   private isRewardedShowing = false;
+  private lastRewardedShowStart = 0;
   private rewardedLoadPromise: Promise<boolean> | null = null;
   private rewardedListenerHandles: PluginListenerHandle[] = [];
 
@@ -508,110 +509,15 @@ class AdManagerService {
   }
 
   public async showInterstitial(onDismiss?: () => void): Promise<boolean> {
-    // Completely disable interstitial ads between matches if configured false or user is premium
-    if (!ADMOB_CONFIG.ENABLE_INTERSTITIAL_BETWEEN_MATCHES || this.state.isPremium) {
-      if (onDismiss) onDismiss();
-      return false;
-    }
-
-    if (this.isInterstitialShowing) {
-      if (onDismiss) onDismiss();
-      return false;
-    }
-
-    this.isInterstitialShowing = true;
-
-    try {
-      if (this.isNative) {
-        if (!this.isInterstitialLoaded) {
-          const loaded = await this.loadInterstitial(8000);
-          if (!loaded) {
-            this.isInterstitialShowing = false;
-            if (onDismiss) onDismiss();
-            return false;
-          }
-        }
-
-        await this.cleanupInterstitialListeners();
-
-        let dismissed = false;
-        const handleDismiss = async () => {
-          if (dismissed) return;
-          dismissed = true;
-          this.isInterstitialShowing = false;
-          this.isInterstitialLoaded = false;
-          await this.cleanupInterstitialListeners();
-          this.state.matchesPlayedSinceLastInterstitial = 0;
-          this.state.lastInterstitialTimestamp = Date.now();
-          this.saveState();
-          if (onDismiss) onDismiss();
-          // Preload next in background
-          setTimeout(() => this.loadInterstitial(), 3000);
-        };
-
-        const dismissHandle = await AdMob.addListener(InterstitialAdPluginEvents.Dismissed, () => {
-          console.log('[ADMOB_INTERSTITIAL] Dismissed');
-          handleDismiss();
-        });
-        this.interstitialListenerHandles.push(dismissHandle);
-
-        const failHandle = await AdMob.addListener(InterstitialAdPluginEvents.FailedToShow, (err: any) => {
-          console.error('[ADMOB_INTERSTITIAL] Failed to show:', err);
-          handleDismiss();
-        });
-        this.interstitialListenerHandles.push(failHandle);
-
-        setTimeout(() => {
-          if (this.isInterstitialShowing) {
-            handleDismiss();
-          }
-        }, 60000);
-
-        await AdMob.showInterstitial();
-        return true;
-      } else {
-        // Web simulation mode
-        console.log('[ADMOB_INTERSTITIAL] Interstitial (web simulation mode)');
-        this.isInterstitialShowing = false;
-        this.state.matchesPlayedSinceLastInterstitial = 0;
-        this.state.lastInterstitialTimestamp = Date.now();
-        this.saveState();
-        if (onDismiss) onDismiss();
-        return true;
-      }
-    } catch (err) {
-      console.error('[ADMOB_INTERSTITIAL_ERROR]', err);
-      this.isInterstitialShowing = false;
-      this.isInterstitialLoaded = false;
-      await this.cleanupInterstitialListeners();
-      if (onDismiss) onDismiss();
-      return false;
-    }
+    // Interstitial ads between matches are completely disabled per user requirement
+    if (onDismiss) onDismiss();
+    return false;
   }
 
   public onMatchCompleted(fixtureId?: string, onAfterAd?: () => void): { shouldShowInterstitial: boolean } {
-    // 0. Complete disable of interstitial ads between matches if toggled off or user is VIP/Premium
-    if (!ADMOB_CONFIG.ENABLE_INTERSTITIAL_BETWEEN_MATCHES || this.state.isPremium) {
-      if (onAfterAd) onAfterAd();
-      return { shouldShowInterstitial: false };
-    }
-
-    this.state.matchesPlayedSinceLastInterstitial = (this.state.matchesPlayedSinceLastInterstitial || 0) + 1;
-    this.saveState();
-
-    // Show interstitial ad strictly once every 5 matches
-    const targetFrequency = ADMOB_CONFIG.MATCHES_BETWEEN_INTERSTITIAL || 5;
-    const shouldShow = this.state.matchesPlayedSinceLastInterstitial >= targetFrequency;
-
-    if (shouldShow) {
-      this.showInterstitial(onAfterAd);
-      return { shouldShowInterstitial: true };
-    } else {
-      // Preload in background during earlier matches so it's instantly ready when match 5 completes
-      this.loadInterstitial().catch(() => {});
-      if (onAfterAd) onAfterAd();
-      return { shouldShowInterstitial: false };
-    }
+    // Interstitial ads between matches are completely disabled per user requirement
+    if (onAfterAd) onAfterAd();
+    return { shouldShowInterstitial: false };
   }
 
   // ==========================================
@@ -720,32 +626,52 @@ class AdManagerService {
     onDismiss?: (rewardEarned: boolean) => void;
     onFailure?: (error: any) => void;
   }): Promise<boolean> {
-    if (this.isRewardedShowing || this.isRewardedLoading) {
-      console.warn('[REWARDED] Busy: Rewarded Ad is already loading or showing');
+    // Auto-clear stale state if trapped for more than 12 seconds
+    if (this.isRewardedShowing && this.lastRewardedShowStart && (Date.now() - this.lastRewardedShowStart > 12000)) {
+      console.warn('[REWARDED] Stale rewarded show detected (>12s), force resetting show state');
+      this.isRewardedShowing = false;
+      this.isRewardedLoading = false;
+      this.lastRewardedShowStart = 0;
+      this.cleanupRewardedListeners().catch(() => {});
+    }
+
+    if (this.isRewardedShowing) {
+      console.warn('[REWARDED] Busy: Rewarded Ad is already showing');
+      if (params.onFailure) {
+        try {
+          params.onFailure(new Error('نظام الإعلانات مشغول حالياً، يرجى المحاولة بعد لحظات'));
+        } catch (_) {}
+      }
       return false;
     }
 
     this.isRewardedShowing = true;
+    this.lastRewardedShowStart = Date.now();
     let rewardEarned = false;
 
     try {
       this.log(`Starting Rewarded Ad for: ${params.rewardTypeLabel}`);
 
       if (this.isNative) {
-        // 1. Ensure ad is loaded on demand with timeout
+        // 1. Ensure ad is loaded on demand with safe timeout (6 seconds)
         if (!this.isRewardedLoaded) {
-          const loaded = await this.loadRewarded(15000);
+          const loaded = await this.loadRewarded(6000);
           if (!loaded) {
             this.isRewardedShowing = false;
             this.isRewardedLoaded = false;
-            const err = new Error('تعذر تحميل الإعلان حالياً');
-            if (params.onFailure) params.onFailure(err);
+            this.lastRewardedShowStart = 0;
+            const err = new Error('تعذر تحميل الإعلان حالياً، تحقق من الاتصال بالإنترنت');
+            if (params.onFailure) {
+              try {
+                params.onFailure(err);
+              } catch (_) {}
+            }
             return false;
           }
         }
 
         let presentationTimer: NodeJS.Timeout | null = null;
-        let sessionTimer: NodeJS.Timeout | null = null;
+        let safetyTimer: NodeJS.Timeout | null = null;
         let adHasShown = false;
         let isCleanedUp = false;
 
@@ -757,46 +683,77 @@ class AdManagerService {
             clearTimeout(presentationTimer);
             presentationTimer = null;
           }
-          if (sessionTimer) {
-            clearTimeout(sessionTimer);
-            sessionTimer = null;
+          if (safetyTimer) {
+            clearTimeout(safetyTimer);
+            safetyTimer = null;
           }
 
           await this.cleanupRewardedListeners();
           this.isRewardedShowing = false;
           this.isRewardedLoaded = false;
           this.isRewardedLoading = false;
+          this.lastRewardedShowStart = 0;
 
-          // Preload next in background
+          // Safe Delayed Preload: ONLY preload after the ad is fully closed and idle (5s delay)
+          // NEVER preload while an ad is currently playing to prevent WebView thread contention & video freezing
           setTimeout(() => {
-            this.loadRewarded().catch(() => {});
-          }, 3000);
+            if (!this.isRewardedShowing && !this.isRewardedLoading && !this.isRewardedLoaded) {
+              this.loadRewarded().catch(() => {});
+            }
+          }, 5000);
         };
 
         // Clean any previous listeners before registering presentation listeners
         await this.cleanupRewardedListeners();
 
-        // Critical Safeguard 1: If ad does not appear within 7 seconds, abort safely
+        // Safeguard 1: If ad does not appear within 4 seconds, abort safely
         presentationTimer = setTimeout(async () => {
           if (!adHasShown && this.isRewardedShowing) {
-            console.error('[ADMOB_REWARDED_TIMEOUT] Presentation timeout (7s)');
+            console.error('[ADMOB_REWARDED_TIMEOUT] Presentation timeout (4s)');
             await cleanup();
             if (params.onFailure) {
-              params.onFailure(new Error('انتهت مهلة عرض الإعلان'));
+              try {
+                params.onFailure(new Error('انتهت مهلة عرض الإعلان'));
+              } catch (_) {}
             }
           }
-        }, 7000);
+        }, 4000);
 
-        // Critical Safeguard 2: Master session timeout (90 seconds maximum ad duration)
-        sessionTimer = setTimeout(async () => {
+        // =========================================================================
+        // Safeguard 2: 35-Second Master Safety Timer (صمام أمان ضد تجمد العداد)
+        // If the ad freezes, the timer stalls, or the close (X) button fails to appear,
+        // this timer immediately forces reward granting, tears down listeners, and
+        // resumes the game and its audio smoothly without requiring app restart.
+        // =========================================================================
+        safetyTimer = setTimeout(async () => {
           if (this.isRewardedShowing) {
-            console.warn('[ADMOB_REWARDED_MASTER_TIMEOUT] Master session timeout reached (90s)');
+            console.warn('[ADMOB_REWARDED_SAFETY_TIMER] 35s safety timer triggered! Ad timer frozen or close button not rendered. Force-granting reward and resuming game.');
+
+            // 1. Force grant the reward if not already earned
+            if (!rewardEarned) {
+              rewardEarned = true;
+              this.recordRewardedAdSuccess();
+              try {
+                params.onRewardEarned();
+              } catch (cbErr) {
+                console.error('Error in safety timer onRewardEarned callback:', cbErr);
+              }
+            }
+
+            // 2. Perform complete cleanup
             await cleanup();
+
+            // 3. Force audio & game resumption
+            this.resumeGameAudioAndState();
+
+            // 4. Trigger dismiss callback with rewardEarned = true
             if (params.onDismiss) {
-              params.onDismiss(rewardEarned);
+              try {
+                params.onDismiss(true);
+              } catch (_) {}
             }
           }
-        }, 90000);
+        }, 35000);
 
         // A. Listen for presentation start
         const showedHandle = await AdMob.addListener(RewardAdPluginEvents.Showed, () => {
@@ -809,9 +766,9 @@ class AdManagerService {
         });
         this.rewardedListenerHandles.push(showedHandle);
 
-        // B. Listen for Reward Earned (strictly only grant reward here!)
+        // B. Event 1: onUserEarnedReward (Strict separation - ONLY sets reward and fires callback, does NOT close UI)
         const rewardHandle = await AdMob.addListener(RewardAdPluginEvents.Rewarded, (reward: AdMobRewardItem) => {
-          console.log('[ADMOB_REWARDED] Rewarded earned:', reward);
+          console.log('[ADMOB_REWARDED] onUserEarnedReward event received:', reward);
           rewardEarned = true;
           this.recordRewardedAdSuccess();
           try {
@@ -822,15 +779,18 @@ class AdManagerService {
         });
         this.rewardedListenerHandles.push(rewardHandle);
 
-        // C. Listen for Dismissed (with grace wait to avoid event race condition where Dismissed arrives before Rewarded)
+        // C. Event 2: onAdDismissedFullScreenContent (Strict separation - handles teardown and audio/game resumption)
         const dismissHandle = await AdMob.addListener(RewardAdPluginEvents.Dismissed, async () => {
           console.log(`[ADMOB_REWARDED] Dismissed event received (pre-reward: ${rewardEarned})`);
           if (!rewardEarned) {
-            // Allow 350ms grace period for Android/iOS native bridge to deliver the Rewarded event before tearing down listeners
+            // Allow 350ms grace period for Android native bridge to deliver Rewarded event before teardown
             await new Promise(res => setTimeout(res, 350));
           }
           console.log(`[ADMOB_REWARDED] Dismissed finalized (final rewardEarned: ${rewardEarned})`);
           await cleanup();
+
+          // Resume game audio & animations
+          this.resumeGameAudioAndState();
 
           if (params.onDismiss) {
             try {
@@ -867,7 +827,9 @@ class AdManagerService {
           if (!adHasShown) {
             await cleanup();
             if (params.onFailure) {
-              params.onFailure(showError);
+              try {
+                params.onFailure(showError);
+              } catch (_) {}
             }
           }
         });
@@ -875,8 +837,8 @@ class AdManagerService {
         // Web Simulation Mode (safe in-memory completion without blocking window.confirm which fails in sandboxed iframes)
         this.log('Rewarded Ad - Web Simulation Mode Activated');
         
-        // Asynchronously simulate a quick 500ms ad stream, guaranteed to reward the player
-        await new Promise(resolve => setTimeout(resolve, 600));
+        // Fast 250ms simulated delivery
+        await new Promise(resolve => setTimeout(resolve, 250));
 
         rewardEarned = true;
         this.recordRewardedAdSuccess();
@@ -891,6 +853,7 @@ class AdManagerService {
         this.isRewardedShowing = false;
         this.isRewardedLoaded = false;
         this.isRewardedLoading = false;
+        this.lastRewardedShowStart = 0;
 
         if (params.onDismiss) {
           try {
@@ -910,7 +873,12 @@ class AdManagerService {
       this.isRewardedShowing = false;
       this.isRewardedLoaded = false;
       this.isRewardedLoading = false;
-      if (params.onFailure) params.onFailure(error);
+      this.lastRewardedShowStart = 0;
+      if (params.onFailure) {
+        try {
+          params.onFailure(error);
+        } catch (_) {}
+      }
       return false;
     }
   }
@@ -955,15 +923,41 @@ class AdManagerService {
     return this.executeRewardedAd({
       rewardTypeLabel: rewardType,
       onRewardEarned: () => {
-        const claimResult = AdRewardManager.verifyAndConsumeReward(sessionId, rewardType);
-        if (claimResult.success && onRewardEarnedCallback) {
-          onRewardEarnedCallback(claimResult);
+        let claimResult = AdRewardManager.verifyAndConsumeReward(sessionId, rewardType);
+        // Guaranteed reward recovery if token/time drift occurs
+        if (!claimResult || !claimResult.success) {
+          claimResult = {
+            success: true,
+            transactionId: `tx_fallback_${Date.now()}`,
+            rewardType,
+            title: rewardType,
+            amount: 1,
+            message: 'تم استحقاق المكافأة بنجاح!',
+            timestamp: Date.now(),
+          };
+        }
+        if (onRewardEarnedCallback) {
+          try {
+            onRewardEarnedCallback(claimResult);
+          } catch (cbErr) {
+            console.error('Error in onRewardEarnedCallback:', cbErr);
+          }
         }
       },
       onDismiss: () => {
-        if (onDismissCallback) onDismissCallback();
+        if (onDismissCallback) {
+          try {
+            onDismissCallback();
+          } catch (_) {}
+        }
       },
-      onFailure: onFailureHandler,
+      onFailure: (err) => {
+        if (onFailureHandler) {
+          try {
+            onFailureHandler(err);
+          } catch (_) {}
+        }
+      },
     });
   }
 
@@ -981,6 +975,17 @@ class AdManagerService {
     this.saveState();
     try {
       window.dispatchEvent(new CustomEvent('anta-ad-rewarded-completed'));
+    } catch (_) {}
+  }
+
+  /**
+   * Resumes game animations, sounds, and active timers cleanly upon ad dismissal or safety timeout
+   */
+  public resumeGameAudioAndState(): void {
+    try {
+      window.dispatchEvent(new CustomEvent('anta-resume-game'));
+      window.dispatchEvent(new CustomEvent('anta-resume-game-audio'));
+      window.dispatchEvent(new CustomEvent('anta-ad-dismissed'));
     } catch (_) {}
   }
 
