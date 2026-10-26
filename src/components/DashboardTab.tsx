@@ -73,6 +73,8 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({ setActiveTab, onSele
     userSquadStrength,
     userDynamicManagerRating,
     liveMatch,
+    userCalendarSchedule,
+    calendarSchedule,
   } = useGame();
 
   // If Manager is unemployed
@@ -274,9 +276,23 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({ setActiveTab, onSele
   const safeStandings = Array.isArray(standings) ? standings.filter(Boolean) : [];
 
   const roundFixtures = safeFixtures.filter(f => f && f.round === currentRound);
-  const nextFixture = userClub?.id 
+
+  // Active upcoming fixture from unified calendar across all competitions (League, CAF Champions League, Cup)
+  const activeUserFixture = React.useMemo(() => {
+    if (!userClub?.id || !Array.isArray(userCalendarSchedule)) return undefined;
+    // 1. Unplayed match today (or overdue unplayed match)
+    const todayMatch = userCalendarSchedule.find(m => m && !m.isPlayed && (m.date === calendarDate?.rawDateStr || (m.date || '') <= (calendarDate?.rawDateStr || '')));
+    if (todayMatch) return todayMatch;
+    // 2. Next unplayed fixture on or after today
+    const upcoming = userCalendarSchedule.find(m => m && !m.isPlayed && m.date >= (calendarDate?.rawDateStr || ''));
+    if (upcoming) return upcoming;
+    // 3. Any remaining unplayed fixture
+    return userCalendarSchedule.find(m => m && !m.isPlayed);
+  }, [userClub?.id, userCalendarSchedule, calendarDate?.rawDateStr]);
+
+  const nextFixture = activeUserFixture || (userClub?.id 
     ? roundFixtures.find(f => f && (f.homeTeamId === userClub.id || f.awayTeamId === userClub.id))
-    : undefined;
+    : undefined);
   
   const isHome = liveMatch
     ? liveMatch.homeTeam?.id === userClub?.id
@@ -393,11 +409,11 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({ setActiveTab, onSele
                 <p className="text-[11px] text-slate-400 mt-0.5">
                   {isMatchDay ? (
                     <strong className="text-emerald-400 flex items-center gap-1 font-bold">
-                      <Zap className="w-3.5 h-3.5" /> موعد الجولة {currentRound} أمام {oppTeam.name}!
+                      <Zap className="w-3.5 h-3.5" /> موعد المباراة الرسمية اليوم أمام {oppTeam.name}!
                     </strong>
                   ) : (
                     <span>
-                      باقي <strong className="text-amber-300 font-mono font-bold">{daysUntilNextMatch}</strong> {daysUntilNextMatch === 1 ? 'يوم' : 'أيام'} على الجولة {currentRound}
+                      باقي <strong className="text-amber-300 font-mono font-bold">{daysUntilNextMatch}</strong> {daysUntilNextMatch === 1 ? 'يوم' : 'أيام'} على موعد اللقاء ({nextFixture?.stageName || nextFixture?.stage || `الجولة ${currentRound}`})
                     </span>
                   )}
                 </p>
@@ -446,8 +462,12 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({ setActiveTab, onSele
           </div>
           <div className="flex items-center justify-between text-xs text-slate-400">
             <span className="flex items-center gap-1.5 font-bold text-amber-400">
-              <Calendar className="w-3.5 h-3.5" />
-              الجولة {currentRound} من {totalRounds}
+              <span>{nextFixture?.tournamentBadge || (nextFixture?.competitionType === 'continental' ? '🏆 دوري أبطال إفريقيا' : nextFixture?.competitionType === 'cup' ? '🛡️ كأس مصر' : `🇪🇬 ${activeLeague.name}`)}</span>
+              <span>•</span>
+              <span>{nextFixture?.stageName || nextFixture?.stage || `الجولة ${currentRound}`}</span>
+              {nextFixture?.date && (
+                <span className="text-[11px] text-cyan-400/90 font-mono">({nextFixture.date})</span>
+              )}
             </span>
             <span className="text-[11px] text-slate-400 font-medium">
               {isHome ? '🏟️ بملعبنا' : '✈️ خارج الديار'}
@@ -561,9 +581,8 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({ setActiveTab, onSele
                 <button
                   id="dashboard_instant_sim_btn"
                   disabled={isSimulationRunning}
-                  onClick={() => {
-                    instantSimulateCurrentRound();
-                    setActiveTab('matches');
+                  onClick={async () => {
+                    await instantSimulateCurrentRound({ advanceDate: false, forcePlayUserMatch: true });
                   }}
                   className="flex items-center justify-center gap-1.5 bg-slate-800 hover:bg-slate-750 border border-slate-700 text-amber-300 font-bold text-xs py-2.5 px-3 rounded-xl transition-all active:scale-95 cursor-pointer disabled:opacity-50"
                 >
@@ -572,37 +591,44 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({ setActiveTab, onSele
                 </button>
               </div>
             ) : (
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+              <div className="space-y-2">
                 <button
-                  id="dashboard_advance_day_btn"
-                  onClick={() => advanceToNextDay(false)}
+                  id="dashboard_play_match_direct_btn"
+                  onClick={() => {
+                    setActiveTab('matches');
+                    startLiveMatch();
+                  }}
                   disabled={isSimulationRunning}
-                  className="flex items-center justify-center gap-1.5 bg-slate-800 hover:bg-slate-750 text-slate-200 border border-slate-700/80 font-bold text-xs py-2.5 px-3 rounded-xl transition-all active:scale-95 cursor-pointer disabled:opacity-50"
-                  title="محاكاة يوم واحد وتطبيق تدريب اليوم وعلاج الإصابات والمفاوضات"
+                  className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-600 hover:from-emerald-500 hover:to-teal-500 text-white font-black text-xs sm:text-sm py-2.5 px-3 rounded-xl transition-all shadow active:scale-95 cursor-pointer disabled:opacity-50"
+                  title="التقدم مباشرة لموعد المباراة وبدء اللقاء في الملعب"
                 >
-                  <Clock className="w-3.5 h-3.5 text-cyan-400" />
-                  <span>اليوم التالي (+1)</span>
+                  <Play className="w-4 h-4 fill-white" />
+                  <span>خوض المباراة الآن فوراً ⚽⚡</span>
                 </button>
 
-                <button
-                  id="dashboard_fast_skip_match_btn"
-                  onClick={() => advanceToNextDay(true)}
-                  disabled={isSimulationRunning}
-                  className="flex items-center justify-center gap-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs py-2.5 px-3 rounded-xl transition-all shadow active:scale-95 cursor-pointer disabled:opacity-50"
-                  title="القفز والتخطي السريع حتى يوم المباراة القادمة"
-                >
-                  <FastForward className="w-3.5 h-3.5 fill-slate-950" />
-                  <span>تخطي للمباراة ⏩</span>
-                </button>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    id="dashboard_fast_skip_match_btn"
+                    onClick={() => advanceToNextDay(true)}
+                    disabled={isSimulationRunning}
+                    className="flex items-center justify-center gap-1.5 bg-slate-800 hover:bg-slate-750 text-amber-300 border border-slate-700/80 font-bold text-xs py-2 px-3 rounded-xl transition-all active:scale-95 cursor-pointer disabled:opacity-50"
+                    title="التقدم بالتقويم ومحاكاة الأيام حتى موعد اللقاء"
+                  >
+                    <FastForward className="w-3.5 h-3.5 text-amber-400" />
+                    <span>تخطي الأيام ({daysUntilNextMatch} أيام) ⏩</span>
+                  </button>
 
-                <button
-                  onClick={() => setActiveTab('tactics')}
-                  className="flex items-center justify-center gap-1.5 bg-slate-800/80 hover:bg-slate-750 border border-slate-700 text-slate-300 font-bold text-xs py-2.5 px-3 rounded-xl transition-all active:scale-95 cursor-pointer"
-                  title="مراجعة التشكيل والتكتيك للمباراة القادمة"
-                >
-                  <ShieldCheck className="w-3.5 h-3.5 text-blue-400" />
-                  <span>الخطة والتكتيك</span>
-                </button>
+                  <button
+                    id="dashboard_advance_day_btn"
+                    onClick={() => advanceToNextDay(false)}
+                    disabled={isSimulationRunning}
+                    className="flex items-center justify-center gap-1.5 bg-slate-800 hover:bg-slate-750 text-slate-200 border border-slate-700/80 font-bold text-xs py-2 px-3 rounded-xl transition-all active:scale-95 cursor-pointer disabled:opacity-50"
+                    title="محاكاة يوم واحد وتطبيق تدريب اليوم وعلاج الإصابات والمفاوضات"
+                  >
+                    <Clock className="w-3.5 h-3.5 text-cyan-400" />
+                    <span>اليوم التالي (+1)</span>
+                  </button>
+                </div>
               </div>
             )}
           </div>
@@ -643,7 +669,7 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({ setActiveTab, onSele
                 المباراة القادمة لفريقك:
               </span>
               <span className="text-amber-300 font-bold">
-                الجولة {nextUpcomingUserFixture.round} أمام ({upcomingOpp.name}) {isUpcomingHome ? '🏟️ بملعبنا' : '✈️ خارج الديار'}
+                الجولة {nextUpcomingUserFixture.round} أمام ({upcomingOpp?.name || 'المنافس'}) {isUpcomingHome ? '🏟️ بملعبنا' : '✈️ خارج الديار'}
               </span>
             </div>
           )}

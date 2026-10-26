@@ -143,8 +143,8 @@ export const INTER_MILAN_SQUAD: RealPlayerTemplate[] = [
     preferredFoot: 'right',
     number: 9,
     attributes: { pace: 89, shooting: 84, passing: 77, dribbling: 84, defending: 44, physical: 85 },
-  },,
-{
+  },
+  {
     id: 'inter_josep_martinez',
     name: 'جوسيب مارتينيز الحارس الإسباني',
     firstName: 'جوسيب',
@@ -569,8 +569,8 @@ export const ATLETICO_SQUAD: RealPlayerTemplate[] = [
     preferredFoot: 'left',
     number: 9,
     attributes: { pace: 80, shooting: 85, passing: 72, dribbling: 76, defending: 38, physical: 89 },
-  },,
-{
+  },
+  {
     id: 'atm_juan_musso',
     name: 'خوان موسو الحارس الأرجنتيني',
     firstName: 'خوان',
@@ -1095,8 +1095,8 @@ export const AL_AHLI_SAUDI_SQUAD: RealPlayerTemplate[] = [
     preferredFoot: 'left',
     number: 20,
     attributes: { pace: 84, shooting: 79, passing: 71, dribbling: 76, defending: 40, physical: 78 },
-  },,
-{
+  },
+  {
     id: 'ahli_sau_al_sanbi',
     name: 'عبد الرحمن الصانبي حارس المستقبل',
     firstName: 'عبد الرحمن',
@@ -1541,8 +1541,8 @@ export const PYRAMIDS_SQUAD: RealPlayerTemplate[] = [
     preferredFoot: 'right',
     number: 18,
     attributes: { pace: 76, shooting: 76, passing: 83, dribbling: 81, defending: 75, physical: 78 },
-  },,
-{
+  },
+  {
     id: 'pyr_sherif_ekramy',
     name: 'شريف إكرامي وحش إفريقيا الخبير',
     firstName: 'شريف',

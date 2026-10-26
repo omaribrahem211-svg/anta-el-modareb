@@ -180,8 +180,8 @@ export function calculateTeamStrength(
     };
   }
 
-  const activeIds = tactics?.startingPlayerIds || (team.players || []).slice(0, 11).map(p => p.id);
-  const startingPlayers = (team.players || []).filter(p => activeIds.includes(p.id));
+  const activeIds = tactics?.startingPlayerIds || (team.players || []).filter(p => p && p.id).slice(0, 11).map(p => p.id);
+  const startingPlayers = (team.players || []).filter(p => p && p.id && activeIds.includes(p.id));
 
   if (startingPlayers.length === 0) {
     const base = team?.reputation ? team.reputation * 2 + 10 : 50;
@@ -802,6 +802,126 @@ export function calculateHomeCrowdAdvantage(
 }
 
 /**
+ * Generates intelligent, adaptive tactics for AI teams based on their strength relative to the opponent.
+ * - Against a stronger opponent (e.g., user's star squad), AI adopts a compact low-block / counter-attacking setup.
+ * - Against a similar opponent, AI plays a balanced tactical system that counters opponent's style.
+ * - When AI is stronger (especially at home), AI presses high and controls possession.
+ */
+export function generateAdaptiveAiTactics(
+  aiTeam: Club,
+  opponentTeam: Club,
+  isAiHome: boolean
+): TeamTactics {
+  const aiPlayers = Array.isArray(aiTeam?.players) ? aiTeam.players.filter(Boolean) : [];
+  const oppPlayers = Array.isArray(opponentTeam?.players) ? opponentTeam.players.filter(Boolean) : [];
+
+  const sortedAiPlayers = [...aiPlayers].sort((a, b) => (b.overallRating || 65) - (a.overallRating || 65));
+  const startingIds =
+    aiTeam?.tactics?.startingPlayerIds && aiTeam.tactics.startingPlayerIds.length === 11
+      ? aiTeam.tactics.startingPlayerIds
+      : sortedAiPlayers.slice(0, 11).map(p => p.id);
+  const benchIds =
+    aiTeam?.tactics?.benchPlayerIds && aiTeam.tactics.benchPlayerIds.length > 0
+      ? aiTeam.tactics.benchPlayerIds
+      : sortedAiPlayers.slice(11, 18).map(p => p.id);
+
+  const calcAvg = (list: Player[], fallback: number) =>
+    list.length > 0
+      ? list.slice(0, 11).reduce((s, p) => s + (p.overallRating || fallback), 0) / Math.min(11, list.length)
+      : fallback;
+
+  const aiAvg = calcAvg(sortedAiPlayers, aiTeam?.reputation || 68) + (isAiHome ? 2.0 : 0);
+  const oppAvg = calcAvg(oppPlayers, opponentTeam?.reputation || 68) + (!isAiHome ? 2.0 : 0);
+  const diff = aiAvg - oppAvg; // negative means opponent is stronger
+
+  if (diff <= -4.5) {
+    // Opponent is significantly stronger: disciplined low block & lethal counter-attacks
+    return {
+      formation: diff <= -8 ? '5-3-2' : '4-2-3-1',
+      tacticalStyle: 'park_the_bus',
+      mentality: 'defensive',
+      attackingStyle: 'counter_attack',
+      passingStyle: 'direct',
+      tempo: 'fast',
+      pressingIntensity: 'low',
+      defensiveLine: 'low',
+      width: 'narrow',
+      markingStyle: 'zonal',
+      timeWasting: 'sometimes',
+      startingPlayerIds: startingIds,
+      benchPlayerIds: benchIds,
+      captainId: startingIds[0] || '',
+      penaltyTakerId: startingIds[startingIds.length - 1] || '',
+      freeKickTakerId: startingIds[0] || '',
+      cornerTakerId: startingIds[1] || '',
+    };
+  } else if (diff <= -1.5) {
+    // Opponent has a slight edge: compact midfield & structured transitions
+    return {
+      formation: '4-2-3-1',
+      tacticalStyle: 'counter_attack',
+      mentality: 'balanced',
+      attackingStyle: 'counter_attack',
+      passingStyle: 'mixed',
+      tempo: 'balanced',
+      pressingIntensity: 'medium',
+      defensiveLine: 'medium',
+      width: 'balanced',
+      markingStyle: 'zonal',
+      timeWasting: 'never',
+      startingPlayerIds: startingIds,
+      benchPlayerIds: benchIds,
+      captainId: startingIds[0] || '',
+      penaltyTakerId: startingIds[startingIds.length - 1] || '',
+      freeKickTakerId: startingIds[0] || '',
+      cornerTakerId: startingIds[1] || '',
+    };
+  } else if (diff >= 4.0) {
+    // AI is stronger: proactive high press and possession dominance
+    return {
+      formation: '4-3-3',
+      tacticalStyle: 'tiki_taka',
+      mentality: 'attacking',
+      attackingStyle: 'possession',
+      passingStyle: 'short',
+      tempo: 'fast',
+      pressingIntensity: 'high',
+      defensiveLine: 'high',
+      width: 'wide',
+      markingStyle: 'man_to_man',
+      timeWasting: 'never',
+      startingPlayerIds: startingIds,
+      benchPlayerIds: benchIds,
+      captainId: startingIds[0] || '',
+      penaltyTakerId: startingIds[startingIds.length - 1] || '',
+      freeKickTakerId: startingIds[0] || '',
+      cornerTakerId: startingIds[1] || '',
+    };
+  }
+
+  // Evenly matched contest
+  return {
+    formation: aiTeam?.tactics?.formation || (isAiHome ? '4-3-3' : '4-2-3-1'),
+    tacticalStyle: 'balanced',
+    mentality: isAiHome ? 'attacking' : 'balanced',
+    attackingStyle: 'Wing_play' as any,
+    passingStyle: 'short',
+    tempo: 'balanced',
+    pressingIntensity: 'medium',
+    defensiveLine: 'medium',
+    width: 'balanced',
+    markingStyle: 'zonal',
+    timeWasting: 'never',
+    startingPlayerIds: startingIds,
+    benchPlayerIds: benchIds,
+    captainId: startingIds[0] || '',
+    penaltyTakerId: startingIds[startingIds.length - 1] || '',
+    freeKickTakerId: startingIds[0] || '',
+    cornerTakerId: startingIds[1] || '',
+  };
+}
+
+/**
  * Initializes a new Live Simulation State
  */
 export function createInitialLiveMatchState(
@@ -817,17 +937,20 @@ export function createInitialLiveMatchState(
   const isHomeUser = Boolean(homeTeam?.isUserClub) || (Boolean(userClubId) && homeTeam?.id === userClubId);
   const isAwayUser = Boolean(awayTeam?.isUserClub) || (Boolean(userClubId) && awayTeam?.id === userClubId);
 
+  const adaptiveHomeAiTactics = !isHomeUser ? generateAdaptiveAiTactics(homeTeam, awayTeam, true) : undefined;
+  const adaptiveAwayAiTactics = !isAwayUser ? generateAdaptiveAiTactics(awayTeam, homeTeam, false) : undefined;
+
   const defaultHomeIds = (isHomeUser && userTactics)
     ? userTactics.startingPlayerIds
-    : homeTeam?.tactics?.startingPlayerIds || homePlayers.slice(0, 11).map(p => p?.id).filter(Boolean);
+    : adaptiveHomeAiTactics?.startingPlayerIds || homeTeam?.tactics?.startingPlayerIds || homePlayers.slice(0, 11).map(p => p?.id).filter(Boolean);
 
   const defaultAwayIds = (isAwayUser && userTactics)
     ? userTactics.startingPlayerIds
-    : awayTeam?.tactics?.startingPlayerIds || awayPlayers.slice(0, 11).map(p => p?.id).filter(Boolean);
+    : adaptiveAwayAiTactics?.startingPlayerIds || awayTeam?.tactics?.startingPlayerIds || awayPlayers.slice(0, 11).map(p => p?.id).filter(Boolean);
 
   const defaultHomeTactics: TeamTactics = (isHomeUser && userTactics)
     ? userTactics
-    : homeTeam?.tactics || {
+    : adaptiveHomeAiTactics || homeTeam?.tactics || {
         formation: '4-3-3',
         mentality: 'balanced',
         passingStyle: 'short',
@@ -843,8 +966,8 @@ export function createInitialLiveMatchState(
 
   const defaultAwayTactics: TeamTactics = (isAwayUser && userTactics)
     ? userTactics
-    : awayTeam?.tactics || {
-        formation: '4-4-2',
+    : adaptiveAwayAiTactics || awayTeam?.tactics || {
+        formation: '4-2-3-1',
         mentality: 'balanced',
         passingStyle: 'short',
         pressingIntensity: 'balanced',
@@ -932,20 +1055,20 @@ export function simulatePenaltyShootout(
   const safeHome = homeTeam || ({ id: 'home_dummy', name: 'الفريق المضيف', shortName: 'مض', players: [], reputation: 50 } as any);
   const safeAway = awayTeam || ({ id: 'away_dummy', name: 'الفريق الضيف', shortName: 'ضف', players: [], reputation: 50 } as any);
 
-  const homePlayers: Player[] = Array.isArray(safeHome.players) ? safeHome.players.filter(Boolean) : [];
-  const awayPlayers: Player[] = Array.isArray(safeAway.players) ? safeAway.players.filter(Boolean) : [];
+  const homePlayers: Player[] = Array.isArray(safeHome.players) ? safeHome.players.filter((p: any) => p && p.id) : [];
+  const awayPlayers: Player[] = Array.isArray(safeAway.players) ? safeAway.players.filter((p: any) => p && p.id) : [];
 
-  const homeGk = homePlayers.find(p => p.position === 'GK') || homePlayers[0] || { name: 'حارس المرمى', rating: 65, id: 'hgk' };
-  const awayGk = awayPlayers.find(p => p.position === 'GK') || awayPlayers[0] || { name: 'حارس المرمى', rating: 65, id: 'agk' };
+  const homeGk = homePlayers.find(p => p && p.position === 'GK') || homePlayers[0] || { name: 'حارس المرمى', rating: 65, id: 'hgk' };
+  const awayGk = awayPlayers.find(p => p && p.position === 'GK') || awayPlayers[0] || { name: 'حارس المرمى', rating: 65, id: 'agk' };
 
   // Select penalty takers
   const homeTakers: (Player | { name: string; rating: number; id: string })[] = [];
   if (homeTactics?.penaltyTakerId) {
-    const designated = homePlayers.find(p => p.id === homeTactics.penaltyTakerId);
+    const designated = homePlayers.find(p => p && p.id === homeTactics.penaltyTakerId);
     if (designated) homeTakers.push(designated);
   }
   homePlayers.forEach(p => {
-    if (!homeTakers.some(t => t.id === p.id)) homeTakers.push(p);
+    if (p && p.id && !homeTakers.some(t => t && t.id === p.id)) homeTakers.push(p);
   });
   while (homeTakers.length < 10) {
     homeTakers.push({ name: `لاعب ${homeTakers.length + 1}`, rating: 65, id: `hp_${homeTakers.length}` });
@@ -953,11 +1076,11 @@ export function simulatePenaltyShootout(
 
   const awayTakers: (Player | { name: string; rating: number; id: string })[] = [];
   if (awayTactics?.penaltyTakerId) {
-    const designated = awayPlayers.find(p => p.id === awayTactics.penaltyTakerId);
+    const designated = awayPlayers.find(p => p && p.id === awayTactics.penaltyTakerId);
     if (designated) awayTakers.push(designated);
   }
   awayPlayers.forEach(p => {
-    if (!awayTakers.some(t => t.id === p.id)) awayTakers.push(p);
+    if (p && p.id && !awayTakers.some(t => t && t.id === p.id)) awayTakers.push(p);
   });
   while (awayTakers.length < 10) {
     awayTakers.push({ name: `لاعب ${awayTakers.length + 1}`, rating: 65, id: `ap_${awayTakers.length}` });
@@ -1308,17 +1431,17 @@ export function simulateMatchStep(
 
     // AI Logical Substitution (up to 3-4 subs per game)
     if (aiSubsCount < 4 && Math.random() < 0.12) {
-      const benchPlayers = aiTeam.players.filter(p => !aiLineup.includes(p.id));
+      const benchPlayers = (aiTeam?.players || []).filter(p => p && p.id && !aiLineup.includes(p.id));
       if (benchPlayers.length > 0) {
-        const aiFatigueMap = isAiHome ? prevState.homeFatigueMap : prevState.awayFatigueMap;
+        const aiFatigueMap = (isAiHome ? prevState.homeFatigueMap : prevState.awayFatigueMap) || {};
         // Pick an active player with lowest fitness or poor position fit
-        const tiredActivePlayers = aiTeam.players
-          .filter(p => aiLineup.includes(p.id))
-          .sort((a, b) => (aiFatigueMap[a.id] || 80) - (aiFatigueMap[b.id] || 80));
+        const tiredActivePlayers = (aiTeam?.players || [])
+          .filter(p => p && p.id && aiLineup.includes(p.id))
+          .sort((a, b) => ((aiFatigueMap && aiFatigueMap[a.id]) || 80) - ((aiFatigueMap && aiFatigueMap[b.id]) || 80));
 
         const subOut = tiredActivePlayers[0];
         // Pick fresh bench replacement
-        const subIn = benchPlayers.sort((a, b) => b.overallRating - a.overallRating)[0];
+        const subIn = benchPlayers.sort((a, b) => (b.overallRating || 60) - (a.overallRating || 60))[0];
 
         if (subOut && subIn) {
           aiLineup = aiLineup.map(id => id === subOut.id ? subIn.id : id);
@@ -1330,7 +1453,7 @@ export function simulateMatchStep(
             teamId: aiTeam.id,
             inPlayerName: subIn.name,
             outPlayerName: subOut.name,
-            description: `🔄 تبديل في صفوف ${aiTeam.shortName}: دخول (${subIn.name}) وخروج (${subOut.name}).`
+            description: `🔄 تبديل في صفوف ${aiTeam.shortName || aiTeam.name}: دخول (${subIn.name}) وخروج (${subOut.name}).`
           });
         }
       }
@@ -1352,12 +1475,12 @@ export function simulateMatchStep(
 
   if (userTeam && prevState.autoSubsEnabled !== false && userSubsCount < 5) {
     const userLineup = isUserTeamHome ? activeHomeLineup : activeAwayLineup;
-    const userFatigue = isUserTeamHome ? prevState.homeFatigueMap : prevState.awayFatigueMap;
-    const userPitchPlayers = (userTeam?.players || []).filter(p => userLineup.includes(p.id));
-    const userBenchPlayers = (userTeam?.players || []).filter(p => !userLineup.includes(p.id));
+    const userFatigue = (isUserTeamHome ? prevState.homeFatigueMap : prevState.awayFatigueMap) || {};
+    const userPitchPlayers = (userTeam?.players || []).filter(p => p && p.id && userLineup.includes(p.id));
+    const userBenchPlayers = (userTeam?.players || []).filter(p => p && p.id && !userLineup.includes(p.id));
 
     // Check if there is an injured player needing an urgent sub immediately
-    const hasInjuredPitchPlayer = userPitchPlayers.some(p => Boolean(p.injury || p.isInjured));
+    const hasInjuredPitchPlayer = userPitchPlayers.some(p => Boolean(p && (p.injury || p.isInjured)));
 
     const lastUserSubEvent = prevState.events
       .filter(e => e.type === 'substitution' && e.teamId === userTeam.id)
@@ -1373,7 +1496,7 @@ export function simulateMatchStep(
       (nextMinute >= 84 && userSubsCount === 4)
     );
 
-    const isExhaustedOnPitch = userPitchPlayers.some(p => (userFatigue[p.id] ?? p.fitness ?? 100) < 55);
+    const isExhaustedOnPitch = userPitchPlayers.some(p => ((userFatigue && userFatigue[p?.id]) ?? p?.fitness ?? 100) < 55);
 
     if (hasInjuredPitchPlayer || (isWindow && minutesSinceLastSub >= 3 && nextMinute <= 89) || (isExhaustedOnPitch && nextMinute >= 52 && minutesSinceLastSub >= 3)) {
       const userScore = isUserTeamHome ? prevState.homeScore : prevState.awayScore;
@@ -1393,7 +1516,7 @@ export function simulateMatchStep(
         }
       );
 
-      if (smartSub) {
+      if (smartSub && smartSub.outPlayer && smartSub.inPlayer) {
         if (isUserTeamHome) {
           activeHomeLineup = activeHomeLineup.map(id => id === smartSub.outPlayer.id ? smartSub.inPlayer.id : id);
         } else {
@@ -1409,7 +1532,7 @@ export function simulateMatchStep(
           playerName: smartSub.outPlayer.name,
           inPlayerName: smartSub.inPlayer.name,
           outPlayerName: smartSub.outPlayer.name,
-          description: `🔄 تبديل تكتيكي ذكي (${userTeam.shortName}): خروج (${smartSub.outPlayer.name}) ودخول (${smartSub.inPlayer.name}) - [${smartSub.reason}].`
+          description: `🔄 تبديل تكتيكي ذكي (${userTeam.shortName || userTeam.name}): خروج (${smartSub.outPlayer.name}) ودخول (${smartSub.inPlayer.name}) - [${smartSub.reason}].`
         });
       }
     }
@@ -1418,8 +1541,8 @@ export function simulateMatchStep(
   // ====================================================
   // ATTRIBUTE-BASED EVENT ENGINE (Physicality, Tactics, Crowd Advantage)
   // ====================================================
-  const homeActivePlayers = (prevState.homeTeam?.players || []).filter(p => activeHomeLineup.includes(p.id));
-  const awayActivePlayers = (prevState.awayTeam?.players || []).filter(p => activeAwayLineup.includes(p.id));
+  const homeActivePlayers = (prevState.homeTeam?.players || []).filter(p => p && p.id && activeHomeLineup.includes(p.id));
+  const awayActivePlayers = (prevState.awayTeam?.players || []).filter(p => p && p.id && activeAwayLineup.includes(p.id));
 
   // Compute live effective strength with AdMob Rewarded Training Boost if applied
   const activeBoost = AdManager.getActiveTrainingBoost() || undefined;
@@ -1581,41 +1704,73 @@ export function simulateMatchStep(
   let updatedHomeRedded = [...prevState.homeReddedPlayerIds];
   let updatedAwayRedded = [...prevState.awayReddedPlayerIds];
 
-  // 3. Dynamic Match Momentum & Anti-Blowout Governor
+  // 3. Dynamic Match Momentum, In-Match AI Adaptation & Realistic Score Governor (Target: ~2.0–2.6 total goals/match)
   const scoreDiff = homeScore - awayScore;
 
-  // Realistic Lead Governor: Leading teams manage tempo, but quality advantage still maintains threat
+  // Dynamic In-Match AI Tactical Adaptation (minute >= 60)
+  const isHomeAi = !prevState.homeTeam?.isUserClub && prevState.homeTeam?.id !== prevState.userClubId;
+  const isAwayAi = !prevState.awayTeam?.isUserClub && prevState.awayTeam?.id !== prevState.userClubId;
+
+  if (isHomeAi && nextMinute >= 60) {
+    if (scoreDiff > 0) {
+      currentHomeTactics = { ...currentHomeTactics, mentality: 'defensive', defensiveLine: 'low', timeWasting: 'sometimes' };
+    } else if (scoreDiff === -1 && nextMinute >= 70) {
+      currentHomeTactics = { ...currentHomeTactics, mentality: 'attacking', pressingIntensity: 'high' };
+    }
+  }
+  if (isAwayAi && nextMinute >= 60) {
+    if (scoreDiff < 0) {
+      currentAwayTactics = { ...currentAwayTactics, mentality: 'defensive', defensiveLine: 'low', timeWasting: 'sometimes' };
+    } else if (scoreDiff === 1 && nextMinute >= 70) {
+      currentAwayTactics = { ...currentAwayTactics, mentality: 'attacking', pressingIntensity: 'high' };
+    }
+  }
+
+  // Team-wide live stamina/fatigue factor
+  const calcTeamLiveFatigueMod = (players: Player[], map: Record<string, number>): number => {
+    if (!players || players.length === 0) return 1.0;
+    const avgFit = players.reduce((s, p) => s + (map[p.id] ?? p.fitness ?? 85), 0) / players.length;
+    if (avgFit < 55) return 0.78;
+    if (avgFit < 68) return 0.88;
+    if (avgFit < 78) return 0.94;
+    return 1.0;
+  };
+  const homeTeamFatigueMod = calcTeamLiveFatigueMod(homeActivePlayers, prevState.homeFatigueMap);
+  const awayTeamFatigueMod = calcTeamLiveFatigueMod(awayActivePlayers, prevState.awayFatigueMap);
+
+  // Realistic Lead Governor: Leading teams manage tempo and protect their lead
   let homeLeadMod = 1.0;
-  if (scoreDiff >= 4) homeLeadMod = overallDiff > 8 ? 0.70 : 0.50;
-  else if (scoreDiff === 3) homeLeadMod = overallDiff > 8 ? 0.80 : 0.68;
-  else if (scoreDiff === 2) homeLeadMod = overallDiff > 8 ? 0.92 : 0.85;
-  else if (scoreDiff === 1) homeLeadMod = 0.98;
-  else if (scoreDiff < 0) homeLeadMod = overallDiff < -8 ? 1.05 : 1.15;
+  if (scoreDiff >= 3) homeLeadMod = 0.42;
+  else if (scoreDiff === 2) homeLeadMod = 0.65;
+  else if (scoreDiff === 1) homeLeadMod = 0.86;
+  else if (scoreDiff < 0) homeLeadMod = 1.08;
 
   let awayLeadMod = 1.0;
-  if (scoreDiff <= -4) awayLeadMod = overallDiff < -8 ? 0.70 : 0.50;
-  else if (scoreDiff === -3) awayLeadMod = overallDiff < -8 ? 0.80 : 0.68;
-  else if (scoreDiff === -2) awayLeadMod = overallDiff < -8 ? 0.92 : 0.85;
-  else if (scoreDiff === -1) awayLeadMod = 0.98;
-  else if (scoreDiff > 0) awayLeadMod = overallDiff > 8 ? 1.05 : 1.15;
+  if (scoreDiff <= -3) awayLeadMod = 0.42;
+  else if (scoreDiff === -2) awayLeadMod = 0.65;
+  else if (scoreDiff === -1) awayLeadMod = 0.86;
+  else if (scoreDiff > 0) awayLeadMod = 1.08;
 
-  // Overextended risk: If a team leads and recklessly stays on ultra_attacking, opponent gets counter-attack opportunities
-  const homeOverextended = scoreDiff > 0 && currentHomeTactics.mentality === 'ultra_attacking';
-  const awayOverextended = scoreDiff < 0 && currentAwayTactics.mentality === 'ultra_attacking';
+  // Overextended risk: If a team recklessly stays on ultra_attacking, opponent gets counter-attack opportunities
+  const homeOverextended = currentHomeTactics.mentality === 'ultra_attacking' || currentHomeTactics.defensiveLine === 'high';
+  const awayOverextended = currentAwayTactics.mentality === 'ultra_attacking' || currentAwayTactics.defensiveLine === 'high';
 
-  // Calibrated attack generation per minute (strongly driven by midfield control, tactics, and player/manager quality)
-  let homeAttackProb = (weightedHomeMid / totalMid) * 0.25 * homeLeadMod * homeQualityMod;
-  let awayAttackProb = (weightedAwayMid / totalMid) * 0.23 * awayLeadMod * awayQualityMod;
+  // Calibrated attack generation per minute for realistic ~2.1–2.6 goals/match
+  let homeAttackProb = (weightedHomeMid / totalMid) * 0.165 * homeLeadMod * homeQualityMod * homeTeamFatigueMod * crowdAdvantage.homeAttackBonus;
+  let awayAttackProb = (weightedAwayMid / totalMid) * 0.145 * awayLeadMod * awayQualityMod * awayTeamFatigueMod;
 
-  if (awayOverextended) homeAttackProb *= 1.25;
-  if (homeOverextended) awayAttackProb *= 1.25;
+  if (awayOverextended) homeAttackProb *= 1.18;
+  if (homeOverextended) awayAttackProb *= 1.18;
 
-  // Defensive block suppression from Park the Bus, Catenaccio, or 5-back formations
-  if (isAwayParked) homeAttackProb *= 0.82;
-  if (isHomeParked) awayAttackProb *= 0.82;
+  // Defensive block suppression from Park the Bus, Catenaccio, Low Block, or 5-back formations
+  const awayLowBlock = isAwayParked || currentAwayTactics.mentality === 'defensive' || currentAwayTactics.defensiveLine === 'low';
+  const homeLowBlock = isHomeParked || currentHomeTactics.mentality === 'defensive' || currentHomeTactics.defensiveLine === 'low';
 
-  homeAttackProb = Math.min(0.32, Math.max(0.02, homeAttackProb));
-  awayAttackProb = Math.min(0.32, Math.max(0.02, awayAttackProb));
+  if (awayLowBlock) homeAttackProb *= isAwayParked ? 0.74 : 0.84;
+  if (homeLowBlock) awayAttackProb *= isHomeParked ? 0.74 : 0.84;
+
+  homeAttackProb = Math.min(0.22, Math.max(0.02, homeAttackProb));
+  awayAttackProb = Math.min(0.20, Math.max(0.02, awayAttackProb));
 
   const roll = Math.random();
 
@@ -1624,23 +1779,29 @@ export function simulateMatchStep(
     homeDangerousAttacks++;
     const shotRoll = Math.random();
 
-    // Superior teams penetrating weaker defenses convert higher % of attacks into shots
-    const homeShotChance = Math.max(0.42, Math.min(0.68, 0.52 + (overallDiff * 0.005)));
+    // Shot creation probability modulated by attack vs opponent defense
+    const homeShotChance = Math.max(0.34, Math.min(0.54, 0.43 + (overallDiff * 0.004)));
     if (shotRoll < homeShotChance) {
       homeShots++;
       const topHomeAttacker = pickPlayerByPosition(homeActivePlayers, 'FWD', 'MID');
-      const shootingSkill = topHomeAttacker?.attributes?.shooting || effHomeAtk;
+      const shootingSkill = topHomeAttacker?.attributes?.shooting || topHomeAttacker?.overallRating || effHomeAtk;
       
       // Fatigue and physical stamina impact on attacker finishing
       const attackerFatigue = prevState.homeFatigueMap[topHomeAttacker?.id] ?? 85;
-      const fatigueFactor = attackerFatigue < 55 ? 0.82 : (attackerFatigue < 68 ? 0.92 : 1.0);
+      const fatigueFactor = attackerFatigue < 55 ? 0.76 : (attackerFatigue < 70 ? 0.88 : 1.0);
 
-      // Blocked shot check: High defending skill blocks more, weak defending blocks less
-      const blockProb = isAwayParked ? 0.38 : Math.max(0.12, Math.min(0.34, 0.25 - (overallDiff * 0.003)));
+      // Blocked shot check: High defending skill & compact defensive block intercepts more shots
+      const awayDefenders = awayActivePlayers.filter(p => p.positionCategory === 'DEF');
+      const avgAwayDefSkill = awayDefenders.length > 0
+        ? awayDefenders.reduce((s, d) => s + (d.attributes?.defending || d.overallRating || 68), 0) / awayDefenders.length
+        : effAwayDef;
+      const baseBlockProb = awayLowBlock ? 0.36 : 0.26;
+      const blockProb = Math.max(0.16, Math.min(0.44, baseBlockProb + ((avgAwayDefSkill - shootingSkill) * 0.004)));
+
       if (Math.random() < blockProb) {
         // Defensive Block
         const defendingCb = pickPlayerByPosition(awayActivePlayers, 'DEF', 'MID');
-        if (Math.random() < 0.45) {
+        if (Math.random() < 0.42) {
           homeCorners++;
           newEvents.push({
             minute: nextMinute,
@@ -1650,37 +1811,37 @@ export function simulateMatchStep(
           });
         }
       } else {
-        // Shot is through on goal: high skill strikers reliably find the target
-        let onTargetProb = (0.38 + ((shootingSkill - 50) * 0.0036)) * fatigueFactor;
-        if (isAwayParked) onTargetProb -= 0.05; // Narrow shooting lanes
-        onTargetProb = Math.min(0.68, Math.max(0.25, onTargetProb));
+        // Shot is through on goal
+        let onTargetProb = (0.35 + ((shootingSkill - 65) * 0.0032)) * fatigueFactor;
+        if (awayLowBlock) onTargetProb -= 0.05;
+        onTargetProb = Math.min(0.54, Math.max(0.22, onTargetProb));
 
         const isTarget = Math.random() < onTargetProb;
-        const shotXg = isTarget ? (Math.random() * 0.20 + 0.09) : (Math.random() * 0.05 + 0.02);
+        const shotXg = isTarget ? (Math.random() * 0.14 + 0.07) : (Math.random() * 0.04 + 0.02);
         homeXg += Number(shotXg.toFixed(2));
 
         if (isTarget) {
           homeShotsOnTarget++;
           const awayGk = awayActivePlayers.find(p => p.positionCategory === 'GK') || awayActivePlayers[0];
-          const awayGkPower = (awayGk?.attributes?.goalkeeping || awayGk?.overallRating || 60);
+          const awayGkPower = (awayGk?.attributes?.goalkeeping || awayGk?.overallRating || 68);
           const awayGkFatigue = prevState.awayFatigueMap[awayGk?.id] ?? 90;
-          const gkEfficiency = awayGkFatigue < 50 ? 0.88 : 1.0;
+          const gkEfficiency = awayGkFatigue < 55 ? 0.90 : 1.0;
 
-          // Calibrated Goal Conversion on Target:
-          // Factoring Player quality and manager coaching quality
-          const atkVsGk = ((effHomeAtk - (awayGkPower * gkEfficiency)) * 0.0042);
-          const defSuppression = ((effAwayDef - 50) * 0.0020);
-          const qualityConversionBonus = (overallDiff * 0.012) + (managerDiff * 0.007) + (squadDiff * 0.005);
-          let goalProb = 0.28 + atkVsGk - defSuppression + qualityConversionBonus;
+          // Calibrated Goal Conversion on Target (Factoring Shooter vs Goalkeeper & Defense)
+          const atkVsGk = ((shootingSkill - (awayGkPower * gkEfficiency)) * 0.0038);
+          const defSuppression = ((avgAwayDefSkill - 65) * 0.0022);
+          const qualityConversionBonus = (overallDiff * 0.0055) + (managerDiff * 0.0035);
+          let goalProb = 0.21 + atkVsGk - defSuppression + qualityConversionBonus;
 
-          if (isAwayParked) goalProb -= 0.06;
+          if (awayLowBlock) goalProb -= 0.04;
+          if (awayTeamFatigueMod < 0.85) goalProb += 0.03; // Tired defense concedes more space
           // Anti-blowout conversion dampener
-          if (scoreDiff >= 4) goalProb *= 0.50;
-          else if (scoreDiff >= 3) goalProb *= 0.70;
-          else if (scoreDiff >= 2) goalProb *= 0.85;
+          if (scoreDiff >= 3) goalProb *= 0.42;
+          else if (scoreDiff === 2) goalProb *= 0.68;
+          else if (scoreDiff === 1) goalProb *= 0.88;
 
           // Realistic conversion clamp
-          goalProb = Math.max(0.06, Math.min(0.60, goalProb));
+          goalProb = Math.max(0.06, Math.min(0.38, goalProb));
 
           if (Math.random() < goalProb) {
             homeScore++;
@@ -1703,7 +1864,7 @@ export function simulateMatchStep(
               minute: nextMinute,
               type: 'save',
               teamId: prevState.homeTeam.id,
-              description: `🧤 تصدي بارع من حارس ${prevState.awayTeam.shortName} يبعد تسديدة خطيرة من (${topHomeAttacker?.name || 'الهجوم'})!`
+              description: `🧤 تصدي بارع من حارس ${prevState.awayTeam.shortName} (${awayGk?.name || 'الحارس'}) يبعد تسديدة خطيرة من (${topHomeAttacker?.name || 'الهجوم'})!`
             });
           }
         } else {
@@ -1730,21 +1891,25 @@ export function simulateMatchStep(
     awayDangerousAttacks++;
     const shotRoll = Math.random();
 
-    // Superior teams penetrating weaker defenses convert higher % of attacks into shots
-    const awayShotChance = Math.max(0.42, Math.min(0.68, 0.52 - (overallDiff * 0.005)));
+    const awayShotChance = Math.max(0.34, Math.min(0.54, 0.42 - (overallDiff * 0.004)));
     if (shotRoll < awayShotChance) {
       awayShots++;
       const topAwayAttacker = pickPlayerByPosition(awayActivePlayers, 'FWD', 'MID');
-      const shootingSkill = topAwayAttacker?.attributes?.shooting || effAwayAtk;
+      const shootingSkill = topAwayAttacker?.attributes?.shooting || topAwayAttacker?.overallRating || effAwayAtk;
 
       const attackerFatigue = prevState.awayFatigueMap[topAwayAttacker?.id] ?? 85;
-      const fatigueFactor = attackerFatigue < 55 ? 0.82 : (attackerFatigue < 68 ? 0.92 : 1.0);
+      const fatigueFactor = attackerFatigue < 55 ? 0.76 : (attackerFatigue < 70 ? 0.88 : 1.0);
 
-      // Blocked shot check: High defending skill blocks more, weak defending blocks less
-      const blockProb = isHomeParked ? 0.38 : Math.max(0.12, Math.min(0.34, 0.25 + (overallDiff * 0.003)));
+      const homeDefenders = homeActivePlayers.filter(p => p.positionCategory === 'DEF');
+      const avgHomeDefSkill = homeDefenders.length > 0
+        ? homeDefenders.reduce((s, d) => s + (d.attributes?.defending || d.overallRating || 68), 0) / homeDefenders.length
+        : effHomeDef;
+      const baseBlockProb = homeLowBlock ? 0.36 : 0.26;
+      const blockProb = Math.max(0.16, Math.min(0.44, baseBlockProb + ((avgHomeDefSkill - shootingSkill) * 0.004)));
+
       if (Math.random() < blockProb) {
         const defendingCb = pickPlayerByPosition(homeActivePlayers, 'DEF', 'MID');
-        if (Math.random() < 0.45) {
+        if (Math.random() < 0.42) {
           awayCorners++;
           newEvents.push({
             minute: nextMinute,
@@ -1754,33 +1919,34 @@ export function simulateMatchStep(
           });
         }
       } else {
-        let onTargetProb = (0.38 + ((shootingSkill - 50) * 0.0036)) * fatigueFactor * crowdAdvantage.awayIntimidationPenalty;
-        if (isHomeParked) onTargetProb -= 0.05;
-        onTargetProb = Math.min(0.68, Math.max(0.25, onTargetProb));
+        let onTargetProb = (0.35 + ((shootingSkill - 65) * 0.0032)) * fatigueFactor * crowdAdvantage.awayIntimidationPenalty;
+        if (homeLowBlock) onTargetProb -= 0.05;
+        onTargetProb = Math.min(0.54, Math.max(0.22, onTargetProb));
 
         const isTarget = Math.random() < onTargetProb;
-        const shotXg = isTarget ? (Math.random() * 0.20 + 0.09) : (Math.random() * 0.05 + 0.02);
+        const shotXg = isTarget ? (Math.random() * 0.14 + 0.07) : (Math.random() * 0.04 + 0.02);
         awayXg += Number(shotXg.toFixed(2));
 
         if (isTarget) {
           awayShotsOnTarget++;
           const homeGk = homeActivePlayers.find(p => p.positionCategory === 'GK') || homeActivePlayers[0];
-          const homeGkPower = (homeGk?.attributes?.goalkeeping || homeGk?.overallRating || 60);
+          const homeGkPower = (homeGk?.attributes?.goalkeeping || homeGk?.overallRating || 68);
           const homeGkFatigue = prevState.homeFatigueMap[homeGk?.id] ?? 90;
-          const gkEfficiency = homeGkFatigue < 50 ? 0.88 : 1.0;
+          const gkEfficiency = homeGkFatigue < 55 ? 0.90 : 1.0;
 
-          const atkVsGk = ((effAwayAtk - (homeGkPower * gkEfficiency)) * 0.0042);
-          const defSuppression = ((effHomeDef - 50) * 0.0020);
-          const qualityConversionBonus = (-overallDiff * 0.012) + (-managerDiff * 0.007) + (-squadDiff * 0.005);
-          let goalProb = 0.28 + atkVsGk - defSuppression + qualityConversionBonus;
+          const atkVsGk = ((shootingSkill - (homeGkPower * gkEfficiency)) * 0.0038);
+          const defSuppression = ((avgHomeDefSkill - 65) * 0.0022);
+          const qualityConversionBonus = (-overallDiff * 0.0055) + (-managerDiff * 0.0035);
+          let goalProb = 0.20 + atkVsGk - defSuppression + qualityConversionBonus;
 
-          if (isHomeParked) goalProb -= 0.06;
-          if (scoreDiff <= -4) goalProb *= 0.50;
-          else if (scoreDiff <= -3) goalProb *= 0.70;
-          else if (scoreDiff <= -2) goalProb *= 0.85;
+          if (homeLowBlock) goalProb -= 0.04;
+          if (homeTeamFatigueMod < 0.85) goalProb += 0.03;
+          if (scoreDiff <= -3) goalProb *= 0.42;
+          else if (scoreDiff === -2) goalProb *= 0.68;
+          else if (scoreDiff === -1) goalProb *= 0.88;
 
           // Realistic conversion clamp
-          goalProb = Math.max(0.06, Math.min(0.60, goalProb));
+          goalProb = Math.max(0.06, Math.min(0.38, goalProb));
 
           if (Math.random() < goalProb) {
             awayScore++;
@@ -1803,7 +1969,7 @@ export function simulateMatchStep(
               minute: nextMinute,
               type: 'save',
               teamId: prevState.awayTeam.id,
-              description: `🧤 تصدي بطولي من حارس ${prevState.homeTeam.shortName} وسط تشجيع جنوني من الجماهير في المدرجات!`
+              description: `🧤 تصدي بطولي من حارس ${prevState.homeTeam.shortName} (${homeGk?.name || 'الحارس'}) وسط تشجيع جنوني من الجماهير في المدرجات!`
             });
           }
         } else {
@@ -1829,8 +1995,8 @@ export function simulateMatchStep(
     // Secondary Events (Fouls, Cards, Corners, Penalties, Tactical Play)
     const subRoll = Math.random();
     
-    // Penalties check: realistic rate (~1.2% per minute under high pressure in the box)
-    if (subRoll < 0.012 && nextMinute > 10) {
+    // Penalties check: realistic football frequency (~0.35% per minute -> ~1 penalty every 3.5 matches)
+    if (subRoll < 0.0035 && nextMinute > 12) {
       const isHomePenalty = Math.random() > 0.48;
       const penaltyTeam = isHomePenalty ? prevState.homeTeam : prevState.awayTeam;
       const defendingTeam = isHomePenalty ? prevState.awayTeam : prevState.homeTeam;
@@ -2123,27 +2289,33 @@ export function simulateMatch(
     sponsors: [],
   } as unknown as Club);
 
-  const homeTac: TeamTactics = homeTactics || safeHome.tactics || ({
-    formation: '4-3-3',
-    tacticalStyle: 'balanced',
-    mentality: 'balanced',
-    passingStyle: 'mixed',
-    tempo: 'normal',
-    pressingIntensity: 'medium',
-    startingPlayerIds: [],
-    benchPlayerIds: [],
-  } as unknown as TeamTactics);
+  const homeTac: TeamTactics =
+    homeTactics ||
+    (safeHome.isUserClub ? safeHome.tactics : generateAdaptiveAiTactics(safeHome, safeAway, true)) ||
+    ({
+      formation: '4-3-3',
+      tacticalStyle: 'balanced',
+      mentality: 'balanced',
+      passingStyle: 'mixed',
+      tempo: 'normal',
+      pressingIntensity: 'medium',
+      startingPlayerIds: [],
+      benchPlayerIds: [],
+    } as unknown as TeamTactics);
 
-  const awayTac: TeamTactics = awayTactics || safeAway.tactics || ({
-    formation: '4-3-3',
-    tacticalStyle: 'balanced',
-    mentality: 'balanced',
-    passingStyle: 'mixed',
-    tempo: 'normal',
-    pressingIntensity: 'medium',
-    startingPlayerIds: [],
-    benchPlayerIds: [],
-  } as unknown as TeamTactics);
+  const awayTac: TeamTactics =
+    awayTactics ||
+    (safeAway.isUserClub ? safeAway.tactics : generateAdaptiveAiTactics(safeAway, safeHome, false)) ||
+    ({
+      formation: '4-2-3-1',
+      tacticalStyle: 'balanced',
+      mentality: 'balanced',
+      passingStyle: 'mixed',
+      tempo: 'normal',
+      pressingIntensity: 'medium',
+      startingPlayerIds: [],
+      benchPlayerIds: [],
+    } as unknown as TeamTactics);
 
   // 1. Calculate Base Team Strength with manager resolution
   let homeCustomMgr = safeHome.manager;
@@ -2164,29 +2336,36 @@ export function simulateMatch(
   const homeStrength = calculateTeamStrength(safeHome, homeTac, homeCustomMgr);
   const awayStrength = calculateTeamStrength(safeAway, awayTac, awayCustomMgr);
 
-  // 2. Tactical Matchup Advantage
+  // 2. Tactical Matchup Advantage & Defensive Block Impact
   const matchup = calculateTacticalMatchup(homeTac, awayTac);
   const homeTacBonus = (matchup.homeAttackMod - 1.0) * 8 + (matchup.homeDefenseMod - 1.0) * 6;
   const awayTacBonus = (matchup.awayAttackMod - 1.0) * 8 + (matchup.awayDefenseMod - 1.0) * 6;
 
-  // 3. Squad Energy & Stamina (Fitness)
-  const homePlayers = Array.isArray(safeHome.players) ? safeHome.players : [];
-  const awayPlayers = Array.isArray(safeAway.players) ? safeAway.players : [];
-  const homeStarters = homePlayers.filter(p => p && (homeTac.startingPlayerIds || []).includes(p.id));
-  const awayStarters = awayPlayers.filter(p => p && (awayTac.startingPlayerIds || []).includes(p.id));
+  // 3. Squad Energy & Stamina (Fitness) + Goalkeeper & Defense Unit Power
+  const homePlayers = Array.isArray(safeHome.players) ? safeHome.players.filter(p => p && p.id) : [];
+  const awayPlayers = Array.isArray(safeAway.players) ? safeAway.players.filter(p => p && p.id) : [];
+  const homeStarters = homePlayers.filter(p => p && p.id && (homeTac.startingPlayerIds || []).includes(p.id));
+  const awayStarters = awayPlayers.filter(p => p && p.id && (awayTac.startingPlayerIds || []).includes(p.id));
+  const effHomeStarters = homeStarters.length > 0 ? homeStarters : homePlayers.slice(0, 11);
+  const effAwayStarters = awayStarters.length > 0 ? awayStarters : awayPlayers.slice(0, 11);
 
   const calcAvgFitness = (players: Player[]): number => {
     if (!players || players.length === 0) return 90;
     const sum = players.reduce((acc, p) => acc + (typeof p?.fitness === 'number' ? p.fitness : 90), 0);
     return sum / players.length;
   };
-  const homeAvgFitness = calcAvgFitness(homeStarters.length > 0 ? homeStarters : homePlayers);
-  const awayAvgFitness = calcAvgFitness(awayStarters.length > 0 ? awayStarters : awayPlayers);
-  const homeFitnessModifier = (homeAvgFitness - 80) * 0.12;
-  const awayFitnessModifier = (awayAvgFitness - 80) * 0.12;
+  const homeAvgFitness = calcAvgFitness(effHomeStarters);
+  const awayAvgFitness = calcAvgFitness(effAwayStarters);
+  const homeFitnessModifier = (homeAvgFitness - 82) * 0.14;
+  const awayFitnessModifier = (awayAvgFitness - 82) * 0.14;
 
-  // 4. Home Pitch & Crowd Advantage (Fair +2.5 rating bonus to home team)
-  const homePitchAdvantage = 2.5;
+  const homeGk = effHomeStarters.find(p => p.positionCategory === 'GK' || p.position === 'GK') || effHomeStarters[0];
+  const awayGk = effAwayStarters.find(p => p.positionCategory === 'GK' || p.position === 'GK') || effAwayStarters[0];
+  const homeGkRating = homeGk?.attributes?.goalkeeping || homeGk?.overallRating || 68;
+  const awayGkRating = awayGk?.attributes?.goalkeeping || awayGk?.overallRating || 68;
+
+  // 4. Home Pitch & Crowd Advantage (Fair +2.6 rating bonus to home team)
+  const homePitchAdvantage = 2.6;
 
   // 5. Effective Overall Ratings
   const effHomeRating = Math.max(30, Math.min(99, homeStrength.overall + homePitchAdvantage + homeTacBonus + homeFitnessModifier));
@@ -2195,20 +2374,23 @@ export function simulateMatch(
   // True Rating Disparity (Rating Delta)
   const ratingDelta = effHomeRating - effAwayRating;
 
-  // 6. Base Expected Goals (xG) incorporating Home Advantage, Attack vs Defense, and Tactical Fit
-  const attackDefDeltaHome = (homeStrength.attack - awayStrength.defense) * 0.024;
-  const attackDefDeltaAway = (awayStrength.attack - homeStrength.defense) * 0.024;
-  const ratingDeltaEffect = ratingDelta * 0.032;
+  // 6. Base Expected Goals (xG) calibrated for realistic 2.0–2.6 average total goals per match
+  const attackDefDeltaHome = (homeStrength.attack - (awayStrength.defense * 0.65 + awayGkRating * 0.35)) * 0.018;
+  const attackDefDeltaAway = (awayStrength.attack - (homeStrength.defense * 0.65 + homeGkRating * 0.35)) * 0.018;
+  const ratingDeltaEffect = Math.max(-0.55, Math.min(0.55, ratingDelta * 0.022));
 
-  let baseHomeXg = 1.35 + (homePitchAdvantage * 0.06) + attackDefDeltaHome + ratingDeltaEffect;
-  let baseAwayXg = 1.05 + attackDefDeltaAway - ratingDeltaEffect;
+  const awayLowBlockMod = (awayTac.tacticalStyle === 'park_the_bus' || awayTac.mentality === 'defensive' || awayTac.defensiveLine === 'low') ? 0.85 : 1.0;
+  const homeLowBlockMod = (homeTac.tacticalStyle === 'park_the_bus' || homeTac.mentality === 'defensive' || homeTac.defensiveLine === 'low') ? 0.85 : 1.0;
 
-  // 7. Realistic Football Variance & Form Momentum (-12% to +12%)
-  const homeVariance = (Math.random() - 0.5) * 0.24;
-  const awayVariance = (Math.random() - 0.5) * 0.24;
+  let baseHomeXg = (1.18 + (homePitchAdvantage * 0.04) + attackDefDeltaHome + ratingDeltaEffect) * awayLowBlockMod;
+  let baseAwayXg = (0.92 + attackDefDeltaAway - ratingDeltaEffect) * homeLowBlockMod;
 
-  let finalHomeXg = Math.max(0.20, Math.min(4.8, baseHomeXg * (1 + homeVariance)));
-  let finalAwayXg = Math.max(0.15, Math.min(4.8, baseAwayXg * (1 + awayVariance)));
+  // 7. Realistic Football Variance & Form Momentum (-10% to +10%)
+  const homeVariance = (Math.random() - 0.5) * 0.20;
+  const awayVariance = (Math.random() - 0.5) * 0.20;
+
+  let finalHomeXg = Math.max(0.22, Math.min(2.65, baseHomeXg * (1 + homeVariance)));
+  let finalAwayXg = Math.max(0.18, Math.min(2.45, baseAwayXg * (1 + awayVariance)));
 
   // 8. Poisson-based Goal Sampling (Authentic probabilistic football engine)
   const samplePoisson = (lambda: number): number => {
@@ -2461,7 +2643,8 @@ export function pickCornerHeader(players: Player[]): Player {
 }
 
 function pickPlayerByPosition(players: Player[], primary: 'FWD' | 'MID' | 'DEF' | 'GK', secondary?: 'FWD' | 'MID' | 'DEF'): Player {
-  if (!players || players.length === 0) {
+  const validPlayers = (players || []).filter(p => p && p.id);
+  if (!validPlayers || validPlayers.length === 0) {
     return {
       id: `p_dummy_${Math.random()}`,
       name: 'لاعب الفريق',
@@ -2483,13 +2666,13 @@ function pickPlayerByPosition(players: Player[], primary: 'FWD' | 'MID' | 'DEF' 
     };
   }
 
-  const primaryMatches = players.filter(p => p.positionCategory === primary);
+  const primaryMatches = validPlayers.filter(p => p && p.positionCategory === primary);
   if (primaryMatches.length > 0) {
     return primaryMatches[Math.floor(Math.random() * primaryMatches.length)];
   }
 
   if (secondary) {
-    const secondaryMatches = players.filter(p => p.positionCategory === secondary);
+    const secondaryMatches = validPlayers.filter(p => p && p.positionCategory === secondary);
     if (secondaryMatches.length > 0) {
       return secondaryMatches[Math.floor(Math.random() * secondaryMatches.length)];
     }
@@ -2497,13 +2680,13 @@ function pickPlayerByPosition(players: Player[], primary: 'FWD' | 'MID' | 'DEF' 
 
   // If primary was not GK, NEVER return a GK in the fallback
   if (primary !== 'GK') {
-    const outfieldOnly = players.filter(p => p.positionCategory !== 'GK' && p.position !== 'GK');
+    const outfieldOnly = validPlayers.filter(p => p && p.positionCategory !== 'GK' && p.position !== 'GK');
     if (outfieldOnly.length > 0) {
       return outfieldOnly[Math.floor(Math.random() * outfieldOnly.length)];
     }
   }
 
-  return players[Math.floor(Math.random() * players.length)];
+  return validPlayers[Math.floor(Math.random() * validPlayers.length)];
 }
 
 export function updateLeagueStandings(
@@ -2615,9 +2798,14 @@ export function recalculateStandingsFromFixtures(
 
   if (teamMap.size === 0) return currentStandings;
 
-  const playedLeagueFixtures = (fixtures || []).filter(
-    f => f && (!f.competitionType || f.competitionType === 'league') && (f.isPlayed || (f as any).played) && typeof f.homeScore === 'number' && typeof f.awayScore === 'number'
-  );
+  const playedLeagueFixtures = (fixtures || []).filter(f => {
+    if (!f || !(f.isPlayed || (f as any).played) || typeof f.homeScore !== 'number' || typeof f.awayScore !== 'number') {
+      return false;
+    }
+    if (!f.competitionType) return true;
+    const comp = String(f.competitionType).toLowerCase().trim();
+    return comp === 'league' || (!comp.includes('cup') && !comp.includes('cop') && !comp.includes('cont') && !comp.includes('ccl'));
+  });
 
   playedLeagueFixtures.forEach(fix => {
     const home = teamMap.get(fix.homeTeamId);
@@ -2662,7 +2850,7 @@ export function recalculateStandingsFromFixtures(
     if (b.points !== a.points) return b.points - a.points;
     if (b.goalDifference !== a.goalDifference) return b.goalDifference - a.goalDifference;
     if (b.goalsFor !== a.goalsFor) return b.goalsFor - a.goalsFor;
-    return a.teamName.localeCompare(b.teamName, 'ar');
+    return (a.teamName || '').localeCompare(b.teamName || '', 'ar');
   });
 }
 

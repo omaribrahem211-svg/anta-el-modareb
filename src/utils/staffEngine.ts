@@ -203,7 +203,10 @@ export function executeSmartAutoSub(
   availableSubsLeft: number = 5,
   matchContext?: AutoSubMatchContext
 ): { outPlayer: Player; inPlayer: Player; reason: string } | null {
-  if (availableSubsLeft <= 0 || pitchPlayers.length === 0 || benchPlayers.length === 0) {
+  const safePitch = (pitchPlayers || []).filter(p => p && p.id);
+  const safeBench = (benchPlayers || []).filter(p => p && p.id);
+
+  if (availableSubsLeft <= 0 || safePitch.length === 0 || safeBench.length === 0) {
     return null;
   }
 
@@ -215,7 +218,7 @@ export function executeSmartAutoSub(
   const yellowCardedIds = matchContext?.yellowCardedIds || [];
 
   // Valid bench replacements (not injured, not suspended, decent fitness)
-  const validBench = benchPlayers.filter(p => 
+  const validBench = safeBench.filter(p => 
     !p.injury && 
     !p.isInjured && 
     !p.isSuspended && 
@@ -225,7 +228,7 @@ export function executeSmartAutoSub(
   if (validBench.length === 0) return null;
 
   // 1. Identify players on pitch needing substitution
-  const candidates = pitchPlayers.map(player => {
+  const candidates = safePitch.map(player => {
     // Goalkeepers are NEVER subbed out unless injured!
     const isGK = player.positionCategory === 'GK';
     const isPlayerInjured = Boolean(player.injury || player.isInjured);

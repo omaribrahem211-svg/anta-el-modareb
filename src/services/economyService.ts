@@ -324,13 +324,13 @@ export function validateTransferFinancials(
   userClub: Club,
   player: Partial<Player>,
   offeredFee?: number,
-  offeredSalary?: number,
+  _offeredSalary?: number,
   isFreeAgent: boolean = false
 ): TransferFinancialValidation {
   if (!userClub) {
     return {
       canAffordFee: false,
-      canAffordWage: false,
+      canAffordWage: true,
       allowed: false,
       currentBudget: 0,
       requiredFee: 0,
@@ -343,36 +343,28 @@ export function validateTransferFinancials(
     };
   }
 
+  const isPlayerFreeAgent = isFreeAgent || (player?.contractYears !== undefined && player.contractYears <= 0);
   const currentBudget = userClub.budget || 0;
-  const requiredFee = isFreeAgent ? 0 : (offeredFee ?? player?.marketValue ?? 0);
+  const requiredFee = isPlayerFreeAgent ? 0 : (offeredFee ?? player?.marketValue ?? 0);
   const canAffordFee = currentBudget >= requiredFee;
-
-  const currentWages = calculateClubTotalMonthlyWages(userClub);
-  const newSalary = offeredSalary ?? player?.salary ?? 2000;
-  const projectedWages = currentWages + newSalary;
-  const monthlyIncome = calculateClubMonthlyIncome(userClub);
-  const remainingWageBudget = Math.max(0, monthlyIncome - currentWages);
-  const canAffordWage = projectedWages <= monthlyIncome;
 
   let reason: string | undefined = undefined;
 
   if (!canAffordFee) {
-    reason = `ميزانية النادي (${(currentBudget || 0).toLocaleString()} ج.م) لا تكفي لدفع قيمة شراء اللاعب المطلوبة (${(requiredFee || 0).toLocaleString()} ج.م). يجب توفير سعر اللاعب أولاً!`;
-  } else if (!canAffordWage) {
-    reason = `الراتب المطلوب (${(newSalary || 0).toLocaleString()} ج.م/ش) سيجعل إجمالي رواتب الفريق (${(projectedWages || 0).toLocaleString()} ج.م) يتجاوز سقف الدخل الشهري (${(monthlyIncome || 0).toLocaleString()} ج.م). المتبقي لسقف الرواتب: ${(remainingWageBudget || 0).toLocaleString()} ج.م فقط!`;
+    reason = `ميزانية النادي (${(currentBudget || 0).toLocaleString()} ج.م) لا تكفي لدفع قيمة شراء عقد اللاعب المطلوبة (${(requiredFee || 0).toLocaleString()} ج.م).`;
   }
 
   return {
     canAffordFee,
-    canAffordWage,
-    allowed: canAffordFee && canAffordWage,
+    canAffordWage: true,
+    allowed: canAffordFee,
     currentBudget,
     requiredFee,
-    currentWages,
-    newSalary,
-    projectedWages,
-    monthlyIncome,
-    remainingWageBudget,
+    currentWages: 0,
+    newSalary: 0,
+    projectedWages: 0,
+    monthlyIncome: calculateClubMonthlyIncome(userClub),
+    remainingWageBudget: 999999999,
     reason,
   };
 }
@@ -394,25 +386,14 @@ export function canPlayerJoinClub(
   const pot = player.potentialRating || ovr;
   const age = player.age || 25;
 
-  // 1. Budget validation
-  const playerValue = player.marketValue || 0;
+  // 1. Budget validation (Free Agents with contractYears === 0 require 0 transfer fee)
+  const isFreeAgent = (player.contractYears !== undefined && player.contractYears <= 0) || !player.currentClubId || player.currentClubId === 'free_agent';
+  const playerValue = isFreeAgent ? 0 : (player.marketValue || 0);
   const clubBudget = userClub.budget || 0;
   if (playerValue > 0 && clubBudget < playerValue) {
     return {
       canJoin: false,
-      reason: `ميزانية ناديك الحالية (${clubBudget.toLocaleString()} ج.م) لا تكفي لدفع قيمة شراء اللاعب (${playerValue.toLocaleString()} ج.م). يجب توفير سعر اللاعب أولاً!`,
-    };
-  }
-
-  // 1.2 Wage budget & monthly income validation
-  const currentWages = calculateClubTotalMonthlyWages(userClub);
-  const monthlyIncome = calculateClubMonthlyIncome(userClub);
-  const newSalary = player.salary || 2500;
-  if (currentWages + newSalary > monthlyIncome) {
-    const remaining = Math.max(0, monthlyIncome - currentWages);
-    return {
-      canJoin: false,
-      reason: `راتب اللاعب (${newSalary.toLocaleString()} ج.م/ش) سيتسبب في تجاوز إجمالي رواتب الفريق لسقف دخل النادي الشهري (${monthlyIncome.toLocaleString()} ج.م). إجمالي الرواتب الحالي: ${currentWages.toLocaleString()} ج.م، والمتبقي لسقف الرواتب هو ${remaining.toLocaleString()} ج.م فقط!`,
+      reason: `ميزانية ناديك الحالية (${clubBudget.toLocaleString()} ج.م) لا تكفي لدفع قيمة شراء اللاعب (${playerValue.toLocaleString()} ج.م).`,
     };
   }
 

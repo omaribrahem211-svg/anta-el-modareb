@@ -859,8 +859,8 @@ export const BARCELONA_SQUAD: RealPlayerTemplate[] = [
     preferredFoot: 'right',
     number: 7,
     attributes: { pace: 82, shooting: 80, passing: 78, dribbling: 81, defending: 45, physical: 73 },
-  },,
-{
+  },
+  {
     id: 'barca_wojciech_szczesny',
     name: 'فويتشيك شتشيسني',
     firstName: 'فويتشيك',
@@ -1265,8 +1265,8 @@ export const MAN_CITY_SQUAD: RealPlayerTemplate[] = [
     preferredFoot: 'right',
     number: 19,
     attributes: { pace: 65, shooting: 80, passing: 88, dribbling: 85, defending: 74, physical: 71 },
-  },,
-{
+  },
+  {
     id: 'city_stefan_ortega',
     name: 'ستيفان أورتيغا الحارس الموثوق',
     firstName: 'ستيفان',
@@ -2257,8 +2257,8 @@ export const AL_HILAL_SQUAD: RealPlayerTemplate[] = [
     preferredFoot: 'left',
     number: 5,
     attributes: { pace: 68, shooting: 35, passing: 66, dribbling: 60, defending: 81, physical: 83 },
-  },,
-{
+  },
+  {
     id: 'hilal_mohammed_al_owais',
     name: 'محمد العويس الحارس الدولي',
     firstName: 'محمد',
@@ -2763,8 +2763,8 @@ export const AL_AHLY_SQUAD: RealPlayerTemplate[] = [
     preferredFoot: 'right',
     number: 19,
     attributes: { pace: 72, shooting: 78, passing: 83, dribbling: 81, defending: 50, physical: 66 },
-  },,
-{
+  },
+  {
     id: 'ahly_hamza_alaa',
     name: 'حمزة علاء الحارس الأولمبي',
     firstName: 'حمزة',
@@ -3199,12 +3199,13 @@ export function isRealClub(clubId: string): boolean {
  */
 export function loadRealClubSquad(clubId: string): Player[] {
   const canonicalId = (clubId || '').toLowerCase();
-  const templates = REAL_SQUADS_BY_CLUB_ID[canonicalId];
+  const rawTemplates = REAL_SQUADS_BY_CLUB_ID[canonicalId];
 
-  if (!templates || templates.length === 0) {
+  if (!rawTemplates || rawTemplates.length === 0) {
     throw new Error(`[loadRealClubSquad] No predefined real squad found for club: ${clubId}`);
   }
 
+  const templates = rawTemplates.filter(Boolean);
   return templates.map((tmpl, index) => ({
     id: tmpl.id,
     name: tmpl.name,

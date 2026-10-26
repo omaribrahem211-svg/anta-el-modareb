@@ -7,13 +7,41 @@ export function normalizeClub(t: any): Club {
     return {} as Club;
   }
 
-  const players = Array.isArray(t.players) ? t.players : [];
-  const startingPlayerIds = t.tactics?.startingPlayerIds && t.tactics.startingPlayerIds.length === 11
-    ? t.tactics.startingPlayerIds
-    : players.slice(0, 11).map((p: any) => p.id);
-  const benchPlayerIds = t.tactics?.benchPlayerIds && t.tactics.benchPlayerIds.length > 0
-    ? t.tactics.benchPlayerIds
-    : players.slice(11, 18).map((p: any) => p.id);
+  const rawPlayers = Array.isArray(t.players) ? t.players : [];
+  const players = rawPlayers
+    .filter((p: any) => p && typeof p === 'object' && p.id)
+    .map((p: any) => ({
+      ...p,
+      name: p.name || 'لاعب',
+      position: p.position || 'CM',
+      positionCategory: p.positionCategory || 'MID',
+      overallRating: Number.isFinite(p.overallRating) ? p.overallRating : 60,
+      isGuestStar: Boolean(p.isGuestStar),
+      nationality: p.nationality || t.country || 'مصر',
+      nationalityCode: p.nationalityCode || t.countryCode || 'EGY',
+      currentClubId: p.currentClubId || t.id,
+      stats: p.stats || { appearances: 0, goals: 0, assists: 0, yellowCards: 0, redCards: 0, cleanSheets: 0, averageRating: 6.5 },
+      attributes: p.attributes || { pace: 60, shooting: 60, passing: 60, dribbling: 60, defending: 60, physical: 60 },
+      savings: p.savings !== undefined ? p.savings : 0,
+      totalBonusesReceived: p.totalBonusesReceived ?? 0,
+    }));
+
+  const playerIds = new Set(players.map((p: any) => p.id));
+  const rawStarting = Array.isArray(t.tactics?.startingPlayerIds) ? t.tactics.startingPlayerIds : [];
+  const rawBench = Array.isArray(t.tactics?.benchPlayerIds) ? t.tactics.benchPlayerIds : [];
+
+  let startingPlayerIds = rawStarting.filter((id: string) => playerIds.has(id));
+  let benchPlayerIds = rawBench.filter((id: string) => playerIds.has(id) && !startingPlayerIds.includes(id));
+
+  // If starting lineup has fewer than 11 and squad has players, backfill from available
+  if (startingPlayerIds.length < 11 && players.length > 0) {
+    for (const p of players) {
+      if (startingPlayerIds.length >= 11) break;
+      if (!startingPlayerIds.includes(p.id) && !benchPlayerIds.includes(p.id)) {
+        startingPlayerIds.push(p.id);
+      }
+    }
+  }
 
   return {
     ...t,
@@ -35,16 +63,7 @@ export function normalizeClub(t: any): Club {
       }
       return b;
     })(),
-    players: players.map((p: any) => ({
-      ...p,
-      nationality: p.nationality || t.country || 'مصر',
-      nationalityCode: p.nationalityCode || t.countryCode || 'EGY',
-      currentClubId: p.currentClubId || t.id,
-      stats: p.stats || { appearances: 0, goals: 0, assists: 0, yellowCards: 0, redCards: 0, cleanSheets: 0, averageRating: 6.5 },
-      attributes: p.attributes || { pace: 60, shooting: 60, passing: 60, dribbling: 60, defending: 60, physical: 60 },
-      savings: p.savings !== undefined ? p.savings : 0,
-      totalBonusesReceived: p.totalBonusesReceived ?? 0,
-    })),
+    players,
     sponsors: [],
     facilities: t.facilities || {
       stadiumName: `${t.name || 'ملعب الفريق'}`,
@@ -61,12 +80,12 @@ export function normalizeClub(t: any): Club {
       passingStyle: t.tactics?.passingStyle || 'short',
       pressingIntensity: t.tactics?.pressingIntensity || 'balanced',
       tempo: t.tactics?.tempo || 'balanced',
-      startingPlayerIds: Array.isArray(startingPlayerIds) ? startingPlayerIds : [],
-      benchPlayerIds: Array.isArray(benchPlayerIds) ? benchPlayerIds : [],
-      captainId: t.tactics?.captainId || players[0]?.id || '',
-      penaltyTakerId: t.tactics?.penaltyTakerId || players[0]?.id || '',
-      freeKickTakerId: t.tactics?.freeKickTakerId || players[0]?.id || '',
-      cornerTakerId: t.tactics?.cornerTakerId || players[0]?.id || '',
+      startingPlayerIds,
+      benchPlayerIds,
+      captainId: (playerIds.has(t.tactics?.captainId) ? t.tactics.captainId : null) || players[0]?.id || '',
+      penaltyTakerId: (playerIds.has(t.tactics?.penaltyTakerId) ? t.tactics.penaltyTakerId : null) || players[0]?.id || '',
+      freeKickTakerId: (playerIds.has(t.tactics?.freeKickTakerId) ? t.tactics.freeKickTakerId : null) || players[0]?.id || '',
+      cornerTakerId: (playerIds.has(t.tactics?.cornerTakerId) ? t.tactics.cornerTakerId : null) || players[0]?.id || '',
     },
   };
 }

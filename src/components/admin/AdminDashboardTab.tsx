@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { 
   Users, 
   UserCheck, 
@@ -10,9 +10,11 @@ import {
   Database,
   CheckCircle2,
   AlertCircle,
-  Radio
+  Radio,
+  Sparkles
 } from 'lucide-react';
 import { AdminDashboardMetrics } from '../../types/admin';
+import { useGame } from '../../context/GameContext';
 
 interface AdminDashboardTabProps {
   metrics: AdminDashboardMetrics | null;
@@ -27,6 +29,9 @@ export const AdminDashboardTab: React.FC<AdminDashboardTabProps> = ({
   onNavigateToUsers,
   onNavigateToLogs
 }) => {
+  const { switchUserClubToAlAhly, userClub } = useGame();
+  const [adminActionMessage, setAdminActionMessage] = useState<string | null>(null);
+
   if (loading) {
     return (
       <div className="flex items-center justify-center py-20">
@@ -72,6 +77,50 @@ export const AdminDashboardTab: React.FC<AdminDashboardTabProps> = ({
           </div>
         </div>
       </div>
+
+      {/* Super Admin Quick Appointment to Al Ahly & CAF Champions League */}
+      <div className="bg-gradient-to-r from-red-950/70 via-slate-900 to-amber-950/60 border border-amber-500/40 rounded-3xl p-5 shadow-xl flex flex-col md:flex-row items-center justify-between gap-4">
+        <div className="flex items-center gap-4">
+          <div className="w-14 h-14 rounded-2xl bg-red-600/20 border border-red-500/40 flex items-center justify-center text-red-400 shrink-0 text-2xl shadow-inner">
+            🦅
+          </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <h3 className="text-base font-bold text-white">تفعيل تدريب النادي الأهلي ودوري أبطال إفريقيا</h3>
+              <span className="text-[10px] bg-red-500/20 text-red-300 border border-red-500/40 px-2 py-0.5 rounded-full font-bold">
+                حساب الأدمن الرسمي
+              </span>
+              {userClub?.id === 'eg1_ahly' && (
+                <span className="text-[10px] bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 px-2 py-0.5 rounded-full font-bold">
+                  أنت تدرب الأهلي حالياً ✅
+                </span>
+              )}
+            </div>
+            <p className="text-xs text-slate-300 mt-1 leading-relaxed">
+              تولي القيادة الفنية لنادي القرن الإفريقي (النادي الأهلي 🇪🇬) بكامل نجومه الحقيقيين (الشناوي، إمام عاشور، وسام أبو علي) وتفعيل بطولة دوري أبطال إفريقيا فوراً بالمجموعة الأولى النارية.
+            </p>
+          </div>
+        </div>
+
+        <button
+          onClick={() => {
+            const res = switchUserClubToAlAhly();
+            setAdminActionMessage(res.message);
+            setTimeout(() => setAdminActionMessage(null), 5000);
+          }}
+          className="px-5 py-3 rounded-2xl bg-gradient-to-r from-red-600 via-amber-600 to-amber-500 hover:from-red-500 hover:to-amber-400 text-white font-black text-xs sm:text-sm flex items-center justify-center gap-2 shrink-0 shadow-lg cursor-pointer transition-all active:scale-95 border border-amber-400/30"
+        >
+          <Sparkles className="w-4 h-4 text-amber-200" />
+          <span>تفعيل تدريب الأهلي وبدء البطولة 🏆</span>
+        </button>
+      </div>
+
+      {adminActionMessage && (
+        <div className="bg-emerald-950/80 border border-emerald-500 text-emerald-200 text-xs sm:text-sm font-bold p-3.5 rounded-2xl flex items-center gap-2 animate-fade-in">
+          <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+          <span>{adminActionMessage}</span>
+        </div>
+      )}
 
       {/* Metrics Grid */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">

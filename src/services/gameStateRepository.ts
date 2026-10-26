@@ -42,6 +42,8 @@ export interface LocalGameSavePayload {
   retiredPlayers: any[];
   worldRankings: any;
   scoutedOpponents: any;
+  africanChampionsLeague?: any;
+  seasonArchives?: any[];
   deletedMessageIds?: string[];
   pendingCloudSync?: boolean;
 }
@@ -195,6 +197,12 @@ async function executeSave(payload: LocalGameSavePayload): Promise<void> {
       safeSetLS(`${LEGACY_STORAGE_PREFIX}_retiredPlayers`, JSON.stringify(timestampedPayload.retiredPlayers));
       safeSetLS(`${LEGACY_STORAGE_PREFIX}_worldRankings`, JSON.stringify(timestampedPayload.worldRankings));
       safeSetLS(`${LEGACY_STORAGE_PREFIX}_scoutedOpponents`, JSON.stringify(timestampedPayload.scoutedOpponents));
+      if (timestampedPayload.africanChampionsLeague !== undefined) {
+        safeSetLS(`${LEGACY_STORAGE_PREFIX}_africanChampionsLeague`, JSON.stringify(timestampedPayload.africanChampionsLeague));
+      }
+      if (timestampedPayload.seasonArchives !== undefined) {
+        safeSetLS(`${LEGACY_STORAGE_PREFIX}_seasonArchives`, JSON.stringify(timestampedPayload.seasonArchives));
+      }
       safeSetLS(`${LEGACY_STORAGE_PREFIX}_deletedMessageIds`, JSON.stringify(timestampedPayload.deletedMessageIds || []));
     } catch (mirrorErr) {
       console.warn('[GameStateRepo] Deferred localStorage mirror notice:', mirrorErr);
@@ -303,6 +311,8 @@ export const gameStateRepository = {
         retiredPlayers: safeParse('retiredPlayers', []),
         worldRankings: safeParse('worldRankings', null),
         scoutedOpponents: safeParse('scoutedOpponents', {}),
+        africanChampionsLeague: safeParse('africanChampionsLeague', null),
+        seasonArchives: safeParse('seasonArchives', []),
         deletedMessageIds: safeParse('deletedMessageIds', []),
       };
 

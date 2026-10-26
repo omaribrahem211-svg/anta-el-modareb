@@ -26,6 +26,8 @@ import { generateYouthAcademyBatch } from './youthAcademyEngine';
 import { checkCupStageAdvancementRewards, StageRewardInfo } from './rewardsEngine';
 import { isRealClub, loadRealClubSquad } from '../data/realPlayersData';
 import { getClubPrestigeTier, isClubEligibleToMakeJobOffer } from './careerProgressionEngine';
+import { getDomesticCupDefinitionForCountry } from '../data/competitionsData';
+import { CalendarManager } from '../services/calendarManager';
 
 // ----------------------------------------------------
 // 1. END OF SEASON RESULT CALCULATION
@@ -840,7 +842,8 @@ export function initNationalCupTournament(
   userClub?: Club | null,
   totalLeagueRounds: number = 38
 ): CupTournament {
-  const trophyName = country === 'مصر' ? 'كأس مصر العريق 🏆' : `كأس ${country} الوطنية 🏆`;
+  const cupDef = getDomesticCupDefinitionForCountry(country || 'مصر');
+  const trophyName = `${cupDef.name} 🏆`;
   
   // 1. Fetch all clubs from all tiers in the country
   let countryClubs = getAllClubsForCountry(country);
@@ -974,13 +977,13 @@ export function initNationalCupTournament(
   }
 
   return {
-    id: `cup_s${seasonNumber}_${Date.now()}`,
-    name: trophyName,
-    country,
+    id: `${cupDef.id}_s${seasonNumber}`,
+    name: cupDef.shortName || cupDef.name,
+    country: country || cupDef.country,
     seasonNumber,
     trophyName,
-    prizeMoneyWinner: 250000,
-    prizeMoneyRunnerUp: 100000,
+    prizeMoneyWinner: cupDef.championPrize || 3000000,
+    prizeMoneyRunnerUp: cupDef.runnerUpPrize || 1500000,
     matches,
     isCompleted: false,
   };
@@ -1000,76 +1003,18 @@ export function generateMasterSeasonAgenda(
   seasonNumber: number,
   activeLeague: LeagueDefinition,
   leagueTeams: Club[],
-  cupTournament: CupTournament,
+  cupTournament?: CupTournament | null,
   continentalTournament?: any,
   userClub?: Club | null
 ): Fixture[] {
-  const masterFixtures: Fixture[] = [];
-  const teamIds = (leagueTeams || []).map(t => t?.id).filter(Boolean) as string[];
-  
-  // Berger round-robin requires an even number of teams; append bye placeholder if odd
-  const effectiveTeamIds = [...teamIds];
-  if (effectiveTeamIds.length % 2 !== 0) {
-    effectiveTeamIds.push('__BYE__');
-  }
-  const n = effectiveTeamIds.length;
-
-  // 1. Generate League Matchdays
-  const halfRounds = n > 1 ? n - 1 : 1;
-  const leagueRounds: { homeId: string; awayId: string }[][] = [];
-
-  // First leg
-  for (let r = 0; r < halfRounds; r++) {
-    const roundMatches: { homeId: string; awayId: string }[] = [];
-    for (let i = 0; i < n / 2; i++) {
-      const homeIdx = (r + i) % (n - 1);
-      let awayIdx = (n - 1 - i + r) % (n - 1);
-      if (i === 0) awayIdx = n - 1;
-      const homeId = effectiveTeamIds[homeIdx];
-      const awayId = effectiveTeamIds[awayIdx];
-      if (homeId && awayId && homeId !== '__BYE__' && awayId !== '__BYE__') {
-        roundMatches.push({
-          homeId,
-          awayId,
-        });
-      }
-    }
-    leagueRounds.push(roundMatches);
-  }
-
-  // Second leg - reverse home & away
-  for (let r = 0; r < halfRounds; r++) {
-    const roundMatches: { homeId: string; awayId: string }[] = [];
-    const firstLeg = leagueRounds[r] || [];
-    for (const match of firstLeg) {
-      if (match && match.homeId && match.awayId) {
-        roundMatches.push({
-          homeId: match.awayId,
-          awayId: match.homeId,
-        });
-      }
-    }
-    leagueRounds.push(roundMatches);
-  }
-
-  // Strictly Pure League Agenda: Clean sequential rounds 1 to N without cup or continental interruptions!
-  leagueRounds.forEach((roundMatches, idx) => {
-    const roundNum = idx + 1;
-    roundMatches.forEach((m) => {
-      masterFixtures.push({
-        id: `fix_league_r${roundNum}_${m.homeId}_${m.awayId}_s${seasonNumber}`,
-        round: roundNum,
-        homeTeamId: m.homeId,
-        awayTeamId: m.awayId,
-        competitionType: 'league',
-        competitionName: activeLeague?.name || 'الدوري العام',
-        stageName: `الجولة ${roundNum}`,
-        isPlayed: false,
-      });
-    });
+  return CalendarManager.generateMasterSchedule({
+    seasonNumber,
+    activeLeague,
+    teams: leagueTeams,
+    userClub,
+    cupTournament: cupTournament || null,
+    continentalTournament: continentalTournament || null,
   });
-
-  return masterFixtures;
 }
 
 interface MasterRoundMappingItem {
@@ -1319,6 +1264,26 @@ export function advanceCupTournament(
   );
 
   if (shouldAdvanceR64 && stageR64.length > 0) {
+    const userMatchR64 = stageR64.find(m => userClub && (m.homeTeamId === userClub.id || m.awayTeamId === userClub.id));
+    if (userMatchR64 && !userMatchR64.isPlayed) {
+      stageR64.forEach(match => {
+        if (!match.isPlayed && match.id !== userMatchR64.id) {
+          const homeTeam = getFullClub(match.homeTeamId);
+          const awayTeam = getFullClub(match.awayTeamId);
+          const res = simulateKnockoutMatch(homeTeam, awayTeam);
+          match.homeScore = res.homeScore;
+          match.awayScore = res.awayScore;
+          match.homePenalties = res.homePenalties;
+          match.awayPenalties = res.awayPenalties;
+          match.isPlayed = true;
+          match.winnerTeamId = res.winnerTeamId;
+          match.events = res.events;
+          match.stats = res.stats;
+        }
+      });
+      return { updatedCup: { ...effectiveCup, matches }, cupMatchThisRound: userMatchR64 };
+    }
+
     const qualifiedR32Ids: string[] = [];
 
     stageR64.forEach(match => {
@@ -1419,6 +1384,26 @@ export function advanceCupTournament(
   );
 
   if (shouldAdvanceR32 && stageR32.length > 0) {
+    const userMatchR32 = stageR32.find(m => userClub && (m.homeTeamId === userClub.id || m.awayTeamId === userClub.id));
+    if (userMatchR32 && !userMatchR32.isPlayed) {
+      stageR32.forEach(match => {
+        if (!match.isPlayed && match.id !== userMatchR32.id) {
+          const homeTeam = getFullClub(match.homeTeamId);
+          const awayTeam = getFullClub(match.awayTeamId);
+          const res = simulateKnockoutMatch(homeTeam, awayTeam);
+          match.homeScore = res.homeScore;
+          match.awayScore = res.awayScore;
+          match.homePenalties = res.homePenalties;
+          match.awayPenalties = res.awayPenalties;
+          match.isPlayed = true;
+          match.winnerTeamId = res.winnerTeamId;
+          match.events = res.events;
+          match.stats = res.stats;
+        }
+      });
+      return { updatedCup: { ...effectiveCup, matches }, cupMatchThisRound: userMatchR32 };
+    }
+
     const qualifiedR16Ids: string[] = [];
 
     stageR32.forEach(match => {
@@ -1519,6 +1504,26 @@ export function advanceCupTournament(
   );
 
   if (shouldAdvanceR16 && stageR16.length > 0) {
+    const userMatchR16 = stageR16.find(m => userClub && (m.homeTeamId === userClub.id || m.awayTeamId === userClub.id));
+    if (userMatchR16 && !userMatchR16.isPlayed) {
+      stageR16.forEach(match => {
+        if (!match.isPlayed && match.id !== userMatchR16.id) {
+          const homeTeam = getFullClub(match.homeTeamId);
+          const awayTeam = getFullClub(match.awayTeamId);
+          const res = simulateKnockoutMatch(homeTeam, awayTeam);
+          match.homeScore = res.homeScore;
+          match.awayScore = res.awayScore;
+          match.homePenalties = res.homePenalties;
+          match.awayPenalties = res.awayPenalties;
+          match.isPlayed = true;
+          match.winnerTeamId = res.winnerTeamId;
+          match.events = res.events;
+          match.stats = res.stats;
+        }
+      });
+      return { updatedCup: { ...effectiveCup, matches }, cupMatchThisRound: userMatchR16 };
+    }
+
     const qualifiedQuarterIds: string[] = [];
 
     stageR16.forEach(match => {
@@ -1620,6 +1625,26 @@ export function advanceCupTournament(
   );
 
   if (shouldAdvanceQuarter && stageQuarters.length > 0) {
+    const userMatchQ = stageQuarters.find(m => userClub && (m.homeTeamId === userClub.id || m.awayTeamId === userClub.id));
+    if (userMatchQ && !userMatchQ.isPlayed) {
+      stageQuarters.forEach(match => {
+        if (!match.isPlayed && match.id !== userMatchQ.id) {
+          const homeTeam = getFullClub(match.homeTeamId);
+          const awayTeam = getFullClub(match.awayTeamId);
+          const res = simulateKnockoutMatch(homeTeam, awayTeam);
+          match.homeScore = res.homeScore;
+          match.awayScore = res.awayScore;
+          match.homePenalties = res.homePenalties;
+          match.awayPenalties = res.awayPenalties;
+          match.isPlayed = true;
+          match.winnerTeamId = res.winnerTeamId;
+          match.events = res.events;
+          match.stats = res.stats;
+        }
+      });
+      return { updatedCup: { ...effectiveCup, matches }, cupMatchThisRound: userMatchQ };
+    }
+
     const semiQualifiedIds: string[] = [];
 
     stageQuarters.forEach(qMatch => {
@@ -1720,6 +1745,26 @@ export function advanceCupTournament(
   );
 
   if (shouldAdvanceSemi && stageSemis.length > 0) {
+    const userMatchS = stageSemis.find(m => userClub && (m.homeTeamId === userClub.id || m.awayTeamId === userClub.id));
+    if (userMatchS && !userMatchS.isPlayed) {
+      stageSemis.forEach(match => {
+        if (!match.isPlayed && match.id !== userMatchS.id) {
+          const homeTeam = getFullClub(match.homeTeamId);
+          const awayTeam = getFullClub(match.awayTeamId);
+          const res = simulateKnockoutMatch(homeTeam, awayTeam);
+          match.homeScore = res.homeScore;
+          match.awayScore = res.awayScore;
+          match.homePenalties = res.homePenalties;
+          match.awayPenalties = res.awayPenalties;
+          match.isPlayed = true;
+          match.winnerTeamId = res.winnerTeamId;
+          match.events = res.events;
+          match.stats = res.stats;
+        }
+      });
+      return { updatedCup: { ...effectiveCup, matches }, cupMatchThisRound: userMatchS };
+    }
+
     const finalQualifiedIds: string[] = [];
 
     stageSemis.forEach(sMatch => {
@@ -1804,6 +1849,10 @@ export function advanceCupTournament(
   if (currentRound === finalTrigger) {
     const finalMatch = matches.find(m => m.stage === 'final');
     if (finalMatch) {
+      if (userClub && (finalMatch.homeTeamId === userClub.id || finalMatch.awayTeamId === userClub.id) && !finalMatch.isPlayed) {
+        return { updatedCup: { ...effectiveCup, matches }, cupMatchThisRound: finalMatch };
+      }
+
       if (!finalMatch.isPlayed) {
         const homeTeam = getFullClub(finalMatch.homeTeamId);
         const awayTeam = getFullClub(finalMatch.awayTeamId);
@@ -2493,15 +2542,21 @@ export function processNewSeasonAdvancement(
   // Also persist this active league roster to world
   updateLeagueRosterInWorld(nextActiveLeague.id, updatedLeagueTeams);
 
-  // 6. Setup Next Season Info (Pure League without Cup or Continental)
-  const nextCup = null as any;
+  // 6. Initialize Next Season National Cup Tournament for the active country
+  const nextCup = initNationalCupTournament(
+    nextSeasonNumber,
+    nextActiveLeague.country || 'مصر',
+    updatedLeagueTeams,
+    nextUserClub,
+    Math.max(18, (updatedLeagueTeams.length - 1) * 2)
+  );
 
-  // 4. Generate New Season Schedule & Standings (Pure League)
+  // 4. Generate New Season Schedule & Standings (League + National Cup)
   const nextFixtures = generateMasterSeasonAgenda(
     nextSeasonNumber,
     nextActiveLeague,
     updatedLeagueTeams,
-    undefined,
+    nextCup,
     undefined,
     nextUserClub
   );

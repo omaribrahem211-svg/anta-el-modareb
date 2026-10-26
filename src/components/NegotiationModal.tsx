@@ -60,71 +60,55 @@ export const NegotiationModal: React.FC<NegotiationModalProps> = ({
     salary: existingNegotiation.offeredSalary || 5000,
   } as Player) : null);
 
-  const fairVal = targetPlayer ? calculatePlayerFairValue(targetPlayer, userClub || undefined) : { fairMarketValue: 50000, minimumAcceptableFee: 50000, recommendedMonthlyWage: 5000, valuationTier: 'low' as const };
-  const isFreeAgent = !sellingClub && !existingNegotiation?.playerClubId;
-  const minRequiredSalary = Math.max(1000, targetPlayer?.salary || 0);
-  const minRequiredFee = isFreeAgent ? Math.max(25000, Math.round(fairVal.fairMarketValue * 0.75)) : Math.max(25000, fairVal.fairMarketValue);
+  const fairVal = targetPlayer ? calculatePlayerFairValue(targetPlayer, userClub || undefined) : { fairMarketValue: 50000, minimumAcceptableFee: 50000, recommendedMonthlyWage: 0, valuationTier: 'low' as const };
+  const isFreeAgent = (!sellingClub && !existingNegotiation?.playerClubId) || (targetPlayer !== null && (targetPlayer.contractYears ?? 1) <= 0);
+  const minRequiredFee = isFreeAgent ? 0 : Math.max(25000, fairVal.fairMarketValue);
 
   // Initial Form State - MUST be unconditionally called at top level (Rule of Hooks)
-  const [fee, setFee] = useState<number | string>(existingNegotiation?.bidFee || minRequiredFee);
-  const [salary, setSalary] = useState<number | string>(
-    existingNegotiation?.offeredSalary || Math.max(minRequiredSalary, fairVal.recommendedMonthlyWage)
-  );
-  const [years, setYears] = useState<number>(existingNegotiation?.contractYears || 3);
+  const [fee, setFee] = useState<number | string>(isFreeAgent ? 0 : (existingNegotiation?.bidFee ?? minRequiredFee));
+  const [years, setYears] = useState<number>(Math.max(1, Math.min(5, existingNegotiation?.contractYears || 3)));
   const [role, setRole] = useState<'key_player' | 'first_team' | 'rotation' | 'prospect'>(
     existingNegotiation?.squadRole || 'first_team'
   );
 
   useEffect(() => {
     if (existingNegotiation) {
-      setFee(existingNegotiation.bidFee || minRequiredFee);
-      setSalary(existingNegotiation.offeredSalary || Math.max(minRequiredSalary, fairVal.recommendedMonthlyWage));
-      setYears(existingNegotiation.contractYears || 3);
+      setFee(isFreeAgent ? 0 : (existingNegotiation.bidFee ?? minRequiredFee));
+      setYears(Math.max(1, Math.min(5, existingNegotiation.contractYears || 3)));
       setRole(existingNegotiation.squadRole || 'first_team');
     } else if (targetPlayer) {
-      setFee(minRequiredFee);
-      setSalary(Math.max(minRequiredSalary, fairVal.recommendedMonthlyWage));
+      setFee(isFreeAgent ? 0 : minRequiredFee);
       setYears(3);
       setRole('first_team');
     }
-  }, [targetPlayer?.id, existingNegotiation?.id, minRequiredFee, minRequiredSalary, fairVal.recommendedMonthlyWage]);
+  }, [targetPlayer?.id, existingNegotiation?.id, minRequiredFee, isFreeAgent]);
 
   // Now conditional render can safely return null without breaking React Hook order
   if (!isOpen || (!player && !existingNegotiation) || !targetPlayer) {
     return null;
   }
 
-  const numFee = typeof fee === 'number' ? fee : (Number(fee) || 0);
-  const numSalary = typeof salary === 'number' ? salary : (Number(salary) || 0);
-
-  // Financial calculations
-  const clubMonthlyIncome = userClub ? calculateClubMonthlyIncome(userClub) : 0;
-  const clubCurrentWages = userClub ? calculateClubTotalMonthlyWages(userClub) : 0;
-  const remainingWageBudget = Math.max(0, clubMonthlyIncome - clubCurrentWages);
-  
-  const isSalaryBelowCurrent = numSalary < (targetPlayer.salary || 0);
-  const isFeeExceedingBudget = userClub ? numFee > (userClub.budget || 0) : false;
-  const isSalaryExceedingCap = numSalary > remainingWageBudget;
+  const numFee = isFreeAgent ? 0 : (typeof fee === 'number' ? fee : (Number(fee) || 0));
+  const isFeeExceedingBudget = !isFreeAgent && userClub ? numFee > (userClub.budget || 0) : false;
 
   const transferValidation = userClub
-    ? validateTransferFinancials(userClub, targetPlayer, numFee, numSalary, isFreeAgent)
-    : { allowed: false, canAffordFee: false, canAffordWage: false, reason: 'يجب تولي تدريب نادٍ أولاً' };
+    ? validateTransferFinancials(userClub, targetPlayer, numFee, 0, isFreeAgent)
+    : { allowed: false, canAffordFee: false, canAffordWage: true, reason: 'يجب تولي تدريب نادٍ أولاً' };
 
   // Counter offer validations
   const canAffordCounterFee = userClub && existingNegotiation?.demandedFee ? (userClub.budget || 0) >= existingNegotiation.demandedFee : true;
-  const canAffordCounterSalary = userClub && existingNegotiation?.demandedSalary ? (clubCurrentWages + existingNegotiation.demandedSalary <= clubMonthlyIncome) : true;
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      if (isSalaryBelowCurrent || isFeeExceedingBudget || isSalaryExceedingCap) return;
+      if (isFeeExceedingBudget) return;
       if (!transferValidation.allowed && !isFreeAgent) return;
 
       onSubmitProposal({
         playerId: targetPlayer.id,
         transferFee: numFee,
-        monthlySalary: numSalary,
-        contractYears: years,
+        monthlySalary: 0,
+        contractYears: Math.max(1, Math.min(5, years)),
         squadRole: role,
       });
       onClose();
@@ -149,6 +133,7 @@ export const NegotiationModal: React.FC<NegotiationModalProps> = ({
               </h3>
               <p className="text-xs text-slate-400">
                 {targetPlayer.position} • تقييم {targetPlayer.overallRating} • {targetPlayer.age} عاماً
+                {isFreeAgent && ' • 🆓 لاعب حر (انتقال مجاني)'}
               </p>
             </div>
           </div>
@@ -173,11 +158,10 @@ export const NegotiationModal: React.FC<NegotiationModalProps> = ({
                 </span>
               </div>
               <div>
-                <span className="text-[10px] text-slate-400 block font-medium">سقف الرواتب الشهري المتاح</span>
-                <span className={`text-sm font-black font-mono ${remainingWageBudget > 0 ? 'text-amber-400' : 'text-rose-400'}`}>
-                  {(remainingWageBudget || 0).toLocaleString()} ج.م/ش
+                <span className="text-[10px] text-slate-400 block font-medium">القيمة السوقية للاعب</span>
+                <span className="text-sm font-black font-mono text-amber-400">
+                  {isFreeAgent ? '0 ج.م (لاعب حر)' : `${(fairVal.fairMarketValue || 0).toLocaleString()} ج.م`}
                 </span>
-                <span className="text-[9px] text-slate-500 block">من إجمالي دخل: {(clubMonthlyIncome || 0).toLocaleString()} ج.م</span>
               </div>
             </div>
           )}
@@ -190,8 +174,8 @@ export const NegotiationModal: React.FC<NegotiationModalProps> = ({
                 <span className="text-[10px] bg-cyan-950 text-cyan-400 border border-cyan-700/60 px-2.5 py-1 rounded-full font-bold">
                   {existingNegotiation.stage === 'club_review' && 'مراجعة النادي البائع'}
                   {existingNegotiation.stage === 'club_counter' && 'عرض مقابل من النادي'}
-                  {existingNegotiation.stage === 'player_terms' && 'شروط عقد اللاعب'}
-                  {existingNegotiation.stage === 'player_counter' && 'طلب راتب أعلى من اللاعب'}
+                  {existingNegotiation.stage === 'player_terms' && 'توثيق مدة العقد'}
+                  {existingNegotiation.stage === 'player_counter' && 'مراجعة مدة العقد'}
                   {existingNegotiation.stage === 'completed' && 'تمت الصفقة بنجاح'}
                   {existingNegotiation.stage === 'rejected' && 'المفاوضات متعثرة'}
                 </span>
@@ -233,22 +217,15 @@ export const NegotiationModal: React.FC<NegotiationModalProps> = ({
 
               {existingNegotiation.stage === 'player_counter' && onRespondToCounter && (
                 <div className="space-y-2 pt-2 border-t border-slate-800">
-                  {!canAffordCounterSalary && (
-                    <div className="text-[11px] text-rose-400 flex items-center gap-1 font-bold">
-                      <AlertCircle className="w-3.5 h-3.5" />
-                      <span>الراتب المطلوب يتجاوز سقف الدخل الشهري المتاح لناديك ({remainingWageBudget.toLocaleString()} ج.م)!</span>
-                    </div>
-                  )}
                   <div className="flex items-center gap-2">
                     <button
                       onClick={() => {
-                        onRespondToCounter(existingNegotiation.id, 'raise_salary', existingNegotiation.demandedSalary);
+                        onRespondToCounter(existingNegotiation.id, 'raise_salary', existingNegotiation.demandedSalary || 0);
                         onClose();
                       }}
-                      disabled={!canAffordCounterSalary}
-                      className="flex-1 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 disabled:cursor-not-allowed text-white font-bold rounded-xl text-xs transition-all shadow"
+                      className="flex-1 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl text-xs transition-all shadow"
                     >
-                      الموافقة على راتب اللاعب ({(existingNegotiation.demandedSalary || 0).toLocaleString()} ج.م)
+                      تأكيد شروط العقد وإتمام الصفقة
                     </button>
                     <button
                       onClick={() => {
@@ -269,96 +246,64 @@ export const NegotiationModal: React.FC<NegotiationModalProps> = ({
           {!existingNegotiation && (
             <form onSubmit={handleSubmit} className="space-y-4">
               
-              {/* Transfer Fee / Signing Fee */}
+              {/* Transfer Fee (1 of 2 Core Elements) */}
               <div className="space-y-1.5 bg-slate-950/60 p-3.5 rounded-2xl border border-slate-800">
                 <div className="flex items-center justify-between">
                   <label className="font-bold text-white flex items-center gap-1.5">
                     <DollarSign className="w-3.5 h-3.5 text-emerald-400" />
-                    <span>{isFreeAgent ? 'مكافأة التوقيع ورسوم الوكيل (تُخصم من ميزانيتك)' : `قيمة عرض الشراء لنادي ${sellingClub ? sellingClub.name : 'اللاعب'}`}</span>
+                    <span>{isFreeAgent ? 'حالة الانتقال (لاعب حر - منتهي العقد)' : `سعر انتقال اللاعب لنادي ${sellingClub ? sellingClub.name : 'اللاعب'}`}</span>
                   </label>
                   <span className="text-[11px] text-slate-400">
-                    {isFreeAgent ? 'الحد الأدنى للتوقيع:' : 'القيمة السوقية:'} {(fairVal?.fairMarketValue || 0).toLocaleString()} ج.م
+                    القيمة السوقية: {(fairVal?.fairMarketValue || 0).toLocaleString()} ج.م
                   </span>
                 </div>
-                <input
-                  type="number"
-                  min={25000}
-                  step={5000}
-                  value={fee}
-                  onChange={e => setFee(e.target.value === '' ? '' : Number(e.target.value))}
-                  onBlur={() => {
-                    if (fee === '' || Number(fee) < 25000) setFee(minRequiredFee);
-                  }}
-                  className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2.5 text-emerald-400 font-mono font-bold text-sm focus:outline-none focus:border-emerald-500"
-                />
-                <div className="flex items-center justify-between text-[11px] pt-1">
-                  <span className="text-slate-400">
-                    ميزانية ناديك المتاحة: <strong className="text-emerald-400 font-mono">{(userClub?.budget || 0).toLocaleString()} ج.م</strong>
-                  </span>
-                  {numFee > (userClub?.budget || 0) && (
-                    <span className="text-rose-400 font-bold flex items-center gap-1">
-                      <AlertCircle className="w-3 h-3" />
-                      العرض يتجاوز ميزانيتك الحالية!
-                    </span>
-                  )}
-                </div>
+                {isFreeAgent ? (
+                  <div className="w-full bg-emerald-950/40 border border-emerald-600/60 rounded-xl px-3.5 py-2.5 text-emerald-300 font-bold text-xs flex items-center justify-between">
+                    <span>🆓 انتقال حر مجاني (مدة عقده السابق 0 سنة)</span>
+                    <span className="font-mono font-black">0 ج.م</span>
+                  </div>
+                ) : (
+                  <>
+                    <input
+                      type="number"
+                      min={25000}
+                      step={5000}
+                      value={fee}
+                      onChange={e => setFee(e.target.value === '' ? '' : Number(e.target.value))}
+                      onBlur={() => {
+                        if (fee === '' || Number(fee) < 25000) setFee(minRequiredFee);
+                      }}
+                      className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2.5 text-emerald-400 font-mono font-bold text-sm focus:outline-none focus:border-emerald-500"
+                    />
+                    <div className="flex items-center justify-between text-[11px] pt-1">
+                      <span className="text-slate-400">
+                        ميزانية ناديك المتاحة: <strong className="text-emerald-400 font-mono">{(userClub?.budget || 0).toLocaleString()} ج.م</strong>
+                      </span>
+                      {numFee > (userClub?.budget || 0) && (
+                        <span className="text-rose-400 font-bold flex items-center gap-1">
+                          <AlertCircle className="w-3 h-3" />
+                          العرض يتجاوز ميزانيتك الحالية!
+                        </span>
+                      )}
+                    </div>
+                  </>
+                )}
               </div>
 
-              {/* Monthly Salary */}
-              <div className="space-y-1.5 bg-slate-950/60 p-3.5 rounded-2xl border border-slate-800">
-                <div className="flex items-center justify-between">
-                  <label className="font-bold text-white flex items-center gap-1.5">
-                    <TrendingUp className="w-3.5 h-3.5 text-amber-400" />
-                    <span>الراتب الشهري المقترح للاعب</span>
-                  </label>
-                  <span className="text-[11px] text-slate-400">
-                    راتب اللاعب الحالي: {(targetPlayer.salary || 0).toLocaleString()} ج.م/ش
-                  </span>
-                </div>
-                <input
-                  type="number"
-                  min={minRequiredSalary}
-                  step={1000}
-                  value={salary}
-                  onChange={e => setSalary(e.target.value === '' ? '' : Number(e.target.value))}
-                  onBlur={() => {
-                    if (salary === '' || Number(salary) < minRequiredSalary) setSalary(minRequiredSalary);
-                  }}
-                  className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2.5 text-amber-400 font-mono font-bold text-sm focus:outline-none focus:border-amber-500"
-                />
-                <div className="flex items-center justify-between text-[11px] pt-1">
-                  <span className="text-slate-400">
-                    السقف المتاح للرواتب: <strong className="text-amber-400 font-mono">{remainingWageBudget.toLocaleString()} ج.م/ش</strong>
-                  </span>
-                  {isSalaryBelowCurrent && (
-                    <span className="text-rose-400 font-bold flex items-center gap-1">
-                      <AlertCircle className="w-3 h-3" />
-                      لا يمكن عرض راتب أقل من راتبه الحالي!
-                    </span>
-                  )}
-                  {!isSalaryBelowCurrent && numSalary > remainingWageBudget && (
-                    <span className="text-rose-400 font-bold flex items-center gap-1">
-                      <AlertCircle className="w-3 h-3" />
-                      الراتب يتجاوز سقف دخل النادي!
-                    </span>
-                  )}
-                </div>
-              </div>
-
-              {/* Contract Duration & Role */}
+              {/* Contract Duration (1 to 5 Years - 2 of 2 Core Elements) & Squad Role */}
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1.5 bg-slate-950/60 p-3.5 rounded-2xl border border-slate-800">
                   <label className="font-bold text-white flex items-center gap-1.5">
                     <Calendar className="w-3.5 h-3.5 text-blue-400" />
-                    <span>مدة العقد (سنوات)</span>
+                    <span>مدة العقد (1 - 5 سنوات)</span>
                   </label>
                   <select
                     value={years}
                     onChange={e => setYears(Number(e.target.value))}
                     className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-white font-bold focus:outline-none focus:border-blue-500"
                   >
-                    <option value={1}>سنة واحدة</option>
-                    <option value={2}>سنتان</option>
+                    <option value={1}>سنة واحدة (1)</option>
+                    <option value={2}>سنتان (2)</option>
                     <option value={3}>3 سنوات</option>
                     <option value={4}>4 سنوات</option>
                     <option value={5}>5 سنوات</option>
@@ -395,24 +340,22 @@ export const NegotiationModal: React.FC<NegotiationModalProps> = ({
               <div className="pt-2">
                 <button
                   type="submit"
-                  disabled={!transferValidation.allowed || isSalaryBelowCurrent || isFeeExceedingBudget || isSalaryExceedingCap}
+                  disabled={(!transferValidation.allowed && !isFreeAgent) || isFeeExceedingBudget}
                   className={`w-full py-3 font-bold text-sm rounded-xl shadow-lg transition-all flex items-center justify-center gap-2 ${
-                    !transferValidation.allowed || isSalaryBelowCurrent || isFeeExceedingBudget || isSalaryExceedingCap
+                    (!transferValidation.allowed && !isFreeAgent) || isFeeExceedingBudget
                       ? 'bg-slate-800 text-slate-500 cursor-not-allowed border border-slate-700'
                       : 'bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white active:scale-95 cursor-pointer'
                   }`}
                 >
                   <Send className="w-4 h-4" />
                   <span>
-                    {isSalaryBelowCurrent
-                      ? 'الراتب المعروض أقل من راتب اللاعب الحالي'
-                      : isFeeExceedingBudget
+                    {isFeeExceedingBudget
                       ? 'قيمة العرض تتجاوز ميزانية النادي'
-                      : isSalaryExceedingCap
-                      ? 'الراتب يتجاوز سقف دخل النادي'
-                      : !transferValidation.allowed
-                      ? 'لا يمكن تقديم العرض (تجاوز القيود المالية)'
-                      : 'إرسال العرض وبدء المفاوضات الرسمية'}
+                      : !transferValidation.allowed && !isFreeAgent
+                      ? 'لا يمكن تقديم العرض (ميزانية غير كافية)'
+                      : isFreeAgent
+                      ? `توقيع مجاني مع ${targetPlayer.name} لمدة ${years} سنوات`
+                      : `إرسال عرض الشراء (${numFee.toLocaleString()} ج.م - عقد ${years} سنوات)`}
                   </span>
                 </button>
               </div>

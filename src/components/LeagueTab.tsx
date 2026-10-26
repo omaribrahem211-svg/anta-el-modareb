@@ -5,14 +5,9 @@ import { recalculateStandingsFromFixtures } from '../utils/engine';
 import {
   Trophy,
   Award,
-  TrendingUp,
   Target,
   Share2,
   Shield,
-  Star,
-  Flame,
-  Info,
-  Layers,
   ArrowUpRight,
   ArrowDownRight,
   Calendar,
@@ -21,9 +16,14 @@ import {
   RefreshCw,
   Zap,
   Globe,
+  CheckCircle2,
+  Play,
 } from 'lucide-react';
 import { fetchDailyManagersLeaderboard, DailyManagerLeaderboardEntry } from '../services/managerRankingService';
-import { getClubDisplayName, findClubInWorld } from '../data/leaguesData';
+import { getClubDisplayName } from '../data/leaguesData';
+import { AfricanChampionsLeagueView } from './continental/AfricanChampionsLeagueView';
+import { getDomesticCupDefinitionForCountry } from '../data/competitionsData';
+import { isEuropeanCountry } from '../utils/continentalEngine';
 
 export const LeagueTab: React.FC = () => {
   const {
@@ -36,10 +36,15 @@ export const LeagueTab: React.FC = () => {
     season,
     activeLeague,
     manager,
+    cupTournament,
+    africanChampionsLeague,
+    calendarDate,
   } = useGame();
   const { user } = useAuth();
 
-  const [activeSubTab, setActiveSubTab] = useState<'standings' | 'daily_managers' | 'scorers' | 'assists'>('standings');
+  const [activeSubTab, setActiveSubTab] = useState<
+    'standings' | 'domestic_cup' | 'continental' | 'daily_managers' | 'scorers' | 'assists'
+  >('standings');
   const [dailyLeaders, setDailyLeaders] = useState<DailyManagerLeaderboardEntry[]>([]);
   const [loadingDaily, setLoadingDaily] = useState(false);
 
@@ -66,28 +71,33 @@ export const LeagueTab: React.FC = () => {
     }
   }, [activeSubTab, manager.dailyPoints, user?.uid]);
 
-  // Helper to find player club name
   const getPlayerClubName = (player: any) => {
     if (!player) return userClub?.name || 'النادي';
-    const club = teams.find(t => t && (t.id === player.currentClubId || (t.players || []).some((p: any) => p && p.id === player.id)));
+    const club = teams.find(
+      t => t && (t.id === player.currentClubId || (t.players || []).some((p: any) => p && p.id === player.id))
+    );
     return club?.name || userClub?.name || 'النادي';
   };
 
-  // Helper to get club by ID
   const getClubName = (clubId: string) => {
     return getClubDisplayName(clubId, teams);
   };
 
-  // Aggregate players across all league clubs for statistics
-  const allPlayers = (teams || []).filter(Boolean).flatMap(t => Array.isArray(t.players) ? t.players.filter(Boolean) : []);
+  const allPlayers = (teams || [])
+    .filter(Boolean)
+    .flatMap(t => (Array.isArray(t.players) ? t.players.filter(Boolean) : []));
 
-  const topScorers = [...allPlayers].sort((a, b) => (b.stats?.goals || 0) - (a.stats?.goals || 0)).filter(p => (p.stats?.goals || 0) > 0);
-  const topAssisters = [...allPlayers].sort((a, b) => (b.stats?.assists || 0) - (a.stats?.assists || 0)).filter(p => (p.stats?.assists || 0) > 0);
+  const topScorers = [...allPlayers]
+    .sort((a, b) => (b.stats?.goals || 0) - (a.stats?.goals || 0))
+    .filter(p => (p.stats?.goals || 0) > 0);
+  const topAssisters = [...allPlayers]
+    .sort((a, b) => (b.stats?.assists || 0) - (a.stats?.assists || 0))
+    .filter(p => (p.stats?.assists || 0) > 0);
 
   const effectiveStandings = useMemo(() => {
     const isAllZero = standings.length === 0 || standings.every(s => (s.played || 0) === 0);
     const hasPlayedFixtures = (fixtures || []).some(
-      f => f && (!f.competitionType || f.competitionType === 'league') && (f.isPlayed || (f as any).played)
+      f => f && (!f.competitionType || f.competitionType === 'league' || f.competitionType === 'LEAGUE') && (f.isPlayed || (f as any).played)
     );
     if ((isAllZero && hasPlayedFixtures) || standings.length === 0) {
       return recalculateStandingsFromFixtures(standings, teams, fixtures);
@@ -99,9 +109,13 @@ export const LeagueTab: React.FC = () => {
   const relegationSpots = activeLeague.relegationSpots || 0;
   const totalTeams = effectiveStandings.length;
 
+  const isEuro = isEuropeanCountry(activeLeague.country);
+  const cupDef = getDomesticCupDefinitionForCountry(activeLeague.country || 'مصر');
+  const cupTitle = cupTournament?.name || cupDef.shortName || cupDef.name;
+  const continentalTitle = africanChampionsLeague?.name || (isEuro ? 'دوري أبطال أوروبا' : 'دوري أبطال إفريقيا');
+
   return (
     <div className="space-y-4 pb-20 animate-fade-in" dir="rtl">
-      
       {/* Header Banner */}
       <div className="bg-slate-900 border border-slate-800 p-4 rounded-3xl space-y-3">
         <div className="flex items-center justify-between">
@@ -124,31 +138,72 @@ export const LeagueTab: React.FC = () => {
           </span>
         </div>
 
-        {/* Promotion / Relegation Rule Pill */}
+        {/* Continental Qualification & Promotion/Relegation Rules */}
         <div className="flex flex-wrap gap-2 text-xs">
-          {promotionSpots > 0 && (
-            <div className="bg-emerald-950/60 border border-emerald-800/80 px-3 py-1.5 rounded-xl flex items-center gap-1.5 text-emerald-300">
-              <ArrowUpRight className="w-4 h-4 text-emerald-400 shrink-0" />
-              <span>المراكز (1 إلى {promotionSpots}): صعود مباشر إلى الدرجة الأعلى 🚀</span>
-            </div>
+          {activeLeague.tier === 1 ? (
+            <>
+              <div className="bg-amber-950/50 border border-amber-700/70 px-3 py-1.5 rounded-xl flex items-center gap-1.5 text-amber-300">
+                <Trophy className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                <span>
+                  المركز 1 و 2: تأهل مباشر إلى {isEuro ? 'دوري أبطال أوروبا 🏆' : 'دوري أبطال إفريقيا 🏆'}
+                </span>
+              </div>
+              <div className="bg-emerald-950/60 border border-emerald-800/80 px-3 py-1.5 rounded-xl flex items-center gap-1.5 text-emerald-300">
+                <Globe className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                <span>
+                  بطل {cupTitle} والمركز 3 (أو 4): تأهل إلى {isEuro ? 'الدوري الأوروبي 🟠' : 'كأس الكونفدرالية الإفريقية 🌍'}
+                </span>
+              </div>
+            </>
+          ) : (
+            promotionSpots > 0 && (
+              <div className="bg-emerald-950/60 border border-emerald-800/80 px-3 py-1.5 rounded-xl flex items-center gap-1.5 text-emerald-300">
+                <ArrowUpRight className="w-4 h-4 text-emerald-400 shrink-0" />
+                <span>المراكز (1 إلى {promotionSpots}): صعود مباشر إلى الدرجة الأعلى 🚀</span>
+              </div>
+            )
           )}
           {relegationSpots > 0 && (
             <div className="bg-rose-950/60 border border-rose-800/80 px-3 py-1.5 rounded-xl flex items-center gap-1.5 text-rose-300">
               <ArrowDownRight className="w-4 h-4 text-rose-400 shrink-0" />
-              <span>آخر {relegationSpots} مراكز ({totalTeams - relegationSpots + 1} إلى {totalTeams}): هبوط مباشر ⚠️</span>
+              <span>
+                آخر {relegationSpots} مراكز ({totalTeams - relegationSpots + 1} إلى {totalTeams}): هبوط مباشر ⚠️
+              </span>
             </div>
           )}
         </div>
 
         {/* Sub-Tab Navigation */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 bg-slate-950/80 p-1.5 rounded-2xl border border-slate-800">
+        <div className="grid grid-cols-2 sm:grid-cols-6 gap-1.5 bg-slate-950/80 p-1.5 rounded-2xl border border-slate-800">
           <button
             onClick={() => setActiveSubTab('standings')}
             className={`py-2 text-xs font-bold rounded-xl transition-all cursor-pointer ${
               activeSubTab === 'standings' ? 'bg-amber-500 text-slate-950 shadow-md' : 'text-slate-400 hover:text-white'
             }`}
           >
-            جدول الترتيب
+            جدول الدوري
+          </button>
+          <button
+            onClick={() => setActiveSubTab('domestic_cup')}
+            className={`py-2 text-xs font-bold rounded-xl transition-all cursor-pointer flex items-center justify-center gap-1 ${
+              activeSubTab === 'domestic_cup'
+                ? 'bg-gradient-to-r from-rose-600 to-amber-500 text-white shadow-md'
+                : 'text-slate-400 hover:text-white'
+            }`}
+          >
+            <Shield className="w-3.5 h-3.5" />
+            <span className="truncate">{cupTitle} 🛡️</span>
+          </button>
+          <button
+            onClick={() => setActiveSubTab('continental')}
+            className={`py-2 text-xs font-bold rounded-xl transition-all cursor-pointer flex items-center justify-center gap-1 ${
+              activeSubTab === 'continental'
+                ? 'bg-gradient-to-r from-red-600 via-amber-600 to-amber-500 text-white shadow-md'
+                : 'text-slate-400 hover:text-white'
+            }`}
+          >
+            <Globe className="w-3.5 h-3.5 text-amber-300" />
+            <span className="truncate">{continentalTitle} 🌍</span>
           </button>
           <button
             onClick={() => setActiveSubTab('daily_managers')}
@@ -203,7 +258,9 @@ export const LeagueTab: React.FC = () => {
                   if (!team) return null;
                   const isUser = userClub?.id ? team.teamId === userClub.id : false;
                   const isLeader = idx === 0;
-                  const isPromotionZone = idx < promotionSpots;
+                  const isChampionsLeagueZone = activeLeague.tier === 1 && idx < 2;
+                  const isSecondaryContinentalZone = activeLeague.tier === 1 && (idx === 2 || idx === 3);
+                  const isPromotionZone = activeLeague.tier > 1 && idx < promotionSpots;
                   const isRelegationZone = relegationSpots > 0 && idx >= totalTeams - relegationSpots;
 
                   return (
@@ -212,25 +269,28 @@ export const LeagueTab: React.FC = () => {
                       className={`transition-colors ${
                         isUser
                           ? 'bg-amber-500/10 hover:bg-amber-500/15 font-bold'
-                          : isPromotionZone
+                          : isChampionsLeagueZone || isPromotionZone
                           ? 'bg-emerald-950/20 hover:bg-emerald-950/30'
+                          : isSecondaryContinentalZone
+                          ? 'bg-cyan-950/15 hover:bg-cyan-950/25'
                           : isRelegationZone
                           ? 'bg-rose-950/20 hover:bg-rose-950/30'
                           : 'hover:bg-slate-800/40'
                       }`}
                     >
-                      {/* Rank */}
                       <td className="py-3 px-2 text-center">
-                        <span 
+                        <span
                           className={`w-5 h-5 rounded-full inline-flex items-center justify-center font-mono text-[11px] font-bold ${
-                            isLeader 
-                              ? 'bg-amber-400 text-slate-950' 
-                              : isPromotionZone
+                            isLeader
+                              ? 'bg-amber-400 text-slate-950'
+                              : isChampionsLeagueZone || isPromotionZone
                               ? 'bg-emerald-500 text-slate-950'
+                              : isSecondaryContinentalZone
+                              ? 'bg-cyan-500 text-slate-950'
                               : isRelegationZone
                               ? 'bg-rose-500 text-white'
-                              : isUser 
-                              ? 'bg-blue-400 text-slate-950' 
+                              : isUser
+                              ? 'bg-blue-400 text-slate-950'
                               : 'text-slate-400'
                           }`}
                         >
@@ -238,10 +298,13 @@ export const LeagueTab: React.FC = () => {
                         </span>
                       </td>
 
-                      {/* Team Name */}
                       <td className="py-3 px-2">
                         <div className="flex items-center gap-1.5">
-                          <span className={`truncate max-w-[130px] sm:max-w-[180px] ${isUser ? 'text-amber-300 font-bold' : 'text-slate-200'}`}>
+                          <span
+                            className={`truncate max-w-[130px] sm:max-w-[180px] ${
+                              isUser ? 'text-amber-300 font-bold' : 'text-slate-200'
+                            }`}
+                          >
                             {team.teamName}
                           </span>
                           {isUser && (
@@ -249,40 +312,46 @@ export const LeagueTab: React.FC = () => {
                               فريقك
                             </span>
                           )}
-                          {isPromotionZone && !isUser && (
-                            <span className="text-[9px] text-emerald-400 font-medium">⬆️</span>
+                          {isChampionsLeagueZone && (
+                            <span className="text-[9px] text-amber-400 font-medium" title="مؤهل لدوري الأبطال">
+                              🏆
+                            </span>
                           )}
-                          {isRelegationZone && !isUser && (
-                            <span className="text-[9px] text-rose-400 font-medium">⬇️</span>
+                          {isSecondaryContinentalZone && (
+                            <span className="text-[9px] text-cyan-400 font-medium" title="مؤهل للكونفدرالية / الدوري الأوروبي">
+                              🌍
+                            </span>
                           )}
                         </div>
                       </td>
 
-                      {/* Stats */}
                       <td className="py-3 px-2 text-center font-mono text-slate-300">{team.played}</td>
                       <td className="py-3 px-1.5 text-center font-mono text-emerald-400">{team.won}</td>
                       <td className="py-3 px-1.5 text-center font-mono text-amber-400">{team.drawn}</td>
                       <td className="py-3 px-1.5 text-center font-mono text-red-400">{team.lost}</td>
                       <td className="py-3 px-1.5 text-center font-mono text-slate-400">{team.goalsFor}</td>
                       <td className="py-3 px-1.5 text-center font-mono text-slate-400">{team.goalsAgainst}</td>
-                      
-                      {/* Goal Difference */}
+
                       <td className="py-3 px-2 text-center font-mono font-bold">
-                        <span className={team.goalDifference > 0 ? 'text-emerald-400' : team.goalDifference < 0 ? 'text-red-400' : 'text-slate-400'}>
+                        <span
+                          className={
+                            team.goalDifference > 0
+                              ? 'text-emerald-400'
+                              : team.goalDifference < 0
+                              ? 'text-red-400'
+                              : 'text-slate-400'
+                          }
+                        >
                           {team.goalDifference > 0 ? `+${team.goalDifference}` : team.goalDifference}
                         </span>
                       </td>
 
-                      {/* Points */}
-                      <td className="py-3 px-3 text-center font-mono font-black text-sm text-amber-400">
-                        {team.points}
-                      </td>
+                      <td className="py-3 px-3 text-center font-mono font-black text-sm text-amber-400">{team.points}</td>
 
-                      {/* Form */}
                       <td className="py-3 px-2 text-center hidden sm:table-cell">
                         <div className="flex items-center justify-center gap-0.5">
                           {(team.form || []).map((f, i) => (
-                            <span 
+                            <span
                               key={i}
                               className={`w-3.5 h-3.5 rounded-sm text-[8px] font-bold flex items-center justify-center text-white ${
                                 f === 'W' ? 'bg-emerald-600' : f === 'D' ? 'bg-amber-600' : 'bg-red-600'
@@ -302,7 +371,133 @@ export const LeagueTab: React.FC = () => {
         </div>
       )}
 
+      {/* VIEW 2: Domestic National Cup */}
+      {activeSubTab === 'domestic_cup' && (
+        <div className="space-y-4">
+          <div className="bg-gradient-to-r from-slate-900 via-rose-950/30 to-slate-900 border border-rose-500/40 rounded-3xl p-4 sm:p-5 space-y-3 shadow-xl">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <div className="w-12 h-12 rounded-2xl bg-rose-500/20 border border-rose-500/40 flex items-center justify-center text-rose-400 shrink-0">
+                  <Shield className="w-6 h-6" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <h3 className="text-base sm:text-lg font-black text-white">{cupDef.name}</h3>
+                    <span className="text-[10px] bg-rose-500/20 text-rose-300 border border-rose-500/30 px-2.5 py-0.5 rounded-full font-bold">
+                      خروج المغلوب المباشر ⚡
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-400 mt-1">
+                    {cupDef.formatDescription} • الفائز يتأهل مباشرة إلى{' '}
+                    <strong className="text-emerald-400">
+                      {isEuro ? 'الدوري الأوروبي (UEFA Europa League)' : 'كأس الكونفدرالية الإفريقية (CAF Confederation Cup)'}
+                    </strong>{' '}
+                    • جائزة البطل: <strong className="text-amber-400 font-mono">{cupDef.championPrize.toLocaleString()} ج.م</strong>
+                  </p>
+                </div>
+              </div>
+              {cupTournament?.winnerClubId && (
+                <div className="bg-amber-500/20 border border-amber-500/40 px-3.5 py-2 rounded-2xl text-xs text-amber-300 font-black flex items-center gap-1.5">
+                  <Trophy className="w-4 h-4 text-amber-400" />
+                  <span>بطل الكأس: {getClubName(cupTournament.winnerClubId)}</span>
+                </div>
+              )}
+            </div>
+          </div>
 
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl p-4 space-y-3">
+            <h4 className="font-bold text-sm text-white flex items-center gap-2 border-b border-slate-800 pb-2.5">
+              <Trophy className="w-4 h-4 text-amber-400" />
+              <span>مواجهات وأدوار {cupTitle} (منتصف الأسبوع - وقت إضافي وركلات ترجيح)</span>
+            </h4>
+
+            {!cupTournament || !cupTournament.matches || cupTournament.matches.length === 0 ? (
+              <div className="text-center py-8 text-xs text-slate-400">جاري تجهيز قرعة الكأس الوطنية للموسم الحالي...</div>
+            ) : (
+              <div className="space-y-2">
+                {cupTournament.matches.map(cm => {
+                  const isUserMatch = Boolean(userClub && (cm.homeTeamId === userClub.id || cm.awayTeamId === userClub.id));
+                  const matchingFix = (fixtures || []).find(f => f.id === cm.id);
+                  const matchDate = matchingFix?.date;
+                  const isToday = Boolean(calendarDate?.rawDateStr && matchDate === calendarDate.rawDateStr);
+
+                  return (
+                    <div
+                      key={cm.id}
+                      className={`p-3 rounded-2xl border flex flex-col sm:flex-row items-center justify-between gap-3 ${
+                        isUserMatch
+                          ? 'bg-gradient-to-r from-amber-500/15 via-slate-950 to-slate-950 border-amber-500/60'
+                          : 'bg-slate-950/70 border-slate-800'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2 text-xs">
+                        <span className="bg-slate-900 px-2.5 py-1 rounded-lg text-rose-300 font-bold border border-slate-800">
+                          {cm.stageName}
+                        </span>
+                      </div>
+
+                      <div className="flex items-center justify-center gap-3 flex-1 min-w-0">
+                        <span
+                          className={`text-xs font-bold truncate flex-1 text-left ${
+                            cm.homeTeamId === userClub?.id ? 'text-amber-300 font-black' : 'text-white'
+                          }`}
+                        >
+                          {getClubName(cm.homeTeamId)}
+                        </span>
+                        <div className="px-3 py-1 bg-slate-900 border border-slate-800 rounded-xl font-mono font-black text-sm text-center shrink-0 min-w-16">
+                          {cm.isPlayed ? (
+                            <span>
+                              {cm.homeScore} - {cm.awayScore}
+                              {cm.homePenalties !== undefined && (
+                                <span className="text-[10px] text-amber-400 block font-normal">
+                                  ({cm.homePenalties} - {cm.awayPenalties} ر.ت)
+                                </span>
+                              )}
+                            </span>
+                          ) : (
+                            <span className="text-slate-500 text-xs">VS</span>
+                          )}
+                        </div>
+                        <span
+                          className={`text-xs font-bold truncate flex-1 text-right ${
+                            cm.awayTeamId === userClub?.id ? 'text-amber-300 font-black' : 'text-white'
+                          }`}
+                        >
+                          {getClubName(cm.awayTeamId)}
+                        </span>
+                      </div>
+
+                      <div className="shrink-0">
+                        {!cm.isPlayed ? (
+                          isToday && isUserMatch ? (
+                            <button
+                              onClick={() => window.dispatchEvent(new CustomEvent('set-active-tab', { detail: { tab: 'matches' } }))}
+                              className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs flex items-center gap-1 cursor-pointer"
+                            >
+                              <Play className="w-3 h-3 fill-white" />
+                              <span>خوض مباراة الكأس ⚽</span>
+                            </button>
+                          ) : (
+                            <div className="text-[11px] text-slate-400 font-mono bg-slate-900 px-2.5 py-1 rounded-xl border border-slate-800 flex items-center gap-1.5">
+                              <Calendar className="w-3.5 h-3.5 text-cyan-400" />
+                              <span>{matchDate || 'مجدولة بالتقويم'}</span>
+                            </div>
+                          )
+                        ) : (
+                          <span className="text-[11px] text-emerald-400 flex items-center gap-1 bg-emerald-950/40 px-2.5 py-1 rounded-xl border border-emerald-800/50">
+                            <CheckCircle2 className="w-3.5 h-3.5" />
+                            <span>تأهل: {getClubName(cm.winnerTeamId || cm.homeTeamId)}</span>
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* VIEW 3: Top Scorers */}
       {activeSubTab === 'scorers' && (
@@ -319,7 +514,7 @@ export const LeagueTab: React.FC = () => {
           ) : (
             <div className="space-y-2">
               {topScorers.map((player, idx) => (
-                <div 
+                <div
                   key={player.id}
                   className="bg-slate-950/70 p-3 rounded-2xl border border-slate-800 flex items-center justify-between"
                 >
@@ -329,7 +524,9 @@ export const LeagueTab: React.FC = () => {
                     </div>
                     <div>
                       <div className="font-bold text-sm text-white">{player.name}</div>
-                      <div className="text-xs text-slate-400">{getPlayerClubName(player)} • {player.position}</div>
+                      <div className="text-xs text-slate-400">
+                        {getPlayerClubName(player)} • {player.position}
+                      </div>
                     </div>
                   </div>
 
@@ -344,7 +541,7 @@ export const LeagueTab: React.FC = () => {
         </div>
       )}
 
-      {/* VIEW: Daily Managers Leaderboard */}
+      {/* VIEW 4: Daily Managers Leaderboard */}
       {activeSubTab === 'daily_managers' && (
         <div className="bg-slate-900 border border-slate-800 rounded-3xl p-4 sm:p-5 space-y-4 shadow-xl">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-gradient-to-r from-amber-950/40 via-slate-900 to-slate-900 p-4 rounded-2xl border border-amber-500/20">
@@ -357,7 +554,7 @@ export const LeagueTab: React.FC = () => {
                 يُحسب الترتيب يومياً بناءً على عدد النقاط المكتسبة من لعب المباريات اليوم (3 نقاط للفوز، 1 للتعادل). يتجدد كل 24 ساعة.
               </p>
             </div>
-            
+
             <button
               onClick={loadDailyRanking}
               disabled={loadingDaily}
@@ -368,7 +565,6 @@ export const LeagueTab: React.FC = () => {
             </button>
           </div>
 
-          {/* User's Daily Status Badge */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             <div className="bg-slate-950/80 border border-slate-800 p-3 rounded-2xl flex items-center gap-3">
               <div className="w-10 h-10 rounded-xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-amber-400 font-bold">
@@ -388,9 +584,7 @@ export const LeagueTab: React.FC = () => {
               </div>
               <div>
                 <div className="text-[11px] text-slate-400">مباريات لعبتها اليوم</div>
-                <div className="text-xl font-black text-blue-400 font-mono">
-                  {manager.dailyMatchesPlayed || 0}
-                </div>
+                <div className="text-xl font-black text-blue-400 font-mono">{manager.dailyMatchesPlayed || 0}</div>
               </div>
             </div>
 
@@ -400,9 +594,7 @@ export const LeagueTab: React.FC = () => {
               </div>
               <div>
                 <div className="text-[11px] text-slate-400">انتصارات اليوم</div>
-                <div className="text-xl font-black text-emerald-400 font-mono">
-                  {manager.dailyWins || 0}
-                </div>
+                <div className="text-xl font-black text-emerald-400 font-mono">{manager.dailyWins || 0}</div>
               </div>
             </div>
 
@@ -412,14 +604,11 @@ export const LeagueTab: React.FC = () => {
               </div>
               <div>
                 <div className="text-[11px] text-slate-400">مستوى المدرب</div>
-                <div className="text-xl font-black text-purple-400 font-mono">
-                  مستوى {manager.level}
-                </div>
+                <div className="text-xl font-black text-purple-400 font-mono">مستوى {manager.level}</div>
               </div>
             </div>
           </div>
 
-          {/* Ranking Table */}
           {loadingDaily ? (
             <div className="py-12 text-center text-slate-400 space-y-2">
               <RefreshCw className="w-6 h-6 animate-spin mx-auto text-amber-400" />
@@ -450,7 +639,6 @@ export const LeagueTab: React.FC = () => {
                     }`}
                   >
                     <div className="flex items-center gap-3 min-w-0">
-                      {/* Rank Position Badge */}
                       <div
                         className={`w-9 h-9 rounded-xl flex items-center justify-center font-black text-sm font-mono shrink-0 shadow-md ${
                           isTop1
@@ -465,12 +653,9 @@ export const LeagueTab: React.FC = () => {
                         {isTop1 ? '🥇' : isTop2 ? '🥈' : isTop3 ? '🥉' : `#${idx + 1}`}
                       </div>
 
-                      {/* Manager and Club Details */}
                       <div className="min-w-0">
                         <div className="flex items-center gap-2">
-                          <span className="font-bold text-sm text-white truncate">
-                            {lead.managerName}
-                          </span>
+                          <span className="font-bold text-sm text-white truncate">{lead.managerName}</span>
                           {lead.isCurrentUser && (
                             <span className="text-[10px] bg-amber-500 text-slate-950 font-black px-1.5 py-0.5 rounded-full shrink-0">
                               أنت
@@ -489,11 +674,12 @@ export const LeagueTab: React.FC = () => {
                       </div>
                     </div>
 
-                    {/* Stats & Points */}
                     <div className="flex items-center gap-3 shrink-0 text-left">
                       <div className="hidden sm:flex flex-col items-end text-xs text-slate-400 font-mono">
                         <span>{lead.dailyMatchesPlayed} مباريات</span>
-                        <span className="text-[11px] text-emerald-400">{lead.dailyWins}ف - {lead.dailyDraws}ت - {lead.dailyLosses}خ</span>
+                        <span className="text-[11px] text-emerald-400">
+                          {lead.dailyWins}ف - {lead.dailyDraws}ت - {lead.dailyLosses}خ
+                        </span>
                       </div>
 
                       <div className="bg-slate-900 border border-amber-500/30 px-3.5 py-1.5 rounded-xl text-center min-w-[75px]">
@@ -511,7 +697,7 @@ export const LeagueTab: React.FC = () => {
         </div>
       )}
 
-      {/* VIEW 4: Top Assists */}
+      {/* VIEW 5: Top Assists */}
       {activeSubTab === 'assists' && (
         <div className="bg-slate-900 border border-slate-800 rounded-3xl p-4 space-y-3">
           <h3 className="font-bold text-sm text-white flex items-center gap-2">
@@ -526,7 +712,7 @@ export const LeagueTab: React.FC = () => {
           ) : (
             <div className="space-y-2">
               {topAssisters.map((player, idx) => (
-                <div 
+                <div
                   key={player.id}
                   className="bg-slate-950/70 p-3 rounded-2xl border border-slate-800 flex items-center justify-between"
                 >
@@ -536,7 +722,9 @@ export const LeagueTab: React.FC = () => {
                     </div>
                     <div>
                       <div className="font-bold text-sm text-white">{player.name}</div>
-                      <div className="text-xs text-slate-400">{getPlayerClubName(player)} • {player.position}</div>
+                      <div className="text-xs text-slate-400">
+                        {getPlayerClubName(player)} • {player.position}
+                      </div>
                     </div>
                   </div>
 
@@ -551,7 +739,8 @@ export const LeagueTab: React.FC = () => {
         </div>
       )}
 
+      {/* VIEW 6: Continental Tournaments (CCL / CCC / UCL / UEL) */}
+      {activeSubTab === 'continental' && <AfricanChampionsLeagueView />}
     </div>
   );
 };
-

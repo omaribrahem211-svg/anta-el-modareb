@@ -52,6 +52,7 @@ function GameApp() {
     closeDaySummaryModal, 
     isMatchDay, 
     liveMatch,
+    startLiveMatch,
     showDailyRewardModal,
     setShowDailyRewardModal
   } = useGame();
@@ -118,6 +119,19 @@ function GameApp() {
       window.removeEventListener('open-admob-rewards', handleOpenAdRewards);
     };
   }, []);
+
+  // Listen for global set-active-tab event to switch tabs safely from anywhere
+  useEffect(() => {
+    const handleSetTab = (e: any) => {
+      if (e.detail?.tab) {
+        handleTabChange(e.detail.tab);
+      }
+    };
+    window.addEventListener('set-active-tab', handleSetTab);
+    return () => {
+      window.removeEventListener('set-active-tab', handleSetTab);
+    };
+  }, [handleTabChange]);
 
   // Android Hardware Back Button Listener (Capacitor)
   useEffect(() => {
@@ -250,22 +264,28 @@ function GameApp() {
         {activeTab === 'dashboard' && <FacebookBanner />}
 
         {activeTab === 'dashboard' && (
-          <DashboardTab 
-            setActiveTab={handleTabChange} 
-            onSelectPlayer={(p) => setSelectedPlayer(p)} 
-          />
+          <ErrorBoundary fallbackTitle="تنبيه واجهة الرئيسية">
+            <DashboardTab 
+              setActiveTab={handleTabChange} 
+              onSelectPlayer={(p) => setSelectedPlayer(p)} 
+            />
+          </ErrorBoundary>
         )}
 
         {activeTab === 'squad' && (
-          <SquadTab 
-            onSelectPlayer={(p) => setSelectedPlayer(p)} 
-          />
+          <ErrorBoundary fallbackTitle="تنبيه قائمة الفريق">
+            <SquadTab 
+              onSelectPlayer={(p) => setSelectedPlayer(p)} 
+            />
+          </ErrorBoundary>
         )}
 
         {activeTab === 'tactics' && (
-          <TacticsTab 
-            onSelectPlayer={(p) => setSelectedPlayer(p)} 
-          />
+          <ErrorBoundary fallbackTitle="تنبيه الخطة والتكتيك">
+            <TacticsTab 
+              onSelectPlayer={(p) => setSelectedPlayer(p)} 
+            />
+          </ErrorBoundary>
         )}
 
         {activeTab === 'matches' && (
@@ -279,7 +299,9 @@ function GameApp() {
         )}
 
         {activeTab === 'league' && (
-          <LeagueTab />
+          <ErrorBoundary fallbackTitle="تنبيه جدول الترتيب">
+            <LeagueTab />
+          </ErrorBoundary>
         )}
 
         {activeTab === 'transfers' && (
@@ -291,29 +313,41 @@ function GameApp() {
         )}
 
         {activeTab === 'training' && (
-          <TrainingTab 
-            onSelectPlayer={(p) => setSelectedPlayer(p)} 
-          />
+          <ErrorBoundary fallbackTitle="تنبيه تدريب اللاعبين">
+            <TrainingTab 
+              onSelectPlayer={(p) => setSelectedPlayer(p)} 
+            />
+          </ErrorBoundary>
         )}
 
         {activeTab === 'club' && (
-          <ClubTab />
+          <ErrorBoundary fallbackTitle="تنبيه إدارة النادي">
+            <ClubTab />
+          </ErrorBoundary>
         )}
 
         {activeTab === 'career' && (
-          <CareerTab />
+          <ErrorBoundary fallbackTitle="تنبيه مسيرة المدرب">
+            <CareerTab />
+          </ErrorBoundary>
         )}
 
         {activeTab === 'inbox' && (
-          <InboxTab />
+          <ErrorBoundary fallbackTitle="تنبيه صندوق الرسائل">
+            <InboxTab />
+          </ErrorBoundary>
         )}
 
         {activeTab === 'rankings' && (
-          <WorldRankingsTab />
+          <ErrorBoundary fallbackTitle="تنبيه التصنيف العالمي">
+            <WorldRankingsTab />
+          </ErrorBoundary>
         )}
 
         {activeTab === 'challenges' && (
-          <ChallengesTab />
+          <ErrorBoundary fallbackTitle="تنبيه سجل التحديات">
+            <ChallengesTab />
+          </ErrorBoundary>
         )}
       </main>
 
@@ -347,6 +381,7 @@ function GameApp() {
         onGoToMatches={() => {
           closeDaySummaryModal();
           setActiveTab('matches');
+          startLiveMatch();
         }}
       />
 

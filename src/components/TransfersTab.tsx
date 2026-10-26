@@ -252,7 +252,7 @@ export const TransfersTab: React.FC<TransfersTabProps> = ({ onSelectPlayer }) =>
       } else if (sortBy === 'age') {
         comparison = a.player.age - b.player.age;
       } else if (sortBy === 'name') {
-        comparison = a.player.name.localeCompare(b.player.name, 'ar');
+        comparison = (a.player?.name || '').localeCompare(b.player?.name || '', 'ar');
       }
       return sortOrder === 'desc' ? -comparison : comparison;
     });

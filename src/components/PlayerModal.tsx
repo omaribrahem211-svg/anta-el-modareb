@@ -104,9 +104,10 @@ export const PlayerModal: React.FC<PlayerModalProps> = ({ player, onClose, onSta
     setTimeout(() => setNotification(null), 3000);
   };
 
+  const [renewYears, setRenewYears] = useState<number>(3);
+
   const handleRenew = () => {
-    const proposedWage = Math.round(player.salary * 1.15);
-    const res = renewPlayerContract(player.id, proposedWage, 2);
+    const res = renewPlayerContract(player.id, player.salary || 2500, renewYears);
     setNotification({ text: res.message, type: res.success ? 'success' : 'error' });
     setTimeout(() => setNotification(null), 3000);
   };
@@ -471,10 +472,10 @@ export const PlayerModal: React.FC<PlayerModalProps> = ({ player, onClose, onSta
           <div className="bg-slate-800/50 p-2.5 rounded-xl border border-slate-700/60">
             <div className="flex items-center gap-1.5 text-slate-400">
               <Calendar className="w-3.5 h-3.5 text-blue-400" />
-              <span>الراتب الشهري</span>
+              <span>مدة العقد</span>
             </div>
-            <div className="font-bold text-xs sm:text-sm text-slate-200 mt-1">
-              {player.salary ? `${player.salary.toLocaleString()} ج.م` : '2,500 ج.م'}
+            <div className={`font-bold text-xs sm:text-sm mt-1 ${(livePlayer.contractYears ?? 2) <= 0 ? 'text-rose-400' : 'text-blue-300'}`}>
+              {(livePlayer.contractYears ?? 2) <= 0 ? 'لاعب حر (0 سنة)' : `${livePlayer.contractYears ?? 2} سنوات`}
             </div>
           </div>
         </div>
@@ -802,13 +803,31 @@ export const PlayerModal: React.FC<PlayerModalProps> = ({ player, onClose, onSta
                 <span>جلسة تحفيز</span>
               </button>
 
-              <button 
-                onClick={handleRenew}
-                className="bg-blue-950/80 hover:bg-blue-900/90 border border-blue-700 text-blue-200 py-2.5 px-2 rounded-xl text-xs font-bold flex flex-col items-center justify-center gap-1 transition-all active:scale-95"
-              >
-                <Sparkles className="w-4 h-4 text-blue-400" />
-                <span>تجديد العقد (+15%)</span>
-              </button>
+              <div className="flex flex-col gap-1">
+                <button 
+                  onClick={handleRenew}
+                  className="bg-blue-950/80 hover:bg-blue-900/90 border border-blue-700 text-blue-200 py-2 px-2 rounded-xl text-xs font-bold flex flex-col items-center justify-center gap-0.5 transition-all active:scale-95"
+                >
+                  <Sparkles className="w-3.5 h-3.5 text-blue-400" />
+                  <span>تجديد (+{renewYears} س)</span>
+                </button>
+                <div className="flex items-center justify-center gap-0.5">
+                  {[1, 2, 3, 4, 5].map(yr => (
+                    <button
+                      key={yr}
+                      type="button"
+                      onClick={() => setRenewYears(yr)}
+                      className={`text-[9px] font-bold px-1.5 py-0.5 rounded transition-colors ${
+                        renewYears === yr
+                          ? 'bg-blue-600 text-white'
+                          : 'bg-slate-800 text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      {yr}
+                    </button>
+                  ))}
+                </div>
+              </div>
 
               <button 
                 onClick={handleSell}

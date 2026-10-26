@@ -303,8 +303,8 @@ export const ARSENAL_SQUAD: RealPlayerTemplate[] = [
     preferredFoot: 'left',
     number: 33,
     attributes: { pace: 78, shooting: 55, passing: 78, dribbling: 78, defending: 82, physical: 82 },
-  },,
-{
+  },
+  {
     id: 'ars_neto',
     name: 'نيتو الحارس البرازيلي',
     firstName: 'نيتو',
@@ -769,8 +769,8 @@ export const BAYERN_SQUAD: RealPlayerTemplate[] = [
     preferredFoot: 'right',
     number: 16,
     attributes: { pace: 65, shooting: 68, passing: 76, dribbling: 74, defending: 88, physical: 89 },
-  },,
-{
+  },
+  {
     id: 'bay_ulreich',
     name: 'سفين أولرايش الحارس المخلص',
     firstName: 'سفين',
@@ -1195,8 +1195,8 @@ export const AL_NASSR_SQUAD: RealPlayerTemplate[] = [
     preferredFoot: 'right',
     number: 17,
     attributes: { pace: 70, shooting: 60, passing: 76, dribbling: 74, defending: 79, physical: 78 },
-  },,
-{
+  },
+  {
     id: 'nas_al_najjar',
     name: 'راغد النجار الحارس الدولي',
     firstName: 'راغد',
@@ -1641,8 +1641,8 @@ export const AL_ITTIHAD_SQUAD: RealPlayerTemplate[] = [
     preferredFoot: 'right',
     number: 11,
     attributes: { pace: 74, shooting: 78, passing: 68, dribbling: 72, defending: 35, physical: 77 },
-  },,
-{
+  },
+  {
     id: 'itt_al_shanqiti',
     name: 'حامد الشنقيطي الحارس الصاعد',
     firstName: 'حامد',
@@ -2187,8 +2187,8 @@ export const ZAMALEK_SQUAD: RealPlayerTemplate[] = [
     preferredFoot: 'right',
     number: 11,
     attributes: { pace: 84, shooting: 78, passing: 76, dribbling: 81, defending: 44, physical: 74 },
-  },,
-{
+  },
+  {
     id: 'zam_mahmoud_el_shenawy',
     name: 'محمود الشناوي الحارس الصاعد',
     firstName: 'محمود',
@@ -2653,8 +2653,8 @@ export const PSG_SQUAD: RealPlayerTemplate[] = [
     preferredFoot: 'right',
     number: 23,
     attributes: { pace: 89, shooting: 80, passing: 74, dribbling: 82, defending: 40, physical: 78 },
-  },,
-{
+  },
+  {
     id: 'psg_matvey_safonov',
     name: 'ماتفي سافونوف الحارس الروسي',
     firstName: 'ماتفي',

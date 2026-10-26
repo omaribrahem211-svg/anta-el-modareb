@@ -129,9 +129,13 @@ export interface Player {
   careerStage?: 'young' | 'developing' | 'peak' | 'veteran' | 'legend';
   announcedRetirement?: boolean;
   unhappyMatchesCount?: number;
-  transferRequestSubmitted?: boolean;
-  injuryWeeks?: number;
   disgruntled?: boolean;
+  injuryWeeks?: number;
+  transferRequestSubmitted?: boolean;
+  isGuestStar?: boolean; // هل اللاعب معار لمباراة واحدة فقط مقابل إعلان
+  guestMatchesRemaining?: number; // عدد المباريات المتبقية (عادة 1)
+  guestStarTier?: 'legend' | 'world_class' | 'star' | 'wildcard';
+  guestStarQuote?: string;
 }
 
 export type StaffRole = 
@@ -373,6 +377,7 @@ export interface Club {
   country?: string;
   countryId?: string;
   countryCode?: string;
+  continent?: Continent | 'africa' | 'europe' | 'asia' | 'south_america';
   division: number; // 1 = Premier, 2 = Second, 3 = Third, 4 = Fourth
   leagueId?: string;
   reputation: number; // 1 - 100
@@ -454,26 +459,42 @@ export interface MatchStats {
   awayRedCards: number;
 }
 
+export type CompetitionType = 
+  | 'LEAGUE' 
+  | 'DOMESTIC_COP' 
+  | 'CONTINENTAL_CUP' 
+  | 'league' 
+  | 'cup' 
+  | 'continental' 
+  | 'playoff';
+
 export interface Fixture {
   id: string;
   round: number;
   homeTeamId: string;
   awayTeamId: string;
-  homeScore?: number;
-  awayScore?: number;
+  homeScore?: number | null;
+  awayScore?: number | null;
   homePenalties?: number;
   awayPenalties?: number;
   winnerTeamId?: string;
   isPlayed: boolean;
   events?: MatchEvent[];
   stats?: MatchStats;
-  competitionType?: 'league' | 'cup' | 'continental' | 'playoff';
+  competitionType?: CompetitionType;
+  competitionId?: string; // e.g. 'egyptian_league', 'caf_champions_league', 'egypt_cup'
   competitionName?: string;
   cupStage?: string;
   stageName?: string;
+  stage?: string;
   groupId?: string;
+  matchday?: number;
   revenueClaimed?: boolean;
   matchRevenue?: any;
+  date?: string; // "YYYY-MM-DD"
+  timestamp?: number; // ms timestamp
+  tournamentId?: 'league' | 'cup' | 'ccl' | 'ccc' | 'ucl' | 'uel' | 'acl' | 'caf_cl';
+  tournamentBadge?: string;
 }
 
 // ----------------------------------------------------
@@ -568,6 +589,7 @@ export interface LeagueDefinition {
   name: string;
   shortName: string;
   country: string;
+  region?: 'africa' | 'europe' | 'asia' | 'south_america';
   tier: number; // 1 = Premier, 2 = Second, 3 = Third, 4 = Fourth
   divisionTier?: number; // alias for tier
   reputation: number; // 1 - 100
@@ -732,9 +754,9 @@ export interface ContinentalMatch {
 
 export interface ContinentalTournament {
   id: string;
-  competitionId: 'ccl' | 'ucl';
+  competitionId: 'ccl' | 'ccc' | 'ucl' | 'uel' | 'acl';
   name: string;
-  region: 'africa' | 'europe';
+  region: 'africa' | 'europe' | 'asia' | 'south_america';
   seasonNumber: number;
   trophyName: string;
   prizeMoneyWinner: number;
@@ -1151,6 +1173,23 @@ export interface DayAdvanceSummary {
   matchPlayed?: boolean;
   matchFixtureId?: string;
   matchSummaryText?: string;
+  postMatchSummary?: {
+    competitionName: string;
+    roundLabel: string;
+    homeTeamName: string;
+    awayTeamName: string;
+    homeScore: number;
+    awayScore: number;
+    homePenalties?: number;
+    awayPenalties?: number;
+    homeScorersText: string;
+    awayScorersText: string;
+    allScorersText: string;
+    homeGoalScorers?: string[];
+    awayGoalScorers?: string[];
+    isUserWin?: boolean;
+    isUserDraw?: boolean;
+  };
   trainingReports: {
     playerId: string;
     playerName: string;

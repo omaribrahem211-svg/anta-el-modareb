@@ -13,9 +13,10 @@ export const MatchDayBlockerModal: React.FC<MatchDayBlockerModalProps> = ({ onNa
     closeMatchBlocker,
     autoFixUserStartingLineup,
     startLiveMatch,
-    instantSimulateCurrentRound,
-    simulateMatchAndAdvanceToNextDay,
-    advanceToNextDay,
+    instantSimulateAndAdvance,
+    simulateRoundOnly,
+    advanceCalendarDay,
+    forceAdvanceDay,
     userClub,
     currentRound,
     totalRounds,
@@ -32,13 +33,13 @@ export const MatchDayBlockerModal: React.FC<MatchDayBlockerModalProps> = ({ onNa
   const fixture = matchBlocker.fixture;
 
   const handleAutoFix = () => {
-    autoFixUserStartingLineup();
+    autoFixUserStartingLineup(true);
   };
 
-  const handleAutoFixAndAdvance = () => {
+  const handleAutoFixAndAdvance = async () => {
     closeMatchBlocker();
-    autoFixUserStartingLineup();
-    simulateMatchAndAdvanceToNextDay();
+    autoFixUserStartingLineup(false);
+    await instantSimulateAndAdvance(fixture?.id);
   };
 
   const handleGoToTactics = () => {
@@ -52,25 +53,29 @@ export const MatchDayBlockerModal: React.FC<MatchDayBlockerModalProps> = ({ onNa
     startLiveMatch(fixture?.id);
   };
 
-  const handleInstantSim = () => {
+  const handleInstantSim = async () => {
     closeMatchBlocker();
-    instantSimulateCurrentRound();
-    onNavigateTab('matches');
+    await simulateRoundOnly(fixture?.id);
   };
 
-  const handleInstantSimAndAdvance = () => {
+  const handleInstantSimAndAdvance = async () => {
     closeMatchBlocker();
-    simulateMatchAndAdvanceToNextDay();
+    await instantSimulateAndAdvance(fixture?.id);
   };
 
   const handleSkipToMatch = () => {
     closeMatchBlocker();
-    advanceToNextDay(true);
+    advanceCalendarDay(true);
   };
 
   const handleAdvanceOneDay = () => {
     closeMatchBlocker();
-    advanceToNextDay(false);
+    advanceCalendarDay(false);
+  };
+
+  const handleForceAdvance = () => {
+    closeMatchBlocker();
+    forceAdvanceDay();
   };
 
   return (
@@ -128,10 +133,10 @@ export const MatchDayBlockerModal: React.FC<MatchDayBlockerModalProps> = ({ onNa
             </h3>
             <p className="text-xs text-slate-400 mt-0.5">
               {isLineupIssue 
-                ? 'إجراء إلزامي مطلوب في قائمة الفريق' 
+                ? `إجراء إلزامي مطلوب قبل خوض (${fixture?.stageName || fixture?.tournamentBadge || `الجولة ${currentRound}`})` 
                 : isNotMatchDay 
-                  ? `الأيام الفاصلة حتى الجولة ${currentRound}`
-                  : `الجولة ${currentRound} من ${totalRounds} في الدوري`
+                  ? `الأيام الفاصلة حتى (${fixture?.stageName || `الجولة ${currentRound}`})`
+                  : (fixture?.stageName || fixture?.tournamentBadge || `الجولة ${currentRound} من ${totalRounds} في الدوري`)
               }
             </p>
           </div>
@@ -325,6 +330,18 @@ export const MatchDayBlockerModal: React.FC<MatchDayBlockerModalProps> = ({ onNa
                 >
                   <Sliders className="w-3.5 h-3.5 text-cyan-400" />
                   <span>مراجعة وتعديل الخطة والتشكيلة 📋</span>
+                </button>
+              </div>
+
+              {/* Fail-Safe Force Advance */}
+              <div className="pt-2 border-t border-slate-800/80 flex items-center justify-between text-[11px] text-slate-500">
+                <span>تعليق في التقويم أو خطأ غير متوقع؟</span>
+                <button
+                  type="button"
+                  onClick={handleForceAdvance}
+                  className="text-amber-400 hover:text-amber-300 underline font-medium cursor-pointer"
+                >
+                  تخطي إجباري لليوم التالي ⏩
                 </button>
               </div>
             </div>

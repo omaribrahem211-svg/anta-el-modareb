@@ -31,10 +31,30 @@ export const DaySummaryModal: React.FC<DaySummaryModalProps> = ({
 }) => {
   if (!isOpen || !summary) return null;
 
-  const hasTraining = summary.trainingReports && summary.trainingReports.length > 0;
-  const hasInjuries = summary.injuryUpdates && summary.injuryUpdates.length > 0;
-  const hasNegotiations = summary.negotiationUpdates && summary.negotiationUpdates.length > 0;
-  const hasNews = summary.newsItems && summary.newsItems.length > 0;
+  const hasTraining = Array.isArray(summary.trainingReports) && summary.trainingReports.length > 0;
+  const hasInjuries = Array.isArray(summary.injuryUpdates) && summary.injuryUpdates.length > 0;
+  const validNegotiations = Array.isArray(summary.negotiationUpdates)
+    ? summary.negotiationUpdates.filter(
+        (neg: any) => neg && typeof neg === 'object' && Boolean(neg.playerName || neg.text)
+      )
+    : [];
+  const hasNegotiations = validNegotiations.length > 0;
+  const hasNews = Array.isArray(summary.newsItems) && summary.newsItems.length > 0;
+
+  const pm = summary.postMatchSummary;
+  const totalMatchGoals = pm ? (pm.homeScore || 0) + (pm.awayScore || 0) : 0;
+  const homeScorersDisplay = pm
+    ? pm.homeScorersText || (Array.isArray(pm.homeGoalScorers) ? pm.homeGoalScorers.join(' ، ') : '')
+    : '';
+  const awayScorersDisplay = pm
+    ? pm.awayScorersText || (Array.isArray(pm.awayGoalScorers) ? pm.awayGoalScorers.join(' ، ') : '')
+    : '';
+  const cleanCompHeader = pm
+    ? [pm.competitionName, pm.roundLabel]
+        .map(s => (s || '').replace(/^[-–—\s]+/, '').trim())
+        .filter(Boolean)
+        .join(' - ')
+    : '';
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-fade-in" dir="rtl">
@@ -48,7 +68,9 @@ export const DaySummaryModal: React.FC<DaySummaryModalProps> = ({
             </div>
             <div>
               <h3 className="font-black text-base text-white">
-                {summary.daysAdvanced && summary.daysAdvanced > 1
+                {pm
+                  ? 'ملخص نتيجة المباراة وأحداث اليوم'
+                  : summary.daysAdvanced && summary.daysAdvanced > 1
                   ? `ملخص التقدم لموعد المباراة (${summary.daysAdvanced} أيام)`
                   : 'ملخص أحداث اليوم'}
               </h3>
@@ -90,14 +112,63 @@ export const DaySummaryModal: React.FC<DaySummaryModalProps> = ({
             </div>
           )}
 
-          {/* Match Result Banner (if simulated) */}
-          {summary.matchSummaryText && (
-            <div className="bg-slate-800/90 border border-slate-700 p-3.5 rounded-2xl flex items-start gap-2.5">
-              <Zap className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
-              <div>
-                <span className="font-bold text-white block mb-0.5">نتيجة المباراة:</span>
-                <p className="text-slate-300">{summary.matchSummaryText}</p>
-              </div>
+          {/* Match Result Banner (Post-Match Summary with Competition, Score & Goal Scorers) */}
+          {(pm || summary.matchSummaryText) && (
+            <div className="bg-gradient-to-b from-slate-900 to-slate-950 border border-emerald-500/50 p-4 rounded-2xl space-y-2.5 shadow-xl">
+              {pm ? (
+                <>
+                  <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+                    <span className="text-[11px] font-bold text-amber-400 flex items-center gap-1.5">
+                      <Zap className="w-3.5 h-3.5 text-amber-400" />
+                      <span>{cleanCompHeader || 'مباراة رسمية'}</span>
+                    </span>
+                    <span className="text-[10px] bg-emerald-950 text-emerald-300 border border-emerald-700/60 px-2 py-0.5 rounded-full font-bold">
+                      النتيجة النهائية
+                    </span>
+                  </div>
+
+                  <div className="text-center py-1.5">
+                    <div className="font-black text-base sm:text-lg text-white tracking-wide">
+                      <span>{pm.homeTeamName}</span>
+                      <span className="mx-3 px-3 py-0.5 rounded-xl bg-slate-950 border border-slate-700 text-amber-400 font-mono">
+                        {pm.homeScore} - {pm.awayScore}
+                      </span>
+                      <span>{pm.awayTeamName}</span>
+                    </div>
+                    {pm.homePenalties !== undefined && pm.awayPenalties !== undefined && (
+                      <div className="text-[11px] text-amber-300 font-mono font-bold mt-1">
+                        ركلات الترجيح: ({pm.homePenalties} - {pm.awayPenalties})
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Detailed Goal Scorers directly below score */}
+                  <div className="bg-slate-950/80 border border-slate-800/90 rounded-xl p-2.5 text-[11px] space-y-1">
+                    {totalMatchGoals > 0 ? (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-center sm:text-right">
+                        <div className="text-emerald-300 font-medium">
+                          <span className="text-slate-400 text-[10px] block mb-0.5">{pm.homeTeamName}:</span>
+                          {pm.homeScore > 0 ? (homeScorersDisplay || `⚽ ${pm.homeScore} أهداف`) : <span className="text-slate-500">لم يسجل</span>}
+                        </div>
+                        <div className="text-cyan-300 font-medium">
+                          <span className="text-slate-400 text-[10px] block mb-0.5">{pm.awayTeamName}:</span>
+                          {pm.awayScore > 0 ? (awayScorersDisplay || `⚽ ${pm.awayScore} أهداف`) : <span className="text-slate-500">لم يسجل</span>}
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="text-center text-slate-400">تعادل سلبي بدون أهداف (0 - 0)</div>
+                    )}
+                  </div>
+                </>
+              ) : (
+                <div className="flex items-start gap-2.5">
+                  <Zap className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                  <div>
+                    <span className="font-bold text-white block mb-0.5">نتيجة المباراة:</span>
+                    <p className="text-slate-300">{summary.matchSummaryText}</p>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
@@ -158,11 +229,11 @@ export const DaySummaryModal: React.FC<DaySummaryModalProps> = ({
                 <span>مستجدات المفاوضات والانتقالات</span>
               </h4>
               <div className="space-y-1.5">
-                {summary.negotiationUpdates.map((neg, idx) => (
+                {validNegotiations.map((neg, idx) => (
                   <div key={idx} className="bg-slate-900/90 p-2.5 rounded-xl border border-slate-800 text-slate-200 flex items-center justify-between gap-2">
                     <div>
-                      <span className="font-bold text-white block">{neg.playerName}</span>
-                      <p className="text-[11px] text-slate-400">{neg.text}</p>
+                      {neg.playerName && <span className="font-bold text-white block">{neg.playerName}</span>}
+                      {neg.text && <p className="text-[11px] text-slate-400">{neg.text}</p>}
                     </div>
                     {neg.actionRequired && (
                       <span className="text-[10px] bg-amber-500/20 text-amber-300 border border-amber-500/40 px-2 py-1 rounded-lg font-bold shrink-0">
@@ -207,21 +278,50 @@ export const DaySummaryModal: React.FC<DaySummaryModalProps> = ({
             </div>
           )}
 
-          {!hasTraining && !hasInjuries && !hasNegotiations && !hasNews && !summary.matchSummaryText && (
+          {!hasTraining && !hasInjuries && !hasNegotiations && !hasNews && !summary.matchSummaryText && !pm && (
             <div className="text-center py-6 text-slate-400">
               مر اليوم بهدوء واستقرار في معسكر الفريق، واستمرت الحصص التدريبية الاعتيادية بنجاح.
+            </div>
+          )}
+
+          {/* Match Day Alert Banner if reached matchday */}
+          {isMatchDay && (
+            <div className="p-3.5 bg-gradient-to-r from-emerald-950/90 to-teal-950/90 border border-emerald-500/60 rounded-2xl flex items-center justify-between gap-3 shadow-lg">
+              <div className="flex items-center gap-2.5">
+                <span className="text-2xl animate-bounce">⚽</span>
+                <div>
+                  <span className="font-black text-xs sm:text-sm text-emerald-300 block">اليوم موعد مباراة رسمية بالتقويم!</span>
+                  <span className="text-[11px] text-slate-300">وصلت إلى يوم اللقاء، فريقك بانتظار صافرة البداية.</span>
+                </div>
+              </div>
+              {onGoToMatches && (
+                <button
+                  onClick={onGoToMatches}
+                  className="px-4 py-2.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-black text-xs rounded-xl shadow-lg transition-all active:scale-95 shrink-0 cursor-pointer"
+                >
+                  الذهاب للمباراة ➔
+                </button>
+              )}
             </div>
           )}
 
         </div>
 
         {/* Modal Footer */}
-        <div className="p-4 border-t border-slate-800 bg-slate-950 flex items-center justify-end">
+        <div className="p-4 border-t border-slate-800 bg-slate-950 flex items-center justify-between">
+          {isMatchDay && onGoToMatches ? (
+            <button
+              onClick={onGoToMatches}
+              className="px-5 py-2.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-black text-xs rounded-xl transition-all shadow active:scale-95 cursor-pointer"
+            >
+              خوض المباراة الآن ⚽
+            </button>
+          ) : <div />}
           <button
             onClick={onClose}
-            className="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-xl transition-all shadow active:scale-95"
+            className="px-6 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs rounded-xl transition-all shadow active:scale-95 cursor-pointer"
           >
-            متابعة العمل اليومي ➔
+            {isMatchDay ? 'إغلاق ومتابعة' : 'متابعة العمل اليومي ➔'}
           </button>
         </div>
 

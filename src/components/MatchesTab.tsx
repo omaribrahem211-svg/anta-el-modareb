@@ -11,6 +11,7 @@ import { findClubInWorld, getClubDisplayName } from '../data/leaguesData';
 import { LiveTacticalAlertBanner } from './LiveTacticalAlertBanner';
 import { TacticalMatchReportCard } from './TacticalMatchReportCard';
 import { RestartSeasonModal } from './RestartSeasonModal';
+import { WorldStarLoanModal } from './modals/WorldStarLoanModal';
 import {
   analyzeLiveMatchSituation,
   isTacticalAdviceApplied,
@@ -38,6 +39,7 @@ import {
   Sparkles,
   UserCheck,
   ChevronRight,
+  ChevronLeft,
   ChevronDown,
   MessageSquare,
   BarChart3,
@@ -100,6 +102,8 @@ export const MatchesTab: React.FC = () => {
     calendarDate,
     doubleLiveMatchRevenueWithAd,
     rematchLiveMatch,
+    userCalendarSchedule,
+    calendarSchedule,
   } = useGame();
 
   const { t, language } = useLanguage();
@@ -115,6 +119,9 @@ export const MatchesTab: React.FC = () => {
   const [isRematchLoading, setIsRematchLoading] = useState(false);
   const [rematchToast, setRematchToast] = useState<{ text: string; isError: boolean } | null>(null);
   const [showRestartSeasonModal, setShowRestartSeasonModal] = useState(false);
+  const [showWorldStarModal, setShowWorldStarModal] = useState(false);
+  const [scheduleViewMode, setScheduleViewMode] = useState<'team' | 'round'>('team');
+  const activeGuestStar = (userClub?.players || []).find(p => Boolean(p && p.isGuestStar));
 
   const handleRematchWithAd = async () => {
     if (isRematchLoading || !liveMatch || !liveMatch.isFinished) return;
@@ -258,9 +265,19 @@ export const MatchesTab: React.FC = () => {
 
   // Current Round Fixtures
   const roundFixtures = (fixtures || []).filter(f => f && f.round === currentRound);
-  const userFixture = userClub?.id && !manager.isUnemployed 
-    ? roundFixtures.find(f => f && (f.homeTeamId === userClub.id || f.awayTeamId === userClub.id))
-    : undefined;
+
+  // Active user fixture across all competitions (League, CAF CL, Cup)
+  const userFixture = useMemo(() => {
+    if (!userClub?.id || manager.isUnemployed) return undefined;
+    // 1. Match scheduled for today on real-world calendar (or overdue unplayed match)
+    const todayMatch = (userCalendarSchedule || []).find(m => m && !m.isPlayed && (m.date === calendarDate?.rawDateStr || (m.date || '') <= (calendarDate?.rawDateStr || '')));
+    if (todayMatch) return todayMatch;
+    // 2. Next upcoming unplayed fixture on or after today
+    const upcoming = (userCalendarSchedule || []).find(m => m && !m.isPlayed && m.date >= (calendarDate?.rawDateStr || ''));
+    if (upcoming) return upcoming;
+    // 3. Round fixture fallback
+    return roundFixtures.find(f => f && (f.homeTeamId === userClub.id || f.awayTeamId === userClub.id));
+  }, [userClub?.id, manager.isUnemployed, userCalendarSchedule, calendarDate?.rawDateStr, roundFixtures]);
 
   // Resolve upcoming match details for user club
   const upcomingMatchAnalysis = useMemo(() => {
@@ -316,15 +333,20 @@ export const MatchesTab: React.FC = () => {
     const isUserHome = userClub ? liveMatch.homeTeam?.id === userClub.id : false;
     const userGoals = isUserHome ? liveMatch.homeScore : liveMatch.awayScore;
     const oppGoals = isUserHome ? liveMatch.awayScore : liveMatch.homeScore;
-    const isCupMatch = false;
-    const hasPenalties = false;
-    const userPenalties = undefined;
-    const oppPenalties = undefined;
+    const isCupMatch = Boolean(
+      liveMatch.fixture?.competitionType === 'cup' ||
+      liveMatch.fixture?.competitionType === 'DOMESTIC_COP' ||
+      liveMatch.fixture?.competitionType === 'continental' ||
+      liveMatch.fixture?.competitionType === 'CONTINENTAL_CUP'
+    );
+    const hasPenalties = liveMatch.homePenalties !== undefined && liveMatch.awayPenalties !== undefined;
+    const userPenalties = isUserHome ? liveMatch.homePenalties : liveMatch.awayPenalties;
+    const oppPenalties = isUserHome ? liveMatch.awayPenalties : liveMatch.homePenalties;
 
-    // League match results: win, draw, or loss
-    const isUserWin = userGoals > oppGoals;
-    const isUserDraw = userGoals === oppGoals;
-    const isUserLoss = userGoals < oppGoals;
+    // Match results: win, draw, or loss (considering penalties for knockout ties)
+    const isUserWin = hasPenalties ? (userPenalties! > oppPenalties!) : userGoals > oppGoals;
+    const isUserDraw = hasPenalties ? false : userGoals === oppGoals;
+    const isUserLoss = hasPenalties ? (userPenalties! < oppPenalties!) : userGoals < oppGoals;
 
     // Filter events up to current minute
     const visibleEvents = (liveMatch.events || []).filter(e => e && e.minute <= liveMatch.currentMinute);
@@ -372,7 +394,7 @@ export const MatchesTab: React.FC = () => {
               </button>
 
               <span className="bg-slate-800 px-3 py-1 rounded-full border border-slate-700 font-bold text-slate-300">
-                الجولة {liveMatch.fixture.round} من {totalRounds}
+                {liveMatch.fixture.stageName || liveMatch.fixture.tournamentBadge || `الجولة ${liveMatch.fixture.round} من ${totalRounds}`}
               </span>
             </div>
 
@@ -468,6 +490,40 @@ export const MatchesTab: React.FC = () => {
               </div>
             </div>
           </div>
+
+          {/* Goal Scorers & Minutes Row (Live & Post-Match) */}
+          {(() => {
+            const goalEvents = (liveMatch.events || []).filter(e => e && e.type === 'goal');
+            if (goalEvents.length === 0) return null;
+            const homeScorers = goalEvents
+              .filter(e => e.teamId === liveMatch.homeTeam.id)
+              .map(e => `${e.playerName || 'لاعب'} '${e.minute}`);
+            const awayScorers = goalEvents
+              .filter(e => e.teamId === liveMatch.awayTeam.id)
+              .map(e => `${e.playerName || 'لاعب'} '${e.minute}`);
+            return (
+              <div className="mt-2.5 pt-2 border-t border-slate-800/80 grid grid-cols-2 gap-2 text-[11px]">
+                <div className="text-right space-y-0.5 pr-1">
+                  {homeScorers.length > 0 ? (
+                    <div className="text-emerald-300 font-bold leading-relaxed">
+                      ⚽ {homeScorers.join('، ')}
+                    </div>
+                  ) : (
+                    <div className="text-slate-600">—</div>
+                  )}
+                </div>
+                <div className="text-left space-y-0.5 pl-1 border-r border-slate-800/60">
+                  {awayScorers.length > 0 ? (
+                    <div className="text-amber-300 font-bold leading-relaxed">
+                      ⚽ {awayScorers.join('، ')}
+                    </div>
+                  ) : (
+                    <div className="text-slate-600">—</div>
+                  )}
+                </div>
+              </div>
+            );
+          })()}
 
           {/* Possession & xG Bar */}
           <div className="mt-3 pt-3 border-t border-slate-800 space-y-1.5">
@@ -1387,7 +1443,7 @@ export const MatchesTab: React.FC = () => {
           <div className="flex items-center gap-2">
             <Swords className="w-5 h-5 text-emerald-400" />
             <h2 className="font-bold text-base text-white">
-              جدول مباريات الدوري الرسمية
+              {userFixture?.tournamentBadge ? `${userFixture.tournamentBadge} - ${userFixture.stageName || 'جدول المباريات الرسمية'}` : 'جدول المباريات الرسمية (الدوري والبطولات)'}
             </h2>
           </div>
           <div className="flex items-center gap-2">
@@ -1457,19 +1513,58 @@ export const MatchesTab: React.FC = () => {
         ) : (userFixture && userFixture.isPlayed) ? (
           /* MATCH IN THIS ROUND ALREADY PLAYED */
           <div className="space-y-3">
-            <div className="p-3 bg-emerald-950/60 border border-emerald-500/60 rounded-2xl flex items-center justify-between gap-2">
-              <div className="flex items-center gap-2 text-xs font-bold text-emerald-300">
-                <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-                <span>تم لعب مباراة الجولة {currentRound} بنجاح ✅ ({userFixture.homeScore} - {userFixture.awayScore})</span>
-              </div>
-              <span className="text-[10px] text-emerald-400 font-mono">مكتملة</span>
-            </div>
+            {(() => {
+              const homeClub = (teams.find(t => t && t.id === userFixture.homeTeamId) || (userFixture.homeTeamId ? findClubInWorld(userFixture.homeTeamId) : undefined));
+              const awayClub = (teams.find(t => t && t.id === userFixture.awayTeamId) || (userFixture.awayTeamId ? findClubInWorld(userFixture.awayTeamId) : undefined));
+              const homeName = homeClub?.name || getClubDisplayName(userFixture.homeTeamId, teams);
+              const awayName = awayClub?.name || getClubDisplayName(userFixture.awayTeamId, teams);
+              const compLabel = userFixture.tournamentBadge || activeLeague?.name || 'الدوري الممتاز';
+              const stageLabel = userFixture.stageName || `الجولة ${userFixture.round || currentRound}`;
+              const goalEvents = (userFixture.events || []).filter(e => e && e.type === 'goal');
+              const homeGoals = goalEvents
+                .filter(e => e.teamId === userFixture.homeTeamId)
+                .map(e => `${e.playerName || 'لاعب'} '${e.minute}`);
+              const awayGoals = goalEvents
+                .filter(e => e.teamId === userFixture.awayTeamId)
+                .map(e => `${e.playerName || 'لاعب'} '${e.minute}`);
+
+              return (
+                <div className="p-3.5 bg-emerald-950/50 border border-emerald-500/60 rounded-2xl space-y-2">
+                  <div className="flex items-center justify-between gap-2 text-[11px] text-emerald-300 font-bold border-b border-emerald-800/50 pb-1.5">
+                    <div className="flex items-center gap-1.5">
+                      <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                      <span>{compLabel} - {stageLabel}</span>
+                    </div>
+                    <span className="text-[10px] bg-emerald-500/20 text-emerald-300 px-2 py-0.5 rounded-full font-mono">النتيجة النهائية</span>
+                  </div>
+
+                  <div className="text-center font-black text-sm sm:text-base text-white py-1">
+                    <span>{homeName}</span>
+                    <span className="mx-2.5 px-2.5 py-0.5 rounded-lg bg-slate-950/90 border border-emerald-500/40 text-amber-400 font-mono">
+                      {userFixture.homeScore} - {userFixture.awayScore}
+                    </span>
+                    <span>{awayName}</span>
+                  </div>
+
+                  {goalEvents.length > 0 && (
+                    <div className="grid grid-cols-2 gap-2 pt-1.5 border-t border-emerald-800/40 text-[11px]">
+                      <div className="text-right text-emerald-200 font-semibold">
+                        {homeGoals.length > 0 ? `⚽ ${homeGoals.join('، ')}` : '—'}
+                      </div>
+                      <div className="text-left text-amber-200 font-semibold border-r border-emerald-800/40 pl-1">
+                        {awayGoals.length > 0 ? `⚽ ${awayGoals.join('، ')}` : '—'}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
               <button
                 id="advance_next_round_completed_btn"
                 disabled={isSimulationRunning}
-                onClick={() => instantSimulateCurrentRound()}
+                onClick={() => advanceToNextDay(true)}
                 className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-black text-sm py-3.5 px-4 rounded-2xl shadow-lg shadow-emerald-950/60 transition-all active:scale-95 cursor-pointer disabled:opacity-50"
               >
                 <FastForward className="w-4 h-4 text-amber-300" />
@@ -1493,9 +1588,44 @@ export const MatchesTab: React.FC = () => {
             <div className="p-3 bg-emerald-950/60 border border-emerald-500/60 rounded-2xl flex items-center justify-between gap-2">
               <div className="flex items-center gap-2 text-xs font-bold text-emerald-300">
                 <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-ping shrink-0" />
-                <span>اليوم موعد المباراة الرسمية في جدول الدوري! ⚽</span>
+                <span>اليوم موعد مباراة رسمية: {userFixture?.stageName || userFixture?.tournamentBadge || `الجولة ${currentRound}`}! ⚽</span>
               </div>
-              <span className="text-[10px] text-emerald-400 font-mono">الجولة {currentRound}</span>
+              <span className="text-[10px] text-emerald-400 font-mono">{userFixture?.tournamentBadge || `الجولة ${currentRound}`}</span>
+            </div>
+
+            {/* World Star Loan Banner (عقد إعارة نجم عالمي لمباراة واحدة) */}
+            <div 
+              id="btn_open_world_star_loan_modal"
+              onClick={() => setShowWorldStarModal(true)}
+              className="p-3.5 rounded-2xl bg-gradient-to-r from-amber-500/15 via-purple-500/15 to-slate-900 border border-amber-500/40 hover:border-amber-400 transition-all cursor-pointer shadow-lg active:scale-[0.99] flex items-center justify-between gap-3 group"
+            >
+              <div className="flex items-center gap-2.5">
+                <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-amber-500 to-purple-600 text-slate-950 font-black flex items-center justify-center shrink-0 shadow-md group-hover:scale-105 transition-transform">
+                  <Sparkles className="w-5 h-5 text-amber-200" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-xs font-bold text-white group-hover:text-amber-300 transition-colors">
+                      {activeGuestStar 
+                        ? `🌟 النجم العالمي: ${activeGuestStar.name} (${activeGuestStar.overallRating}) في تشكيلتك!` 
+                        : '🌟 استعارة نجم عالمي لمباراة اليوم (2x Ads)'}
+                    </span>
+                    <span className="text-[10px] bg-amber-500/20 text-amber-300 border border-amber-500/30 px-2 py-0.2 rounded-full font-bold">
+                      {activeGuestStar ? 'مباراة واحدة' : 'عقد ذهبي 2x'}
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-slate-400 mt-0.5">
+                    {activeGuestStar 
+                      ? `${activeGuestStar.nickname} جاهز في الخطة الأساسية، وسيغادر فور نهاية المباراة.`
+                      : 'احصل على نجم عالمي عشوائي (ميسي، رونالدو، مبابي، صلاح، أو بطاقة حظ) لخوض مباراة اليوم!'}
+                  </p>
+                </div>
+              </div>
+
+              <div className="shrink-0 flex items-center gap-1 text-xs font-bold text-amber-400 group-hover:text-amber-300">
+                <span>{activeGuestStar ? 'تفاصيل / استبدال' : 'استدعاء النجم'}</span>
+                <ChevronLeft className="w-4 h-4 rtl:rotate-0 ltr:rotate-180" />
+              </div>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
@@ -1506,17 +1636,17 @@ export const MatchesTab: React.FC = () => {
                 className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-black text-sm py-3.5 px-4 rounded-2xl shadow-lg shadow-emerald-950/60 transition-all active:scale-95 cursor-pointer disabled:opacity-50 disabled:pointer-events-none"
               >
                 <Play className="w-4 h-4 fill-white" />
-                <span>خوض مباراة الجولة {currentRound} الآن ⚽</span>
+                <span>خوض مباراة ({userFixture?.stageName || `الجولة ${currentRound}`}) الآن ⚽</span>
               </button>
 
               <button
                 id="instant_simulate_round_btn"
                 disabled={isSimulationRunning}
-                onClick={() => instantSimulateCurrentRound()}
+                onClick={() => instantSimulateCurrentRound({ advanceDate: false, forcePlayUserMatch: true })}
                 className="w-full flex items-center justify-center gap-2 bg-slate-800 hover:bg-slate-750 text-amber-300 border border-slate-700 font-bold text-xs sm:text-sm py-3 px-4 rounded-2xl shadow transition-all active:scale-95 cursor-pointer disabled:opacity-50 disabled:pointer-events-none"
               >
                 <FastForward className="w-4 h-4 text-amber-400" />
-                <span>{isSimulationRunning ? 'جارٍ المحاكاة...' : `محاكاة نتائج مباريات الجولة ${currentRound}`}</span>
+                <span>{isSimulationRunning ? 'جارٍ المحاكاة...' : `محاكاة نتائج مباريات (${userFixture?.stageName || `الجولة ${currentRound}`})`}</span>
               </button>
             </div>
           </div>
@@ -1538,25 +1668,36 @@ export const MatchesTab: React.FC = () => {
               </p>
             </div>
 
-            {/* Quick Calendar Advancing Actions */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+            {/* Quick Calendar Advancing Actions & Direct Play */}
+            <div className="space-y-2">
               <button
-                id="advance_fast_to_match_btn"
-                onClick={() => advanceToNextDay(true)}
-                className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-emerald-700 to-teal-700 hover:from-emerald-600 hover:to-teal-600 text-white font-bold text-xs sm:text-sm py-3 px-4 rounded-2xl shadow transition-all active:scale-95 cursor-pointer"
+                id="play_match_now_prematch_btn"
+                onClick={() => userFixture?.id ? startLiveMatch(userFixture.id) : startLiveMatch()}
+                className="w-full py-3.5 px-4 bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-600 hover:from-emerald-500 hover:to-teal-500 text-white font-black text-xs sm:text-sm rounded-2xl shadow-xl shadow-emerald-950/60 flex items-center justify-center gap-2 transition-all active:scale-95 cursor-pointer"
               >
-                <FastForward className="w-4 h-4 text-amber-300" />
-                <span>التقدم السريع لموعد المباراة (تخطي {daysUntilNextMatch} أيام) ⏩</span>
+                <Play className="w-4 h-4 fill-white" />
+                <span>خوض مباراة الجولة {currentRound} الآن فوراً والانتقال للملعب ⚽⚡</span>
               </button>
 
-              <button
-                id="advance_single_day_btn"
-                onClick={() => advanceToNextDay(false)}
-                className="w-full flex items-center justify-center gap-2 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-bold text-xs sm:text-sm py-3 px-4 rounded-2xl shadow transition-all active:scale-95 cursor-pointer"
-              >
-                <Calendar className="w-4 h-4 text-sky-400" />
-                <span>محاكاة اليوم التالي فقط ➔</span>
-              </button>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                <button
+                  id="advance_fast_to_match_btn"
+                  onClick={() => advanceToNextDay(true)}
+                  className="w-full flex items-center justify-center gap-2 bg-slate-800 hover:bg-slate-750 text-amber-300 border border-slate-700 font-bold text-xs sm:text-sm py-3 px-4 rounded-2xl shadow transition-all active:scale-95 cursor-pointer"
+                >
+                  <FastForward className="w-4 h-4 text-amber-300" />
+                  <span>التقدم لموعد المباراة (تخطي {daysUntilNextMatch} أيام) ⏩</span>
+                </button>
+
+                <button
+                  id="advance_single_day_btn"
+                  onClick={() => advanceToNextDay(false)}
+                  className="w-full flex items-center justify-center gap-2 bg-slate-800 hover:bg-slate-750 text-slate-200 border border-slate-700 font-bold text-xs sm:text-sm py-3 px-4 rounded-2xl shadow transition-all active:scale-95 cursor-pointer"
+                >
+                  <Calendar className="w-4 h-4 text-sky-400" />
+                  <span>محاكاة اليوم التالي فقط (+1) ➔</span>
+                </button>
+              </div>
             </div>
           </div>
         )}
@@ -2002,77 +2143,281 @@ export const MatchesTab: React.FC = () => {
         </div>
       )}
 
-      {/* Current Round Fixtures List */}
-      <div className="space-y-2.5">
-        <h3 className="text-xs font-bold text-slate-400 px-1">
-          {userFixture?.stageName 
-            ? `مباريات ${userFixture.stageName} (الجولة ${currentRound})` 
-            : `مباريات الجولة الحالية (${currentRound})`}
-        </h3>
-        
-        <div className="space-y-2">
-          {roundFixtures.map(fixture => {
-            if (!fixture) return null;
-            const home = (teams.find(t => t && t.id === fixture.homeTeamId) || (fixture.homeTeamId ? findClubInWorld(fixture.homeTeamId) : undefined)) || { name: getClubDisplayName(fixture.homeTeamId, teams), shortName: 'مض', primaryColor: '#334155', isUserClub: false };
-            const away = (teams.find(t => t && t.id === fixture.awayTeamId) || (fixture.awayTeamId ? findClubInWorld(fixture.awayTeamId) : undefined)) || { name: getClubDisplayName(fixture.awayTeamId, teams), shortName: 'ضف', primaryColor: '#334155', isUserClub: false };
-            const isUserGame = Boolean(home?.isUserClub || away?.isUserClub || (userClub?.id && (fixture.homeTeamId === userClub.id || fixture.awayTeamId === userClub.id)));
+      {/* 4. Fixture Views: Team Calendar vs Current Round */}
+      <div className="space-y-3">
+        {/* Sleek Segmented Switcher */}
+        <div className="flex items-center justify-between p-1 bg-slate-900 border border-slate-800 rounded-2xl gap-1 text-xs">
+          <button
+            onClick={() => setScheduleViewMode('team')}
+            className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 px-3 rounded-xl font-bold transition-all cursor-pointer ${
+              scheduleViewMode === 'team'
+                ? 'bg-slate-800 text-emerald-400 shadow-md border border-slate-700'
+                : 'text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            <Calendar className="w-4 h-4 text-emerald-400" />
+            <span>جدول مباريات فريقي 📅 ({userCalendarSchedule.length})</span>
+          </button>
 
-            const homeInitial = (home?.shortName || home?.name || 'مض').slice(0, 1);
-            const awayInitial = (away?.shortName || away?.name || 'ضف').slice(0, 1);
-
-            return (
-              <div
-                key={fixture.id}
-                className={`p-3.5 rounded-2xl border transition-all flex items-center justify-between gap-3 ${
-                  isUserGame
-                    ? 'bg-emerald-950/40 border-emerald-600/70 shadow-lg'
-                    : 'bg-slate-900/80 border-slate-800'
-                }`}
-              >
-                {/* Home */}
-                <div className="flex items-center gap-2 min-w-0 flex-1 justify-end text-left">
-                  <span className={`text-xs font-bold truncate ${home.isUserClub ? 'text-emerald-300' : 'text-white'}`}>
-                    {home.name}
-                  </span>
-                  <div 
-                    className="w-7 h-7 rounded-lg flex items-center justify-center font-bold text-xs shrink-0 text-white"
-                    style={{ backgroundColor: home.primaryColor || '#334155' }}
-                  >
-                    {homeInitial}
-                  </div>
-                </div>
-
-                {/* Score / VS */}
-                <div className="px-3 py-1 rounded-xl bg-slate-950 border border-slate-800 font-mono font-black text-sm shrink-0 text-center">
-                  {fixture.isPlayed ? (
-                    <span className="text-amber-400">{fixture.homeScore} - {fixture.awayScore}</span>
-                  ) : (
-                    <span className="text-slate-500 text-xs">VS</span>
-                  )}
-                </div>
-
-                {/* Away */}
-                <div className="flex items-center gap-2 min-w-0 flex-1 justify-start text-right">
-                  <div 
-                    className="w-7 h-7 rounded-lg flex items-center justify-center font-bold text-xs shrink-0 text-white"
-                    style={{ backgroundColor: away.primaryColor || '#334155' }}
-                  >
-                    {awayInitial}
-                  </div>
-                  <span className={`text-xs font-bold truncate ${away.isUserClub ? 'text-emerald-300' : 'text-white'}`}>
-                    {away.name}
-                  </span>
-                </div>
-              </div>
-            );
-          })}
+          <button
+            onClick={() => setScheduleViewMode('round')}
+            className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 px-3 rounded-xl font-bold transition-all cursor-pointer ${
+              scheduleViewMode === 'round'
+                ? 'bg-slate-800 text-amber-400 shadow-md border border-slate-700'
+                : 'text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            <Swords className="w-4 h-4 text-amber-400" />
+            <span>مباريات الجولة الحالية ⚽ (الجولة {currentRound})</span>
+          </button>
         </div>
+
+        {/* View Mode 1: Team-Centric Master Schedule (Chronological Real Calendar) */}
+        {scheduleViewMode === 'team' ? (
+          <div className="space-y-2.5">
+            <div className="flex items-center justify-between px-1">
+              <h3 className="text-xs font-bold text-slate-400 flex items-center gap-1.5">
+                <CalendarDays className="w-4 h-4 text-emerald-400" />
+                <span>التقويم الزمني الموحد لمباريات {userClub?.name || 'فريقك'} (من 15 أغسطس حتى 30 مايو)</span>
+              </h3>
+              <span className="text-[11px] bg-slate-800 text-slate-300 px-2 py-0.5 rounded-full font-mono border border-slate-700">
+                {userCalendarSchedule.filter(m => m.isPlayed).length} / {userCalendarSchedule.length} مباراة
+              </span>
+            </div>
+
+            {userCalendarSchedule.length === 0 ? (
+              <div className="p-8 text-center text-xs text-slate-400 bg-slate-900/80 rounded-2xl border border-slate-800">
+                لا توجد مباريات مجدولة حالياً.
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {userCalendarSchedule.map(fixture => {
+                  if (!fixture) return null;
+                  const home = (teams.find(t => t && t.id === fixture.homeTeamId) || (fixture.homeTeamId ? findClubInWorld(fixture.homeTeamId) : undefined)) || { name: getClubDisplayName(fixture.homeTeamId, teams), shortName: 'مض', primaryColor: '#334155', isUserClub: fixture.homeTeamId === userClub?.id };
+                  const away = (teams.find(t => t && t.id === fixture.awayTeamId) || (fixture.awayTeamId ? findClubInWorld(fixture.awayTeamId) : undefined)) || { name: getClubDisplayName(fixture.awayTeamId, teams), shortName: 'ضف', primaryColor: '#334155', isUserClub: fixture.awayTeamId === userClub?.id };
+                  const isUserHome = fixture.homeTeamId === userClub?.id;
+                  const oppClub = isUserHome ? away : home;
+                  const isToday = fixture.date === calendarDate?.rawDateStr;
+                  const isUpcomingNext = !fixture.isPlayed && fixture.id === userFixture?.id;
+
+                  // Result indicator
+                  let resultBadge = null;
+                  if (fixture.isPlayed && typeof fixture.homeScore === 'number' && typeof fixture.awayScore === 'number') {
+                    const userScore = isUserHome ? fixture.homeScore : fixture.awayScore;
+                    const oppScore = isUserHome ? fixture.awayScore : fixture.homeScore;
+                    if (userScore > oppScore) {
+                      resultBadge = <span className="text-[10px] bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 px-2 py-0.5 rounded-full font-bold">فوز ✅</span>;
+                    } else if (userScore === oppScore) {
+                      resultBadge = <span className="text-[10px] bg-amber-500/20 text-amber-300 border border-amber-500/40 px-2 py-0.5 rounded-full font-bold">تعادل 🤝</span>;
+                    } else {
+                      resultBadge = <span className="text-[10px] bg-rose-500/20 text-rose-300 border border-rose-500/40 px-2 py-0.5 rounded-full font-bold">خسارة ❌</span>;
+                    }
+                  }
+
+                  return (
+                    <div
+                      key={fixture.id}
+                      className={`p-3.5 rounded-2xl border transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
+                        isToday && !fixture.isPlayed
+                          ? 'bg-gradient-to-r from-emerald-950/70 via-slate-900 to-slate-900 border-emerald-500 ring-1 ring-emerald-500/50 shadow-xl'
+                          : isUpcomingNext
+                          ? 'bg-slate-900/90 border-amber-500/50 shadow-md'
+                          : fixture.isPlayed
+                          ? 'bg-slate-900/60 border-slate-800/80 opacity-90'
+                          : 'bg-slate-900/80 border-slate-800'
+                      }`}
+                    >
+                      {/* Left: Tournament Badge & Stage info */}
+                      <div className="flex items-center gap-2.5 min-w-[200px]">
+                        <div className="w-10 h-10 rounded-xl bg-slate-800/90 border border-slate-700/80 flex items-center justify-center text-lg shrink-0">
+                          {fixture.tournamentId === 'ccl' ? '🏆' : fixture.tournamentId === 'cup' ? '🛡️' : '🇪🇬'}
+                        </div>
+                        <div className="space-y-0.5">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span className="text-xs font-bold text-white">
+                              {fixture.tournamentBadge || (fixture.tournamentId === 'ccl' ? '🏆 دوري أبطال إفريقيا' : fixture.tournamentId === 'cup' ? '🛡️ كأس مصر' : '🇪🇬 الدوري الممتاز')}
+                            </span>
+                            {resultBadge}
+                            {isToday && !fixture.isPlayed && (
+                              <span className="text-[10px] bg-emerald-500 text-slate-950 px-2 py-0.2 rounded-full font-black animate-pulse">
+                                مباراة اليوم ⚽
+                              </span>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-2 text-[11px] text-slate-400">
+                            <span>{fixture.stageName || fixture.stage || `الجولة ${fixture.round}`}</span>
+                            <span>•</span>
+                            <span className="font-mono text-cyan-400/90">{fixture.date}</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Middle: Teams Head-to-Head + Goal Scorers */}
+                      <div className="flex flex-col items-center justify-center flex-1 py-1 sm:py-0 gap-1">
+                        <div className="flex items-center justify-center gap-2 w-full">
+                          {/* Home Team */}
+                          <div className="flex items-center gap-1.5 text-left justify-end flex-1 min-w-0">
+                            <span className={`text-xs font-bold truncate ${home.isUserClub ? 'text-emerald-300 font-black' : 'text-slate-200'}`}>
+                              {home.name}
+                            </span>
+                            <div
+                              className="w-6 h-6 rounded-md flex items-center justify-center font-bold text-[10px] shrink-0 text-white"
+                              style={{ backgroundColor: home.primaryColor || '#334155' }}
+                            >
+                              {(home.shortName || home.name || 'م').slice(0, 1)}
+                            </div>
+                          </div>
+
+                          {/* Score or VS */}
+                          <div className="px-3 py-1 rounded-xl bg-slate-950 border border-slate-800 font-mono font-black text-xs shrink-0 text-center min-w-[60px]">
+                            {fixture.isPlayed ? (
+                              <span className="text-amber-400 text-sm">{fixture.homeScore} - {fixture.awayScore}</span>
+                            ) : isToday ? (
+                              <span className="text-emerald-400 text-xs font-bold">اليوم</span>
+                            ) : (
+                              <span className="text-slate-500 text-[11px]">VS</span>
+                            )}
+                          </div>
+
+                          {/* Away Team */}
+                          <div className="flex items-center gap-1.5 text-right justify-start flex-1 min-w-0">
+                            <div
+                              className="w-6 h-6 rounded-md flex items-center justify-center font-bold text-[10px] shrink-0 text-white"
+                              style={{ backgroundColor: away.primaryColor || '#334155' }}
+                            >
+                              {(away.shortName || away.name || 'ض').slice(0, 1)}
+                            </div>
+                            <span className={`text-xs font-bold truncate ${away.isUserClub ? 'text-emerald-300 font-black' : 'text-slate-200'}`}>
+                              {away.name}
+                            </span>
+                          </div>
+                        </div>
+
+                        {fixture.isPlayed && Array.isArray(fixture.events) && fixture.events.some((ev: any) => ev && ev.type === 'goal') && (
+                          <div className="text-[10px] text-slate-300 text-center leading-relaxed">
+                            ⚽ {fixture.events
+                              .filter((ev: any) => ev && ev.type === 'goal')
+                              .map((ev: any) => `${ev.playerName || 'لاعب'} '${ev.minute}`)
+                              .join('، ')}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Right: Action or Status */}
+                      <div className="flex items-center justify-end gap-2 shrink-0">
+                        <span className="text-[11px] text-slate-400 font-medium">
+                          {isUserHome ? '🏟️ ملعبنا' : '✈️ خارج الديار'}
+                        </span>
+
+                        {isToday && !fixture.isPlayed && (
+                          <button
+                            onClick={() => startLiveMatch(fixture.id)}
+                            disabled={isSimulationRunning}
+                            className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-xl shadow cursor-pointer transition-all active:scale-95 flex items-center gap-1"
+                          >
+                            <Play className="w-3.5 h-3.5 fill-white" />
+                            <span>العب الآن</span>
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        ) : (
+          /* View Mode 2: Current Round Fixtures List */
+          <div className="space-y-2.5">
+            <h3 className="text-xs font-bold text-slate-400 px-1">
+              {userFixture?.stageName 
+                ? `مباريات ${userFixture.stageName} (الجولة ${currentRound})` 
+                : `مباريات الجولة الحالية (${currentRound})`}
+            </h3>
+            
+            <div className="space-y-2">
+              {roundFixtures.map(fixture => {
+                if (!fixture) return null;
+                const home = (teams.find(t => t && t.id === fixture.homeTeamId) || (fixture.homeTeamId ? findClubInWorld(fixture.homeTeamId) : undefined)) || { name: getClubDisplayName(fixture.homeTeamId, teams), shortName: 'مض', primaryColor: '#334155', isUserClub: false };
+                const away = (teams.find(t => t && t.id === fixture.awayTeamId) || (fixture.awayTeamId ? findClubInWorld(fixture.awayTeamId) : undefined)) || { name: getClubDisplayName(fixture.awayTeamId, teams), shortName: 'ضف', primaryColor: '#334155', isUserClub: false };
+                const isUserGame = Boolean(home?.isUserClub || away?.isUserClub || (userClub?.id && (fixture.homeTeamId === userClub.id || fixture.awayTeamId === userClub.id)));
+
+                const homeInitial = (home?.shortName || home?.name || 'مض').slice(0, 1);
+                const awayInitial = (away?.shortName || away?.name || 'ضف').slice(0, 1);
+
+                return (
+                  <div
+                    key={fixture.id}
+                    className={`p-3.5 rounded-2xl border transition-all flex flex-col gap-1.5 ${
+                      isUserGame
+                        ? 'bg-emerald-950/40 border-emerald-600/70 shadow-lg'
+                        : 'bg-slate-900/80 border-slate-800'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-3">
+                      {/* Home */}
+                      <div className="flex items-center gap-2 min-w-0 flex-1 justify-end text-left">
+                        <span className={`text-xs font-bold truncate ${home.isUserClub ? 'text-emerald-300' : 'text-white'}`}>
+                          {home.name}
+                        </span>
+                        <div 
+                          className="w-7 h-7 rounded-lg flex items-center justify-center font-bold text-xs shrink-0 text-white"
+                          style={{ backgroundColor: home.primaryColor || '#334155' }}
+                        >
+                          {homeInitial}
+                        </div>
+                      </div>
+
+                      {/* Score / VS */}
+                      <div className="px-3 py-1 rounded-xl bg-slate-950 border border-slate-800 font-mono font-black text-sm shrink-0 text-center">
+                        {fixture.isPlayed ? (
+                          <span className="text-amber-400">{fixture.homeScore} - {fixture.awayScore}</span>
+                        ) : (
+                          <span className="text-slate-500 text-xs">VS</span>
+                        )}
+                      </div>
+
+                      {/* Away */}
+                      <div className="flex items-center gap-2 min-w-0 flex-1 justify-start text-right">
+                        <div 
+                          className="w-7 h-7 rounded-lg flex items-center justify-center font-bold text-xs shrink-0 text-white"
+                          style={{ backgroundColor: away.primaryColor || '#334155' }}
+                        >
+                          {awayInitial}
+                        </div>
+                        <span className={`text-xs font-bold truncate ${away.isUserClub ? 'text-emerald-300' : 'text-white'}`}>
+                          {away.name}
+                        </span>
+                      </div>
+                    </div>
+
+                    {fixture.isPlayed && Array.isArray(fixture.events) && fixture.events.some(ev => ev && ev.type === 'goal') && (
+                      <div className="pt-1 border-t border-slate-800/60 text-[10px] text-slate-300 text-center">
+                        ⚽ {fixture.events
+                          .filter(ev => ev && ev.type === 'goal')
+                          .map(ev => `${ev.playerName || 'لاعب'} '${ev.minute}`)
+                          .join('، ')}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Restart Season Modal */}
       <RestartSeasonModal
         isOpen={showRestartSeasonModal}
         onClose={() => setShowRestartSeasonModal(false)}
+      />
+
+      {/* World Star Loan Modal (2x Ads) */}
+      <WorldStarLoanModal
+        isOpen={showWorldStarModal}
+        onClose={() => setShowWorldStarModal(false)}
+        onNavigateToTactics={() => window.dispatchEvent(new CustomEvent('set-active-tab', { detail: { tab: 'tactics' } }))}
       />
 
     </div>

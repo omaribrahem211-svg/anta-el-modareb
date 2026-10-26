@@ -59,7 +59,7 @@ export const SquadTab: React.FC<SquadTabProps> = ({ onSelectPlayer }) => {
     );
   }
 
-  const squadPlayers = Array.isArray(userClub.players) ? userClub.players : [];
+  const squadPlayers = (Array.isArray(userClub.players) ? userClub.players : []).filter(Boolean);
   const startingIds = userClub.tactics?.startingPlayerIds || [];
   const benchIds = userClub.tactics?.benchPlayerIds || [];
 
@@ -280,7 +280,15 @@ export const SquadTab: React.FC<SquadTabProps> = ({ onSelectPlayer }) => {
                 {/* Name & Role */}
                 <div className="min-w-0">
                   <div className="flex items-center gap-1.5 flex-wrap">
-                    <span className="font-bold text-sm text-white truncate">{player.name}</span>
+                    <span className="font-bold text-sm text-white truncate flex items-center gap-1.5">
+                      {player.name}
+                      {player.isGuestStar && (
+                        <span className="text-[10px] bg-gradient-to-r from-amber-500/20 to-purple-500/20 text-amber-300 border border-amber-500/40 px-1.5 py-0.2 rounded font-bold inline-flex items-center gap-0.5">
+                          <Sparkles className="w-2.5 h-2.5 text-amber-400" />
+                          نجم عالمي
+                        </span>
+                      )}
+                    </span>
                     <span className="text-[10px] text-slate-500 font-mono">#{player.number}</span>
                     <span className="text-[10px] text-slate-300 bg-slate-800/80 px-1 py-0.2 rounded border border-slate-700">
                       {player.nationalityCode === 'EGY' ? '🇪🇬' : player.nationalityCode === 'SAU' ? '🇸🇦' : player.nationalityCode === 'UAE' ? '🇦🇪' : player.nationalityCode === 'QAT' ? '🇶🇦' : player.nationalityCode === 'MAR' ? '🇲🇦' : player.nationalityCode === 'TUN' ? '🇹🇳' : player.nationalityCode === 'ALG' ? '🇩🇿' : player.nationalityCode === 'ESP' ? '🇪🇸' : player.nationalityCode === 'ENG' ? '🏴󠁧󠁢󠁥󠁮󠁧󠁿' : player.nationalityCode === 'FRA' ? '🇫🇷' : player.nationalityCode === 'ITA' ? '🇮🇹' : player.nationalityCode === 'GER' ? '🇩🇪' : player.nationalityCode === 'BRA' ? '🇧🇷' : player.nationalityCode === 'ARG' ? '🇦🇷' : '🇪🇬'}
@@ -299,6 +307,12 @@ export const SquadTab: React.FC<SquadTabProps> = ({ onSelectPlayer }) => {
 
                   {/* Starter / Bench / Injury Badge & Financial Status */}
                   <div className="flex items-center gap-1.5 mt-1 flex-wrap">
+                    {player.isGuestStar && (
+                      <span className="text-[9px] bg-gradient-to-r from-amber-500/30 to-purple-500/30 text-amber-300 border border-amber-500/50 px-2 py-0.5 rounded font-bold flex items-center gap-1">
+                        <Sparkles className="w-3 h-3 text-amber-400" />
+                        إعارة ذهبية لمباراة واحدة (متبقي: {player.guestMatchesRemaining || 1})
+                      </span>
+                    )}
                     {player.isInjured || (player.injury && player.injury.daysRemaining > 0) ? (
                       <span className="text-[9px] bg-red-950 text-red-300 border border-red-700 px-1.5 py-0.2 rounded font-bold flex items-center gap-1 animate-pulse">
                         <Bandage className="w-3 h-3 text-red-400" />

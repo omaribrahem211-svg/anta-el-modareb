@@ -22,6 +22,7 @@ import {
   AdRewardClaimResult 
 } from '../../services/adRewardService';
 import { useGame } from '../../context/GameContext';
+import { WorldStarLoanModal } from '../modals/WorldStarLoanModal';
 
 interface RewardedAdCenterModalProps {
   isOpen: boolean;
@@ -36,6 +37,7 @@ export const RewardedAdCenterModal: React.FC<RewardedAdCenterModalProps> = ({
 }) => {
   const { claimAdReward, userClub } = useGame();
   const [selectedType, setSelectedType] = useState<AdRewardType>(defaultRewardType);
+  const [showWorldStarModal, setShowWorldStarModal] = useState(false);
   const [isLoadingAd, setIsLoadingAd] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
@@ -185,6 +187,38 @@ export const RewardedAdCenterModal: React.FC<RewardedAdCenterModalProps> = ({
             </div>
           )}
 
+          {/* World Star Loan Offer (2x Ads) */}
+          <div 
+            id="reward_center_world_star_loan_card"
+            onClick={() => setShowWorldStarModal(true)}
+            className="p-3.5 rounded-2xl border border-amber-500/50 bg-gradient-to-r from-amber-500/20 via-purple-950/40 to-slate-900 hover:border-amber-400 transition-all cursor-pointer flex items-center justify-between gap-3 shadow-lg group active:scale-[0.99]"
+          >
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-amber-500 to-purple-600 flex items-center justify-center shrink-0 shadow text-slate-950 group-hover:scale-105 transition-transform">
+                <Sparkles className="w-5 h-5 text-amber-200" />
+              </div>
+              <div className="min-w-0">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-xs font-bold text-white group-hover:text-amber-300 transition-colors">
+                    🌟 استعارة نجم عالمي للمباراة القادمة
+                  </span>
+                  <span className="text-[10px] bg-purple-500/30 text-purple-200 border border-purple-500/40 px-2 py-0.5 rounded-full font-bold">
+                    شاهد إعلانين 2x
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-400 mt-0.5 truncate">
+                  شاهد إعلانين واجلب نجماً عالمياً عشوائياً (ميسي، رونالدو، صلاح، مبابي، إلخ) لخوض مباراتك القادمة!
+                </p>
+              </div>
+            </div>
+            <button
+              type="button"
+              className="px-3 py-1.5 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-black text-xs shrink-0 shadow transition-all cursor-pointer"
+            >
+              فتح ✨
+            </button>
+          </div>
+
           {/* Reward Choices Grid */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
             {rewardTypes.map((type) => {
@@ -306,6 +340,12 @@ export const RewardedAdCenterModal: React.FC<RewardedAdCenterModalProps> = ({
           </button>
         </div>
       </div>
+
+      {/* World Star Loan Modal */}
+      <WorldStarLoanModal
+        isOpen={showWorldStarModal}
+        onClose={() => setShowWorldStarModal(false)}
+      />
     </div>
   );
 };
