@@ -101,8 +101,8 @@ export interface LiveSimulationState {
  */
 export function calculateManagerRatingFromProfile(mgr: any, fallbackReputation: number = 60): number {
   if (!mgr) {
-    // Normal AI club baseline (fair competitive tier: 58 to 74 max, never artificial 80+ without an explicit manager)
-    return Math.max(58, Math.min(74, Math.round(52 + (fallbackReputation * 0.22))));
+    // Competitive AI club manager baseline (68 to 93 based on club reputation so top & continental clubs have elite coaching)
+    return Math.max(68, Math.min(93, Math.round(56 + (fallbackReputation * 0.42))));
   }
 
   // If specific manual numeric rating is set without license
@@ -815,109 +815,121 @@ export function generateAdaptiveAiTactics(
   const aiPlayers = Array.isArray(aiTeam?.players) ? aiTeam.players.filter(Boolean) : [];
   const oppPlayers = Array.isArray(opponentTeam?.players) ? opponentTeam.players.filter(Boolean) : [];
 
-  const sortedAiPlayers = [...aiPlayers].sort((a, b) => (b.overallRating || 65) - (a.overallRating || 65));
-  const startingIds =
-    aiTeam?.tactics?.startingPlayerIds && aiTeam.tactics.startingPlayerIds.length === 11
-      ? aiTeam.tactics.startingPlayerIds
-      : sortedAiPlayers.slice(0, 11).map(p => p.id);
-  const benchIds =
-    aiTeam?.tactics?.benchPlayerIds && aiTeam.tactics.benchPlayerIds.length > 0
-      ? aiTeam.tactics.benchPlayerIds
-      : sortedAiPlayers.slice(11, 18).map(p => p.id);
+  // Ensure best Goalkeeper is at slot 0 and best 10 outfield players fill slots 1..10
+  const gks = aiPlayers
+    .filter(p => p.positionCategory === 'GK' || p.position === 'GK')
+    .sort((a, b) => (b.overallRating || 65) - (a.overallRating || 65));
+  const outfield = aiPlayers
+    .filter(p => p.positionCategory !== 'GK' && p.position !== 'GK')
+    .sort((a, b) => (b.overallRating || 65) - (a.overallRating || 65));
+
+  const bestEleven = [
+    ...(gks.length > 0 ? [gks[0]] : []),
+    ...outfield.slice(0, gks.length > 0 ? 10 : 11),
+  ];
+  const startingIds = bestEleven.map(p => p.id);
+  const benchIds = aiPlayers
+    .filter(p => !startingIds.includes(p.id))
+    .sort((a, b) => (b.overallRating || 65) - (a.overallRating || 65))
+    .slice(0, 7)
+    .map(p => p.id);
 
   const calcAvg = (list: Player[], fallback: number) =>
     list.length > 0
       ? list.slice(0, 11).reduce((s, p) => s + (p.overallRating || fallback), 0) / Math.min(11, list.length)
       : fallback;
 
-  const aiAvg = calcAvg(sortedAiPlayers, aiTeam?.reputation || 68) + (isAiHome ? 2.0 : 0);
+  const aiAvg = calcAvg(bestEleven, aiTeam?.reputation || 70) + (isAiHome ? 2.5 : 0);
   const oppAvg = calcAvg(oppPlayers, opponentTeam?.reputation || 68) + (!isAiHome ? 2.0 : 0);
   const diff = aiAvg - oppAvg; // negative means opponent is stronger
 
-  if (diff <= -4.5) {
-    // Opponent is significantly stronger: disciplined low block & lethal counter-attacks
+  const oppTac = opponentTeam?.tactics;
+  const oppHighPress = oppTac?.pressingIntensity === 'high' || oppTac?.pressingIntensity === 'gegenpress';
+  const oppHighLine = (oppTac as any)?.defensiveLine === 'high' || oppTac?.mentality === 'ultra_attacking' || oppTac?.mentality === 'attacking';
+  const oppWingPlay = oppTac?.tacticalStyle === 'wing_play' || (oppTac as any)?.teamWidth === 'wide';
+  const oppShortPass = oppTac?.passingStyle === 'short' || oppTac?.tacticalStyle === 'tiki_taka';
+
+  if (diff <= -3.5) {
+    // Opponent is stronger: disciplined low block & lethal counter-attacking trap tailored to punish user's setup
     return {
-      formation: diff <= -8 ? '5-3-2' : '4-2-3-1',
-      tacticalStyle: 'park_the_bus',
+      formation: diff <= -7 ? '5-3-2' : '4-2-3-1',
+      tacticalStyle: 'counter_attack',
       mentality: 'defensive',
       attackingStyle: 'counter_attack',
       passingStyle: 'direct',
       tempo: 'fast',
-      pressingIntensity: 'low',
-      defensiveLine: 'low',
+      pressingIntensity: oppShortPass ? 'medium' : 'low',
+      defensiveLine: 'deep' as any,
+      teamWidth: 'narrow' as any,
       width: 'narrow',
+      buildUpStyle: oppHighPress ? 'direct_pivot' : 'channel_balls',
+      pressingTrap: oppWingPlay ? 'trap_wings' : 'trap_center',
+      fullbackRole: 'stay_back',
+      strikerRole: oppHighLine ? 'advanced_forward' : 'poacher',
+      defensiveBlock: 'low',
       markingStyle: 'zonal',
       timeWasting: 'sometimes',
       startingPlayerIds: startingIds,
       benchPlayerIds: benchIds,
       captainId: startingIds[0] || '',
       penaltyTakerId: startingIds[startingIds.length - 1] || '',
-      freeKickTakerId: startingIds[0] || '',
-      cornerTakerId: startingIds[1] || '',
+      freeKickTakerId: startingIds[1] || '',
+      cornerTakerId: startingIds[2] || '',
     };
-  } else if (diff <= -1.5) {
-    // Opponent has a slight edge: compact midfield & structured transitions
+  } else if (diff <= 1.5) {
+    // Closely matched / competitive clash: sharp tactical counter-system
     return {
-      formation: '4-2-3-1',
-      tacticalStyle: 'counter_attack',
-      mentality: 'balanced',
+      formation: oppWingPlay ? '4-2-3-1' : '4-3-3',
+      tacticalStyle: oppHighLine ? 'counter_attack' : 'wing_play',
+      mentality: isAiHome ? 'attacking' : 'balanced',
       attackingStyle: 'counter_attack',
-      passingStyle: 'mixed',
-      tempo: 'balanced',
-      pressingIntensity: 'medium',
-      defensiveLine: 'medium',
-      width: 'balanced',
+      passingStyle: oppHighPress ? 'direct' : 'short',
+      tempo: 'fast',
+      pressingIntensity: oppShortPass ? 'high' : 'medium',
+      defensiveLine: oppHighLine ? ('balanced' as any) : ('high' as any),
+      teamWidth: 'wide' as any,
+      width: 'wide',
+      buildUpStyle: oppHighPress ? 'direct_pivot' : 'channel_balls',
+      pressingTrap: oppWingPlay ? 'trap_wings' : 'trap_center',
+      fullbackRole: oppWingPlay ? 'stay_back' : 'overlapping',
+      strikerRole: oppHighLine ? 'advanced_forward' : 'poacher',
+      defensiveBlock: 'balanced',
       markingStyle: 'zonal',
       timeWasting: 'never',
       startingPlayerIds: startingIds,
       benchPlayerIds: benchIds,
       captainId: startingIds[0] || '',
       penaltyTakerId: startingIds[startingIds.length - 1] || '',
-      freeKickTakerId: startingIds[0] || '',
-      cornerTakerId: startingIds[1] || '',
-    };
-  } else if (diff >= 4.0) {
-    // AI is stronger: proactive high press and possession dominance
-    return {
-      formation: '4-3-3',
-      tacticalStyle: 'tiki_taka',
-      mentality: 'attacking',
-      attackingStyle: 'possession',
-      passingStyle: 'short',
-      tempo: 'fast',
-      pressingIntensity: 'high',
-      defensiveLine: 'high',
-      width: 'wide',
-      markingStyle: 'man_to_man',
-      timeWasting: 'never',
-      startingPlayerIds: startingIds,
-      benchPlayerIds: benchIds,
-      captainId: startingIds[0] || '',
-      penaltyTakerId: startingIds[startingIds.length - 1] || '',
-      freeKickTakerId: startingIds[0] || '',
-      cornerTakerId: startingIds[1] || '',
+      freeKickTakerId: startingIds[1] || '',
+      cornerTakerId: startingIds[2] || '',
     };
   }
 
-  // Evenly matched contest
+  // AI is stronger: aggressive pressing, midfield overload, and clinical finishing
   return {
-    formation: aiTeam?.tactics?.formation || (isAiHome ? '4-3-3' : '4-2-3-1'),
-    tacticalStyle: 'balanced',
-    mentality: isAiHome ? 'attacking' : 'balanced',
-    attackingStyle: 'Wing_play' as any,
-    passingStyle: 'short',
-    tempo: 'balanced',
-    pressingIntensity: 'medium',
-    defensiveLine: 'medium',
-    width: 'balanced',
-    markingStyle: 'zonal',
+    formation: '4-3-3',
+    tacticalStyle: oppHighPress ? 'direct_play' : 'tiki_taka',
+    mentality: 'attacking',
+    attackingStyle: 'possession',
+    passingStyle: oppHighPress ? 'direct' : 'short',
+    tempo: 'fast',
+    pressingIntensity: 'high',
+    defensiveLine: 'high',
+    teamWidth: 'wide' as any,
+    width: 'wide',
+    buildUpStyle: oppHighPress ? 'direct_pivot' : 'from_back',
+    pressingTrap: oppWingPlay ? 'trap_wings' : 'zonal_trap',
+    fullbackRole: 'inverted',
+    strikerRole: 'poacher',
+    defensiveBlock: 'high',
+    markingStyle: 'man_to_man',
     timeWasting: 'never',
     startingPlayerIds: startingIds,
     benchPlayerIds: benchIds,
     captainId: startingIds[0] || '',
     penaltyTakerId: startingIds[startingIds.length - 1] || '',
-    freeKickTakerId: startingIds[0] || '',
-    cornerTakerId: startingIds[1] || '',
+    freeKickTakerId: startingIds[1] || '',
+    cornerTakerId: startingIds[2] || '',
   };
 }
 
@@ -1205,9 +1217,9 @@ export function simulatePenaltyShootout(
     suddenDeathRound++;
   }
 
-  // Absolute tiebreaker guarantee (knockout penalties can never end in a draw)
+  // Absolute tiebreaker guarantee (knockout penalties can never end in a draw - tense 50/50 coin flip)
   if (homeScore === awayScore) {
-    if (homeMgrRating >= awayMgrRating) {
+    if (Math.random() < 0.5) {
       homeScore++;
     } else {
       awayScore++;
@@ -1262,7 +1274,10 @@ export function simulateMatchStep(
 
     const isCupMatch = 
       prevState.fixture?.competitionType === 'cup' || 
+      prevState.fixture?.competitionType === 'DOMESTIC_CUP' ||
+      (prevState.fixture?.competitionType === 'CONTINENTAL_CUP' && prevState.fixture?.stage && prevState.fixture?.stage !== 'group') ||
       Boolean(prevState.fixture?.cupStage) || 
+      Boolean(prevState.fixture?.stage && ['round_of_64', 'round_of_32', 'round_of_16', 'quarter', 'semi', 'final'].includes(String(prevState.fixture.stage))) ||
       Boolean(prevState.fixture?.stageName?.includes('نهائي')) ||
       Boolean(prevState.fixture?.stageName?.includes('كأس')) ||
       Boolean(prevState.fixture?.stageName?.includes('الكأس')) ||
@@ -1655,29 +1670,69 @@ export function simulateMatchStep(
     }
   }
 
-  // Calculated Effective Strengths incorporating Tactics, Synergy, Physicality, Crowd, and Staff
-  const effHomeAtk = homeStrength.attack * matchup.homeAttackMod * homeSynergy.attackMod * crowdAdvantage.homeAttackBonus * homePhysMod * homeCountFactor * (1 + homeStaffBonuses.tacticalScoutingAdvantage);
-  const effHomeMid = homeStrength.midfield * matchup.homeMidfieldMod * homeSynergy.midfieldMod * crowdAdvantage.homeMidfieldBonus * homePhysMod * homeCountFactor * (1 + homeStaffBonuses.tacticalSynergyBonus);
-  const effHomeDef = homeStrength.defense * matchup.homeDefenseMod * homeSynergy.defenseMod * crowdAdvantage.homeDefenseBonus * homePhysMod * homeCountFactor;
+  // Tournament & Knockout AI Difficulty Scaling (Makes winning League, Cup, and Continental titles genuinely challenging)
+  const isHomeAi = !prevState.homeTeam?.isUserClub && prevState.homeTeam?.id !== prevState.userClubId;
+  const isAwayAi = !prevState.awayTeam?.isUserClub && prevState.awayTeam?.id !== prevState.userClubId;
+  const isContinentalMatch =
+    prevState.fixture?.competitionType === 'continental' ||
+    prevState.fixture?.competitionType === 'CONTINENTAL_CUP' ||
+    Boolean(prevState.fixture?.competitionName?.includes('أبطال')) ||
+    Boolean(prevState.fixture?.competitionName?.includes('كونفدرالية'));
+  const isDomesticCupMatch =
+    prevState.fixture?.competitionType === 'cup' ||
+    prevState.fixture?.competitionType === 'DOMESTIC_CUP' ||
+    Boolean(prevState.fixture?.cupStage);
+  const isKnockoutStageMatch =
+    isDomesticCupMatch ||
+    (isContinentalMatch && prevState.fixture?.stage && prevState.fixture?.stage !== 'group') ||
+    Boolean(prevState.fixture?.stageName?.includes('نهائي')) ||
+    Boolean(prevState.fixture?.stageName?.includes('دور الـ'));
+  const isFinalOrSemi =
+    prevState.fixture?.stage === 'final' ||
+    prevState.fixture?.stage === 'semi' ||
+    prevState.fixture?.cupStage === 'final' ||
+    prevState.fixture?.cupStage === 'semi' ||
+    Boolean(prevState.fixture?.stageName?.includes('نهائي'));
 
-  const effAwayAtk = awayStrength.attack * matchup.awayAttackMod * awaySynergy.attackMod * crowdAdvantage.awayIntimidationPenalty * awayPhysMod * awayCountFactor * (1 + awayStaffBonuses.tacticalScoutingAdvantage);
-  const effAwayMid = awayStrength.midfield * matchup.awayMidfieldMod * awaySynergy.midfieldMod * awayPhysMod * awayCountFactor * (1 + awayStaffBonuses.tacticalSynergyBonus);
-  const effAwayDef = awayStrength.defense * matchup.awayDefenseMod * awaySynergy.defenseMod * awayPhysMod * awayCountFactor;
+  // Competitive AI boost when facing the user's club
+  const getAiCompetitiveMult = (isAiSide: boolean): number => {
+    if (!isAiSide) return 1.0;
+    if (isFinalOrSemi) return 1.24; // Fierce Semifinal & Final intensity
+    if (isKnockoutStageMatch) return 1.18; // Tough Cup & Continental Knockout clashes
+    if (isContinentalMatch) return 1.15; // Tough Continental Group Stage
+    return 1.11; // Competitive Domestic League AI
+  };
 
-  // Balanced Quality Advantage incorporating Squad Strength, Overall, and Tactical Coaching
-  const squadDiff = homeStrength.squadStrength - awayStrength.squadStrength;
+  const homeAiMult = getAiCompetitiveMult(isHomeAi && !isAwayAi);
+  const awayAiMult = getAiCompetitiveMult(isAwayAi && !isHomeAi);
+
+  // Calculated Effective Strengths incorporating Tactics, Synergy, Physicality, Crowd, Staff, and Tournament Difficulty
+  const effHomeAtk = homeStrength.attack * matchup.homeAttackMod * homeSynergy.attackMod * crowdAdvantage.homeAttackBonus * homePhysMod * homeCountFactor * (1 + homeStaffBonuses.tacticalScoutingAdvantage) * homeAiMult;
+  const effHomeMid = homeStrength.midfield * matchup.homeMidfieldMod * homeSynergy.midfieldMod * crowdAdvantage.homeMidfieldBonus * homePhysMod * homeCountFactor * (1 + homeStaffBonuses.tacticalSynergyBonus) * homeAiMult;
+  const effHomeDef = homeStrength.defense * matchup.homeDefenseMod * homeSynergy.defenseMod * crowdAdvantage.homeDefenseBonus * homePhysMod * homeCountFactor * homeAiMult;
+
+  const effAwayAtk = awayStrength.attack * matchup.awayAttackMod * awaySynergy.attackMod * crowdAdvantage.awayIntimidationPenalty * awayPhysMod * awayCountFactor * (1 + awayStaffBonuses.tacticalScoutingAdvantage) * awayAiMult;
+  const effAwayMid = awayStrength.midfield * matchup.awayMidfieldMod * awaySynergy.midfieldMod * awayPhysMod * awayCountFactor * (1 + awayStaffBonuses.tacticalSynergyBonus) * awayAiMult;
+  const effAwayDef = awayStrength.defense * matchup.awayDefenseMod * awaySynergy.defenseMod * awayPhysMod * awayCountFactor * awayAiMult;
+
+  // Balanced Quality Advantage incorporating Squad Strength, Overall, and Tactical Coaching (with AI tournament resilience)
+  const aiBonusRating = isFinalOrSemi ? 7 : isKnockoutStageMatch ? 5 : isContinentalMatch ? 4 : 3;
+  const adjHomeOverall = homeStrength.overall + (isHomeAi && !isAwayAi ? aiBonusRating : 0);
+  const adjAwayOverall = awayStrength.overall + (isAwayAi && !isHomeAi ? aiBonusRating : 0);
+  const squadDiff = (homeStrength.squadStrength + (isHomeAi && !isAwayAi ? aiBonusRating : 0)) - (awayStrength.squadStrength + (isAwayAi && !isHomeAi ? aiBonusRating : 0));
   const managerDiff = homeStrength.managerRating - awayStrength.managerRating;
-  const overallDiff = homeStrength.overall - awayStrength.overall;
+  const overallDiff = adjHomeOverall - adjAwayOverall;
 
-  const qualityAdvantage = Math.max(-0.40, Math.min(0.40, (overallDiff * 0.020) + (managerDiff * 0.008) + (squadDiff * 0.006)));
-  const homeQualityMod = Math.max(0.60, Math.min(1.40, 1.0 + qualityAdvantage));
-  const awayQualityMod = Math.max(0.60, Math.min(1.40, 1.0 - qualityAdvantage));
+  const rawQualityAdv = (overallDiff * 0.018) + (managerDiff * 0.005) + (squadDiff * 0.005);
+  const qualityAdvantage = Math.max(-0.36, Math.min(0.36, rawQualityAdv));
+  const homeQualityMod = Math.max(0.64, Math.min(1.36, 1.0 + qualityAdvantage));
+  const awayQualityMod = Math.max(0.64, Math.min(1.36, 1.0 - qualityAdvantage));
 
   // Dynamic Possession for this minute (strongly reflects quality gap and tactical control)
   const weightedHomeMid = effHomeMid * Math.sqrt(homeQualityMod);
   const weightedAwayMid = effAwayMid * Math.sqrt(awayQualityMod);
   const totalMid = Math.max(10, weightedHomeMid + weightedAwayMid);
-  const homePossession = Math.min(84, Math.max(16, Math.round((weightedHomeMid / totalMid) * 100)));
+  const homePossession = Math.min(82, Math.max(18, Math.round((weightedHomeMid / totalMid) * 100)));
   const awayPossession = 100 - homePossession;
 
   // Track match events and stats
@@ -1704,25 +1759,22 @@ export function simulateMatchStep(
   let updatedHomeRedded = [...prevState.homeReddedPlayerIds];
   let updatedAwayRedded = [...prevState.awayReddedPlayerIds];
 
-  // 3. Dynamic Match Momentum, In-Match AI Adaptation & Realistic Score Governor (Target: ~2.0–2.6 total goals/match)
+  // 3. Dynamic Match Momentum, In-Match AI Adaptation & Realistic Score Governor
   const scoreDiff = homeScore - awayScore;
 
-  // Dynamic In-Match AI Tactical Adaptation (minute >= 60)
-  const isHomeAi = !prevState.homeTeam?.isUserClub && prevState.homeTeam?.id !== prevState.userClubId;
-  const isAwayAi = !prevState.awayTeam?.isUserClub && prevState.awayTeam?.id !== prevState.userClubId;
-
-  if (isHomeAi && nextMinute >= 60) {
-    if (scoreDiff > 0) {
-      currentHomeTactics = { ...currentHomeTactics, mentality: 'defensive', defensiveLine: 'low', timeWasting: 'sometimes' };
-    } else if (scoreDiff === -1 && nextMinute >= 70) {
-      currentHomeTactics = { ...currentHomeTactics, mentality: 'attacking', pressingIntensity: 'high' };
+  // Dynamic In-Match AI Tactical Adaptation (minute >= 55)
+  if (isHomeAi && nextMinute >= 55) {
+    if (scoreDiff > 0 && nextMinute >= 68) {
+      currentHomeTactics = { ...currentHomeTactics, mentality: 'defensive', defensiveLine: 'low', timeWasting: 'sometimes', defensiveBlock: 'low' };
+    } else if (scoreDiff < 0) {
+      currentHomeTactics = { ...currentHomeTactics, mentality: scoreDiff <= -2 ? 'ultra_attacking' : 'attacking', pressingIntensity: 'high', tempo: 'fast' };
     }
   }
-  if (isAwayAi && nextMinute >= 60) {
-    if (scoreDiff < 0) {
-      currentAwayTactics = { ...currentAwayTactics, mentality: 'defensive', defensiveLine: 'low', timeWasting: 'sometimes' };
-    } else if (scoreDiff === 1 && nextMinute >= 70) {
-      currentAwayTactics = { ...currentAwayTactics, mentality: 'attacking', pressingIntensity: 'high' };
+  if (isAwayAi && nextMinute >= 55) {
+    if (scoreDiff < 0 && nextMinute >= 68) {
+      currentAwayTactics = { ...currentAwayTactics, mentality: 'defensive', defensiveLine: 'low', timeWasting: 'sometimes', defensiveBlock: 'low' };
+    } else if (scoreDiff > 0) {
+      currentAwayTactics = { ...currentAwayTactics, mentality: scoreDiff >= 2 ? 'ultra_attacking' : 'attacking', pressingIntensity: 'high', tempo: 'fast' };
     }
   }
 
@@ -1738,39 +1790,38 @@ export function simulateMatchStep(
   const homeTeamFatigueMod = calcTeamLiveFatigueMod(homeActivePlayers, prevState.homeFatigueMap);
   const awayTeamFatigueMod = calcTeamLiveFatigueMod(awayActivePlayers, prevState.awayFatigueMap);
 
-  // Realistic Lead Governor: Leading teams manage tempo and protect their lead
+  // Realistic Lead Governor: Leading teams manage tempo and trailing AI teams push hard for an equalizer
   let homeLeadMod = 1.0;
-  if (scoreDiff >= 3) homeLeadMod = 0.42;
-  else if (scoreDiff === 2) homeLeadMod = 0.65;
-  else if (scoreDiff === 1) homeLeadMod = 0.86;
-  else if (scoreDiff < 0) homeLeadMod = 1.08;
+  if (scoreDiff >= 3) homeLeadMod = 0.38;
+  else if (scoreDiff === 2) homeLeadMod = 0.58;
+  else if (scoreDiff === 1) homeLeadMod = isHomeAi ? 0.88 : 0.76;
+  else if (scoreDiff < 0) homeLeadMod = isHomeAi ? 1.24 : 1.06;
 
   let awayLeadMod = 1.0;
-  if (scoreDiff <= -3) awayLeadMod = 0.42;
-  else if (scoreDiff === -2) awayLeadMod = 0.65;
-  else if (scoreDiff === -1) awayLeadMod = 0.86;
-  else if (scoreDiff > 0) awayLeadMod = 1.08;
+  if (scoreDiff <= -3) awayLeadMod = 0.38;
+  else if (scoreDiff === -2) awayLeadMod = 0.58;
+  else if (scoreDiff === -1) awayLeadMod = isAwayAi ? 0.88 : 0.76;
+  else if (scoreDiff > 0) awayLeadMod = isAwayAi ? 1.24 : 1.06;
 
-  // Overextended risk: If a team recklessly stays on ultra_attacking, opponent gets counter-attack opportunities
+  // Overextended risk: If a team recklessly stays on ultra_attacking or high line, opponent gets counter-attack opportunities
   const homeOverextended = currentHomeTactics.mentality === 'ultra_attacking' || currentHomeTactics.defensiveLine === 'high';
   const awayOverextended = currentAwayTactics.mentality === 'ultra_attacking' || currentAwayTactics.defensiveLine === 'high';
 
-  // Calibrated attack generation per minute for realistic ~2.1–2.6 goals/match
-  let homeAttackProb = (weightedHomeMid / totalMid) * 0.165 * homeLeadMod * homeQualityMod * homeTeamFatigueMod * crowdAdvantage.homeAttackBonus;
-  let awayAttackProb = (weightedAwayMid / totalMid) * 0.145 * awayLeadMod * awayQualityMod * awayTeamFatigueMod;
+  let homeAttackProb = (weightedHomeMid / totalMid) * 0.165 * homeLeadMod * homeQualityMod * homeTeamFatigueMod * crowdAdvantage.homeAttackBonus * (isHomeAi && !isAwayAi ? 1.12 : 1.0);
+  let awayAttackProb = (weightedAwayMid / totalMid) * 0.152 * awayLeadMod * awayQualityMod * awayTeamFatigueMod * (isAwayAi && !isHomeAi ? 1.14 : 1.0);
 
-  if (awayOverextended) homeAttackProb *= 1.18;
-  if (homeOverextended) awayAttackProb *= 1.18;
+  if (awayOverextended) homeAttackProb *= 1.20;
+  if (homeOverextended) awayAttackProb *= 1.20;
 
   // Defensive block suppression from Park the Bus, Catenaccio, Low Block, or 5-back formations
   const awayLowBlock = isAwayParked || currentAwayTactics.mentality === 'defensive' || currentAwayTactics.defensiveLine === 'low';
   const homeLowBlock = isHomeParked || currentHomeTactics.mentality === 'defensive' || currentHomeTactics.defensiveLine === 'low';
 
-  if (awayLowBlock) homeAttackProb *= isAwayParked ? 0.74 : 0.84;
-  if (homeLowBlock) awayAttackProb *= isHomeParked ? 0.74 : 0.84;
+  if (awayLowBlock) homeAttackProb *= isAwayParked ? 0.72 : 0.82;
+  if (homeLowBlock) awayAttackProb *= isHomeParked ? 0.72 : 0.82;
 
-  homeAttackProb = Math.min(0.22, Math.max(0.02, homeAttackProb));
-  awayAttackProb = Math.min(0.20, Math.max(0.02, awayAttackProb));
+  homeAttackProb = Math.min(0.22, Math.max(0.025, homeAttackProb));
+  awayAttackProb = Math.min(0.21, Math.max(0.025, awayAttackProb));
 
   const roll = Math.random();
 
@@ -2364,12 +2415,14 @@ export function simulateMatch(
   const homeGkRating = homeGk?.attributes?.goalkeeping || homeGk?.overallRating || 68;
   const awayGkRating = awayGk?.attributes?.goalkeeping || awayGk?.overallRating || 68;
 
-  // 4. Home Pitch & Crowd Advantage (Fair +2.6 rating bonus to home team)
+  // 4. Home Pitch & Crowd Advantage + AI Competitive Challenge Boost against User
   const homePitchAdvantage = 2.6;
+  const homeAiChallengeBonus = !safeHome.isUserClub && safeAway.isUserClub ? 4.2 : 0;
+  const awayAiChallengeBonus = !safeAway.isUserClub && safeHome.isUserClub ? 4.2 : 0;
 
   // 5. Effective Overall Ratings
-  const effHomeRating = Math.max(30, Math.min(99, homeStrength.overall + homePitchAdvantage + homeTacBonus + homeFitnessModifier));
-  const effAwayRating = Math.max(30, Math.min(99, awayStrength.overall + awayTacBonus + awayFitnessModifier));
+  const effHomeRating = Math.max(30, Math.min(99, homeStrength.overall + homePitchAdvantage + homeTacBonus + homeFitnessModifier + homeAiChallengeBonus));
+  const effAwayRating = Math.max(30, Math.min(99, awayStrength.overall + awayTacBonus + awayFitnessModifier + awayAiChallengeBonus));
 
   // True Rating Disparity (Rating Delta)
   const ratingDelta = effHomeRating - effAwayRating;

@@ -324,13 +324,13 @@ export function validateTransferFinancials(
   userClub: Club,
   player: Partial<Player>,
   offeredFee?: number,
-  _offeredSalary?: number,
+  offeredSalary?: number,
   isFreeAgent: boolean = false
 ): TransferFinancialValidation {
   if (!userClub) {
     return {
       canAffordFee: false,
-      canAffordWage: true,
+      canAffordWage: false,
       allowed: false,
       currentBudget: 0,
       requiredFee: 0,
@@ -348,23 +348,36 @@ export function validateTransferFinancials(
   const requiredFee = isPlayerFreeAgent ? 0 : (offeredFee ?? player?.marketValue ?? 0);
   const canAffordFee = currentBudget >= requiredFee;
 
+  const currentWages = calculateClubTotalMonthlyWages(userClub);
+  const monthlyIncome = calculateClubMonthlyIncome(userClub);
+  const remainingWageBudget = Math.max(0, monthlyIncome - currentWages);
+  const defaultSalary = player?.salary || calculateRealisticSalary(player?.overallRating || 60, {
+    divisionTier: userClub.division || 4,
+    clubReputation: userClub.reputation || 30,
+  });
+  const newSalary = offeredSalary !== undefined && offeredSalary > 0 ? offeredSalary : defaultSalary;
+  const projectedWages = currentWages + newSalary;
+  const canAffordWage = projectedWages <= monthlyIncome;
+
   let reason: string | undefined = undefined;
 
   if (!canAffordFee) {
-    reason = `ميزانية النادي (${(currentBudget || 0).toLocaleString()} ج.م) لا تكفي لدفع قيمة شراء عقد اللاعب المطلوبة (${(requiredFee || 0).toLocaleString()} ج.م).`;
+    reason = `ميزانية النادي (${(currentBudget || 0).toLocaleString()} ج.م) لا تكفي لدفع السعر الثابت لشراء عقد اللاعب (${(requiredFee || 0).toLocaleString()} ج.م).`;
+  } else if (!canAffordWage) {
+    reason = `راتب اللاعب الشهري (${newSalary.toLocaleString()} ج.م) يتجاوز السقف المتبقي لرواتب النادي (${remainingWageBudget.toLocaleString()} ج.م شهرياً).`;
   }
 
   return {
     canAffordFee,
-    canAffordWage: true,
-    allowed: canAffordFee,
+    canAffordWage,
+    allowed: canAffordFee && canAffordWage,
     currentBudget,
     requiredFee,
-    currentWages: 0,
-    newSalary: 0,
-    projectedWages: 0,
-    monthlyIncome: calculateClubMonthlyIncome(userClub),
-    remainingWageBudget: 999999999,
+    currentWages,
+    newSalary,
+    projectedWages,
+    monthlyIncome,
+    remainingWageBudget,
     reason,
   };
 }

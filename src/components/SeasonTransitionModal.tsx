@@ -172,12 +172,63 @@ export const SeasonTransitionModal: React.FC = () => {
                 </div>
               </div>
 
-              {/* Trophies & Cup Section */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {/* 🏆 Golden Trophies Showcase (سجل بطولات وإنجازات الموسم الذهبية) */}
+              {((seasonEndSummary.trophiesWonList && seasonEndSummary.trophiesWonList.length > 0) ||
+                seasonEndSummary.leagueTrophyAwarded ||
+                seasonEndSummary.cupTrophyAwarded ||
+                seasonEndSummary.continentalTrophyAwarded) && (
+                <div className="bg-gradient-to-r from-amber-500/20 via-yellow-500/25 to-amber-600/20 p-4 sm:p-5 rounded-3xl border-2 border-amber-400/50 shadow-2xl relative overflow-hidden">
+                  <div className="flex items-center justify-between mb-3">
+                    <div className="flex items-center gap-2">
+                      <span className="text-2xl animate-bounce">🏆</span>
+                      <h4 className="text-base sm:text-lg font-black text-amber-300">
+                        سجل بطولات الموسم الذهبية ({seasonEndSummary.seasonNumber})
+                      </h4>
+                    </div>
+                    <span className="text-[11px] font-bold px-2.5 py-1 rounded-full bg-amber-500/30 text-amber-200 border border-amber-400/40">
+                      تتويج رسمي معتمد
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    {seasonEndSummary.leagueTrophyAwarded && (
+                      <div className="bg-slate-900/80 p-3 rounded-2xl border border-amber-400/40 flex items-center gap-3 shadow-md">
+                        <span className="text-3xl">🥇</span>
+                        <div>
+                          <div className="text-[11px] text-amber-400 font-bold">بطل الدوري</div>
+                          <div className="text-sm font-black text-white">{seasonEndSummary.leagueTrophyAwarded}</div>
+                        </div>
+                      </div>
+                    )}
+                    {seasonEndSummary.cupTrophyAwarded && (
+                      <div className="bg-slate-900/80 p-3 rounded-2xl border border-amber-400/40 flex items-center gap-3 shadow-md">
+                        <span className="text-3xl">🛡️</span>
+                        <div>
+                          <div className="text-[11px] text-purple-400 font-bold">بطل الكأس</div>
+                          <div className="text-sm font-black text-white">{seasonEndSummary.cupTrophyAwarded}</div>
+                        </div>
+                      </div>
+                    )}
+                    {seasonEndSummary.continentalTrophyAwarded && (
+                      <div className="bg-slate-900/80 p-3 rounded-2xl border border-amber-400/40 flex items-center gap-3 shadow-md">
+                        <span className="text-3xl">🌍</span>
+                        <div>
+                          <div className="text-[11px] text-cyan-400 font-bold">المجد القاري</div>
+                          <div className="text-sm font-black text-white">{seasonEndSummary.continentalTrophyAwarded}</div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Competitions Outcome Section (League + National Cup + Continental) */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                {/* 1. League */}
                 <div className="bg-gradient-to-br from-amber-950/30 to-slate-800/80 p-4 rounded-2xl border border-amber-500/20">
                   <div className="flex items-center gap-2 mb-2">
                     <Trophy className="w-5 h-5 text-amber-400" />
-                    <h5 className="font-bold text-slate-200 text-sm">البطولات والدرع</h5>
+                    <h5 className="font-bold text-slate-200 text-sm">الدوري العام</h5>
                   </div>
                   {seasonEndSummary.leagueTrophyAwarded ? (
                     <div className="flex items-center gap-3 bg-amber-500/10 p-3 rounded-xl border border-amber-500/30">
@@ -188,12 +239,16 @@ export const SeasonTransitionModal: React.FC = () => {
                       </div>
                     </div>
                   ) : (
-                    <p className="text-xs text-slate-400">
-                      لم يتم التتويج بلقب الدوري هذا الموسم. التركيز على التتويج في المواسم القادمة!
-                    </p>
+                    <div className="bg-slate-900/40 p-3 rounded-xl border border-slate-700/50">
+                      <div className="text-sm font-bold text-slate-300">المركز {seasonEndSummary.finalPosition}</div>
+                      <div className="text-xs text-slate-400 mt-0.5">
+                        {isPromoted ? 'ضمن الصعود للدرجة الأعلى' : isRelegated ? 'هبط إلى الدرجة الأدنى' : 'البقاء في نفس الدرجة'}
+                      </div>
+                    </div>
                   )}
                 </div>
 
+                {/* 2. National Cup */}
                 <div className="bg-gradient-to-br from-purple-950/30 to-slate-800/80 p-4 rounded-2xl border border-purple-500/20">
                   <div className="flex items-center gap-2 mb-2">
                     <Award className="w-5 h-5 text-purple-400" />
@@ -204,11 +259,37 @@ export const SeasonTransitionModal: React.FC = () => {
                     <div>
                       <div className="font-bold text-purple-300 text-sm">{seasonEndSummary.cupResultText}</div>
                       <div className="text-xs text-purple-200/70">
-                        {seasonEndSummary.cupTrophyAwarded ? 'حصد لقب الكأس رسمياً' : 'منافسات خروج المغلوب'}
+                        {seasonEndSummary.cupTrophyAwarded ? 'حصد لقب الكأس رسمياً' : 'منافسات الكأس'}
                       </div>
                     </div>
                   </div>
                 </div>
+
+                {/* 3. Continental Tournament */}
+                <div className="bg-gradient-to-br from-cyan-950/30 to-slate-800/80 p-4 rounded-2xl border border-cyan-500/20">
+                  <div className="flex items-center gap-2 mb-2">
+                    <Sparkles className="w-5 h-5 text-cyan-400" />
+                    <h5 className="font-bold text-slate-200 text-sm">البطولة القارية</h5>
+                  </div>
+                  <div className="flex items-center gap-3 bg-cyan-500/10 p-3 rounded-xl border border-cyan-500/30">
+                    <span className="text-2xl">🌍</span>
+                    <div>
+                      <div className="font-bold text-cyan-300 text-sm">{seasonEndSummary.continentalResultText || 'لم يشارك هذا الموسم'}</div>
+                      <div className="text-xs text-cyan-200/70">
+                        {seasonEndSummary.continentalTrophyAwarded ? 'تتويج قاري تاريخي' : 'المسابقات الإفريقية/الأوروبية'}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Local Storage Integrity Badge */}
+              <div className="flex items-center justify-between bg-slate-950/70 px-4 py-2.5 rounded-2xl border border-slate-800 text-xs text-slate-400">
+                <span className="flex items-center gap-2">
+                  <ShieldCheck className="w-4 h-4 text-emerald-400" />
+                  <span>حفظ آمن ومستمر لعالم اللعبة محلياً (IndexedDB Persistent Universe)</span>
+                </span>
+                <span className="text-[11px] font-mono text-emerald-400 font-bold">100% Local</span>
               </div>
 
               {/* 🌍 World Domination Conquest Banner */}

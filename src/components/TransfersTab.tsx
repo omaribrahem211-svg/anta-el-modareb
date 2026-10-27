@@ -13,6 +13,10 @@ import {
 } from '../utils/transferEngine';
 import { canPlayerJoinClub, calculateClubMonthlyIncome, calculateClubTotalMonthlyWages, validateTransferFinancials } from '../services/economyService';
 import { GLOBAL_LEAGUES } from '../data/leaguesData';
+import { PlayerKit3DModel } from './models/Football3DModels';
+import { useLazyList } from '../utils/useLazyList';
+import { compressImage } from '../utils/imageCompressor';
+import { LazyImage } from './common/LazyImage';
 import {
   ArrowLeftRight,
   Search,
@@ -115,19 +119,53 @@ export const TransfersTab: React.FC<TransfersTabProps> = ({ onSelectPlayer }) =>
   const [sortOrder, setSortOrder] = useState<'desc' | 'asc'>('desc');
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
 
-  // Pagination for smooth ultra-fast rendering
-  const [displayCount, setDisplayCount] = useState<number>(30);
+  // Pagination for smooth ultra-fast rendering on Android
+  const [displayCount, setDisplayCount] = useState<number>(20);
+  const [debouncedSearch, setDebouncedSearch] = useState<string>('');
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearch(searchQuery);
+      setDisplayCount(20);
+    }, 120);
+    return () => clearTimeout(timer);
+  }, [searchQuery]);
+
+  // Precompute user club player IDs and normalized names once in O(M) for O(1) lookup during filtering
+  const { userPlayerIdsSet, userPlayerNamesSet } = useMemo(() => {
+    const idSet = new Set<string>();
+    const nameSet = new Set<string>();
+    for (const myP of userClub?.players || []) {
+      if (!myP) continue;
+      if (myP.id) idSet.add(myP.id);
+      const nk = normalizePlayerKey(myP.name);
+      if (nk) nameSet.add(nk);
+    }
+    return { userPlayerIdsSet: idSet, userPlayerNamesSet: nameSet };
+  }, [userClub?.players]);
 
   // 1. Fetch All Database Players
   const allDbPlayers: MarketPlayerItem[] = useMemo(() => {
     return getAllDatabasePlayers(teams, transferMarket, activeNegotiations, userClub?.id);
   }, [teams, transferMarket, activeNegotiations, userClub?.id]);
 
-  // 2. Transfer Rumors Feed
+  // Fast O(1) lookup maps by ID and Name
+  const { dbItemByIdMap, dbPlayerByNameMap } = useMemo(() => {
+    const byId = new Map<string, MarketPlayerItem>();
+    const byName = new Map<string, Player>();
+    for (const item of allDbPlayers) {
+      if (item.player?.id) byId.set(item.player.id, item);
+      if (item.player?.name) byName.set(item.player.name, item.player);
+    }
+    return { dbItemByIdMap: byId, dbPlayerByNameMap: byName };
+  }, [allDbPlayers]);
+
+  // 2. Transfer Rumors Feed (Lazily computed only when rumors tab is viewed)
   const [rumorFeedSeed, setRumorFeedSeed] = useState<number>(1);
   const transferRumors: TransferRumor[] = useMemo(() => {
-    return generateTransferRumors(allDbPlayers, calendarDate?.formattedArabic || 'اليوم', 12);
-  }, [allDbPlayers, rumorFeedSeed, calendarDate?.formattedArabic]);
+    if (activeTabMode !== 'rumors') return [];
+    return generateTransferRumors(allDbPlayers, calendarDate?.formattedArabic || 'اليوم', 10);
+  }, [activeTabMode, allDbPlayers, rumorFeedSeed, calendarDate?.formattedArabic]);
 
   // 3. Extract unique filter options dynamically from database
   const availableLeagues = useMemo(() => {
@@ -163,21 +201,25 @@ export const TransfersTab: React.FC<TransfersTabProps> = ({ onSelectPlayer }) =>
     return Array.from(set).sort((a, b) => a.localeCompare(b, 'ar'));
   }, [allDbPlayers]);
 
-  // 4. Apply Multi-Dimension Filtering
+  // 4. Apply Multi-Dimension Filtering (Optimized with O(1) Set lookups for Android)
   const filteredPlayers = useMemo(() => {
-    const q = searchQuery.trim().toLowerCase();
+    const q = debouncedSearch.trim().toLowerCase();
+    const parsedMinAge = typeof minAge === 'number' ? minAge : (parseInt(minAge) || 15);
+    const parsedMaxAge = typeof maxAge === 'number' ? maxAge : (parseInt(maxAge) || 45);
+    const parsedMinOverall = typeof minOverall === 'number' ? minOverall : (parseInt(minOverall) || 40);
+    const parsedMaxOverall = typeof maxOverall === 'number' ? maxOverall : (parseInt(maxOverall) || 99);
 
     const filtered = allDbPlayers.filter(item => {
       const p = item.player;
       if (!p) return false;
 
-      // Never show user's own players in the buy market (strict de-duplication by ID and normalized name)
+      // Fast O(1) check to exclude user's own players from the buy market
       if (userClub?.id) {
-        const normPName = normalizePlayerKey(p.name);
         if (
-          item.isUserClubPlayer || 
-          item.club?.id === userClub.id || 
-          (userClub.players || []).some(myP => myP && (myP.id === p.id || (normPName && normalizePlayerKey(myP.name) === normPName)))
+          item.isUserClubPlayer ||
+          item.club?.id === userClub.id ||
+          userPlayerIdsSet.has(p.id) ||
+          userPlayerNamesSet.has(normalizePlayerKey(p.name))
         ) {
           return false;
         }
@@ -222,13 +264,9 @@ export const TransfersTab: React.FC<TransfersTabProps> = ({ onSelectPlayer }) =>
       }
 
       // Age Range
-      const parsedMinAge = typeof minAge === 'number' ? minAge : (parseInt(minAge) || 15);
-      const parsedMaxAge = typeof maxAge === 'number' ? maxAge : (parseInt(maxAge) || 45);
       if (p.age < parsedMinAge || p.age > parsedMaxAge) return false;
 
       // Overall Rating Range
-      const parsedMinOverall = typeof minOverall === 'number' ? minOverall : (parseInt(minOverall) || 40);
-      const parsedMaxOverall = typeof maxOverall === 'number' ? maxOverall : (parseInt(maxOverall) || 99);
       if (p.overallRating < parsedMinOverall || p.overallRating > parsedMaxOverall) return false;
 
       // Market Value
@@ -260,7 +298,10 @@ export const TransfersTab: React.FC<TransfersTabProps> = ({ onSelectPlayer }) =>
     return filtered;
   }, [
     allDbPlayers,
-    searchQuery,
+    debouncedSearch,
+    userClub?.id,
+    userPlayerIdsSet,
+    userPlayerNamesSet,
     selectedLeague,
     selectedClub,
     selectedNationality,
@@ -276,9 +317,14 @@ export const TransfersTab: React.FC<TransfersTabProps> = ({ onSelectPlayer }) =>
     sortOrder,
   ]);
 
-  const displayedList = useMemo(() => {
-    return filteredPlayers.slice(0, displayCount);
-  }, [filteredPlayers, displayCount]);
+  const {
+    visibleItems: displayedList,
+    hasMore,
+    loadMore,
+    sentinelRef,
+    renderedCount,
+    totalCount,
+  } = useLazyList(filteredPlayers, { initialBatchSize: 20, batchStep: 15 });
 
   // Reset Filters helper
   const handleResetFilters = () => {
@@ -296,7 +342,7 @@ export const TransfersTab: React.FC<TransfersTabProps> = ({ onSelectPlayer }) =>
     setMaxSalary(0);
     setSortBy('overall');
     setSortOrder('desc');
-    setDisplayCount(30);
+    setDisplayCount(20);
   };
 
   const handleBuy = (player: Player, overrideFee?: number) => {
@@ -317,13 +363,14 @@ export const TransfersTab: React.FC<TransfersTabProps> = ({ onSelectPlayer }) =>
 
       const safeClub = resolveClubInfo(player.currentClubId, (player as any).currentClubName, teams);
       const { askingPrice } = calculateAskingPrice(player, safeClub.club);
-      const effectiveFee = overrideFee != null ? overrideFee : Math.max(25000, askingPrice || player.marketValue || 50000);
-      const effectiveSalary = Math.max(2500, player.salary || 2500);
+      const isFree = askingPrice === 0 || (player.contractYears !== undefined && player.contractYears <= 0);
+      const effectiveFee = isFree ? 0 : (overrideFee != null ? overrideFee : Math.max(25000, askingPrice || player.marketValue || 50000));
+      const effectiveSalary = Math.max(1500, player.salary || 2500);
 
       const clubBudget = userClub.budget || 0;
       if (clubBudget < effectiveFee) {
         setNotification({
-          text: `ميزانية ناديك (${clubBudget.toLocaleString()} ج.م) لا تكفي لدفع قيمة الصفقة (${effectiveFee.toLocaleString()} ج.م)!`,
+          text: `ميزانية ناديك (${clubBudget.toLocaleString()} ج.م) لا تكفي لدفع السعر الثابت للصفقة (${effectiveFee.toLocaleString()} ج.م)!`,
           type: 'error',
         });
         setTimeout(() => setNotification(null), 4000);
@@ -760,21 +807,21 @@ export const TransfersTab: React.FC<TransfersTabProps> = ({ onSelectPlayer }) =>
                 return (
                   <div
                     key={`${player.id}_${item.club?.id || 'free'}`}
+                    style={{ contentVisibility: 'auto', containIntrinsicSize: '130px' }}
                     className="bg-slate-900 border border-slate-800 hover:border-slate-700 p-3.5 rounded-2xl transition-all space-y-3 shadow-sm"
                   >
                     <div className="flex items-start justify-between gap-2">
                       <div className="flex items-center gap-3 min-w-0">
-                        {/* Rating Badge */}
-                        <div className="w-12 h-12 rounded-xl bg-slate-950 border border-emerald-600/50 flex flex-col items-center justify-center font-black shrink-0 shadow">
-                          <span className={`text-lg leading-none ${
-                            player.overallRating >= 85 ? 'text-amber-400' :
-                            player.overallRating >= 75 ? 'text-emerald-400' :
-                            player.overallRating >= 65 ? 'text-cyan-400' : 'text-slate-300'
-                          }`}>
-                            {player.overallRating}
-                          </span>
-                          <span className="text-[9px] uppercase font-bold text-slate-400 mt-0.5">{player.position}</span>
-                        </div>
+                        {/* 3D Sculpted Kit Figurine */}
+                        <PlayerKit3DModel
+                          number={player.number || 9}
+                          position={player.position}
+                          overall={player.overallRating}
+                          primaryColor={item.club?.primaryColor || '#10b981'}
+                          secondaryColor={item.club?.secondaryColor || '#ffffff'}
+                          isGK={player.position === 'GK'}
+                          size="sm"
+                        />
 
                         {/* Info */}
                         <div className="min-w-0">
@@ -810,13 +857,16 @@ export const TransfersTab: React.FC<TransfersTabProps> = ({ onSelectPlayer }) =>
                         </div>
                       </div>
 
-                      {/* Market Value & Salary */}
+                      {/* Fixed Price & Fixed Monthly Salary */}
                       <div className="text-left shrink-0">
                         <span className="text-xs font-bold text-emerald-400 font-mono block">
-                          {(player.marketValue || 0) > 0 ? `${(player.marketValue || 0).toLocaleString()} ج.م` : 'انتقال حر (مجاني)'}
+                          {item.askingPrice > 0 ? `${item.askingPrice.toLocaleString()} ج.م` : 'انتقال حر (مجاني)'}
                         </span>
-                        <span className="text-[10px] text-slate-400 block font-mono">
+                        <span className="text-[10px] text-cyan-300 block font-mono font-bold mt-0.5">
                           راتب: {(player.salary || 2500).toLocaleString()} ج.م/ش
+                        </span>
+                        <span className="text-[9px] text-amber-400 font-bold block">
+                          🔒 سعر وراتب ثابتان
                         </span>
                         <span className={`inline-block text-[9px] px-2 py-0.5 rounded mt-1 font-bold border ${item.statusColor}`}>
                           {item.statusLabel}
@@ -907,14 +957,14 @@ export const TransfersTab: React.FC<TransfersTabProps> = ({ onSelectPlayer }) =>
                 );
               })}
 
-              {/* Load More Button */}
-              {filteredPlayers.length > displayCount && (
-                <div className="text-center pt-2 pb-4">
+              {/* Load More Sentinel / Indicator */}
+              {hasMore && (
+                <div ref={sentinelRef} className="text-center pt-2 pb-4">
                   <button
-                    onClick={() => setDisplayCount(prev => prev + 30)}
+                    onClick={loadMore}
                     className="px-6 py-2.5 bg-slate-800 hover:bg-slate-700 text-emerald-400 font-bold text-xs rounded-2xl border border-slate-700 transition-all shadow"
                   >
-                    عرض المزيد من اللاعبين (متبقي {filteredPlayers.length - displayCount}) ⬇️
+                    عرض المزيد من اللاعبين (تم عرض {renderedCount} من {totalCount}) ⬇️
                   </button>
                 </div>
               )}
@@ -963,7 +1013,7 @@ export const TransfersTab: React.FC<TransfersTabProps> = ({ onSelectPlayer }) =>
           {/* Rumor Cards Grid */}
           <div className="space-y-3">
             {transferRumors.map(rumor => {
-              const matchedPlayer = allDbPlayers.find(p => p.player.name === rumor.playerName)?.player;
+              const matchedPlayer = dbPlayerByNameMap.get(rumor.playerName);
 
               return (
                 <div
@@ -1148,58 +1198,6 @@ export const TransfersTab: React.FC<TransfersTabProps> = ({ onSelectPlayer }) =>
                       <span>{neg.statusMessage}</span>
                     </div>
 
-                    {/* Counter price input if active for this sell negotiation */}
-                    {isSell && counteringNegId === neg.id && (
-                      <div className="p-3 bg-slate-950 border border-amber-500/50 rounded-xl space-y-2.5 animate-fade-in">
-                        <div className="flex items-center justify-between text-xs">
-                          <span className="text-amber-300 font-bold">تحديد المقابل المالي المطلوب (عرض مقابل وحيد):</span>
-                          <span className="text-slate-400 font-mono">العرض الحالي: {(neg.bidFee || 0).toLocaleString()} ج.م</span>
-                        </div>
-                        {buyerClubObj && (
-                          <div className="text-[11px] text-slate-400 flex items-center justify-between bg-slate-900/80 p-2 rounded-lg border border-slate-800 flex-wrap gap-1">
-                            <span>ميزانية {buyerClubObj.name} المتاحة: <strong className="text-emerald-400 font-mono">{(buyerClubObj.budget || 0).toLocaleString()} ج.م</strong></span>
-                            <span className="text-rose-400">⚠️ طلب مبلغ أعلى من ميزانية النادي سيؤدي لانسحاب النادي فوراً</span>
-                          </div>
-                        )}
-                        <div className="flex items-center gap-2">
-                          <input
-                            type="number"
-                            value={counterPriceInput}
-                            onChange={e => setCounterPriceInput(e.target.value === '' ? '' : Number(e.target.value))}
-                            onBlur={() => {
-                              if (counterPriceInput === '' || Number(counterPriceInput) < neg.bidFee) {
-                                setCounterPriceInput(Math.round(neg.bidFee * 1.15));
-                              }
-                            }}
-                            className="bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-white flex-1 font-mono focus:outline-none focus:border-amber-400"
-                            min={neg.bidFee}
-                            step={10000}
-                            placeholder={`مثال: ${Math.round(neg.bidFee * 1.15)}`}
-                          />
-                          <button
-                            onClick={() => {
-                              const targetVal = typeof counterPriceInput === 'number' && counterPriceInput > 0
-                                ? counterPriceInput
-                                : (Number(counterPriceInput) || Math.round(neg.bidFee * 1.15));
-                              const res = counterSellNegotiation(neg.id, targetVal);
-                              setNotification({ text: res.message, type: res.success ? 'success' : 'error' });
-                              setTimeout(() => setNotification(null), 3500);
-                              setCounteringNegId(null);
-                            }}
-                            className="px-3 py-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs rounded-lg transition-all"
-                          >
-                            إرسال الطلب 📤
-                          </button>
-                          <button
-                            onClick={() => setCounteringNegId(null)}
-                            className="px-2 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-400 text-xs rounded-lg"
-                          >
-                            إلغاء
-                          </button>
-                        </div>
-                      </div>
-                    )}
-
                     {/* Action Buttons */}
                     <div className="flex items-center gap-2 pt-1 border-t border-slate-800 flex-wrap">
                       {isSell ? (
@@ -1215,20 +1213,8 @@ export const TransfersTab: React.FC<TransfersTabProps> = ({ onSelectPlayer }) =>
                                 className="flex-1 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-xs py-2 px-3 rounded-xl transition-all shadow-md active:scale-95 flex items-center justify-center gap-1.5"
                               >
                                 <Check className="w-4 h-4" />
-                                <span>قبول البيع ({((neg.bidFee || 0)).toLocaleString()} ج.م) وإتمام الصفقة 💰</span>
+                                <span>قبول البيع بالسعر الثابت ({((neg.bidFee || 0)).toLocaleString()} ج.م) 💰</span>
                               </button>
-
-                              {!neg.managerHasCountered && (
-                                <button
-                                  onClick={() => {
-                                    setCounteringNegId(neg.id);
-                                    setCounterPriceInput(Math.round((neg.bidFee || 50000) * 1.15));
-                                  }}
-                                  className="bg-amber-600/20 hover:bg-amber-600/30 border border-amber-500/60 text-amber-300 font-bold text-xs py-2 px-3 rounded-xl transition-all"
-                                >
-                                  <span>تقديم عرض مقابل (مرة واحدة فقط) 📈</span>
-                                </button>
-                              )}
 
                               <button
                                 onClick={() => {
@@ -1348,7 +1334,7 @@ export const TransfersTab: React.FC<TransfersTabProps> = ({ onSelectPlayer }) =>
                   n => n.playerId === player.id && n.type === 'sell' && n.stage !== 'completed' && n.stage !== 'rejected'
                 );
                 const incomingBid = incomingBids.find(b => b.playerId === player.id);
-                const salePrice = Math.round(player.marketValue * 0.95);
+                const salePrice = Math.max(25000, Math.round(player.marketValue || 50000));
 
                 return (
                   <div
@@ -1476,7 +1462,9 @@ export const TransfersTab: React.FC<TransfersTabProps> = ({ onSelectPlayer }) =>
 
       {/* Interactive Negotiation Modal */}
       {(() => {
-        const negotiatingSellingClub = negotiatingPlayer ? (allDbPlayers.find(i => i.player && i.player.id === negotiatingPlayer.id)?.club || teams.find(t => (t.players || []).some(p => p && p.id === negotiatingPlayer.id)) || null) : null;
+        const negotiatingSellingClub = negotiatingPlayer
+          ? (dbItemByIdMap.get(negotiatingPlayer.id)?.club || teams.find(t => (t.players || []).some(p => p && p.id === negotiatingPlayer.id)) || null)
+          : null;
         return (
           <NegotiationModal
             player={negotiatingPlayer}

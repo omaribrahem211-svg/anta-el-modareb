@@ -39,6 +39,7 @@ import {
   ITALY_SERIE_B_CLUBS,
   FRANCE_LIGUE_2_CLUBS
 } from './lowerTiersData';
+import { get as idbGet, set as idbSet } from 'idb-keyval';
 
 // Re-export for backward compatibility
 export { generateClubSquad, createClub };
@@ -339,6 +340,11 @@ export function saveCustomLeagues(leagues: Record<string, LeagueDefinition>): vo
         continue;
       }
     }
+
+    // Asynchronously persist to IndexedDB for unlimited local persistence without quota limits
+    idbSet('anta_custom_leagues_idb', modifiedToSave).catch(err => {
+      console.warn('[LeaguesData] IndexedDB write notice:', err);
+    });
 
     const serialized = JSON.stringify(modifiedToSave);
 

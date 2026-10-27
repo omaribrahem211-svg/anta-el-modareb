@@ -10,6 +10,7 @@ import {
   MatchStats,
 } from '../types/game';
 import { updateLeagueStandings } from '../utils/engine';
+import { recalculateContinentalGroupStandings } from '../utils/continentalEngine';
 import { CalendarManager } from './calendarManager';
 import { getDomesticCupDefinitionForCountry } from '../data/competitionsData';
 
@@ -363,148 +364,62 @@ export function processMatchResult(
         m.id === updatedFixture.id ||
         (m.homeTeamId === updatedFixture.homeTeamId &&
           m.awayTeamId === updatedFixture.awayTeamId &&
-          (m.stage === updatedFixture.stage || m.stageName === updatedFixture.stageName))
+          ((updatedFixture.matchday && m.matchday === updatedFixture.matchday) ||
+            m.stage === updatedFixture.stage ||
+            m.stageName === updatedFixture.stageName))
     );
 
-    const wasAlreadyPlayedInContinental =
-      cMatchIdx !== -1 && Boolean(updatedContinental.matches[cMatchIdx]?.isPlayed);
-
     if (cMatchIdx !== -1) {
-      updatedContinental.matches[cMatchIdx] = {
-        ...updatedContinental.matches[cMatchIdx],
-        homeScore,
-        awayScore,
-        homePenalties,
-        awayPenalties,
-        winnerTeamId: resolvedWinner,
-        isPlayed: true,
-        events,
-        stats,
+      updatedContinental = {
+        ...updatedContinental,
+        matches: updatedContinental.matches.map((m, idx) =>
+          idx === cMatchIdx
+            ? {
+                ...m,
+                homeScore,
+                awayScore,
+                homePenalties,
+                awayPenalties,
+                winnerTeamId: resolvedWinner,
+                isPlayed: true,
+                events,
+                stats,
+              }
+            : { ...m }
+        ),
       };
     } else {
-      updatedContinental.matches.push({
-        id: updatedFixture.id,
-        stage: (updatedFixture.stage as any) || 'group',
-        stageName: branding.stageName,
-        roundTrigger: updatedFixture.round || 1,
-        homeTeamId: updatedFixture.homeTeamId,
-        awayTeamId: updatedFixture.awayTeamId,
-        homeScore,
-        awayScore,
-        homePenalties,
-        awayPenalties,
-        winnerTeamId: resolvedWinner,
-        isPlayed: true,
-        events,
-        stats,
-      });
+      updatedContinental = {
+        ...updatedContinental,
+        matches: [
+          ...updatedContinental.matches.map(m => ({ ...m })),
+          {
+            id: updatedFixture.id,
+            stage: (updatedFixture.stage as any) || 'group',
+            stageName: branding.stageName,
+            roundTrigger: updatedFixture.round || 1,
+            matchday: updatedFixture.matchday,
+            groupId: updatedFixture.groupId,
+            homeTeamId: updatedFixture.homeTeamId,
+            awayTeamId: updatedFixture.awayTeamId,
+            homeScore,
+            awayScore,
+            homePenalties,
+            awayPenalties,
+            winnerTeamId: resolvedWinner,
+            isPlayed: true,
+            events,
+            stats,
+          },
+        ],
+      };
     }
 
-    // 2b. Update Continental Group Standings
-    const isGroupStageMatch =
-      !updatedFixture.stage ||
-      updatedFixture.stage === 'group' ||
-      String(updatedFixture.stage).toLowerCase().includes('group') ||
-      Boolean(updatedFixture.groupId);
-
-    if (isGroupStageMatch && !wasAlreadyPlayedInContinental) {
-      const targetGroupId =
-        updatedFixture.groupId || updatedContinental.matches[cMatchIdx]?.groupId;
-      let targetGroup = updatedContinental.groups.find(g => g.id === targetGroupId);
-      if (!targetGroup) {
-        targetGroup = updatedContinental.groups.find(
-          g =>
-            g.teamIds.includes(updatedFixture.homeTeamId) &&
-            g.teamIds.includes(updatedFixture.awayTeamId)
-        );
-      }
-
-      if (targetGroup) {
-        targetGroup.standings = targetGroup.standings
-          .map(s => {
-            if (s.teamId === updatedFixture.homeTeamId) {
-              const isWin = homeScore > awayScore;
-              const isDraw = homeScore === awayScore;
-              const isLoss = homeScore < awayScore;
-              return {
-                ...s,
-                played: s.played + 1,
-                won: s.won + (isWin ? 1 : 0),
-                drawn: s.drawn + (isDraw ? 1 : 0),
-                lost: s.lost + (isLoss ? 1 : 0),
-                goalsFor: s.goalsFor + homeScore,
-                goalsAgainst: s.goalsAgainst + awayScore,
-                goalDifference: s.goalsFor + homeScore - (s.goalsAgainst + awayScore),
-                points: s.points + (isWin ? 3 : isDraw ? 1 : 0),
-              };
-            }
-            if (s.teamId === updatedFixture.awayTeamId) {
-              const isWin = awayScore > homeScore;
-              const isDraw = homeScore === awayScore;
-              const isLoss = awayScore < homeScore;
-              return {
-                ...s,
-                played: s.played + 1,
-                won: s.won + (isWin ? 1 : 0),
-                drawn: s.drawn + (isDraw ? 1 : 0),
-                lost: s.lost + (isLoss ? 1 : 0),
-                goalsFor: s.goalsFor + awayScore,
-                goalsAgainst: s.goalsAgainst + homeScore,
-                goalDifference: s.goalsFor + awayScore - (s.goalsAgainst + homeScore),
-                points: s.points + (isWin ? 3 : isDraw ? 1 : 0),
-              };
-            }
-            return s;
-          })
-          .sort((a, b) => {
-            if (b.points !== a.points) return b.points - a.points;
-            if (b.goalDifference !== a.goalDifference)
-              return b.goalDifference - a.goalDifference;
-            return b.goalsFor - a.goalsFor;
-          });
-      }
-    }
-
-    // 2c. Check Group Stage Completion & Knockout Progression
-    const groupStageMatches = updatedContinental.matches.filter(m => m.stage === 'group');
-    if (
-      groupStageMatches.length > 0 &&
-      groupStageMatches.every(m => m.isPlayed) &&
-      updatedContinental.currentStage === 'group' &&
-      !updatedContinental.matches.some(m => m.stage === 'quarter')
-    ) {
-      const qualifiedFirst: string[] = [];
-      const qualifiedSecond: string[] = [];
-
-      updatedContinental.groups.forEach(g => {
-        if (g.standings && g.standings.length >= 2) {
-          qualifiedFirst.push(g.standings[0].teamId);
-          qualifiedSecond.push(g.standings[1].teamId);
-        }
-      });
-
-      if (qualifiedFirst.length >= 4 && qualifiedSecond.length >= 4) {
-        const qfPairs = [
-          { home: qualifiedFirst[0], away: qualifiedSecond[1] },
-          { home: qualifiedFirst[1], away: qualifiedSecond[0] },
-          { home: qualifiedFirst[2], away: qualifiedSecond[3] },
-          { home: qualifiedFirst[3], away: qualifiedSecond[2] },
-        ];
-
-        qfPairs.forEach((pair, idx) => {
-          updatedContinental!.matches.push({
-            id: `${compCode}_qf_${idx + 1}_s${updatedContinental!.seasonNumber}`,
-            stage: 'quarter',
-            stageName: `ربع نهائي ${compName} (${idx + 1})`,
-            roundTrigger: 18,
-            homeTeamId: pair.home,
-            awayTeamId: pair.away,
-            isPlayed: false,
-          });
-        });
-        updatedContinental.currentStage = 'quarter';
-      }
-    }
+    // 2b & 2c. Recalculate Continental Group Standings immutably from all played matches & unlock Quarter-Finals when all 6 matchdays complete
+    updatedContinental = recalculateContinentalGroupStandings(
+      updatedContinental,
+      updatedFixtures
+    );
 
     const isQuarter =
       updatedFixture.stage === 'quarter' || updatedFixture.stageName?.includes('ربع');

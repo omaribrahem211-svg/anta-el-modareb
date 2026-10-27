@@ -20,6 +20,7 @@ import {
   AlertCircle,
 } from 'lucide-react';
 import { stadiumAudio } from '../../utils/stadiumAudio';
+import { PitchPlayerFigurine3D } from '../models/Football3DModels';
 
 export interface PitchLiveEvent {
   id?: string;
@@ -304,7 +305,7 @@ const QUICK_TACTICS_LIST = [
 ];
 
 /**
- * Miniature 3D Player Figurine Component (مجسم لاعب مصغر ثلاثي الأبعاد مع الاسم والرقم)
+ * Miniature 3D Player Figurine Component (مجسم لاعب ثلاثي الأبعاد مطور مع الاسم والرقم وحلقة الإضاءة التكتيكية)
  */
 const MiniaturePlayerFigurine: React.FC<{
   player: PlayerDot;
@@ -312,120 +313,19 @@ const MiniaturePlayerFigurine: React.FC<{
   primaryColor?: string;
   isGK: boolean;
 }> = ({ player, isHome, primaryColor, isGK }) => {
-  const kitColor = isGK
-    ? isHome
-      ? '#f59e0b'
-      : '#06b6d4'
-    : primaryColor || (isHome ? '#10b981' : '#2563eb');
-  const shortsColor = isHome ? '#ffffff' : '#0f172a';
-  const sockColor = kitColor;
-
   return (
-    <div className="relative flex flex-col items-center">
-      {/* Scorer celebration banner above player head */}
-      {player.isScorer && (
-        <div className="absolute -top-6 left-1/2 -translate-x-1/2 flex items-center gap-1 px-1.5 py-0.2 rounded-full bg-amber-400 text-slate-950 font-black text-[8px] shadow-lg animate-bounce z-30 whitespace-nowrap border border-amber-200">
-          <span>⚽</span>
-          <span>هداف!</span>
-        </div>
-      )}
-
-      {/* 3D Contact Shadow on Turf - Light & Hardware-friendly */}
-      <div
-        className="absolute -bottom-0.5 left-1/2 -translate-x-1/2 bg-black/60 rounded-full blur-[0.6px]"
-        style={{
-          width: player.isRunning ? '14px' : '11px',
-          height: '3px',
-        }}
-      />
-
-      {/* Miniature 3D Figurine Body - Compact & Ultra-lightweight (Reduced size by ~35%) */}
-      <div
-        className={`relative flex flex-col items-center transition-transform duration-200 ${
-          player.isCarrier ? 'scale-105' : 'scale-90'
-        }`}
-      >
-        {/* Head with skin tone and styled hair (Smaller: 10px / 2.5) */}
-        <div className="relative w-2.5 h-2.5 rounded-full bg-[#f6c89f] border border-black/30 flex items-center justify-center overflow-hidden z-3 shadow-xs">
-          <div className="absolute top-0 inset-x-0 h-1 bg-[#2a1b12] rounded-t-full" />
-        </div>
-
-        {/* Torso & Jersey with sleeves and squad number (Smaller: w-3.5 h-3) */}
-        <div
-          className={`relative w-3.5 h-3 rounded-xs border border-black/30 flex items-center justify-center -mt-0.5 z-2 shadow-xs ${
-            player.isCarrier ? 'ring-1.5 ring-amber-400 shadow-[0_0_6px_rgba(251,191,36,0.9)]' : ''
-          }`}
-          style={{ backgroundColor: kitColor }}
-        >
-          {/* Sleeves */}
-          <div
-            className="absolute -left-0.8 top-0.5 w-0.8 h-1.5 rounded-l-xs"
-            style={{ backgroundColor: kitColor }}
-          />
-          <div
-            className="absolute -right-0.8 top-0.5 w-0.8 h-1.5 rounded-r-xs"
-            style={{ backgroundColor: kitColor }}
-          />
-          {/* Collar trim */}
-          <div className="absolute top-0 w-1.5 h-0.5 bg-white/40 rounded-b-xs" />
-          {/* Squad Number on jersey */}
-          <span className="text-[6px] font-black text-white leading-none drop-shadow-[0_1px_1px_rgba(0,0,0,0.9)] z-2">
-            {player.jerseyNumber}
-          </span>
-        </div>
-
-        {/* Athletic Shorts (Smaller: w-3 h-1.4) */}
-        <div
-          className="w-3 h-1.4 -mt-0.5 rounded-b-xs border-x border-b border-black/20 flex justify-between px-0.5"
-          style={{ backgroundColor: shortsColor }}
-        >
-          <div className="w-1 h-full bg-black/10" />
-          <div className="w-1 h-full bg-black/10" />
-        </div>
-
-        {/* Legs, Socks & Boots */}
-        <div className="flex items-center gap-0.5 -mt-0.5">
-          {/* Left Foot */}
-          <div className={`flex flex-col items-center ${player.isRunning ? 'animate-leg-left' : ''}`}>
-            <div className="w-1 h-1.2 rounded-xs" style={{ backgroundColor: sockColor }} />
-            <div className="w-1.2 h-0.6 bg-slate-900 rounded-[1px] border-b border-white/40" />
-          </div>
-          {/* Right Foot */}
-          <div className={`flex flex-col items-center ${player.isRunning ? 'animate-leg-right' : ''}`}>
-            <div className="w-1 h-1.2 rounded-xs" style={{ backgroundColor: sockColor }} />
-            <div className="w-1.2 h-0.6 bg-slate-900 rounded-[1px] border-b border-white/40" />
-          </div>
-        </div>
-      </div>
-
-      {/* PLAYER NAME & ROLE LABELS - ONLY SHOWN FOR USER'S TEAM (isHome) */}
-      {isHome ? (
-        <div className="flex flex-col items-center mt-0.5 pointer-events-none z-10 max-w-[65px] sm:max-w-[75px]">
-          {/* Real Player Name Badge */}
-          <span
-            className={`px-1 py-0.2 rounded text-[7px] sm:text-[7.5px] font-black tracking-tight whitespace-nowrap truncate max-w-full shadow-md border leading-tight transition-all duration-200 ${
-              player.isCarrier
-                ? 'bg-amber-400 text-slate-950 border-amber-300 ring-1 ring-amber-400 shadow-[0_0_6px_rgba(251,191,36,0.8)] scale-105'
-                : 'bg-slate-950/85 text-emerald-300 border-emerald-500/40'
-            }`}
-            title={player.name}
-          >
-            {player.name}
-          </span>
-          {/* Role and squad number */}
-          <span className="text-[6px] font-bold text-slate-300/80 mt-0.2 leading-none drop-shadow-[0_1px_1px_rgba(0,0,0,0.9)]">
-            {player.roleArabic} #{player.jerseyNumber}
-          </span>
-        </div>
-      ) : player.isCarrier ? (
-        /* Minimal away carrier indicator without text clutter */
-        <div className="mt-0.5 pointer-events-none z-10">
-          <span className="px-1 py-0.2 rounded text-[6.5px] font-black bg-blue-600/90 text-white border border-blue-400/50 shadow">
-            #{player.jerseyNumber}
-          </span>
-        </div>
-      ) : null}
-    </div>
+    <PitchPlayerFigurine3D
+      player={player}
+      name={player?.name}
+      jerseyNumber={player?.jerseyNumber}
+      roleArabic={player?.roleArabic}
+      isHome={isHome}
+      primaryColor={primaryColor}
+      isGK={isGK}
+      isCarrier={player?.isCarrier}
+      isRunning={player?.isRunning}
+      isScorer={player?.isScorer}
+    />
   );
 };
 

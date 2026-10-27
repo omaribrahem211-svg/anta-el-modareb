@@ -553,6 +553,9 @@ export class CalendarManager {
     const simulatedFixtures: CalendarScheduleItem[] = [];
 
     matchesOnDate.forEach(fix => {
+      if (userClubId && (fix.homeTeamId === userClubId || fix.awayTeamId === userClubId)) {
+        return;
+      }
       if (userMatchToday && fix.id === userMatchToday.id) {
         return;
       }

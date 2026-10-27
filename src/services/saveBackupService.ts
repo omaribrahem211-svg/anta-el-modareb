@@ -111,8 +111,10 @@ export function migrateSavePayload(rawPayload: any): LocalGameSavePayload {
     incomingBids: Array.isArray(src?.incomingBids) ? src.incomingBids : [],
     inbox: Array.isArray(src?.inbox) ? src.inbox : [],
     cupTournament: src?.cupTournament || null,
+    africanChampionsLeague: src?.africanChampionsLeague || null,
     jobOffers: Array.isArray(src?.jobOffers) ? src.jobOffers : [],
     seasonEndSummary: src?.seasonEndSummary || null,
+    seasonArchives: Array.isArray(src?.seasonArchives) ? src.seasonArchives : [],
     transferHistory: Array.isArray(src?.transferHistory) ? src.transferHistory : [],
     clubEconomy: src?.clubEconomy || {
       transferSpendingTotal: 0,

@@ -2,8 +2,10 @@ import React, { useState } from 'react';
 import { Player, PlayerAttributes } from '../types/game';
 import { useGame } from '../context/GameContext';
 import { calculateAskingPrice, getPlayerTransferStatus, resolveClubInfo } from '../utils/transferEngine';
+import { calculateSuggestedRenewalWage } from '../utils/contractAlertEngine';
 import { getPositionArabic, getPositionBadgeClass } from '../utils/positionHelper';
 import { AdManager } from '../services/adManager';
+import { PlayerKit3DModel } from './models/Football3DModels';
 import {
   X,
   Zap,
@@ -105,9 +107,11 @@ export const PlayerModal: React.FC<PlayerModalProps> = ({ player, onClose, onSta
   };
 
   const [renewYears, setRenewYears] = useState<number>(3);
+  const livePlayer = (userClub?.players || []).find(p => p.id === player.id) || player;
+  const suggestedRenewalSalary = calculateSuggestedRenewalWage(livePlayer);
 
   const handleRenew = () => {
-    const res = renewPlayerContract(player.id, player.salary || 2500, renewYears);
+    const res = renewPlayerContract(player.id, suggestedRenewalSalary, renewYears);
     setNotification({ text: res.message, type: res.success ? 'success' : 'error' });
     setTimeout(() => setNotification(null), 3000);
   };
@@ -121,8 +125,6 @@ export const PlayerModal: React.FC<PlayerModalProps> = ({ player, onClose, onSta
       setTimeout(() => setNotification(null), 3000);
     }
   };
-
-  const livePlayer = (userClub?.players || []).find(p => p.id === player.id) || player;
 
   const handleHealWithAd = async () => {
     if (isAdLoading) return;
@@ -232,13 +234,18 @@ export const PlayerModal: React.FC<PlayerModalProps> = ({ player, onClose, onSta
         className="w-full max-w-lg bg-slate-900 border border-slate-700/80 rounded-3xl p-5 shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto custom-scrollbar"
         onClick={(e) => e.stopPropagation()}
       >
-        {/* Header Bar */}
+        {/* Header Bar with 3D Sculpted Kit Figurine */}
         <div className="flex items-start justify-between border-b border-slate-800 pb-3 gap-3">
-          <div className="flex items-start gap-3 min-w-0 flex-1">
-            <div className={`w-14 h-14 rounded-2xl border-2 flex flex-col items-center justify-center font-black shrink-0 ${getRatingColor(player.overallRating)}`}>
-              <span className="text-xl leading-none">{player.overallRating}</span>
-              <span className="text-[10px] uppercase font-bold tracking-wider">{player.position}</span>
-            </div>
+          <div className="flex items-start gap-3.5 min-w-0 flex-1">
+            <PlayerKit3DModel
+              number={player.number || 10}
+              position={player.position}
+              overall={player.overallRating}
+              primaryColor={playerClub?.primaryColor || userClub?.primaryColor || '#10b981'}
+              secondaryColor={playerClub?.secondaryColor || userClub?.secondaryColor || '#ffffff'}
+              isGK={player.position === 'GK'}
+              size="md"
+            />
             <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-center gap-2">
                 <h3 className="font-black text-lg sm:text-xl text-white break-words leading-tight">{player.name}</h3>
@@ -447,25 +454,25 @@ export const PlayerModal: React.FC<PlayerModalProps> = ({ player, onClose, onSta
           </div>
         </div>
 
-        {/* Contract & Financials */}
+        {/* Contract, Fixed Price & Monthly Salary */}
         <div className="grid grid-cols-3 gap-2 text-xs">
           <div className="bg-slate-800/50 p-2.5 rounded-xl border border-slate-700/60">
             <div className="flex items-center gap-1.5 text-slate-400">
               <DollarSign className="w-3.5 h-3.5 text-emerald-400" />
-              <span>القيمة السوقية</span>
+              <span>السعر الثابت</span>
             </div>
-            <div className="font-bold text-xs sm:text-sm text-emerald-400 mt-1">
-              {player.marketValue ? `${player.marketValue.toLocaleString()} ج.م` : 'غير محدد'}
+            <div className="font-bold text-xs sm:text-sm text-emerald-400 mt-1 font-mono">
+              {askingPrice === 0 ? 'مجاناً (لاعب حر)' : `${askingPrice.toLocaleString()} ج.م`}
             </div>
           </div>
 
           <div className="bg-slate-800/50 p-2.5 rounded-xl border border-slate-700/60">
             <div className="flex items-center gap-1.5 text-slate-400">
-              <TrendingUp className="w-3.5 h-3.5 text-amber-400" />
-              <span>السعر المطلوب</span>
+              <Wallet className="w-3.5 h-3.5 text-cyan-400" />
+              <span>الراتب الشهري</span>
             </div>
-            <div className="font-bold text-xs sm:text-sm text-amber-400 mt-1">
-              {askingPrice === 0 ? 'مجاناً (لاعب حر)' : `${askingPrice.toLocaleString()} ج.م`}
+            <div className="font-bold text-xs sm:text-sm text-cyan-400 mt-1 font-mono">
+              {(livePlayer.salary || 2500).toLocaleString()} ج.م/ش
             </div>
           </div>
 

@@ -4,13 +4,14 @@ import {
   ContinentalGroupStanding,
   ContinentalMatch,
   ContinentalTournament,
+  Fixture,
   LeagueDefinition,
   LeagueStanding,
   MatchEvent,
   MatchStats,
 } from '../types/game';
 import { simulateMatch } from './engine';
-import { GLOBAL_LEAGUES } from '../data/leaguesData';
+import { GLOBAL_LEAGUES, findClubInWorld } from '../data/leaguesData';
 import {
   EGYPT_PREMIER_CLUBS,
   MOROCCO_BOTOLA_CLUBS,
@@ -593,35 +594,20 @@ export function initUefaChampionsLeague(
     seenIds.add(userClub.id);
   }
 
-  while (uniquePool.length < 16) {
-    const fallbackId = `ucl_club_${uniquePool.length + 1}`;
-    uniquePool.push({
-      id: fallbackId,
-      name: `نادي أوروبي ${uniquePool.length + 1}`,
-      shortName: `أوروبي ${uniquePool.length + 1}`,
-      city: 'مدريد',
-      primaryColor: '#1e3a8a',
-      secondaryColor: '#ffffff',
-      budget: 50000000,
-      transferBudget: 30000000,
-      wageBudgetMonthly: 500000,
-      reputation: 82,
-      division: 1,
-      country: 'إسبانيا',
-      continent: 'Europe',
-      facilities: {
-        stadiumName: `ستاد أوروبا ${uniquePool.length + 1}`,
-        stadiumCapacity: 55000,
-        stadiumLevel: 5,
-        medicalCenterLevel: 5,
-        trainingGroundLevel: 5,
-        youthAcademyLevel: 5,
-        scoutingNetworkLevel: 5,
-      },
-      sponsors: [],
-      isUserClub: false,
-      players: [],
-    });
+  const realEuropeanBackups = [
+    ...ENGLAND_PREMIER_CLUBS,
+    ...SPAIN_LA_LIGA_CLUBS,
+    ...ITALY_SERIE_A_CLUBS,
+    ...GERMANY_BUNDESLIGA_CLUBS,
+    ...FRANCE_LIGUE_1_CLUBS,
+  ];
+
+  for (const backupClub of realEuropeanBackups) {
+    if (uniquePool.length >= 16) break;
+    if (backupClub && backupClub.id && !seenIds.has(backupClub.id) && !excluded.has(backupClub.id)) {
+      seenIds.add(backupClub.id);
+      uniquePool.push(backupClub);
+    }
   }
 
   const selected16 = uniquePool.slice(0, 16);
@@ -745,35 +731,20 @@ export function initUefaEuropaLeague(
     seenIds.add(userClub.id);
   }
 
-  while (uniquePool.length < 16) {
-    const fallbackId = `uel_club_${uniquePool.length + 1}`;
-    uniquePool.push({
-      id: fallbackId,
-      name: `نادي يوروباليغ ${uniquePool.length + 1}`,
-      shortName: `يوروبا ${uniquePool.length + 1}`,
-      city: 'روما',
-      primaryColor: '#ea580c',
-      secondaryColor: '#ffffff',
-      budget: 28000000,
-      transferBudget: 15000000,
-      wageBudgetMonthly: 300000,
-      reputation: 78,
-      division: 1,
-      country: 'إيطاليا',
-      continent: 'Europe',
-      facilities: {
-        stadiumName: `ستاد الدوري الأوروبي ${uniquePool.length + 1}`,
-        stadiumCapacity: 42000,
-        stadiumLevel: 4,
-        medicalCenterLevel: 4,
-        trainingGroundLevel: 4,
-        youthAcademyLevel: 4,
-        scoutingNetworkLevel: 4,
-      },
-      sponsors: [],
-      isUserClub: false,
-      players: [],
-    });
+  const realEuropeanBackups = [
+    ...ENGLAND_PREMIER_CLUBS,
+    ...SPAIN_LA_LIGA_CLUBS,
+    ...ITALY_SERIE_A_CLUBS,
+    ...GERMANY_BUNDESLIGA_CLUBS,
+    ...FRANCE_LIGUE_1_CLUBS,
+  ];
+
+  for (const backupClub of realEuropeanBackups) {
+    if (uniquePool.length >= 16) break;
+    if (backupClub && backupClub.id && !seenIds.has(backupClub.id) && !uclTeamIds.has(backupClub.id)) {
+      seenIds.add(backupClub.id);
+      uniquePool.push(backupClub);
+    }
   }
 
   const selected16 = uniquePool.slice(0, 16);
@@ -1029,309 +1000,525 @@ export function simulateKnockoutMatch(
 // 6. ADVANCEMENT OF CONTINENTAL TOURNAMENT
 // ----------------------------------------------------
 
+/**
+ * Pure, immutable recalculation of Continental Group Stage standings from all played matches.
+ * Syncs played results from externalFixtures (if provided), computes played, won, drawn, lost,
+ * goalsFor, goalsAgainst, goalDifference, and points from scratch without direct mutation,
+ * and sorts each group by points DESC, goalDifference DESC, goalsFor DESC.
+ */
+export function recalculateContinentalGroupStandings(
+  tournament: ContinentalTournament,
+  externalFixtures?: Fixture[]
+): ContinentalTournament {
+  if (!tournament || !Array.isArray(tournament.groups)) {
+    return tournament;
+  }
+
+  const extContFixtures = Array.isArray(externalFixtures)
+    ? externalFixtures.filter(
+        f =>
+          f &&
+          f.isPlayed &&
+          (f.competitionType === 'CONTINENTAL_CUP' ||
+            f.competitionType === 'continental' ||
+            f.competitionId === tournament.competitionId ||
+            String(f.id || '').startsWith(`${tournament.competitionId}_`))
+      )
+    : [];
+
+  // 1. Immutably sync matches with any played externalFixtures
+  let syncedMatches: ContinentalMatch[] = (tournament.matches || []).map(m => {
+    if (m.isPlayed && m.homeScore !== undefined && m.awayScore !== undefined) {
+      return { ...m };
+    }
+    const matchingFix = extContFixtures.find(
+      f =>
+        f.id === m.id ||
+        (f.homeTeamId === m.homeTeamId &&
+          f.awayTeamId === m.awayTeamId &&
+          ((f.matchday && m.matchday && f.matchday === m.matchday) ||
+            (f.stage || 'group') === (m.stage || 'group')))
+    );
+    if (matchingFix && matchingFix.isPlayed) {
+      const hScore = Number(matchingFix.homeScore ?? 0);
+      const aScore = Number(matchingFix.awayScore ?? 0);
+      return {
+        ...m,
+        homeScore: hScore,
+        awayScore: aScore,
+        homePenalties: matchingFix.homePenalties ?? m.homePenalties,
+        awayPenalties: matchingFix.awayPenalties ?? m.awayPenalties,
+        isPlayed: true,
+        winnerTeamId:
+          matchingFix.winnerTeamId ||
+          (hScore > aScore ? m.homeTeamId : aScore > hScore ? m.awayTeamId : undefined),
+        events: matchingFix.events || m.events,
+        stats: matchingFix.stats || m.stats,
+      };
+    }
+    return { ...m };
+  });
+
+  // 2. Immutably rebuild each group's standings from all played group-stage matches
+  const updatedGroups: ContinentalGroup[] = tournament.groups.map(group => {
+    const statsMap = new Map<string, ContinentalGroupStanding>();
+
+    group.teamIds.forEach(teamId => {
+      const existingStanding = (group.standings || []).find(s => s && s.teamId === teamId);
+      const teamName = existingStanding?.teamName || findClubInWorld(teamId)?.name || teamId;
+
+      statsMap.set(teamId, {
+        teamId,
+        teamName,
+        played: 0,
+        won: 0,
+        drawn: 0,
+        lost: 0,
+        goalsFor: 0,
+        goalsAgainst: 0,
+        goalDifference: 0,
+        points: 0,
+      });
+    });
+
+    const playedGroupMatches = syncedMatches.filter(
+      m =>
+        m.stage === 'group' &&
+        m.isPlayed &&
+        (m.groupId === group.id ||
+          (group.teamIds.includes(m.homeTeamId) && group.teamIds.includes(m.awayTeamId)))
+    );
+
+    playedGroupMatches.forEach(m => {
+      const hScore = Number(m.homeScore ?? 0);
+      const aScore = Number(m.awayScore ?? 0);
+      const homeRow = statsMap.get(m.homeTeamId);
+      const awayRow = statsMap.get(m.awayTeamId);
+
+      if (homeRow) {
+        const isWin = hScore > aScore;
+        const isDraw = hScore === aScore;
+        const isLoss = hScore < aScore;
+        const nextGF = homeRow.goalsFor + hScore;
+        const nextGA = homeRow.goalsAgainst + aScore;
+        statsMap.set(m.homeTeamId, {
+          ...homeRow,
+          played: homeRow.played + 1,
+          won: homeRow.won + (isWin ? 1 : 0),
+          drawn: homeRow.drawn + (isDraw ? 1 : 0),
+          lost: homeRow.lost + (isLoss ? 1 : 0),
+          goalsFor: nextGF,
+          goalsAgainst: nextGA,
+          goalDifference: nextGF - nextGA,
+          points: homeRow.points + (isWin ? 3 : isDraw ? 1 : 0),
+        });
+      }
+
+      if (awayRow) {
+        const isWin = aScore > hScore;
+        const isDraw = hScore === aScore;
+        const isLoss = aScore < hScore;
+        const nextGF = awayRow.goalsFor + aScore;
+        const nextGA = awayRow.goalsAgainst + hScore;
+        statsMap.set(m.awayTeamId, {
+          ...awayRow,
+          played: awayRow.played + 1,
+          won: awayRow.won + (isWin ? 1 : 0),
+          drawn: awayRow.drawn + (isDraw ? 1 : 0),
+          lost: awayRow.lost + (isLoss ? 1 : 0),
+          goalsFor: nextGF,
+          goalsAgainst: nextGA,
+          goalDifference: nextGF - nextGA,
+          points: awayRow.points + (isWin ? 3 : isDraw ? 1 : 0),
+        });
+      }
+    });
+
+    const sortedStandings = Array.from(statsMap.values()).sort((a, b) => {
+      if (b.points !== a.points) return b.points - a.points;
+      if (b.goalDifference !== a.goalDifference) return b.goalDifference - a.goalDifference;
+      return b.goalsFor - a.goalsFor;
+    });
+
+    return {
+      ...group,
+      teamIds: [...group.teamIds],
+      standings: sortedStandings,
+    };
+  });
+
+  // 3. Check if all 6 group matchdays (all 24 group matches) are completed to unlock Quarter-Finals
+  let nextStage = tournament.currentStage;
+  const allGroupMatches = syncedMatches.filter(m => m.stage === 'group');
+  const hasQuarterMatches = syncedMatches.some(m => m.stage === 'quarter');
+
+  if (
+    allGroupMatches.length > 0 &&
+    allGroupMatches.every(m => m.isPlayed) &&
+    !hasQuarterMatches
+  ) {
+    const qualifiedFirst: string[] = [];
+    const qualifiedSecond: string[] = [];
+
+    updatedGroups.forEach(g => {
+      if (g.standings.length >= 2) {
+        qualifiedFirst.push(g.standings[0].teamId);
+        qualifiedSecond.push(g.standings[1].teamId);
+      }
+    });
+
+    if (qualifiedFirst.length === 4 && qualifiedSecond.length === 4) {
+      const qfPairs = [
+        { home: qualifiedFirst[0], away: qualifiedSecond[1] },
+        { home: qualifiedFirst[1], away: qualifiedSecond[0] },
+        { home: qualifiedFirst[2], away: qualifiedSecond[3] },
+        { home: qualifiedFirst[3], away: qualifiedSecond[2] },
+      ];
+
+      const newQfMatches: ContinentalMatch[] = qfPairs.map((pair, idx) => ({
+        id: `${tournament.competitionId}_qf_${idx + 1}_s${tournament.seasonNumber}`,
+        stage: 'quarter',
+        stageName: `${tournament.name} - ربع النهائي (${idx + 1})`,
+        roundTrigger: 18,
+        homeTeamId: pair.home,
+        awayTeamId: pair.away,
+        isPlayed: false,
+      }));
+
+      syncedMatches = [...syncedMatches, ...newQfMatches];
+      nextStage = 'quarter';
+    }
+  }
+
+  return {
+    ...tournament,
+    currentStage: nextStage,
+    groups: updatedGroups,
+    matches: syncedMatches,
+  };
+}
+
 export function advanceContinentalTournament(
   tournament: ContinentalTournament,
   currentRound: number,
   allTeamsMap: Map<string, Club>,
-  userClub?: Club | null
+  userClub?: Club | null,
+  options?: { simulateUserMatches?: boolean; externalFixtures?: Fixture[] }
 ): {
   updatedTournament: ContinentalTournament;
   userMatchThisRound?: ContinentalMatch;
   newsMessage?: string;
 } {
-  if (tournament.isCompleted) {
+  if (!tournament || tournament.isCompleted) {
     return { updatedTournament: tournament };
   }
 
-  let updatedTournament = { ...tournament };
-  let matches = [...updatedTournament.matches];
-  let groups = [...updatedTournament.groups];
+  const shouldSimUser = options?.simulateUserMatches === true;
+  // First sync any already-played fixtures and recalculate current standings immutably
+  let baseTournament = recalculateContinentalGroupStandings(tournament, options?.externalFixtures);
+  let matches = baseTournament.matches.map(m => ({ ...m }));
   let userMatchThisRound: ContinentalMatch | undefined = undefined;
   let newsMessage: string | undefined = undefined;
 
   const findClub = (id: string): Club => {
-    return allTeamsMap.get(id) || {
-      id,
-      name: 'نادي منافس',
-      shortName: 'منافس',
-      city: 'القاهرة',
-      primaryColor: '#334155',
-      secondaryColor: '#ffffff',
-      budget: 1000000,
-      transferBudget: 500000,
-      wageBudgetMonthly: 50000,
-      reputation: 60,
-      division: 1,
-      country: 'مصر',
-      facilities: {
-        stadiumName: 'ستاد المنافس',
-        stadiumCapacity: 20000,
-        stadiumLevel: 3,
-        medicalCenterLevel: 3,
-        trainingGroundLevel: 3,
-        youthAcademyLevel: 3,
-        scoutingNetworkLevel: 3,
-      },
-      sponsors: [],
-      isUserClub: false,
-      players: [],
-    };
+    return (
+      allTeamsMap.get(id) ||
+      findClubInWorld(id) || {
+        id,
+        name: 'نادي منافس',
+        shortName: 'منافس',
+        city: 'القاهرة',
+        primaryColor: '#334155',
+        secondaryColor: '#ffffff',
+        budget: 1000000,
+        transferBudget: 500000,
+        wageBudgetMonthly: 50000,
+        reputation: 60,
+        division: 1,
+        country: 'مصر',
+        facilities: {
+          stadiumName: 'ستاد المنافس',
+          stadiumCapacity: 20000,
+          stadiumLevel: 3,
+          medicalCenterLevel: 3,
+          trainingGroundLevel: 3,
+          youthAcademyLevel: 3,
+          scoutingNetworkLevel: 3,
+        },
+        sponsors: [],
+        isUserClub: false,
+        players: [],
+      }
+    );
   };
 
-  // A. SIMULATE GROUP STAGE MATCHES
-  const unplayedGroupMatches = matches.filter(
-    m => m.stage === 'group' && m.roundTrigger === currentRound && !m.isPlayed
+  // A. SIMULATE GROUP STAGE MATCHES (All matchdays whose roundTrigger <= currentRound)
+  // Group matchdays trigger at rounds [3, 6, 8, 12, 14, 16] (Matchdays 1..6)
+  const dueGroupMatches = matches.filter(
+    m => m.stage === 'group' && !m.isPlayed && (m.roundTrigger || 1) <= currentRound
   );
 
-  if (unplayedGroupMatches.length > 0) {
-    unplayedGroupMatches.forEach(gMatch => {
-      if (userClub && (gMatch.homeTeamId === userClub.id || gMatch.awayTeamId === userClub.id)) {
-        userMatchThisRound = gMatch;
-        return;
+  if (dueGroupMatches.length > 0) {
+    let lastSimulatedMatchday = dueGroupMatches[0]?.matchday || 1;
+
+    matches = matches.map(m => {
+      if (m.stage !== 'group' || m.isPlayed || (m.roundTrigger || 1) > currentRound) {
+        return m;
       }
 
-      const homeTeam = findClub(gMatch.homeTeamId);
-      const awayTeam = findClub(gMatch.awayTeamId);
-      const res = simulateMatch(homeTeam, awayTeam);
+      const isUserInvolved = Boolean(
+        userClub && (m.homeTeamId === userClub.id || m.awayTeamId === userClub.id)
+      );
 
-      gMatch.homeScore = res.homeScore;
-      gMatch.awayScore = res.awayScore;
-      gMatch.isPlayed = true;
-      gMatch.winnerTeamId =
-        res.homeScore > res.awayScore
-          ? homeTeam.id
-          : res.awayScore > res.homeScore
-          ? awayTeam.id
-          : undefined;
-      gMatch.events = res.events;
-      gMatch.stats = res.stats;
-
-      if (gMatch.groupId) {
-        const group = groups.find(g => g.id === gMatch.groupId);
-        if (group) {
-          group.standings = group.standings.map(s => {
-            if (s.teamId === homeTeam.id) {
-              const isWin = res.homeScore > res.awayScore;
-              const isDraw = res.homeScore === res.awayScore;
-              const isLoss = res.homeScore < res.awayScore;
-              return {
-                ...s,
-                played: s.played + 1,
-                won: s.won + (isWin ? 1 : 0),
-                drawn: s.drawn + (isDraw ? 1 : 0),
-                lost: s.lost + (isLoss ? 1 : 0),
-                goalsFor: s.goalsFor + res.homeScore,
-                goalsAgainst: s.goalsAgainst + res.awayScore,
-                goalDifference: s.goalsFor + res.homeScore - (s.goalsAgainst + res.awayScore),
-                points: s.points + (isWin ? 3 : isDraw ? 1 : 0),
-              };
-            }
-            if (s.teamId === awayTeam.id) {
-              const isWin = res.awayScore > res.homeScore;
-              const isDraw = res.homeScore === res.awayScore;
-              const isLoss = res.awayScore < res.homeScore;
-              return {
-                ...s,
-                played: s.played + 1,
-                won: s.won + (isWin ? 1 : 0),
-                drawn: s.drawn + (isDraw ? 1 : 0),
-                lost: s.lost + (isLoss ? 1 : 0),
-                goalsFor: s.goalsFor + res.awayScore,
-                goalsAgainst: s.goalsAgainst + res.homeScore,
-                goalDifference: s.goalsFor + res.awayScore - (s.goalsAgainst + res.homeScore),
-                points: s.points + (isWin ? 3 : isDraw ? 1 : 0),
-              };
-            }
-            return s;
-          }).sort((a, b) => {
-            if (b.points !== a.points) return b.points - a.points;
-            if (b.goalDifference !== a.goalDifference) return b.goalDifference - a.goalDifference;
-            return b.goalsFor - a.goalsFor;
-          });
+      // STRICT RULE: Never simulate the user's Continental match in the background unless explicitly requested!
+      if (isUserInvolved && !shouldSimUser) {
+        if (!userMatchThisRound) {
+          userMatchThisRound = m;
         }
+        return m;
       }
+
+      const homeTeam = findClub(m.homeTeamId);
+      const awayTeam = findClub(m.awayTeamId);
+      const res = simulateMatch(homeTeam, awayTeam, homeTeam.tactics, awayTeam.tactics);
+      if (m.matchday) lastSimulatedMatchday = m.matchday;
+
+      return {
+        ...m,
+        homeScore: res.homeScore,
+        awayScore: res.awayScore,
+        isPlayed: true,
+        winnerTeamId:
+          res.homeScore > res.awayScore
+            ? homeTeam.id
+            : res.awayScore > res.homeScore
+            ? awayTeam.id
+            : undefined,
+        events: res.events,
+        stats: res.stats,
+      };
     });
 
-    const matchdayNum = unplayedGroupMatches[0]?.matchday || 1;
-    newsMessage = `انتهت مباريات الجولة ${matchdayNum} من دور المجموعات لـ ${tournament.name}!`;
-
-    if (currentRound === 16) {
-      updatedTournament.currentStage = 'quarter';
-      const qualifiedFirst: string[] = [];
-      const qualifiedSecond: string[] = [];
-
-      groups.forEach(g => {
-        if (g.standings.length >= 2) {
-          qualifiedFirst.push(g.standings[0].teamId);
-          qualifiedSecond.push(g.standings[1].teamId);
-        }
-      });
-
-      if (userClub) {
-        const isUserQualified =
-          qualifiedFirst.includes(userClub.id) || qualifiedSecond.includes(userClub.id);
-        const wasInTournament = groups.some(g => g.teamIds.includes(userClub.id));
-        if (wasInTournament && !isUserQualified) {
-          updatedTournament.userEliminatedStage = 'دور المجموعات';
-        }
-      }
-
-      if (qualifiedFirst.length === 4 && qualifiedSecond.length === 4) {
-        const qfPairs = [
-          { home: qualifiedFirst[0], away: qualifiedSecond[1] },
-          { home: qualifiedFirst[1], away: qualifiedSecond[0] },
-          { home: qualifiedFirst[2], away: qualifiedSecond[3] },
-          { home: qualifiedFirst[3], away: qualifiedSecond[2] },
-        ];
-
-        qfPairs.forEach((pair, idx) => {
-          matches.push({
-            id: `${tournament.competitionId}_qf_${idx + 1}_s${tournament.seasonNumber}`,
-            stage: 'quarter',
-            stageName: `${tournament.name} - ربع النهائي (${idx + 1})`,
-            roundTrigger: 18,
-            homeTeamId: pair.home,
-            awayTeamId: pair.away,
-            isPlayed: false,
-          });
-        });
-
-        newsMessage = `اكتمل دور المجموعات وتحددت مواجهات الدور ربع النهائي النارية لـ ${tournament.name}! 🌟`;
-      }
-    }
+    newsMessage = `انتهت مباريات الجولة ${lastSimulatedMatchday} من دور المجموعات لـ ${tournament.name}!`;
   }
 
-  // B. SIMULATE QUARTERFINALS (Round 18)
-  if (currentRound === 18) {
-    const unplayedQFs = matches.filter(m => m.stage === 'quarter' && !m.isPlayed);
-    if (unplayedQFs.length > 0) {
-      const sfWinners: string[] = [];
+  // Recompute group standings immutably and auto-generate QF if all 6 group matchdays are complete
+  let updatedTournament = recalculateContinentalGroupStandings(
+    {
+      ...baseTournament,
+      matches,
+    },
+    options?.externalFixtures
+  );
+  matches = updatedTournament.matches.map(m => ({ ...m }));
 
-      unplayedQFs.forEach(qfMatch => {
-        if (userClub && (qfMatch.homeTeamId === userClub.id || qfMatch.awayTeamId === userClub.id)) {
-          userMatchThisRound = qfMatch;
-          return;
+  if (
+    updatedTournament.currentStage === 'quarter' &&
+    baseTournament.currentStage === 'group'
+  ) {
+    newsMessage = `اكتمل دور المجموعات (6 جولات) وتحددت مواجهات الدور ربع النهائي النارية لـ ${tournament.name}! 🌟`;
+  }
+
+  // B. SIMULATE QUARTERFINALS (When user plays QF, or when currentRound >= 18 for AI matches)
+  const qfMatches = matches.filter(m => m.stage === 'quarter');
+  const userQfMatch = userClub
+    ? qfMatches.find(m => m.homeTeamId === userClub.id || m.awayTeamId === userClub.id)
+    : undefined;
+  const anyQfPlayed = qfMatches.some(m => m.isPlayed);
+
+  if (qfMatches.length > 0 && (currentRound >= 18 || anyQfPlayed)) {
+    const unplayedQFs = qfMatches.filter(m => !m.isPlayed);
+    // If user is in QF and hasn't played yet (and !shouldSimUser), hold back user's QF and only simulate AI QFs if user already played or round >= 18
+    if (unplayedQFs.length > 0) {
+      matches = matches.map(m => {
+        if (m.stage !== 'quarter' || m.isPlayed) return m;
+        const isUserInvolved = Boolean(
+          userClub && (m.homeTeamId === userClub.id || m.awayTeamId === userClub.id)
+        );
+        if (isUserInvolved && !shouldSimUser) {
+          userMatchThisRound = m;
+          return m;
+        }
+        // Wait for user to play their QF before auto-resolving other QFs if currentRound < 18
+        if (userQfMatch && !userQfMatch.isPlayed && !shouldSimUser) {
+          return m;
         }
 
-        const homeTeam = findClub(qfMatch.homeTeamId);
-        const awayTeam = findClub(qfMatch.awayTeamId);
+        const homeTeam = findClub(m.homeTeamId);
+        const awayTeam = findClub(m.awayTeamId);
         const res = simulateKnockoutMatch(homeTeam, awayTeam);
 
-        qfMatch.homeScore = res.homeScore;
-        qfMatch.awayScore = res.awayScore;
-        qfMatch.homePenalties = res.homePenalties;
-        qfMatch.awayPenalties = res.awayPenalties;
-        qfMatch.isPlayed = true;
-        qfMatch.winnerTeamId = res.winnerTeamId;
-        qfMatch.events = res.events;
-        qfMatch.stats = res.stats;
-
-        sfWinners.push(res.winnerTeamId);
+        return {
+          ...m,
+          homeScore: res.homeScore,
+          awayScore: res.awayScore,
+          homePenalties: res.homePenalties,
+          awayPenalties: res.awayPenalties,
+          isPlayed: true,
+          winnerTeamId: res.winnerTeamId,
+          events: res.events,
+          stats: res.stats,
+        };
       });
+    }
 
-      if (sfWinners.length >= 4) {
-        updatedTournament.currentStage = 'semi';
-        matches.push(
-          {
-            id: `${tournament.competitionId}_sf_1_s${tournament.seasonNumber}`,
-            stage: 'semi',
-            stageName: `${tournament.name} - نصف النهائي (1)`,
-            roundTrigger: 20,
-            homeTeamId: sfWinners[0],
-            awayTeamId: sfWinners[1],
-            isPlayed: false,
-          },
-          {
-            id: `${tournament.competitionId}_sf_2_s${tournament.seasonNumber}`,
-            stage: 'semi',
-            stageName: `${tournament.name} - نصف النهائي (2)`,
-            roundTrigger: 20,
-            homeTeamId: sfWinners[2],
-            awayTeamId: sfWinners[3],
-            isPlayed: false,
-          }
-        );
-      }
-
+    const allQFs = matches.filter(m => m.stage === 'quarter');
+    const hasSFs = matches.some(m => m.stage === 'semi');
+    if (allQFs.length >= 4 && allQFs.every(m => m.isPlayed) && !hasSFs) {
+      const sfWinners = allQFs.map(m => m.winnerTeamId || m.homeTeamId);
+      updatedTournament.currentStage = 'semi';
+      matches = [
+        ...matches,
+        {
+          id: `${tournament.competitionId}_sf_1_s${tournament.seasonNumber}`,
+          stage: 'semi',
+          stageName: `${tournament.name} - نصف النهائي (1)`,
+          roundTrigger: Math.max(20, currentRound + 1),
+          homeTeamId: sfWinners[0],
+          awayTeamId: sfWinners[1],
+          isPlayed: false,
+        },
+        {
+          id: `${tournament.competitionId}_sf_2_s${tournament.seasonNumber}`,
+          stage: 'semi',
+          stageName: `${tournament.name} - نصف النهائي (2)`,
+          roundTrigger: Math.max(20, currentRound + 1),
+          homeTeamId: sfWinners[2],
+          awayTeamId: sfWinners[3],
+          isPlayed: false,
+        },
+      ];
       newsMessage = `إثارة بالغة في ربع نهائي ${tournament.name} وتأهل الفرق الأربعة إلى المربع الذهبي!`;
     }
   }
 
-  // C. SIMULATE SEMIFINALS (Round 20)
-  if (currentRound === 20) {
-    const unplayedSFs = matches.filter(m => m.stage === 'semi' && !m.isPlayed);
-    if (unplayedSFs.length > 0) {
-      const finalWinners: string[] = [];
+  // C. SIMULATE SEMIFINALS (When user plays SF, or when currentRound >= 20 for AI matches)
+  const sfMatches = matches.filter(m => m.stage === 'semi');
+  const userSfMatch = userClub
+    ? sfMatches.find(m => m.homeTeamId === userClub.id || m.awayTeamId === userClub.id)
+    : undefined;
+  const anySfPlayed = sfMatches.some(m => m.isPlayed);
 
-      unplayedSFs.forEach(sfMatch => {
-        if (userClub && (sfMatch.homeTeamId === userClub.id || sfMatch.awayTeamId === userClub.id)) {
-          userMatchThisRound = sfMatch;
-          return;
+  if (sfMatches.length > 0 && (currentRound >= 20 || anySfPlayed)) {
+    const unplayedSFs = sfMatches.filter(m => !m.isPlayed);
+    if (unplayedSFs.length > 0) {
+      matches = matches.map(m => {
+        if (m.stage !== 'semi' || m.isPlayed) return m;
+        const isUserInvolved = Boolean(
+          userClub && (m.homeTeamId === userClub.id || m.awayTeamId === userClub.id)
+        );
+        if (isUserInvolved && !shouldSimUser) {
+          userMatchThisRound = m;
+          return m;
+        }
+        if (userSfMatch && !userSfMatch.isPlayed && !shouldSimUser) {
+          return m;
         }
 
-        const homeTeam = findClub(sfMatch.homeTeamId);
-        const awayTeam = findClub(sfMatch.awayTeamId);
+        const homeTeam = findClub(m.homeTeamId);
+        const awayTeam = findClub(m.awayTeamId);
         const res = simulateKnockoutMatch(homeTeam, awayTeam);
 
-        sfMatch.homeScore = res.homeScore;
-        sfMatch.awayScore = res.awayScore;
-        sfMatch.homePenalties = res.homePenalties;
-        sfMatch.awayPenalties = res.awayPenalties;
-        sfMatch.isPlayed = true;
-        sfMatch.winnerTeamId = res.winnerTeamId;
-        sfMatch.events = res.events;
-        sfMatch.stats = res.stats;
-
-        finalWinners.push(res.winnerTeamId);
+        return {
+          ...m,
+          homeScore: res.homeScore,
+          awayScore: res.awayScore,
+          homePenalties: res.homePenalties,
+          awayPenalties: res.awayPenalties,
+          isPlayed: true,
+          winnerTeamId: res.winnerTeamId,
+          events: res.events,
+          stats: res.stats,
+        };
       });
+    }
 
-      if (finalWinners.length >= 2) {
-        updatedTournament.currentStage = 'final';
-        matches.push({
+    const allSFs = matches.filter(m => m.stage === 'semi');
+    const hasFinal = matches.some(m => m.stage === 'final');
+    if (allSFs.length >= 2 && allSFs.every(m => m.isPlayed) && !hasFinal) {
+      const finalWinners = allSFs.map(m => m.winnerTeamId || m.homeTeamId);
+      updatedTournament.currentStage = 'final';
+      matches = [
+        ...matches,
+        {
           id: `${tournament.competitionId}_final_s${tournament.seasonNumber}`,
           stage: 'final',
           stageName: `نهائي ${tournament.name} الكبير 🏆`,
-          roundTrigger: 22,
+          roundTrigger: Math.max(22, currentRound + 1),
           homeTeamId: finalWinners[0],
           awayTeamId: finalWinners[1],
           isPlayed: false,
-        });
-      }
-
+        },
+      ];
       newsMessage = `تحدد طرفا النهائي الحلم لبطولة ${tournament.name}! 🏆`;
     }
   }
 
-  // D. SIMULATE FINAL (Round 22)
-  if (currentRound === 22) {
-    const finalMatch = matches.find(m => m.stage === 'final' && !m.isPlayed);
-    if (finalMatch) {
-      if (userClub && (finalMatch.homeTeamId === userClub.id || finalMatch.awayTeamId === userClub.id)) {
-        userMatchThisRound = finalMatch;
+  // D. SIMULATE FINAL (When user plays Final, or when currentRound >= 22 for AI Final)
+  const existingFinalMatch = matches.find(m => m.stage === 'final');
+  if (existingFinalMatch && (currentRound >= 22 || existingFinalMatch.isPlayed)) {
+    if (!existingFinalMatch.isPlayed) {
+      const isUserInvolved = Boolean(
+        userClub && (existingFinalMatch.homeTeamId === userClub.id || existingFinalMatch.awayTeamId === userClub.id)
+      );
+      if (isUserInvolved && !shouldSimUser) {
+        userMatchThisRound = existingFinalMatch;
       } else {
-        const homeTeam = findClub(finalMatch.homeTeamId);
-        const awayTeam = findClub(finalMatch.awayTeamId);
+        const homeTeam = findClub(existingFinalMatch.homeTeamId);
+        const awayTeam = findClub(existingFinalMatch.awayTeamId);
         const res = simulateKnockoutMatch(homeTeam, awayTeam);
-
-        finalMatch.homeScore = res.homeScore;
-        finalMatch.awayScore = res.awayScore;
-        finalMatch.homePenalties = res.homePenalties;
-        finalMatch.awayPenalties = res.awayPenalties;
-        finalMatch.isPlayed = true;
-        finalMatch.winnerTeamId = res.winnerTeamId;
-        finalMatch.events = res.events;
-        finalMatch.stats = res.stats;
-
         const runnerUpId = res.winnerTeamId === homeTeam.id ? awayTeam.id : homeTeam.id;
 
-        updatedTournament.isCompleted = true;
-        updatedTournament.currentStage = 'completed';
-        updatedTournament.winnerClubId = res.winnerTeamId;
-        updatedTournament.runnerUpClubId = runnerUpId;
+        matches = matches.map(m =>
+          m.id === existingFinalMatch.id
+            ? {
+                ...m,
+                homeScore: res.homeScore,
+                awayScore: res.awayScore,
+                homePenalties: res.homePenalties,
+                awayPenalties: res.awayPenalties,
+                isPlayed: true,
+                winnerTeamId: res.winnerTeamId,
+                events: res.events,
+                stats: res.stats,
+              }
+            : m
+        );
+
+        updatedTournament = {
+          ...updatedTournament,
+          isCompleted: true,
+          currentStage: 'completed',
+          winnerClubId: res.winnerTeamId,
+          runnerUpClubId: runnerUpId,
+        };
 
         const winnerClub = findClub(res.winnerTeamId);
         newsMessage = `ألف مبروك لفريق (${winnerClub.name}) التتويج بلقب ${tournament.name} ورفع ${tournament.trophyName}! 🏆🎉`;
       }
+    } else {
+      // Final was already played (e.g. by the user in Live Match) -> ensure tournament is marked completed
+      const resolvedWinner =
+        existingFinalMatch.winnerTeamId ||
+        ((existingFinalMatch.homeScore ?? 0) > (existingFinalMatch.awayScore ?? 0)
+          ? existingFinalMatch.homeTeamId
+          : (existingFinalMatch.awayScore ?? 0) > (existingFinalMatch.homeScore ?? 0)
+          ? existingFinalMatch.awayTeamId
+          : (existingFinalMatch.homePenalties ?? 0) >= (existingFinalMatch.awayPenalties ?? 0)
+          ? existingFinalMatch.homeTeamId
+          : existingFinalMatch.awayTeamId);
+      const runnerUpId =
+        resolvedWinner === existingFinalMatch.homeTeamId
+          ? existingFinalMatch.awayTeamId
+          : existingFinalMatch.homeTeamId;
+
+      updatedTournament = {
+        ...updatedTournament,
+        isCompleted: true,
+        currentStage: 'completed',
+        winnerClubId: resolvedWinner,
+        runnerUpClubId: runnerUpId,
+      };
     }
   }
 
@@ -1339,7 +1526,11 @@ export function advanceContinentalTournament(
     updatedTournament: {
       ...updatedTournament,
       matches,
-      groups,
+      groups: updatedTournament.groups.map(g => ({
+        ...g,
+        teamIds: [...g.teamIds],
+        standings: g.standings.map(s => ({ ...s })),
+      })),
     },
     userMatchThisRound,
     newsMessage,

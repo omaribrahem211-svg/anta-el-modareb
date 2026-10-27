@@ -46,6 +46,7 @@ export interface LocalGameSavePayload {
   seasonArchives?: any[];
   deletedMessageIds?: string[];
   pendingCloudSync?: boolean;
+  worldState?: any;
 }
 
 let dbInstance: IDBDatabase | null = null;

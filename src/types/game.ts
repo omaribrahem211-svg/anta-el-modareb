@@ -408,6 +408,7 @@ export interface Club {
   targetLeaguePosition?: number;
   targetLeaguePositionText?: string;
   isNewlyPromoted?: boolean;
+  isNewlyRelegated?: boolean;
   previousDivision?: number;
   rankingPoints?: number;
   worldRank?: number;
@@ -569,6 +570,9 @@ export interface SeasonEndSummary {
   leagueTrophyAwarded?: string;
   cupTrophyAwarded?: string;
   cupResultText: string;
+  continentalTrophyAwarded?: string;
+  continentalResultText?: string;
+  trophiesWonList?: string[];
   prizeMoney: number;
   ticketRevenueTotal: number;
   sponsorshipTotal: number;

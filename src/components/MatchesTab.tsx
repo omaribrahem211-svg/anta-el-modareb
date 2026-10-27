@@ -12,6 +12,7 @@ import { LiveTacticalAlertBanner } from './LiveTacticalAlertBanner';
 import { TacticalMatchReportCard } from './TacticalMatchReportCard';
 import { RestartSeasonModal } from './RestartSeasonModal';
 import { WorldStarLoanModal } from './modals/WorldStarLoanModal';
+import { ClubCrest3DShield } from './models/Football3DModels';
 import {
   analyzeLiveMatchSituation,
   isTacticalAdviceApplied,
@@ -1518,7 +1519,7 @@ export const MatchesTab: React.FC = () => {
               const awayClub = (teams.find(t => t && t.id === userFixture.awayTeamId) || (userFixture.awayTeamId ? findClubInWorld(userFixture.awayTeamId) : undefined));
               const homeName = homeClub?.name || getClubDisplayName(userFixture.homeTeamId, teams);
               const awayName = awayClub?.name || getClubDisplayName(userFixture.awayTeamId, teams);
-              const compLabel = userFixture.tournamentBadge || activeLeague?.name || 'الدوري الممتاز';
+              const compLabel = userFixture.tournamentBadge || 'الدوري الممتاز';
               const stageLabel = userFixture.stageName || `الجولة ${userFixture.round || currentRound}`;
               const goalEvents = (userFixture.events || []).filter(e => e && e.type === 'goal');
               const homeGoals = goalEvents
@@ -1954,6 +1955,42 @@ export const MatchesTab: React.FC = () => {
               <span className="text-[11px] bg-slate-800 text-slate-300 px-2.5 py-1 rounded-full font-mono border border-slate-700">
                 {upcomingMatchAnalysis?.isUserHome ? 'ملعبك (المضيف)' : 'خارج الديار (الضيف)'}
               </span>
+            </div>
+
+            {/* 3D Broadcast Club Shields Face-off Banner */}
+            <div className="relative overflow-hidden rounded-2xl border border-emerald-500/30 bg-gradient-to-r from-emerald-950/50 via-slate-950 to-rose-950/50 p-4 flex items-center justify-around gap-3 shadow-inner">
+              <div className="flex flex-col items-center gap-1.5 text-center">
+                <ClubCrest3DShield
+                  clubName={userClub?.name || 'فريقك'}
+                  primaryColor={userClub?.primaryColor || '#10b981'}
+                  secondaryColor={userClub?.secondaryColor || '#ffffff'}
+                  rating={upcomingMatchAnalysis?.userSquad?.overall || 70}
+                  size="md"
+                />
+                <span className="text-xs font-black text-white">{userClub?.name || 'فريقك'}</span>
+                <span className="text-[10px] text-emerald-400 font-bold">نادي المدرب</span>
+              </div>
+
+              <div className="flex flex-col items-center gap-1">
+                <div className="w-10 h-10 rounded-2xl bg-slate-900 border border-amber-500/50 flex items-center justify-center font-black text-amber-400 text-xs shadow-lg">
+                  VS
+                </div>
+                <span className="text-[10px] text-slate-400 font-mono">
+                  {userFixture?.stageName || `الجولة ${currentRound}`}
+                </span>
+              </div>
+
+              <div className="flex flex-col items-center gap-1.5 text-center">
+                <ClubCrest3DShield
+                  clubName={upcomingMatchAnalysis?.oppClub?.name || 'المنافس'}
+                  primaryColor={upcomingMatchAnalysis?.oppClub?.primaryColor || '#e11d48'}
+                  secondaryColor={upcomingMatchAnalysis?.oppClub?.secondaryColor || '#ffffff'}
+                  rating={upcomingMatchAnalysis?.oppSquad?.overall || 70}
+                  size="md"
+                />
+                <span className="text-xs font-black text-white">{upcomingMatchAnalysis?.oppClub?.name || 'المنافس'}</span>
+                <span className="text-[10px] text-rose-400 font-bold">المنافس القادم</span>
+              </div>
             </div>
 
             {/* Manager vs Manager Breakdown */}

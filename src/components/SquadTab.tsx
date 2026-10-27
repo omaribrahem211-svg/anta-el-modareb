@@ -2,6 +2,9 @@ import React, { useState } from 'react';
 import { useGame } from '../context/GameContext';
 import { Player, PositionCategory } from '../types/game';
 import { getPositionArabic, getPositionBadgeClass } from '../utils/positionHelper';
+import { PlayerKit3DModel } from './models/Football3DModels';
+import { useLazyList } from '../utils/useLazyList';
+import { compressImage } from '../utils/imageCompressor';
 import {
   Users,
   Search,
@@ -78,6 +81,15 @@ export const SquadTab: React.FC<SquadTabProps> = ({ onSelectPlayer }) => {
     if (sortBy === 'savings') return (b.savings || 0) - (a.savings || 0);
     return 0;
   });
+
+  const {
+    visibleItems: displayedPlayers,
+    hasMore,
+    loadMore,
+    sentinelRef,
+    renderedCount,
+    totalCount,
+  } = useLazyList(filteredPlayers, { initialBatchSize: 15, batchStep: 10 });
 
   const avgSquadRating = squadPlayers.length > 0 ? Math.round(squadPlayers.reduce((sum, p) => sum + p.overallRating, 0) / squadPlayers.length) : 0;
   const avgAge = squadPlayers.length > 0 ? (squadPlayers.reduce((sum, p) => sum + p.age, 0) / squadPlayers.length).toFixed(1) : '0';
@@ -249,7 +261,7 @@ export const SquadTab: React.FC<SquadTabProps> = ({ onSelectPlayer }) => {
 
       {/* Players List */}
       <div className="space-y-2">
-        {filteredPlayers.map((player) => {
+        {displayedPlayers.map((player) => {
           const isStarter = startingIds.includes(player.id);
           const isBench = benchIds.includes(player.id);
           const playerSavings = player.savings || 0;
@@ -259,23 +271,21 @@ export const SquadTab: React.FC<SquadTabProps> = ({ onSelectPlayer }) => {
             <div
               key={player.id}
               onClick={() => onSelectPlayer(player)}
+              style={{ contentVisibility: 'auto', containIntrinsicSize: '72px' }}
               className="bg-slate-900/80 hover:bg-slate-850 border border-slate-800 hover:border-slate-700/80 p-3 rounded-2xl cursor-pointer transition-all flex items-center justify-between gap-2.5 active:scale-[0.99]"
             >
-              {/* Left: Overall & Info */}
-              <div className="flex items-center gap-2.5 min-w-0">
-                {/* Rating Badge */}
-                <div 
-                  className={`w-11 h-11 rounded-xl flex flex-col items-center justify-center font-black shrink-0 border ${
-                    player.overallRating >= 56 
-                      ? 'bg-emerald-950 text-emerald-400 border-emerald-700' 
-                      : player.overallRating >= 50 
-                      ? 'bg-blue-950 text-blue-400 border-blue-700' 
-                      : 'bg-amber-950 text-amber-400 border-amber-700'
-                  }`}
-                >
-                  <span className="text-base leading-none">{player.overallRating}</span>
-                  <span className="text-[8px] uppercase tracking-wider font-bold">{player.position}</span>
-                </div>
+              {/* Left: 3D Kit Figurine & Info */}
+              <div className="flex items-center gap-3 min-w-0">
+                <PlayerKit3DModel
+                  number={player.number || 10}
+                  position={player.position}
+                  overall={player.overallRating}
+                  primaryColor={userClub.primaryColor || '#10b981'}
+                  secondaryColor={userClub.secondaryColor || '#ffffff'}
+                  isGK={player.position === 'GK'}
+                  isCaptain={userClub.tactics?.captainId === player.id}
+                  size="sm"
+                />
 
                 {/* Name & Role */}
                 <div className="min-w-0">
@@ -388,6 +398,18 @@ export const SquadTab: React.FC<SquadTabProps> = ({ onSelectPlayer }) => {
             </div>
           );
         })}
+
+        {/* Lazy Loading Sentinel */}
+        {hasMore && (
+          <div ref={sentinelRef} className="py-3 text-center">
+            <button
+              onClick={loadMore}
+              className="px-4 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-white border border-slate-800 text-xs font-bold transition-all cursor-pointer inline-flex items-center gap-1.5"
+            >
+              <span>عرض المزيد من اللاعبين ({renderedCount} من {totalCount})</span>
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Bonus Distribution Modal */}

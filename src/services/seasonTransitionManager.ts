@@ -191,7 +191,8 @@ export class SeasonTransitionManager {
       summaryClub,
       activeLeague,
       cupTournament,
-      manager
+      manager,
+      params.continentalTournament
     );
 
     // 3. Initialize Next Season's Domestic National Cup for the active country
@@ -263,13 +264,31 @@ export class SeasonTransitionManager {
     // 7. Update Manager Records
     const isUserChampion = standings[0]?.teamId === userClub?.id;
     const isUserCupWinner = Boolean(userClub?.id && cupTournament?.winnerClubId === userClub.id);
+    const isUserContWinner = Boolean(
+      userClub?.id &&
+      (seasonEndSummary.continentalTrophyAwarded ||
+        params.continentalTournament?.winnerClubId === userClub.id)
+    );
+
+    const newTrophiesForManager = [...(manager.trophies || [])];
+    if (isUserChampion && seasonEndSummary.leagueTrophyAwarded && !newTrophiesForManager.includes(seasonEndSummary.leagueTrophyAwarded)) {
+      newTrophiesForManager.push(seasonEndSummary.leagueTrophyAwarded);
+    }
+    if (isUserCupWinner && seasonEndSummary.cupTrophyAwarded && !newTrophiesForManager.includes(seasonEndSummary.cupTrophyAwarded)) {
+      newTrophiesForManager.push(seasonEndSummary.cupTrophyAwarded);
+    }
+    if (isUserContWinner && seasonEndSummary.continentalTrophyAwarded && !newTrophiesForManager.includes(seasonEndSummary.continentalTrophyAwarded)) {
+      newTrophiesForManager.push(seasonEndSummary.continentalTrophyAwarded);
+    }
+
     const updatedManager: ManagerProfile = {
       ...manager,
       totalSeasons: (manager.totalSeasons || 1) + 1,
       leagueTitles: isUserChampion ? (manager.leagueTitles || 0) + 1 : (manager.leagueTitles || 0),
       cupTitles: isUserCupWinner ? (manager.cupTitles || 0) + 1 : (manager.cupTitles || 0),
-      reputation: isUserChampion ? Math.min(100, (manager.reputation || 20) + 10) : manager.reputation,
-      level: isUserChampion ? (manager.level || 1) + 1 : manager.level,
+      trophies: newTrophiesForManager,
+      reputation: isUserChampion || isUserContWinner ? Math.min(100, (manager.reputation || 20) + 10) : manager.reputation,
+      level: isUserChampion || isUserContWinner ? (manager.level || 1) + 1 : manager.level,
     };
 
     // 8. Next Season Info

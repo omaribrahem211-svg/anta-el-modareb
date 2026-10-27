@@ -5,6 +5,7 @@ import { calculateClubMonthlyIncome, calculateClubTotalMonthlyWages } from '../s
 import { getBenchmarkTicketPrice } from '../utils/matchRevenue';
 import { MedicalCenterModal } from './MedicalCenterModal';
 import { YouthAcademyModal } from './YouthAcademyModal';
+import { ClubArena3DShowcase, Facility3DModel } from './models/Football3DModels';
 import {
   Building2,
   Wallet,
@@ -256,6 +257,16 @@ export const ClubTab: React.FC = () => {
           </div>
         </div>
       </div>
+
+      {/* 3D Isometric Club Stadium & Sports Complex Showcase */}
+      <ClubArena3DShowcase
+        clubName={userClub.name}
+        stadiumName={facilities.stadiumName || 'استاد النادي'}
+        stadiumCapacity={facilities.stadiumCapacity || 5000}
+        facilities={facilities}
+        stadiumLevel={facilities.stadiumLevel || 1}
+        primaryColor={userClub.primaryColor || '#10b981'}
+      />
 
       {notification && (
         <div className={`p-3 rounded-2xl text-xs font-bold text-center flex items-center justify-center gap-2 ${
@@ -833,18 +844,19 @@ export const ClubTab: React.FC = () => {
 
         <div className="space-y-3">
           {facilitiesList.map(item => {
-            const Icon = item.icon;
             const isMax = item.level >= 5;
 
             return (
               <div
                 key={item.key}
-                className="bg-slate-950/70 border border-slate-800 p-3.5 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+                className="bg-slate-950/70 border border-slate-800 hover:border-slate-700 p-3.5 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 transition-all"
               >
-                <div className="flex items-start gap-3">
-                  <div className="p-2.5 rounded-xl bg-slate-800 border border-slate-700 text-emerald-400 shrink-0">
-                    <Icon className="w-5 h-5" />
-                  </div>
+                <div className="flex items-center gap-3.5">
+                  <Facility3DModel
+                    facilityKey={item.key as any}
+                    level={item.level}
+                    clubColor={userClub.primaryColor || '#10b981'}
+                  />
                   <div>
                     <div className="flex items-center gap-2">
                       <h4 className="font-bold text-sm text-white">{item.title}</h4>

@@ -537,54 +537,35 @@ export function simulateDailyNegotiations(
           }
         }
 
-        // If bid is >= 95% of market value: Club Approves!
-        if (current.bidFee >= playerVal * 0.95) {
+        // Fixed non-negotiable transfer price check
+        if (current.bidFee >= playerVal * 0.98) {
           current.stage = 'player_terms';
           current.daysRemainingInStage = 1;
-          current.statusMessage = `وافق نادي ${current.playerClubName} على العرض المالي (${current.bidFee.toLocaleString()} ج.م). يتم الآن توثيق مدة العقد (${current.contractYears || 3} سنوات) مع اللاعب.`;
+          current.statusMessage = `وافق نادي ${current.playerClubName} على السعر الثابت للصفقة (${current.bidFee.toLocaleString()} ج.م). يتم الآن مراجعة الراتب الشهري (${(current.offeredSalary || 0).toLocaleString()} ج.م) ومدة العقد (${current.contractYears || 3} سنوات) مع اللاعب.`;
           current.history.push({
             dateStr: new Date().toISOString().slice(0, 10),
-            message: `وافق نادي ${current.playerClubName} على العرض المالي.`,
+            message: `وافق نادي ${current.playerClubName} على السعر الثابت للصفقة.`,
             from: 'club',
           });
           negotiationReports.push({
             negotiationId: current.id,
             playerName: current.playerName,
-            text: `نادي ${current.playerClubName} يقبل عرض شراء ${current.playerName}! جاري توقيع عقد لمدة ${current.contractYears || 3} سنوات.`,
+            text: `نادي ${current.playerClubName} يقبل السعر الثابت لشراء ${current.playerName}! جاري توقيع عقد براتب ${(current.offeredSalary || 0).toLocaleString()} ج.م شهرياً لمدة ${current.contractYears || 3} سنوات.`,
             stage: 'player_terms',
             actionRequired: false,
           });
-        } else if (current.bidFee >= playerVal * 0.75) {
-          // Counter offer from selling club
-          const counterAmount = Math.round(playerVal * 1.05);
-          current.stage = 'club_counter';
-          current.demandedFee = counterAmount;
-          current.statusMessage = `طلب نادي ${current.playerClubName} مبلغاً أعلى قدره (${counterAmount.toLocaleString()} ج.م) للموافقة على بيع اللاعب.`;
-          current.history.push({
-            dateStr: new Date().toISOString().slice(0, 10),
-            message: `النادي يطلب ${counterAmount.toLocaleString()} ج.م للموافقة على الصفقة.`,
-            from: 'club',
-          });
-          negotiationReports.push({
-            negotiationId: current.id,
-            playerName: current.playerName,
-            text: `طلب نادي ${current.playerClubName} رفع العرض إلى ${counterAmount.toLocaleString()} ج.م لضم ${current.playerName}.`,
-            stage: 'club_counter',
-            actionRequired: true,
-          });
         } else {
-          // Reject bid as too low
           current.stage = 'rejected';
-          current.statusMessage = `رفض نادي ${current.playerClubName} العرض المقدم معتبراً إياه غير كافٍ ومجحفاً بقيمة اللاعب.`;
+          current.statusMessage = `رفض نادي ${current.playerClubName} العرض لأن سعر اللاعب ثابت وغير قابل للتفاوض (${playerVal.toLocaleString()} ج.م).`;
           current.history.push({
             dateStr: new Date().toISOString().slice(0, 10),
-            message: 'رفض النادي العرض نهائياً.',
+            message: 'رفض النادي العرض لأن السعر ثابت وغير قابل للتفاوض.',
             from: 'club',
           });
           negotiationReports.push({
             negotiationId: current.id,
             playerName: current.playerName,
-            text: `رفض نادي ${current.playerClubName} عرض ضم اللاعب ${current.playerName}.`,
+            text: `رفض نادي ${current.playerClubName} عرض ضم اللاعب ${current.playerName} لعدم مطابقة السعر الثابت.`,
             stage: 'rejected',
             actionRequired: false,
           });
@@ -597,28 +578,30 @@ export function simulateDailyNegotiations(
       return current;
     }
 
-    // --- STAGE 2: Player Terms Review (Contract Length 1-5 Years Only, No Salary Constraint) ---
+    // --- STAGE 2: Player Terms Review (Contract Length 1-5 Years & Fixed Monthly Salary) ---
     if (current.stage === 'player_terms') {
       const validYears = Math.max(1, Math.min(5, current.contractYears || 3));
       current.contractYears = validYears;
+      const fullPlayer = resolveFullPlayerObject(current, allTeams, transferMarket);
+      const fixedWage = Math.max(1000, current.offeredSalary || fullPlayer.salary || 2500);
+
+      current.offeredSalary = fixedWage;
       current.stage = 'completed';
-      current.statusMessage = `تم الاتفاق بنجاح! وقع اللاعب ${current.playerName} عقداً رسمياً يمتد لـ ${validYears} سنوات.`;
+      current.statusMessage = `تم الاتفاق بنجاح! وقع اللاعب ${current.playerName} عقداً رسمياً يمتد لـ ${validYears} سنوات بالراتب الشهري الثابت (${fixedWage.toLocaleString()} ج.م).`;
       current.history.push({
         dateStr: new Date().toISOString().slice(0, 10),
-        message: `وقع اللاعب ${current.playerName} على عقده الجديد لمدة ${validYears} سنوات رسمياً.`,
+        message: `وقع اللاعب ${current.playerName} على عقده الجديد لمدة ${validYears} سنوات بالراتب الشهري الثابت (${fixedWage.toLocaleString()} ج.م).`,
         from: 'player',
       });
       negotiationReports.push({
         negotiationId: current.id,
         playerName: current.playerName,
-        text: `🎉 تمت الصفقة رسمياً! انضم ${current.playerName} إلى صفوف فريقك بعقد يمتد لـ ${validYears} سنوات.`,
+        text: `🎉 تمت الصفقة رسمياً! انضم ${current.playerName} إلى صفوف فريقك بعقد يمتد لـ ${validYears} سنوات وبالراتب الثابت ${fixedWage.toLocaleString()} ج.م.`,
         stage: 'completed',
         actionRequired: false,
       });
 
-      // Reliably locate or construct player for atomic transfer
-      const fullPlayer = resolveFullPlayerObject(current, allTeams, transferMarket);
-      completedTransfers.push({ negotiation: current, player: fullPlayer });
+      completedTransfers.push({ negotiation: current, player: { ...fullPlayer, salary: fixedWage } });
       return current;
     }
 

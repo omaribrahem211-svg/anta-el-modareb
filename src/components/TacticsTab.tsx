@@ -5,6 +5,7 @@ import { validateSquadLineup } from '../utils/squadValidator';
 import { getPositionArabic, getPositionBadgeClass } from '../utils/positionHelper';
 import { ALL_FORMATIONS, ALL_TACTICAL_STYLES } from '../utils/tacticalKnowledgeEngine';
 import { getLicenseRank } from '../utils/careerProgressionEngine';
+import { PlayerKit3DModel } from './models/Football3DModels';
 import {
   Sliders,
   Sparkles,
@@ -772,7 +773,7 @@ export const TacticsTab: React.FC<TacticsTabProps> = ({ onSelectPlayer }) => {
               <div className="absolute bottom-0 left-1/2 -translate-x-1/2 w-24 h-8 border-t-2 border-x-2 border-white/30" />
             </div>
 
-            {/* Starting 11 Player Nodes on Pitch */}
+            {/* Starting 11 3D Kit Figurines on Pitch */}
             {currentSlots.map((slot, index) => {
               const player = startingPlayers[index];
               const isSelected = selectedPlayerForSwap?.id === player?.id || selectedSlotIndex === index;
@@ -793,47 +794,35 @@ export const TacticsTab: React.FC<TacticsTabProps> = ({ onSelectPlayer }) => {
                   }`}
                   style={{ top: `${slot.top}%`, left: `${slot.left}%` }}
                 >
-                  {/* Jersey / Circle */}
-                  <div 
-                    className={`relative w-10 h-10 rounded-full flex flex-col items-center justify-center font-bold text-white shadow-xl border-2 transition-all ${
-                      isSelected 
-                        ? 'border-amber-300 ring-4 ring-amber-400/80 bg-amber-600 scale-110 animate-pulse' 
-                        : isPlayerIneligible
-                        ? 'border-red-500 bg-red-950 ring-2 ring-red-500'
-                        : player?.positionCategory === 'GK'
-                        ? 'border-amber-300 bg-amber-800'
-                        : 'border-white/80 bg-slate-900'
-                    }`}
-                  >
-                    <span className="text-xs leading-none font-mono">
-                      {player ? player.overallRating : slot.pos}
-                    </span>
-                    <span className="text-[7px] text-amber-300 font-bold leading-none mt-0.5">
-                      {player?.number ? `#${player.number}` : slot.pos}
-                    </span>
+                  {/* 3D Sculpted Kit Figurine */}
+                  <div className="relative">
+                    <PlayerKit3DModel
+                      number={player?.number || index + 1}
+                      position={slot.pos}
+                      overall={player?.overallRating}
+                      primaryColor={isPlayerIneligible ? '#991b1b' : (userClub.primaryColor || '#10b981')}
+                      secondaryColor={userClub.secondaryColor || '#ffffff'}
+                      isGK={slot.pos === 'GK' || player?.positionCategory === 'GK'}
+                      isCaptain={Boolean(player && tactics.captainId === player.id)}
+                      isSelected={isSelected}
+                      size="sm"
+                    />
 
                     {/* Ineligibility Icon Badge */}
                     {isPlayerInjured && (
-                      <span className="absolute -top-2 -left-2 w-4 h-4 bg-red-600 text-white font-black text-[9px] rounded-full flex items-center justify-center border border-white shadow">
+                      <span className="absolute -top-1 -left-1 w-4 h-4 bg-red-600 text-white font-black text-[9px] rounded-full flex items-center justify-center border border-white shadow z-30">
                         🚑
                       </span>
                     )}
                     {isPlayerSuspended && !isPlayerInjured && (
-                      <span className="absolute -top-2 -left-2 w-4 h-4 bg-red-600 text-white font-black text-[9px] rounded-full flex items-center justify-center border border-white shadow">
+                      <span className="absolute -top-1 -left-1 w-4 h-4 bg-red-600 text-white font-black text-[9px] rounded-full flex items-center justify-center border border-white shadow z-30">
                         🟥
-                      </span>
-                    )}
-
-                    {/* Captain C Badge */}
-                    {player && tactics.captainId === player.id && (
-                      <span className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-amber-400 text-slate-950 font-black text-[9px] rounded-full flex items-center justify-center border border-white">
-                        C
                       </span>
                     )}
                   </div>
 
                   {/* Player Name Pill */}
-                  <div className={`px-2 py-0.5 rounded-md text-[10px] font-bold mt-1 truncate max-w-[84px] shadow-md text-center ${
+                  <div className={`px-2 py-0.5 rounded-md text-[10px] font-bold -mt-0.5 truncate max-w-[86px] shadow-md text-center ${
                     isSelected
                       ? 'bg-amber-500 text-slate-950 font-black border border-amber-300'
                       : isPlayerIneligible
@@ -845,9 +834,9 @@ export const TacticsTab: React.FC<TacticsTabProps> = ({ onSelectPlayer }) => {
 
                   {/* Fitness Battery Dot */}
                   {player && (
-                    <div className="flex items-center gap-0.5 mt-0.5">
+                    <div className="flex items-center gap-0.5 mt-0.5 bg-slate-950/75 px-1.5 py-0.2 rounded-full border border-white/10">
                       <span className={`w-1.5 h-1.5 rounded-full ${isPlayerIneligible ? 'bg-red-500' : player.fitness > 80 ? 'bg-emerald-400' : 'bg-amber-400'}`} />
-                      <span className="text-[8px] text-white/80 font-mono">{player.fitness}%</span>
+                      <span className="text-[8px] text-white/90 font-mono">{player.fitness}%</span>
                     </div>
                   )}
                 </div>

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   Trophy,
   Globe,
@@ -14,6 +14,7 @@ import { ContinentalMatch, ContinentalGroup } from '../../types/game';
 import {
   resolveClubContinentRegion,
   getContinentalCompetitionsForRegion,
+  recalculateContinentalGroupStandings,
 } from '../../utils/continentalEngine';
 
 interface AfricanChampionsLeagueViewProps {
@@ -36,6 +37,11 @@ export const AfricanChampionsLeagueView: React.FC<AfricanChampionsLeagueViewProp
   const [filterUserOnly, setFilterUserOnly] = useState<boolean>(false);
   const [lastMatchResult, setLastMatchResult] = useState<{ match: ContinentalMatch; message?: string } | null>(null);
 
+  const liveTournament = useMemo(() => {
+    if (!africanChampionsLeague) return null;
+    return recalculateContinentalGroupStandings(africanChampionsLeague, fixtures);
+  }, [africanChampionsLeague, fixtures]);
+
   // Resolve current managed club's continent ('africa' | 'europe') based on userClub.continent / activeLeague.region / country
   const managedRegion = resolveClubContinentRegion(userClub, activeLeague);
   const availableContinentalButtons = getContinentalCompetitionsForRegion(managedRegion).filter(
@@ -44,7 +50,7 @@ export const AfricanChampionsLeagueView: React.FC<AfricanChampionsLeagueViewProp
   const regionConfederationLabel =
     managedRegion === 'europe' ? 'الاتحاد الأوروبي (UEFA)' : 'الاتحاد الإفريقي (CAF)';
 
-  if (!africanChampionsLeague) {
+  if (!liveTournament) {
     return (
       <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 text-center space-y-4">
         <div className="w-16 h-16 rounded-2xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-amber-400 mx-auto">
@@ -85,7 +91,7 @@ export const AfricanChampionsLeagueView: React.FC<AfricanChampionsLeagueViewProp
     );
   }
 
-  const { groups, matches, currentStage, name, prizeMoneyWinner, competitionId } = africanChampionsLeague;
+  const { groups, matches, currentStage, name, prizeMoneyWinner, competitionId } = liveTournament;
   const isThursdayComp = competitionId === 'ccc' || competitionId === 'uel';
   const isUserParticipantInThisComp = Boolean(
     userClub && groups.some(g => g.teamIds.includes(userClub.id))
@@ -437,32 +443,68 @@ export const AfricanChampionsLeagueView: React.FC<AfricanChampionsLeagueViewProp
                 return (
                   <div
                     key={match.id}
-                    className={`p-3 rounded-2xl border transition-all flex flex-col sm:flex-row items-center justify-between gap-3 ${
+                    className={`p-3.5 rounded-2xl border transition-all flex flex-col gap-2.5 ${
                       isUserMatch
-                        ? 'bg-gradient-to-r from-amber-500/10 via-slate-900 to-slate-900 border-amber-500/50 shadow-md'
+                        ? 'bg-gradient-to-r from-amber-500/15 via-slate-900 to-slate-900 border-amber-500/50 shadow-md'
                         : 'bg-slate-900/80 border-slate-800'
                     }`}
                   >
-                    <div className="flex items-center gap-2 text-xs">
-                      <span className="bg-slate-950 px-2.5 py-1 rounded-lg text-amber-400 font-mono text-[11px] border border-slate-800">
+                    {/* Top Row: Stage Badge + Date / Status / Play CTA */}
+                    <div className="flex items-center justify-between gap-2 w-full border-b border-slate-800/70 pb-2">
+                      <span className="bg-slate-950 px-2.5 py-1 rounded-lg text-amber-400 font-bold text-[11px] border border-slate-800 truncate">
                         {match.stageName}
                       </span>
+
+                      <div className="shrink-0">
+                        {!match.isPlayed ? (
+                          (() => {
+                            const matchingFix = (fixtures || []).find(f => f.id === match.id);
+                            const matchDate = matchingFix?.date || (match as any).date;
+                            const isToday = Boolean(calendarDate?.rawDateStr && matchDate && matchDate <= calendarDate.rawDateStr);
+
+                            if (isToday && isUserMatch) {
+                              return (
+                                <button
+                                  onClick={() => window.dispatchEvent(new CustomEvent('set-active-tab', { detail: { tab: 'matches' } }))}
+                                  className="px-3 py-1 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-black text-[11px] flex items-center gap-1 shadow cursor-pointer transition-all active:scale-95 animate-pulse"
+                                >
+                                  <Play className="w-3 h-3 fill-white" />
+                                  <span>العب المباراة الآن ⚽</span>
+                                </button>
+                              );
+                            }
+
+                            return (
+                              <div className="text-[11px] text-slate-400 font-mono bg-slate-950 px-2.5 py-1 rounded-xl border border-slate-800 flex items-center gap-1.5">
+                                <Calendar className="w-3.5 h-3.5 text-cyan-400" />
+                                <span>{matchDate || 'مجدولة بالتقويم'}</span>
+                              </div>
+                            );
+                          })()
+                        ) : (
+                          <span className="text-[11px] text-emerald-400 flex items-center gap-1 bg-emerald-950/40 px-2.5 py-1 rounded-xl border border-emerald-800/50">
+                            <CheckCircle2 className="w-3.5 h-3.5" />
+                            <span>انتهت</span>
+                          </span>
+                        )}
+                      </div>
                     </div>
 
-                    <div className="flex items-center justify-center gap-3 flex-1 min-w-0">
-                      <div className="flex items-center gap-2 justify-end flex-1 truncate text-left">
-                        <span className={`text-xs font-bold truncate ${home.id === userClub?.id ? 'text-amber-300 font-black' : 'text-white'}`}>
-                          {home.name}
-                        </span>
+                    {/* Main Matchup Row: Home Team vs Away Team */}
+                    <div className="flex items-center justify-between gap-2 w-full">
+                      <div className="flex items-center gap-2 justify-start flex-1 min-w-0">
                         <div
-                          className="w-6 h-6 rounded-lg flex items-center justify-center text-[10px] font-bold text-white shrink-0"
+                          className="w-7 h-7 rounded-lg flex items-center justify-center text-[11px] font-bold text-white shrink-0 shadow-sm"
                           style={{ backgroundColor: home.primaryColor || '#dc2626' }}
                         >
-                          {home.shortName?.slice(0, 1) || 'أ'}
+                          {home.shortName?.slice(0, 2) || 'أ'}
                         </div>
+                        <span className={`text-xs sm:text-sm font-bold leading-tight break-words ${home.id === userClub?.id ? 'text-amber-300 font-black' : 'text-white'}`}>
+                          {home.name}
+                        </span>
                       </div>
 
-                      <div className="px-3 py-1 bg-slate-950 border border-slate-800 rounded-xl font-mono font-black text-sm text-center shrink-0 min-w-16">
+                      <div className="px-3 py-1.5 bg-slate-950 border border-slate-800 rounded-xl font-mono font-black text-sm text-center shrink-0 min-w-[68px]">
                         {match.isPlayed ? (
                           <span className="text-amber-400">
                             {match.homeScore} - {match.awayScore}
@@ -472,51 +514,17 @@ export const AfricanChampionsLeagueView: React.FC<AfricanChampionsLeagueViewProp
                         )}
                       </div>
 
-                      <div className="flex items-center gap-2 justify-start flex-1 truncate text-right">
-                        <div
-                          className="w-6 h-6 rounded-lg flex items-center justify-center text-[10px] font-bold text-white shrink-0"
-                          style={{ backgroundColor: away.primaryColor || '#15803d' }}
-                        >
-                          {away.shortName?.slice(0, 1) || 'ض'}
-                        </div>
-                        <span className={`text-xs font-bold truncate ${away.id === userClub?.id ? 'text-amber-300 font-black' : 'text-white'}`}>
+                      <div className="flex items-center gap-2 justify-end flex-1 min-w-0 text-left">
+                        <span className={`text-xs sm:text-sm font-bold leading-tight break-words text-left ${away.id === userClub?.id ? 'text-amber-300 font-black' : 'text-white'}`}>
                           {away.name}
                         </span>
+                        <div
+                          className="w-7 h-7 rounded-lg flex items-center justify-center text-[11px] font-bold text-white shrink-0 shadow-sm"
+                          style={{ backgroundColor: away.primaryColor || '#15803d' }}
+                        >
+                          {away.shortName?.slice(0, 2) || 'ض'}
+                        </div>
                       </div>
-                    </div>
-
-                    <div className="shrink-0 text-left">
-                      {!match.isPlayed ? (
-                        (() => {
-                          const matchingFix = (fixtures || []).find(f => f.id === match.id);
-                          const matchDate = matchingFix?.date || (match as any).date;
-                          const isToday = calendarDate?.rawDateStr && matchDate === calendarDate.rawDateStr;
-
-                          if (isToday && isUserMatch) {
-                            return (
-                              <button
-                                onClick={() => window.dispatchEvent(new CustomEvent('set-active-tab', { detail: { tab: 'matches' } }))}
-                                className="px-3 py-1.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-black text-xs flex items-center gap-1 shadow cursor-pointer transition-all active:scale-95 animate-pulse"
-                              >
-                                <Play className="w-3 h-3 fill-white" />
-                                <span>مباراة اليوم بالتقويم ⚽</span>
-                              </button>
-                            );
-                          }
-
-                          return (
-                            <div className="text-[11px] text-slate-400 font-mono bg-slate-950 px-2.5 py-1 rounded-xl border border-slate-800 flex items-center gap-1.5">
-                              <Calendar className="w-3.5 h-3.5 text-cyan-400" />
-                              <span>{matchDate || 'مجدولة بالتقويم'}</span>
-                            </div>
-                          );
-                        })()
-                      ) : (
-                        <span className="text-[11px] text-emerald-400 flex items-center gap-1 bg-emerald-950/40 px-2.5 py-1 rounded-xl border border-emerald-800/50">
-                          <CheckCircle2 className="w-3.5 h-3.5" />
-                          <span>انتهت بالتقويم</span>
-                        </span>
-                      )}
                     </div>
                   </div>
                 );
@@ -529,9 +537,9 @@ export const AfricanChampionsLeagueView: React.FC<AfricanChampionsLeagueViewProp
       {activeTab === 'knockout' && (
         <div className="space-y-4">
           <div className="bg-slate-900 border border-slate-800 rounded-3xl p-4 sm:p-5 space-y-4">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 pb-3">
               <div className="flex items-center gap-2">
-                <Trophy className="w-5 h-5 text-amber-400" />
+                <Trophy className="w-5 h-5 text-amber-400 shrink-0" />
                 <h3 className="font-bold text-sm sm:text-base text-white">شجرة الأدوار الإقصائية (من ربع النهائي حتى النهائي)</h3>
               </div>
               <span className="text-[11px] bg-slate-800 text-slate-300 px-2.5 py-1 rounded-full font-mono border border-slate-700">
@@ -553,73 +561,123 @@ export const AfricanChampionsLeagueView: React.FC<AfricanChampionsLeagueViewProp
                   const home = getClub(km.homeTeamId);
                   const away = getClub(km.awayTeamId);
                   const isUserMatch = userClub && (km.homeTeamId === userClub.id || km.awayTeamId === userClub.id);
+                  const winnerClub = km.winnerTeamId ? getClub(km.winnerTeamId) : null;
 
                   return (
                     <div
                       key={km.id}
-                      className={`p-3.5 rounded-2xl border flex items-center justify-between gap-3 ${
+                      className={`p-3.5 rounded-2xl border flex flex-col gap-3 transition-all ${
                         isUserMatch
-                          ? 'bg-gradient-to-r from-amber-500/15 via-slate-900 to-slate-900 border-amber-500/60'
-                          : 'bg-slate-950/80 border-slate-800'
+                          ? 'bg-gradient-to-r from-amber-500/15 via-slate-900 to-slate-900 border-amber-500/60 shadow-lg'
+                          : 'bg-slate-950/90 border-slate-800'
                       }`}
                     >
-                      <div className="text-xs font-bold text-amber-400 min-w-28">{km.stageName}</div>
-
-                      <div className="flex items-center justify-center gap-3 flex-1 min-w-0">
-                        <span className={`text-xs font-bold truncate ${km.winnerTeamId === home.id ? 'text-emerald-400' : 'text-slate-200'}`}>
-                          {home.name}
+                      {/* Top Header Row: Stage Name + Winner Badge or Date/Play CTA */}
+                      <div className="flex items-center justify-between gap-2 w-full border-b border-slate-800/80 pb-2">
+                        <span className="text-xs font-black text-amber-400 bg-amber-500/10 border border-amber-500/30 px-2.5 py-1 rounded-xl">
+                          {km.stageName}
                         </span>
-                        <div className="px-3 py-1 bg-slate-900 border border-slate-800 rounded-xl font-mono font-black text-sm text-center shrink-0">
+
+                        <div className="shrink-0">
+                          {!km.isPlayed ? (
+                            (() => {
+                              const matchingFix = (fixtures || []).find(f => f.id === km.id);
+                              const matchDate = matchingFix?.date || (km as any).date;
+                              const isToday = Boolean(calendarDate?.rawDateStr && matchDate && matchDate <= calendarDate.rawDateStr);
+
+                              if (isToday && isUserMatch) {
+                                return (
+                                  <button
+                                    onClick={() => window.dispatchEvent(new CustomEvent('set-active-tab', { detail: { tab: 'matches' } }))}
+                                    className="px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-black text-xs flex items-center gap-1 shadow cursor-pointer transition-all active:scale-95 animate-pulse"
+                                  >
+                                    <Play className="w-3 h-3 fill-white" />
+                                    <span>العب المباراة الآن ⚽</span>
+                                  </button>
+                                );
+                              }
+
+                              return (
+                                <div className="text-[11px] text-slate-400 font-mono bg-slate-900 px-2.5 py-1 rounded-xl border border-slate-800 flex items-center gap-1.5">
+                                  <Calendar className="w-3.5 h-3.5 text-cyan-400" />
+                                  <span>{matchDate || 'مجدولة بالتقويم'}</span>
+                                </div>
+                              );
+                            })()
+                          ) : (
+                            <span className="text-[11px] text-emerald-400 font-bold flex items-center gap-1 bg-emerald-950/40 px-2.5 py-1 rounded-xl border border-emerald-700/40">
+                              <Trophy className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                              <span>الفائز: {winnerClub?.name || 'متأهل'}</span>
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Main Matchup Row: Home Team - Score Box - Away Team */}
+                      <div className="flex items-center justify-between gap-2 w-full">
+                        {/* Home Team */}
+                        <div className="flex items-center gap-2 justify-start flex-1 min-w-0">
+                          <div
+                            className="w-8 h-8 rounded-xl flex items-center justify-center text-xs font-black text-white shrink-0 shadow"
+                            style={{ backgroundColor: home.primaryColor || '#dc2626' }}
+                          >
+                            {home.shortName?.slice(0, 2) || 'أ'}
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <span
+                              className={`text-xs sm:text-sm font-bold block leading-snug break-words ${
+                                km.winnerTeamId === home.id
+                                  ? 'text-emerald-400 font-black'
+                                  : home.id === userClub?.id
+                                  ? 'text-amber-300 font-black'
+                                  : 'text-slate-100'
+                              }`}
+                            >
+                              {home.name}
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* Center Score Box */}
+                        <div className="px-3.5 py-1.5 bg-slate-900 border border-slate-700/80 rounded-xl font-mono font-black text-sm sm:text-base text-center shrink-0 min-w-[76px] shadow-inner">
                           {km.isPlayed ? (
-                            <span>
-                              {km.homeScore} - {km.awayScore}
-                              {km.homePenalties !== undefined && (
-                                <span className="text-[10px] text-amber-400 block font-normal">
+                            <div className="flex flex-col items-center leading-tight">
+                              <span className="text-white tracking-wider">
+                                {km.homeScore} - {km.awayScore}
+                              </span>
+                              {km.homePenalties !== undefined && km.awayPenalties !== undefined && (
+                                <span className="text-[10px] text-amber-400 font-bold mt-0.5 whitespace-nowrap">
                                   ({km.homePenalties} - {km.awayPenalties} ر.ت)
                                 </span>
                               )}
-                            </span>
+                            </div>
                           ) : (
-                            <span className="text-slate-500 text-xs">VS</span>
+                            <span className="text-slate-400 text-xs">VS</span>
                           )}
                         </div>
-                        <span className={`text-xs font-bold truncate ${km.winnerTeamId === away.id ? 'text-emerald-400' : 'text-slate-200'}`}>
-                          {away.name}
-                        </span>
-                      </div>
 
-                      <div className="shrink-0 text-left">
-                        {!km.isPlayed ? (
-                          (() => {
-                            const matchingFix = (fixtures || []).find(f => f.id === km.id);
-                            const matchDate = matchingFix?.date || (km as any).date;
-                            const isToday = calendarDate?.rawDateStr && matchDate === calendarDate.rawDateStr;
-
-                            if (isToday && isUserMatch) {
-                              return (
-                                <button
-                                  onClick={() => window.dispatchEvent(new CustomEvent('set-active-tab', { detail: { tab: 'matches' } }))}
-                                  className="px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-black text-xs flex items-center gap-1 shadow cursor-pointer transition-all active:scale-95 animate-pulse"
-                                >
-                                  <Play className="w-3 h-3 fill-white" />
-                                  <span>مباراة اليوم بالتقويم ⚽</span>
-                                </button>
-                              );
-                            }
-
-                            return (
-                              <div className="text-[11px] text-slate-400 font-mono bg-slate-900 px-2.5 py-1 rounded-xl border border-slate-800 flex items-center gap-1.5">
-                                <Calendar className="w-3.5 h-3.5 text-cyan-400" />
-                                <span>{matchDate || 'مجدولة بالتقويم'}</span>
-                              </div>
-                            );
-                          })()
-                        ) : (
-                          <span className="text-xs text-emerald-400 font-bold flex items-center gap-1">
-                            <Trophy className="w-3.5 h-3.5 text-amber-400" />
-                            <span>الفائز: {getClub(km.winnerTeamId || '').name}</span>
-                          </span>
-                        )}
+                        {/* Away Team */}
+                        <div className="flex items-center gap-2 justify-end flex-1 min-w-0 text-left">
+                          <div className="min-w-0 flex-1 text-left">
+                            <span
+                              className={`text-xs sm:text-sm font-bold block leading-snug break-words text-left ${
+                                km.winnerTeamId === away.id
+                                  ? 'text-emerald-400 font-black'
+                                  : away.id === userClub?.id
+                                  ? 'text-amber-300 font-black'
+                                  : 'text-slate-100'
+                              }`}
+                            >
+                              {away.name}
+                            </span>
+                          </div>
+                          <div
+                            className="w-8 h-8 rounded-xl flex items-center justify-center text-xs font-black text-white shrink-0 shadow"
+                            style={{ backgroundColor: away.primaryColor || '#15803d' }}
+                          >
+                            {away.shortName?.slice(0, 2) || 'ض'}
+                          </div>
+                        </div>
                       </div>
                     </div>
                   );

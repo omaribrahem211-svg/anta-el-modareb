@@ -3,7 +3,7 @@ import { GLOBAL_LEAGUES, getCustomLeagues, saveCustomLeagues } from '../data/lea
 import { isRealClub, loadRealClubSquad, REAL_SQUADS_BY_CLUB_ID } from '../data/realPlayersData';
 import { VERIFIED_REAL_PLAYERS, convertVerifiedRealPlayerToPlayer } from '../data/playersData';
 import { generateClubSquad } from '../utils/playerGenerator';
-import { calculateClubMonthlyIncome, calculateClubTotalMonthlyWages } from '../services/economyService';
+import { calculateClubMonthlyIncome, calculateClubTotalMonthlyWages, calculateRealisticSalary } from '../services/economyService';
 
 export type PlayerTransferStatus = 
   | 'available' 
@@ -146,18 +146,17 @@ export function calculatePlayerFairValue(
 
   const rawFairFee = Math.max(25000, Math.round(baseValue * ageMultiplier * (contractYears === 0 ? 0.75 : contractMultiplier)));
   const mv = (player && typeof player.marketValue === 'number' && !isNaN(player.marketValue) && player.marketValue > 0) ? player.marketValue : 0;
+  // Fixed, non-negotiable price: strictly equals the player's marketValue
   const fairMarketValue = Math.max(25000, mv > 0 ? mv : rawFairFee);
-  
-  // If player is listed for transfer, minimum acceptable fee is slightly lower
-  const discountFactor = player?.isListedForTransfer ? 0.85 : 0.95;
-  const minimumAcceptableFee = Math.max(25000, Math.round(fairMarketValue * discountFactor));
+  const minimumAcceptableFee = fairMarketValue;
 
-  // Recommended wage
-  let baseSalary = Math.max(2500, Math.round(fairMarketValue * 0.008));
-  const curSal = (player && typeof player.salary === 'number' && !isNaN(player.salary)) ? player.salary : 0;
-  if (curSal > 0) {
-    baseSalary = Math.max(baseSalary, curSal);
-  }
+  // Recommended monthly salary
+  const realisticWage = calculateRealisticSalary(ovr, {
+    divisionTier: club?.division || 2,
+    clubReputation: club?.reputation || 50,
+  });
+  const curSal = (player && typeof player.salary === 'number' && !isNaN(player.salary) && player.salary > 0) ? player.salary : 0;
+  const recommendedMonthlyWage = curSal > 0 ? curSal : Math.max(1500, realisticWage);
 
   let valuationTier: 'low' | 'medium' | 'high' | 'world_class' = 'low';
   if (ovr >= 85) valuationTier = 'world_class';
@@ -167,7 +166,7 @@ export function calculatePlayerFairValue(
   return {
     fairMarketValue,
     minimumAcceptableFee,
-    recommendedMonthlyWage: baseSalary,
+    recommendedMonthlyWage,
     valuationTier,
   };
 }
@@ -321,15 +320,7 @@ export function evaluateTransferOffer(
           message: `يرى اللاعب ${player.name} (تقييم ${ovr}) أن الانتقال للدوري الحالي لا يناسب مكانته وتاريخه الكروي في الملاعب الأوروبية.`,
         };
       }
-      // For Saudi tier 1, requires strong transfer fee / signing valuation (>= 1.25x fair market value)
-      if (proposal.transferFee < fairMarketValue * 1.2) {
-        return {
-          decision: 'reject',
-          clubApproved: false,
-          playerApproved: false,
-          message: `يشترط النجم ${player.name} وناديه عرض شراء ضخم لا يقل عن (${Math.round(fairMarketValue * 1.25).toLocaleString()} ج.م) للموافقة على مغادرة الملاعب الأوروبية.`,
-        };
-      }
+      // For Saudi tier 1, fixed price still applies
     }
   }
 
@@ -349,60 +340,36 @@ export function evaluateTransferOffer(
     }
   }
 
-  // 3. EVALUATE SELLING CLUB & TRANSFER VALUE (or Free Agent status when contractYears === 0)
+  // 3. FIXED NON-NEGOTIABLE TRANSFER PRICE CHECK
   const isContractExpiredFreeAgent = isFreeAgent || (player.contractYears !== undefined && player.contractYears <= 0);
-  let clubApproved = false;
-  let clubCounterFee: number | undefined = undefined;
-  let clubRejectionMessage = '';
+  const fixedTransferPrice = isContractExpiredFreeAgent ? 0 : fairMarketValue;
 
-  const offeredFee = isContractExpiredFreeAgent ? 0 : proposal.transferFee;
-  if (userClub && userClub.budget < offeredFee) {
+  if (userClub && userClub.budget < fixedTransferPrice) {
     return {
       decision: 'reject',
       clubApproved: false,
       playerApproved: false,
-      message: `ميزانية ناديك الحالية (${userClub.budget.toLocaleString()} ج.م) لا تكفي لدفع قيمة شراء اللاعب (${offeredFee.toLocaleString()} ج.م)!`,
+      message: `ميزانية ناديك الحالية (${userClub.budget.toLocaleString()} ج.م) لا تكفي لدفع السعر الثابت لشراء اللاعب (${fixedTransferPrice.toLocaleString()} ج.م)!`,
     };
   }
 
-  if (isContractExpiredFreeAgent) {
-    clubApproved = true;
-  } else {
-    if (offeredFee >= minimumAcceptableFee) {
-      clubApproved = true;
-    } else if (offeredFee >= minimumAcceptableFee * 0.78) {
-      clubApproved = false;
-      clubCounterFee = Math.round(minimumAcceptableFee * 1.05);
-      clubRejectionMessage = `النادي يرى أن العرض المالي (${offeredFee.toLocaleString()} ج.م) غير كافٍ للاستغناء عن عقد اللاعب، ويطلب (${clubCounterFee.toLocaleString()} ج.م) لإتمام الصفقة.`;
-    } else {
-      clubApproved = false;
-      clubRejectionMessage = `إدارة نادي ${sellingClub?.name || 'اللاعب'} رفضت العرض رسمياً؛ المبلغ المعروض (${offeredFee.toLocaleString()} ج.م) أقل بكثير من قيمة اللاعب السوقية.`;
-    }
-  }
+  const clubApproved = true;
 
-  // 4. EVALUATE CONTRACT DURATION (1 to 5 Years — No Salary Constraint)
-  const validYears = Math.max(1, Math.min(5, proposal.contractYears || 2));
+  // 4. FIXED NON-NEGOTIABLE MONTHLY SALARY & CONTRACT DURATION (1 to 5 Years)
+  const validYears = Math.max(1, Math.min(5, proposal.contractYears || 3));
+  const fixedSalary = Math.max(1000, Number(player.salary) || recommendedMonthlyWage || 2500);
+
   const playerApproved = validYears >= 1 && validYears <= 5;
 
-  // 5. FINAL SYNTHESIS
+  // 5. FINAL SYNTHESIS (Both Price & Salary are Fixed and Non-Negotiable)
   if (clubApproved && playerApproved) {
     return {
       decision: 'accept',
       clubApproved: true,
       playerApproved: true,
       message: isContractExpiredFreeAgent
-        ? `تمت الموافقة الرسمية! وقع اللاعب الحر ${player.name} على عقد انضمام لناديك لمدة ${validYears} سنوات في صفقة انتقال حر.`
-        : `تمت الموافقة الرسمية على الصفقة! وافق نادي ${sellingClub ? sellingClub.name : 'اللاعب'} واللاعب على الانتقال مقابل (${offeredFee.toLocaleString()} ج.م) وبعقد يمتد لـ ${validYears} سنوات.`,
-    };
-  }
-
-  if (!clubApproved && clubCounterFee) {
-    return {
-      decision: 'counter',
-      clubApproved: false,
-      playerApproved: true,
-      message: clubRejectionMessage,
-      counterFee: clubCounterFee,
+        ? `تمت الموافقة الرسمية! وقع اللاعب الحر ${player.name} على عقد انضمام لناديك لمدة ${validYears} سنوات بالراتب الشهري الثابت (${fixedSalary.toLocaleString()} ج.م) في صفقة انتقال حر.`
+        : `تمت الموافقة الرسمية على الصفقة! انتقل ${player.name} بالسعر الثابت (${fixedTransferPrice.toLocaleString()} ج.م) وبالراتب الشهري الثابت (${fixedSalary.toLocaleString()} ج.م) وعقد يمتد لـ ${validYears} سنوات.`,
     };
   }
 
@@ -410,7 +377,94 @@ export function evaluateTransferOffer(
     decision: 'reject',
     clubApproved,
     playerApproved,
-    message: clubRejectionMessage || 'تم رفض العرض من قبل إدارة النادي.',
+    message: 'تم رفض العرض لعدم استيفاء شروط التعاقد.',
+  };
+}
+
+/**
+ * Helper to automatically synchronize an AI club's starting 11 and bench so newly signed/transferred players
+ * actively participate in matches and no departed player leaves a gap in the lineup.
+ */
+export function syncClubLineupAfterTransfer(club: Club, prioritizePlayerId?: string): Club {
+  if (!club || !Array.isArray(club.players)) return club;
+  const validPlayers = club.players.filter(p => p && p.id);
+  const validIdSet = new Set(validPlayers.map(p => p.id));
+
+  // For the user's club, only strip invalid/departed IDs and backfill if below 11 starters
+  if (club.isUserClub) {
+    if (!club.tactics) return club;
+    const cleanStarters = (club.tactics.startingPlayerIds || []).filter(id => validIdSet.has(id));
+    const starterSet = new Set(cleanStarters);
+    const cleanBench = (club.tactics.benchPlayerIds || []).filter(id => validIdSet.has(id) && !starterSet.has(id));
+    return {
+      ...club,
+      tactics: {
+        ...club.tactics,
+        startingPlayerIds: cleanStarters,
+        benchPlayerIds: cleanBench,
+      },
+    };
+  }
+
+  // For AI clubs, build an active 11-player starting lineup + 7-player bench, ensuring prioritizePlayerId plays!
+  const sortedByRating = [...validPlayers].sort((a, b) => {
+    if (prioritizePlayerId) {
+      if (a.id === prioritizePlayerId) return -1;
+      if (b.id === prioritizePlayerId) return 1;
+    }
+    return (b.overallRating || 60) - (a.overallRating || 60);
+  });
+
+  const gks = sortedByRating.filter(p => p.position === 'GK' || p.positionCategory === 'GK');
+  const nonGks = sortedByRating.filter(p => p.position !== 'GK' && p.positionCategory !== 'GK');
+
+  const startingIds: string[] = [];
+  if (gks.length > 0) {
+    startingIds.push(gks[0].id);
+  }
+  for (const p of nonGks) {
+    if (startingIds.length >= 11) break;
+    if (!startingIds.includes(p.id)) {
+      startingIds.push(p.id);
+    }
+  }
+  // If still fewer than 11 (e.g. extra GKs needed), fill from remaining
+  for (const p of sortedByRating) {
+    if (startingIds.length >= 11) break;
+    if (!startingIds.includes(p.id)) {
+      startingIds.push(p.id);
+    }
+  }
+
+  const starterSet = new Set(startingIds);
+  const benchIds = sortedByRating
+    .filter(p => !starterSet.has(p.id))
+    .slice(0, 7)
+    .map(p => p.id);
+
+  const currentTactics: any = club.tactics || {
+    formation: '4-3-3',
+    mentality: 'balanced',
+    passingStyle: 'mixed',
+    tempo: 'normal',
+    pressing: 'medium',
+    marking: 'zonal',
+    counterAttack: true,
+    offsideTrap: false,
+    startingPlayerIds: [],
+    benchPlayerIds: [],
+  };
+
+  return {
+    ...club,
+    tactics: {
+      ...currentTactics,
+      startingPlayerIds: startingIds,
+      benchPlayerIds: benchIds,
+      captainId: currentTactics.captainId && validIdSet.has(currentTactics.captainId)
+        ? currentTactics.captainId
+        : (startingIds[0] || ''),
+    },
   };
 }
 
@@ -614,23 +668,23 @@ export function executeAtomicTransfer(params: {
         cornerTakerId: t.tactics.cornerTakerId === player.id ? '' : t.tactics.cornerTakerId,
       } : undefined;
 
-      return {
+      return syncClubLineupAfterTransfer({
         ...t,
         budget: (t.budget || 0) + transferFee,
         players: filteredPlayers,
         tactics: updatedTactics,
-      };
+      });
     }
 
-    // 2. Buying Club: add player and subtract transfer fee (if in league teams)
+    // 2. Buying Club: add player, subtract transfer fee, and integrate into starting lineup if AI club
     if (isThisBuyingClub) {
       toClubName = t.name;
       const filteredExisting = (t.players || []).filter(p => p && p.id && p.id !== player.id);
-      return {
+      return syncClubLineupAfterTransfer({
         ...t,
         budget: Math.max(0, (t.budget || 0) - transferFee),
         players: [...filteredExisting, transferredPlayer],
-      };
+      }, transferredPlayer.id);
     }
 
     // 3. Other Clubs: ensure player is removed if they previously held this ID
@@ -1044,23 +1098,13 @@ export function generateIncomingAiBids(
     const { club: biddingClub, maxAffordableFee } = eligibleBuyers[Math.floor(Math.random() * eligibleBuyers.length)];
     if (!biddingClub || !biddingClub.id) continue;
 
-    // Calculate realistic bid amount:
-    // Base market value * multiplier
-    const isLucrativeRoll = Math.random() < 0.40 || targetPlayer.overallRating >= 72 || (targetPlayer.stats?.goals || 0) >= 3 || (biddingClub.reputation || 50) >= 75;
-    const multiplier = targetPlayer.isListedForTransfer
-      ? (0.95 + Math.random() * 0.22) // Listed: 95% to 117%
-      : isLucrativeRoll
-      ? (1.20 + Math.random() * 0.35) // Lucrative: 120% to 155%
-      : (1.00 + Math.random() * 0.18); // Normal inquiry: 100% to 118%
-
+    // Fixed non-negotiable price: AI bid is strictly the player's fixed marketValue
     const baseMarketVal = Math.max(25000, targetPlayer.marketValue || 50000);
-    const rawBidAmount = Math.round(baseMarketVal * multiplier);
-    const bidAmount = Math.min(rawBidAmount, maxAffordableFee, Math.floor(biddingClub.budget * 0.90));
+    if (biddingClub.budget < baseMarketVal || maxAffordableFee < baseMarketVal) continue;
+    const bidAmount = baseMarketVal;
 
-    if (bidAmount <= 0) continue;
-
-    const profitRatio = Number((bidAmount / baseMarketVal).toFixed(2));
-    const isLucrative = profitRatio >= 1.18 || (biddingClub.reputation || 50) >= 78;
+    const profitRatio = 1.0;
+    const isLucrative = (biddingClub.reputation || 50) >= 75 || targetPlayer.overallRating >= 72;
 
     const offerId = `bid_${Date.now()}_${targetPlayer.id}_${Math.random().toString(36).substring(2, 6)}`;
     const offer: TransferOffer = {
@@ -1209,30 +1253,23 @@ export function getPlayerTransferStatus(
 }
 
 /**
- * Calculates asking price and loan fee for a player.
+ * Calculates fixed, non-negotiable asking price and loan fee for a player.
+ * Player transfer price is strictly fixed at their marketValue (or 0 for free agents).
  */
 export function calculateAskingPrice(player: Player, club?: Club): { askingPrice: number; loanFee: number } {
-  const baseValue = Math.max(25000, player.marketValue || 50000);
+  const baseValue = Math.max(25000, Math.round(player.marketValue || 50000));
   const isFree = !club || !player.currentClubId || player.contractYears === 0 || (player as any).isFreeAgent;
   
   if (isFree) {
-    // Free agents (contractYears === 0) have 0 club transfer fee!
     return {
       askingPrice: 0,
       loanFee: 0,
     };
   }
 
-  if (player.isListedForTransfer) {
-    return {
-      askingPrice: Math.max(25000, Math.round(baseValue * 0.95)),
-      loanFee: Math.round(baseValue * 0.08),
-    };
-  }
-
   return {
-    askingPrice: Math.max(25000, Math.round(baseValue * 1.15)),
-    loanFee: Math.round(baseValue * 0.12),
+    askingPrice: baseValue,
+    loanFee: Math.round(baseValue * 0.10),
   };
 }
 
@@ -1367,18 +1404,26 @@ export function resolveClubInfo(
     };
   }
 
-  // 3. Search in all GLOBAL_LEAGUES
+  // 3. Fast O(1) lookup in cached GLOBAL_LEAGUES index
   if (clubId) {
-    for (const [lId, lDef] of Object.entries(GLOBAL_LEAGUES)) {
-      const match = (lDef.teams || []).find(t => t.id === clubId);
-      if (match && match.name) {
-        return {
-          clubName: match.name,
-          leagueId: match.leagueId || lId,
-          leagueName: lDef.name,
-          club: match,
-        };
+    if (!globalClubLookupIndex) {
+      globalClubLookupIndex = new Map();
+      for (const [lId, lDef] of Object.entries(GLOBAL_LEAGUES)) {
+        for (const t of lDef.teams || []) {
+          if (t && t.id) {
+            globalClubLookupIndex.set(t.id, {
+              clubName: t.name,
+              leagueId: t.leagueId || lId,
+              leagueName: lDef.name,
+              club: t,
+            });
+          }
+        }
       }
+    }
+    const indexed = globalClubLookupIndex.get(clubId);
+    if (indexed) {
+      return indexed;
     }
   }
 
@@ -1557,11 +1602,19 @@ export function generateTransferRumors(
   return rumors;
 }
 
-// In-memory cache for generated global clubs to ensure fast retrieval
+// In-memory caches for high-speed Android performance on Transfers screen
 const globalClubsPlayerCache = new Map<string, Player[]>();
+const normalizedKeyCache = new Map<string, string>();
+let globalClubLookupIndex: Map<string, { clubName: string; leagueId: string; leagueName: string; club: Club }> | null = null;
+let cachedConvertedVerifiedPlayers: { vrp: (typeof VERIFIED_REAL_PLAYERS)[number]; player: Player; normKey: string }[] | null = null;
+
+const HONORARY_TITLES_REGEX = /\b(المايسترو|الاسطوره|الاسطورة|النجم الاول|الحاوي|القناص|الساحر|الدبابه|الدبابة|السفاح|الصاروخ|الموهوب|البلدوزر|الفرعون|العقرب|البرنس|الاباتشي|العميد|الجوكر|الكابيتانو|العملاق|المقاتل|الفنان|الصخره|الصخرة|المسمار|الداهيه|الداهية|المدفعجي|الجناح الطائر|السد العالي|فخر العرب|المرعب|الانيق)\b/g;
 
 export function normalizePlayerKey(name?: string): string {
   if (!name) return '';
+  const cached = normalizedKeyCache.get(name);
+  if (cached !== undefined) return cached;
+
   let cleaned = name.trim().toLowerCase()
     .replace(/[أإآ]/g, 'ا')
     .replace(/ة/g, 'ه')
@@ -1569,31 +1622,26 @@ export function normalizePlayerKey(name?: string): string {
     .replace(/[\(\)\[\]\{\}\-_\.]/g, ' ')
     .replace(/\s+/g, ' ');
 
-  // Strip common honorary football nicknames / titles
-  const titles = [
-    'المايسترو', 'الاسطوره', 'الاسطورة', 'النجم الاول', 'الحاوي', 'القناص', 'الساحر',
-    'الدبابه', 'الدبابة', 'السفاح', 'الصاروخ', 'الموهوب', 'البلدوزر', 'الفرعون',
-    'العقرب', 'البرنس', 'الاباتشي', 'العميد', 'الجوكر', 'الكابيتانو', 'العملاق',
-    'المقاتل', 'الفنان', 'الصخره', 'الصخرة', 'المسمار', 'الداهيه', 'الداهية',
-    'المدفعجي', 'الجناح الطائر', 'السد العالي', 'فخر العرب', 'المرعب', 'الانيق'
-  ];
-  for (const t of titles) {
-    cleaned = cleaned.replace(new RegExp(`\\b${t}\\b`, 'g'), '').trim();
+  cleaned = cleaned.replace(HONORARY_TITLES_REGEX, '').trim();
+
+  let result: string;
+  if (cleaned.includes('زيزو')) result = 'احمد سيد زيزو';
+  else if (cleaned.includes('شيكابالا')) result = 'محمود شيكابالا';
+  else if (cleaned.includes('افشه') || cleaned.includes('قفشه')) result = 'محمد مجدي افشه';
+  else if (cleaned.includes('كهربا')) result = 'محمود كهربا';
+  else if (cleaned.includes('تريزيجيه') || cleaned.includes('تريزيجه')) result = 'محمود حسن تريزيجيه';
+  else result = cleaned.replace(/\s+/g, '');
+
+  if (normalizedKeyCache.size > 15000) {
+    normalizedKeyCache.clear();
   }
-
-  // Special iconic single-token aliases in Egyptian football
-  if (cleaned.includes('زيزو')) return 'احمد سيد زيزو';
-  if (cleaned.includes('شيكابالا')) return 'محمود شيكابالا';
-  if (cleaned.includes('افشه') || cleaned.includes('قفشه')) return 'محمد مجدي افشه';
-  if (cleaned.includes('كهربا')) return 'محمود كهربا';
-  if (cleaned.includes('تريزيجيه') || cleaned.includes('تريزيجه')) return 'محمود حسن تريزيجيه';
-
-  return cleaned.replace(/\s+/g, '');
+  normalizedKeyCache.set(name, result);
+  return result;
 }
 
 /**
  * Gathers all players registered across the entire game database without duplication.
- * Single Source of Truth: Integrates active universe teams, global league squads, and transfer market.
+ * Optimized with O(1) lookup maps and memoized player conversions for smooth Android performance.
  */
 export function getAllDatabasePlayers(
   currentTeams: Club[],
@@ -1605,6 +1653,12 @@ export function getAllDatabasePlayers(
   const seenPlayerNames = new Set<string>();
   const results: MarketPlayerItem[] = [];
 
+  // Pre-build O(1) live club lookup map
+  const liveClubMap = new Map<string, Club>();
+  for (const c of currentTeams) {
+    if (c && c.id) liveClubMap.set(c.id, c);
+  }
+
   // Helper to resolve human-readable league name
   const getLeagueName = (leagueId?: string, fallbackCountry?: string): string => {
     if (!leagueId) return fallbackCountry || 'دوري محلي';
@@ -1612,12 +1666,27 @@ export function getAllDatabasePlayers(
     return l ? l.name : leagueId;
   };
 
+  // Fast club info resolver using liveClubMap first
+  const fastResolveClub = (clubId?: string, fallbackName?: string) => {
+    if (clubId) {
+      const live = liveClubMap.get(clubId);
+      if (live && live.name) {
+        return {
+          clubName: live.name,
+          leagueId: live.leagueId || '',
+          leagueName: getLeagueName(live.leagueId, live.country),
+          club: live,
+        };
+      }
+    }
+    return resolveClubInfo(clubId, fallbackName);
+  };
+
   // 1. Process Live Teams in Current Universe (User League & Active Teams)
   for (const club of currentTeams) {
     if (!club) continue;
-    const safeClubInfo = resolveClubInfo(club.id, club.name, currentTeams);
-    const clubName = safeClubInfo.clubName;
-    const leagueName = getLeagueName(club.leagueId, club.country) || safeClubInfo.leagueName;
+    const clubName = club.name || KNOWN_CLUB_NAMES[club.id]?.name || 'نادي محلي';
+    const leagueName = getLeagueName(club.leagueId, club.country);
     const players = Array.isArray(club.players) ? club.players : [];
 
     for (const player of players) {
@@ -1637,7 +1706,7 @@ export function getAllDatabasePlayers(
         },
         club,
         clubName,
-        leagueId: club.leagueId || safeClubInfo.leagueId,
+        leagueId: club.leagueId || '',
         leagueName,
         askingPrice,
         loanFee,
@@ -1651,17 +1720,14 @@ export function getAllDatabasePlayers(
   }
 
   // 2. Process Global Leagues & Predefined Authentic Clubs
-  const currentTeamIds = new Set(currentTeams.map(t => t.id));
-
   for (const [leagueId, leagueDef] of Object.entries(GLOBAL_LEAGUES)) {
     const clubs = leagueDef.teams || [];
 
     for (const club of clubs) {
-      if (!club || !club.id || currentTeamIds.has(club.id)) continue;
+      if (!club || !club.id || liveClubMap.has(club.id)) continue;
 
-      const safeClubInfo = resolveClubInfo(club.id, club.name, currentTeams);
-      const clubName = safeClubInfo.clubName;
-      const leagueName = leagueDef.name || safeClubInfo.leagueName;
+      const clubName = club.name || KNOWN_CLUB_NAMES[club.id]?.name || 'نادي عالمي';
+      const leagueName = leagueDef.name || 'دوري عالمي';
 
       let squad = club.players || [];
       if (squad.length === 0) {
@@ -1729,7 +1795,7 @@ export function getAllDatabasePlayers(
     seenPlayerIds.add(player.id);
     if (normKey) seenPlayerNames.add(normKey);
 
-    const safeClubInfo = resolveClubInfo(player.currentClubId, (player as any).currentClubName, currentTeams);
+    const safeClubInfo = fastResolveClub(player.currentClubId, (player as any).currentClubName);
     const club = safeClubInfo.club;
     const clubName = safeClubInfo.clubName;
     const leagueName = safeClubInfo.leagueName;
@@ -1753,16 +1819,26 @@ export function getAllDatabasePlayers(
     });
   }
 
-  // 4. Process Verified Real Players Registry
-  for (const vrp of VERIFIED_REAL_PLAYERS) {
-    if (!vrp || !vrp.id) continue;
-    const normKey = normalizePlayerKey(vrp.name);
+  // 4. Process Verified Real Players Registry (using pre-converted cache)
+  if (!cachedConvertedVerifiedPlayers) {
+    cachedConvertedVerifiedPlayers = [];
+    for (const vrp of VERIFIED_REAL_PLAYERS) {
+      if (!vrp || !vrp.id) continue;
+      cachedConvertedVerifiedPlayers.push({
+        vrp,
+        player: convertVerifiedRealPlayerToPlayer(vrp),
+        normKey: normalizePlayerKey(vrp.name),
+      });
+    }
+  }
+
+  for (const item of cachedConvertedVerifiedPlayers) {
+    const { vrp, player, normKey } = item;
     if (seenPlayerIds.has(vrp.id) || (normKey && seenPlayerNames.has(normKey))) continue;
     seenPlayerIds.add(vrp.id);
     if (normKey) seenPlayerNames.add(normKey);
 
-    const player = convertVerifiedRealPlayerToPlayer(vrp);
-    const safeClubInfo = resolveClubInfo(vrp.clubId, vrp.clubName, currentTeams);
+    const safeClubInfo = fastResolveClub(vrp.clubId, vrp.clubName);
     const club = safeClubInfo.club;
     const clubName = safeClubInfo.clubName;
     const leagueName = getLeagueName(vrp.leagueId) || safeClubInfo.leagueName;
@@ -1781,7 +1857,7 @@ export function getAllDatabasePlayers(
       status: statusInfo.status,
       statusLabel: statusInfo.statusLabel,
       statusColor: statusInfo.statusColor,
-      isUserClubPlayer: statusInfo.status === 'not_available' || (club && club.id === userClubId),
+      isUserClubPlayer: statusInfo.status === 'not_available' || Boolean(club && club.id === userClubId),
       canNegotiate: statusInfo.canNegotiate,
     });
   }
@@ -1790,46 +1866,57 @@ export function getAllDatabasePlayers(
 }
 
 /**
- * Processes Free Agents (contractYears === 0) and Autonomous AI Club Transfers:
- * 1. Identifies any players whose contracts have expired (contractYears <= 0) and marks them as Free Agents.
- * 2. AI clubs searching for positional reinforcements automatically sign Free Agents on 2–3 year contracts
- *    or place transfer market purchases based on club budget and player marketValue.
- * 3. Returns updated clubs, updated transferMarket, and transfer history records for local persistence.
+ * Processes Expired Contracts (contractYears <= 0) and Autonomous AI Club Transfers:
+ * 1. Every player whose contract has expired (contractYears <= 0) is guaranteed to leave their club
+ *    and transfer to another real club in `allTeams`, signing a new 2–4 year contract with a realistic salary.
+ * 2. Every transferred player is immediately integrated into their new club's `tactics.startingPlayerIds`
+ *    so they actively play in matches for their new club!
+ * 3. Any club whose roster drops below 16 players after contract expirations is replenished so no squad breaks lineup rules.
  */
 export function processFreeAgentsAndAiTransfers(
   allTeams: Club[],
   transferMarket: Player[],
   seasonNumber: number,
-  currentRound: number
+  currentRound: number,
+  _userClubId?: string
 ): {
   updatedTeams: Club[];
   updatedMarket: Player[];
+  updatedTransferMarket: Player[];
   newTransfers: TransferHistoryEntry[];
+  newTransferHistory: TransferHistoryEntry[];
   inboxNotifications: InboxMessage[];
 } {
-  const safeTeams = Array.isArray(allTeams) ? allTeams.map(t => ({ ...t, players: [...(t.players || [])] })) : [];
+  let safeTeams = Array.isArray(allTeams)
+    ? allTeams.map(t => ({ ...t, players: [...(t.players || [])] }))
+    : [];
   let safeMarket = Array.isArray(transferMarket) ? [...transferMarket] : [];
   const newTransfers: TransferHistoryEntry[] = [];
   const inboxNotifications: InboxMessage[] = [];
 
-  const freeAgentPool: { player: Player; formerClubName: string; wasUserClub: boolean }[] = [];
+  const expiredContractPool: {
+    player: Player;
+    formerClubId: string;
+    formerClubName: string;
+    wasUserClub: boolean;
+  }[] = [];
 
-  // 1. Collect players whose contracts expired (contractYears <= 0)
+  // 1. Collect ALL players whose contracts expired (contractYears <= 0) across all clubs
   for (const club of safeTeams) {
     if (!club || !Array.isArray(club.players)) continue;
     const remainingPlayers: Player[] = [];
 
     for (const p of club.players) {
       if (!p || !p.id) continue;
-      // Keep minimum 14 players on a squad so no club is left with an illegal roster
-      if ((p.contractYears !== undefined && p.contractYears <= 0) && remainingPlayers.length >= 14) {
-        freeAgentPool.push({
+      if (p.contractYears !== undefined && p.contractYears <= 0) {
+        expiredContractPool.push({
           player: {
             ...p,
             contractYears: 0,
             currentClubId: '',
-            isListedForTransfer: true,
+            isListedForTransfer: false,
           },
+          formerClubId: club.id,
           formerClubName: club.name,
           wasUserClub: Boolean(club.isUserClub),
         });
@@ -1839,20 +1926,16 @@ export function processFreeAgentsAndAiTransfers(
     }
 
     club.players = remainingPlayers;
-    if (club.tactics) {
-      const validIds = new Set(remainingPlayers.map(rp => rp.id));
-      club.tactics.startingPlayerIds = (club.tactics.startingPlayerIds || []).filter(id => validIds.has(id));
-      club.tactics.benchPlayerIds = (club.tactics.benchPlayerIds || []).filter(id => validIds.has(id));
-    }
   }
 
-  // Also check existing free agents in transferMarket (contractYears === 0 or no club)
+  // Also check any free agents in transferMarket whose contractYears <= 0
   const remainingMarket: Player[] = [];
   for (const mp of safeMarket) {
     if (!mp || !mp.id) continue;
     if ((mp.contractYears !== undefined && mp.contractYears <= 0) || !mp.currentClubId) {
-      freeAgentPool.push({
+      expiredContractPool.push({
         player: { ...mp, contractYears: 0, currentClubId: '' },
+        formerClubId: '',
         formerClubName: 'صفقة انتقال حر',
         wasUserClub: false,
       });
@@ -1862,75 +1945,125 @@ export function processFreeAgentsAndAiTransfers(
   }
   safeMarket = remainingMarket;
 
-  // 2. AI Clubs sign Free Agents based on positional need
-  const aiClubs = safeTeams.filter(t => t && !t.isUserClub);
-  for (const item of freeAgentPool) {
+  // 2. Guarantee EVERY expired-contract player transfers to another club and plays in its active lineup!
+  for (const item of expiredContractPool) {
     const fa = item.player;
-    const posCat = fa.positionCategory || (fa.position === 'GK' ? 'GK' : ['CB', 'LB', 'RB'].includes(fa.position) ? 'DEF' : ['ST', 'CF', 'RW', 'LW'].includes(fa.position) ? 'FWD' : 'MID');
+    const posCat = fa.positionCategory || (
+      fa.position === 'GK'
+        ? 'GK'
+        : ['CB', 'LB', 'RB'].includes(fa.position)
+        ? 'DEF'
+        : ['ST', 'CF', 'RW', 'LW'].includes(fa.position)
+        ? 'FWD'
+        : 'MID'
+    );
 
-    // Find an AI club that needs this position and matches the player's caliber
-    const interestedAiClubs = aiClubs.filter(c => {
+    // Candidate AI clubs (excluding the player's former club so they always move to a DIFFERENT club)
+    const otherAiClubs = safeTeams.filter(c => c && !c.isUserClub && c.id !== item.formerClubId);
+    if (otherAiClubs.length === 0) continue;
+
+    // Prefer clubs that need this position or have smaller squads, sorted by closeness in rating/reputation
+    const preferredClubs = otherAiClubs.filter(c => {
       const squad = c.players || [];
-      if (squad.length >= 28) return false;
+      if (squad.length >= 30) return false;
       const countInPos = squad.filter(p => p.positionCategory === posCat).length;
-      const targetMax = posCat === 'GK' ? 3 : posCat === 'DEF' ? 9 : posCat === 'MID' ? 9 : 7;
+      const targetMax = posCat === 'GK' ? 4 : posCat === 'DEF' ? 10 : posCat === 'MID' ? 10 : 8;
       return countInPos < targetMax;
     });
 
-    if (interestedAiClubs.length > 0 && Math.random() < 0.75) {
-      const buyer = interestedAiClubs[Math.floor(Math.random() * interestedAiClubs.length)];
-      const newContractYears = Math.floor(Math.random() * 3) + 2; // 2 to 4 years
-      const signedPlayer: Player = {
-        ...fa,
-        currentClubId: buyer.id,
-        currentLeagueId: buyer.leagueId || '',
-        contractYears: newContractYears,
-        isListedForTransfer: false,
-        morale: 90,
-        fitness: 100,
-      };
-      buyer.players.push(signedPlayer);
+    const poolToPickFrom = preferredClubs.length > 0 ? preferredClubs : otherAiClubs;
+    // Sort by smallest squad first so clubs that lost players get reinforced immediately
+    poolToPickFrom.sort((a, b) => (a.players?.length || 0) - (b.players?.length || 0));
+    const topCandidates = poolToPickFrom.slice(0, Math.min(4, poolToPickFrom.length));
+    const buyer = topCandidates[Math.floor(Math.random() * topCandidates.length)] || otherAiClubs[0];
 
-      newTransfers.push({
-        id: `tx_fa_${Date.now()}_${fa.id}_${Math.random().toString(36).slice(2, 6)}`,
-        playerId: fa.id,
-        playerName: fa.name,
-        playerRating: fa.overallRating,
-        position: fa.position,
-        type: 'free',
-        fee: 0,
-        salary: 0,
-        date: `الموسم ${seasonNumber} - الجولة ${currentRound}`,
-        seasonNumber,
-        round: currentRound,
-        fromClubName: item.formerClubName || 'لاعب حر',
-        toClubName: buyer.name,
-        timestamp: Date.now(),
-      });
+    const newContractYears = Math.floor(Math.random() * 3) + 2; // 2 to 4 years
+    const newSalary = calculateRealisticSalary(fa.overallRating || 65, {
+      divisionTier: buyer.division || 1,
+      clubReputation: buyer.reputation || 60,
+    });
 
-      if (item.wasUserClub) {
-        inboxNotifications.push({
-          id: `msg_fa_left_${Date.now()}_${fa.id}`,
-          title: `انتقال حر: رحيل ${fa.name} إلى ${buyer.name} بعد انتهاء عقده 📄`,
-          sender: 'لجنة شؤون اللاعبين والتعاقدات',
-          date: `بداية الموسم ${seasonNumber}`,
-          type: 'transfer',
-          read: false,
-          content: `انتهى عقد اللاعب ${fa.name} (${fa.position} - تقييم ${fa.overallRating}) مع ناديك رسمياً (0 سنوات متبقية)، وانتقل في صفقة انتقال حر مجانية إلى صفوف نادي (${buyer.name}) بعقد لمدة ${newContractYears} سنوات.`,
-        });
-      }
-    } else {
-      // Remains in Transfer Market as an available Free Agent (0 fee)
-      safeMarket.unshift({
-        ...fa,
-        contractYears: 0,
-        currentClubId: '',
-        isListedForTransfer: true,
+    const signedPlayer: Player = {
+      ...fa,
+      currentClubId: buyer.id,
+      currentLeagueId: buyer.leagueId || '',
+      contractYears: newContractYears,
+      salary: newSalary,
+      isListedForTransfer: false,
+      morale: 92,
+      fitness: 100,
+    };
+
+    buyer.players = [...(buyer.players || []).filter(p => p && p.id !== signedPlayer.id), signedPlayer];
+    // Immediately integrate the player into the new club's starting lineup so they actively play!
+    const syncedBuyer = syncClubLineupAfterTransfer(buyer, signedPlayer.id);
+    buyer.tactics = syncedBuyer.tactics;
+
+    newTransfers.push({
+      id: `tx_fa_${Date.now()}_${fa.id}_${Math.random().toString(36).slice(2, 6)}`,
+      playerId: fa.id,
+      playerName: fa.name,
+      playerRating: fa.overallRating,
+      position: fa.position,
+      type: 'buy',
+      fee: 0,
+      salary: newSalary,
+      date: `الموسم ${seasonNumber} - الجولة ${currentRound}`,
+      seasonNumber,
+      round: currentRound,
+      fromClubName: item.formerClubName || 'لاعب حر',
+      toClubName: buyer.name,
+      timestamp: Date.now(),
+    });
+
+    if (item.wasUserClub) {
+      inboxNotifications.push({
+        id: `msg_fa_left_${Date.now()}_${fa.id}_${Math.random().toString(36).slice(2, 5)}`,
+        title: `انتقال حر بعد انتهاء العقد: رحيل ${fa.name} إلى ${buyer.name} 📄`,
+        sender: 'لجنة شؤون اللاعبين والتعاقدات',
+        date: `الموسم ${seasonNumber}`,
+        type: 'transfer',
+        read: false,
+        content: `انتهت مدة عقد اللاعب ${fa.name} (${fa.position} - تقييم ${fa.overallRating}) مع ناديك رسمياً (0 سنوات متبقية)، وانتقل في صفقة انتقال حر إلى صفوف نادي (${buyer.name}) بعقد لمدة ${newContractYears} سنوات وراتب شهري ${newSalary.toLocaleString()} ج.م، وشارك رسمياً في التشكيلة الأساسية لناديه الجديد.`,
       });
     }
   }
 
-  // 3. Autonomous AI-to-AI Paid Transfers based on club budget & player marketValue
+  // 3. Ensure every club has at least 16 players and a valid synced lineup after contract expirations
+  safeTeams = safeTeams.map(club => {
+    if (!club) return club;
+    let squad = Array.isArray(club.players) ? [...club.players] : [];
+    if (squad.length < 16) {
+      try {
+        const generated = generateClubSquad(
+          club.id,
+          club.countryCode || 'EGY',
+          club.leagueId || 'egy_tier_1',
+          club.reputation || 50,
+          (club.division || 1) === 1 ? 68 : (club.division || 2) === 2 ? 62 : 56
+        );
+        for (const gp of generated) {
+          if (squad.length >= 18) break;
+          if (!squad.some(existing => existing.id === gp.id)) {
+            squad.push({
+              ...gp,
+              currentClubId: club.id,
+              contractYears: 3,
+            });
+          }
+        }
+      } catch {
+        // Ignore fallback generation errors
+      }
+    }
+    return syncClubLineupAfterTransfer({
+      ...club,
+      players: squad,
+    });
+  });
+
+  // 4. Autonomous AI-to-AI Paid Transfers at fixed player marketValue
+  const aiClubs = safeTeams.filter(t => t && !t.isUserClub);
   const richAiClubs = aiClubs.filter(c => (c.budget || 0) >= 120000 && (c.players || []).length < 26);
   const maxAiDeals = Math.min(3, richAiClubs.length);
 
@@ -1938,7 +2071,6 @@ export function processFreeAgentsAndAiTransfers(
     const buyer = richAiClubs[d];
     if (!buyer) continue;
 
-    // Pick a target player from transferMarket or another AI club with > 18 players
     const marketCandidates = safeMarket.filter(
       p => p && (p.contractYears || 0) > 0 && (p.marketValue || 50000) <= (buyer.budget || 0) * 0.75
     );
@@ -1949,13 +2081,21 @@ export function processFreeAgentsAndAiTransfers(
       if (buyer.budget >= fee) {
         buyer.budget -= fee;
         const years = Math.floor(Math.random() * 3) + 2;
-        buyer.players.push({
+        const wage = target.salary || calculateRealisticSalary(target.overallRating || 65, {
+          divisionTier: buyer.division || 1,
+          clubReputation: buyer.reputation || 60,
+        });
+        const signedTarget: Player = {
           ...target,
           currentClubId: buyer.id,
           currentLeagueId: buyer.leagueId || '',
           contractYears: years,
+          salary: wage,
           isListedForTransfer: false,
-        });
+        };
+        buyer.players.push(signedTarget);
+        const syncedBuyer = syncClubLineupAfterTransfer(buyer, signedTarget.id);
+        buyer.tactics = syncedBuyer.tactics;
         safeMarket = safeMarket.filter(p => p.id !== target.id);
 
         newTransfers.push({
@@ -1966,7 +2106,7 @@ export function processFreeAgentsAndAiTransfers(
           position: target.position,
           type: 'buy',
           fee,
-          salary: 0,
+          salary: wage,
           date: `الموسم ${seasonNumber} - الجولة ${currentRound}`,
           seasonNumber,
           round: currentRound,
@@ -1981,8 +2121,11 @@ export function processFreeAgentsAndAiTransfers(
   return {
     updatedTeams: safeTeams,
     updatedMarket: safeMarket,
+    updatedTransferMarket: safeMarket,
     newTransfers,
+    newTransferHistory: newTransfers,
     inboxNotifications,
   };
 }
+
 

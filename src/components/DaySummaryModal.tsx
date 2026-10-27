@@ -42,12 +42,14 @@ export const DaySummaryModal: React.FC<DaySummaryModalProps> = ({
   const hasNews = Array.isArray(summary.newsItems) && summary.newsItems.length > 0;
 
   const pm = summary.postMatchSummary;
-  const totalMatchGoals = pm ? (pm.homeScore || 0) + (pm.awayScore || 0) : 0;
+  const parsedHomeScore = pm ? (Number(pm.homeScore) >= 0 ? Number(pm.homeScore) : 0) : 0;
+  const parsedAwayScore = pm ? (Number(pm.awayScore) >= 0 ? Number(pm.awayScore) : 0) : 0;
+  const totalMatchGoals = parsedHomeScore + parsedAwayScore;
   const homeScorersDisplay = pm
-    ? pm.homeScorersText || (Array.isArray(pm.homeGoalScorers) ? pm.homeGoalScorers.join(' ، ') : '')
+    ? pm.homeScorersText || (Array.isArray(pm.homeGoalScorers) && pm.homeGoalScorers.length > 0 ? pm.homeGoalScorers.join(' ، ') : '')
     : '';
   const awayScorersDisplay = pm
-    ? pm.awayScorersText || (Array.isArray(pm.awayGoalScorers) ? pm.awayGoalScorers.join(' ، ') : '')
+    ? pm.awayScorersText || (Array.isArray(pm.awayGoalScorers) && pm.awayGoalScorers.length > 0 ? pm.awayGoalScorers.join(' ، ') : '')
     : '';
   const cleanCompHeader = pm
     ? [pm.competitionName, pm.roundLabel]
@@ -148,15 +150,17 @@ export const DaySummaryModal: React.FC<DaySummaryModalProps> = ({
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-center sm:text-right">
                         <div className="text-emerald-300 font-medium">
                           <span className="text-slate-400 text-[10px] block mb-0.5">{pm.homeTeamName}:</span>
-                          {pm.homeScore > 0 ? (homeScorersDisplay || `⚽ ${pm.homeScore} أهداف`) : <span className="text-slate-500">لم يسجل</span>}
+                          {parsedHomeScore > 0 ? (homeScorersDisplay || `⚽ ${parsedHomeScore} ${parsedHomeScore === 1 ? 'هدف' : 'أهداف'}`) : <span className="text-slate-500">لم يسجل</span>}
                         </div>
                         <div className="text-cyan-300 font-medium">
                           <span className="text-slate-400 text-[10px] block mb-0.5">{pm.awayTeamName}:</span>
-                          {pm.awayScore > 0 ? (awayScorersDisplay || `⚽ ${pm.awayScore} أهداف`) : <span className="text-slate-500">لم يسجل</span>}
+                          {parsedAwayScore > 0 ? (awayScorersDisplay || `⚽ ${parsedAwayScore} ${parsedAwayScore === 1 ? 'هدف' : 'أهداف'}`) : <span className="text-slate-500">لم يسجل</span>}
                         </div>
                       </div>
                     ) : (
-                      <div className="text-center text-slate-400">تعادل سلبي بدون أهداف (0 - 0)</div>
+                      <div className="text-center text-slate-400 font-medium">
+                        {parsedHomeScore === 0 && parsedAwayScore === 0 ? 'تعادل سلبي بدون أهداف (0 - 0)' : `انتهت المباراة بنتيجة (${parsedHomeScore} - ${parsedAwayScore})`}
+                      </div>
                     )}
                   </div>
                 </>

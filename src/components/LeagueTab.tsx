@@ -414,81 +414,95 @@ export const LeagueTab: React.FC = () => {
             {!cupTournament || !cupTournament.matches || cupTournament.matches.length === 0 ? (
               <div className="text-center py-8 text-xs text-slate-400">جاري تجهيز قرعة الكأس الوطنية للموسم الحالي...</div>
             ) : (
-              <div className="space-y-2">
+              <div className="space-y-3">
                 {cupTournament.matches.map(cm => {
                   const isUserMatch = Boolean(userClub && (cm.homeTeamId === userClub.id || cm.awayTeamId === userClub.id));
                   const matchingFix = (fixtures || []).find(f => f.id === cm.id);
                   const matchDate = matchingFix?.date;
-                  const isToday = Boolean(calendarDate?.rawDateStr && matchDate === calendarDate.rawDateStr);
+                  const isToday = Boolean(calendarDate?.rawDateStr && matchDate && matchDate <= calendarDate.rawDateStr);
 
                   return (
                     <div
                       key={cm.id}
-                      className={`p-3 rounded-2xl border flex flex-col sm:flex-row items-center justify-between gap-3 ${
+                      className={`p-3.5 rounded-2xl border flex flex-col gap-3 transition-all ${
                         isUserMatch
-                          ? 'bg-gradient-to-r from-amber-500/15 via-slate-950 to-slate-950 border-amber-500/60'
-                          : 'bg-slate-950/70 border-slate-800'
+                          ? 'bg-gradient-to-r from-amber-500/15 via-slate-950 to-slate-950 border-amber-500/60 shadow-md'
+                          : 'bg-slate-950/80 border-slate-800'
                       }`}
                     >
-                      <div className="flex items-center gap-2 text-xs">
-                        <span className="bg-slate-900 px-2.5 py-1 rounded-lg text-rose-300 font-bold border border-slate-800">
+                      {/* Top Header Row: Stage Badge + Winner / Date / Play CTA */}
+                      <div className="flex items-center justify-between gap-2 w-full border-b border-slate-800/70 pb-2">
+                        <span className="bg-slate-900 px-2.5 py-1 rounded-xl text-rose-300 font-bold text-xs border border-slate-800">
                           {cm.stageName}
                         </span>
+
+                        <div className="shrink-0">
+                          {!cm.isPlayed ? (
+                            isToday && isUserMatch ? (
+                              <button
+                                onClick={() => window.dispatchEvent(new CustomEvent('set-active-tab', { detail: { tab: 'matches' } }))}
+                                className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs flex items-center gap-1 cursor-pointer animate-pulse"
+                              >
+                                <Play className="w-3 h-3 fill-white" />
+                                <span>خوض مباراة الكأس ⚽</span>
+                              </button>
+                            ) : (
+                              <div className="text-[11px] text-slate-400 font-mono bg-slate-900 px-2.5 py-1 rounded-xl border border-slate-800 flex items-center gap-1.5">
+                                <Calendar className="w-3.5 h-3.5 text-cyan-400" />
+                                <span>{matchDate || 'مجدولة بالتقويم'}</span>
+                              </div>
+                            )
+                          ) : (
+                            <span className="text-[11px] text-emerald-400 font-bold flex items-center gap-1 bg-emerald-950/40 px-2.5 py-1 rounded-xl border border-emerald-800/50">
+                              <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
+                              <span>تأهل: {getClubName(cm.winnerTeamId || cm.homeTeamId)}</span>
+                            </span>
+                          )}
+                        </div>
                       </div>
 
-                      <div className="flex items-center justify-center gap-3 flex-1 min-w-0">
+                      {/* Main Matchup Row: Home Team vs Away Team */}
+                      <div className="flex items-center justify-between gap-2 w-full">
                         <span
-                          className={`text-xs font-bold truncate flex-1 text-left ${
-                            cm.homeTeamId === userClub?.id ? 'text-amber-300 font-black' : 'text-white'
+                          className={`text-xs sm:text-sm font-bold leading-snug break-words flex-1 text-right ${
+                            cm.winnerTeamId === cm.homeTeamId
+                              ? 'text-emerald-400 font-black'
+                              : cm.homeTeamId === userClub?.id
+                              ? 'text-amber-300 font-black'
+                              : 'text-white'
                           }`}
                         >
                           {getClubName(cm.homeTeamId)}
                         </span>
-                        <div className="px-3 py-1 bg-slate-900 border border-slate-800 rounded-xl font-mono font-black text-sm text-center shrink-0 min-w-16">
+
+                        <div className="px-3.5 py-1.5 bg-slate-900 border border-slate-800 rounded-xl font-mono font-black text-sm text-center shrink-0 min-w-[72px]">
                           {cm.isPlayed ? (
-                            <span>
-                              {cm.homeScore} - {cm.awayScore}
-                              {cm.homePenalties !== undefined && (
-                                <span className="text-[10px] text-amber-400 block font-normal">
+                            <div className="flex flex-col items-center leading-tight">
+                              <span className="text-white">
+                                {cm.homeScore} - {cm.awayScore}
+                              </span>
+                              {cm.homePenalties !== undefined && cm.awayPenalties !== undefined && (
+                                <span className="text-[10px] text-amber-400 font-bold mt-0.5 whitespace-nowrap">
                                   ({cm.homePenalties} - {cm.awayPenalties} ر.ت)
                                 </span>
                               )}
-                            </span>
+                            </div>
                           ) : (
                             <span className="text-slate-500 text-xs">VS</span>
                           )}
                         </div>
+
                         <span
-                          className={`text-xs font-bold truncate flex-1 text-right ${
-                            cm.awayTeamId === userClub?.id ? 'text-amber-300 font-black' : 'text-white'
+                          className={`text-xs sm:text-sm font-bold leading-snug break-words flex-1 text-left ${
+                            cm.winnerTeamId === cm.awayTeamId
+                              ? 'text-emerald-400 font-black'
+                              : cm.awayTeamId === userClub?.id
+                              ? 'text-amber-300 font-black'
+                              : 'text-white'
                           }`}
                         >
                           {getClubName(cm.awayTeamId)}
                         </span>
-                      </div>
-
-                      <div className="shrink-0">
-                        {!cm.isPlayed ? (
-                          isToday && isUserMatch ? (
-                            <button
-                              onClick={() => window.dispatchEvent(new CustomEvent('set-active-tab', { detail: { tab: 'matches' } }))}
-                              className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs flex items-center gap-1 cursor-pointer"
-                            >
-                              <Play className="w-3 h-3 fill-white" />
-                              <span>خوض مباراة الكأس ⚽</span>
-                            </button>
-                          ) : (
-                            <div className="text-[11px] text-slate-400 font-mono bg-slate-900 px-2.5 py-1 rounded-xl border border-slate-800 flex items-center gap-1.5">
-                              <Calendar className="w-3.5 h-3.5 text-cyan-400" />
-                              <span>{matchDate || 'مجدولة بالتقويم'}</span>
-                            </div>
-                          )
-                        ) : (
-                          <span className="text-[11px] text-emerald-400 flex items-center gap-1 bg-emerald-950/40 px-2.5 py-1 rounded-xl border border-emerald-800/50">
-                            <CheckCircle2 className="w-3.5 h-3.5" />
-                            <span>تأهل: {getClubName(cm.winnerTeamId || cm.homeTeamId)}</span>
-                          </span>
-                        )}
                       </div>
                     </div>
                   );
