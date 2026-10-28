@@ -675,13 +675,17 @@ export const ADVANCED_ROLES: Record<string, PlayerRoleMeta> = {
 
 export function getLicenseRankValue(license: CoachingLicenseTier | string): number {
   switch (license) {
+    case 'BASIC': return 2;
+    case 'PREMIER': return 4;
+    case 'CONTINENTAL': return 5;
+    case 'LEGENDARY': return 6;
     case 'D': return 1;
     case 'C': return 2;
     case 'B': return 3;
     case 'A': return 4;
     case 'PRO': return 5;
     case 'ELITE': return 6;
-    default: return 1;
+    default: return 2;
   }
 }
 
@@ -771,7 +775,7 @@ export function evaluateSquadTacticalSynergy(
     };
   }
 
-  // 1. Compute Squad Attribute Averages
+  // 1. Compute Squad Attribute Averages (and Opponent Averages for fair relative comparison)
   const squadSize = activePlayers.length;
   const avgPace = activePlayers.reduce((acc, p) => acc + (p?.attributes?.pace || 65), 0) / squadSize;
   const avgPassing = activePlayers.reduce((acc, p) => acc + (p?.attributes?.passing || 65), 0) / squadSize;
@@ -781,6 +785,13 @@ export function evaluateSquadTacticalSynergy(
   }, 0) / squadSize;
   const avgPhysical = activePlayers.reduce((acc, p) => acc + (p?.attributes?.physical || 65), 0) / squadSize;
   const avgDefending = activePlayers.reduce((acc, p) => acc + (p?.attributes?.defending || 65), 0) / squadSize;
+  const avgOvr = activePlayers.reduce((acc, p) => acc + (p?.overallRating || 65), 0) / squadSize;
+
+  const oppSize = oppActivePlayers && oppActivePlayers.length > 0 ? oppActivePlayers.length : 0;
+  const oppAvgOvr = oppSize > 0
+    ? oppActivePlayers.reduce((acc, p) => acc + (p?.overallRating || 62), 0) / oppSize
+    : avgOvr - 2;
+  const isStrongerThanOpp = avgOvr >= oppAvgOvr;
 
   // Specific line averages
   const defenders = activePlayers.filter(p => p?.positionCategory === 'DEF');
@@ -793,7 +804,7 @@ export function evaluateSquadTacticalSynergy(
   const midPassing = midfielders.length > 0
     ? midfielders.reduce((acc, p) => acc + (p?.attributes?.passing || 65), 0) / midfielders.length
     : avgPassing;
-  const midVision = midPassing; // closely linked
+  const midVision = midPassing;
   const fwdPace = attackers.length > 0
     ? attackers.reduce((acc, p) => acc + (p?.attributes?.pace || 65), 0) / attackers.length
     : avgPace;
@@ -801,150 +812,130 @@ export function evaluateSquadTacticalSynergy(
     ? attackers.reduce((acc, p) => acc + (p?.attributes?.shooting || 65), 0) / attackers.length
     : 70;
 
-  // 2. Manager Tactical Experience Influence (0 to 100 experience -> up to +22% boost, -22% if weak)
-  const experienceBonusPct = Math.round(((managerExp - 50) / 50) * 22); // -22% to +22%
+  // Relative benchmark based on opponent quality (so lower-division or mid-tier teams aren't penalized against weak teams)
+  const attrBenchmark = Math.min(72, Math.max(54, oppAvgOvr - 2));
+
+  // 2. Manager Tactical Experience Influence (never penalizes below 0.96, rewards up to +20%)
+  const experienceBonusPct = Math.max(-4, Math.round(((managerExp - 55) / 45) * 20));
   const expMult = 1 + (experienceBonusPct / 100);
   attackMod *= expMult;
   midfieldMod *= expMult;
   defenseMod *= expMult;
 
-  // 3. Tactical Style & Player Attribute Verification (المطابقة الفنية بين أسلوب اللعب وقدرات اللاعبين)
+  // 3. Tactical Style & Player Attribute Verification
   const style = tactics.tacticalStyle || 'total_football';
   const isHighPressing = tactics.pressingIntensity === 'high' || tactics.pressingIntensity === 'gegenpress' || style === 'gegenpress';
 
   // --- A. High Press / Gegenpress Checks ---
   if (isHighPressing) {
-    staminaDrainMult *= 1.38; // High press costs much more stamina
+    staminaDrainMult *= 1.18;
 
-    // If squad is slow or weak in stamina:
-    if (avgPace < 70 || avgStamina < 70) {
-      if (matchMinute <= 45) {
-        // High press works well in early 45 minutes
-        midfieldMod *= 1.14;
-        attackMod *= 1.08;
-        synergyScore += 6;
-      } else if (matchMinute > 60) {
-        // Severe late-game collapse after minute 60!
-        defenseMod *= 0.72; // Defense collapses
-        staminaDrainMult *= 1.65; // Stamina drains even faster
-        counterRiskBonus += 0.45; // Concedes dangerous transitions
-        synergyScore -= 18;
-        fatigueWarning = 'انهيار بدني واضح في منظومة الضغط العالي بعد الدقيقة 60، مع اتساع المساحات واستقبال هجمات مرتدة خطيرة.';
-        feedbackReasons.push('الضغط العالي نجح في أول 60 دقيقة، لكن تراجع اللياقة سمح بتحولات هجومية خطيرة للمنافس.');
-      }
+    if (!isStrongerThanOpp && avgPace < attrBenchmark - 3 && avgStamina < 55 && matchMinute > 72) {
+      defenseMod *= 0.94;
+      staminaDrainMult *= 1.20;
+      counterRiskBonus += 0.15;
+      synergyScore -= 6;
+      fatigueWarning = 'إجهاد بدني نسبي في الدقائق الأخيرة نتيجة الضغط العالي المتواصل.';
+      feedbackReasons.push('الضغط العالي تطلب مجهوداً بدنياً كبيراً في الشوط الثاني.');
     } else {
-      // Squad has high pace & stamina -> Press thrives!
-      midfieldMod *= 1.18;
-      defenseMod *= 1.08;
+      midfieldMod *= 1.14;
+      defenseMod *= 1.06;
       attackMod *= 1.12;
-      synergyScore += 14;
+      synergyScore += 12;
     }
   }
 
   // --- B. Possession Control & Tiki-Taka Checks ---
   if (style === 'tiki_taka' || style === 'possession_control') {
-    if (midPassing < 74 || midVision < 72) {
-      // Low midfield passing with possession control -> 40% more turnovers!
-      turnoverPenaltyRate += 0.40;
-      midfieldMod *= 0.82;
-      attackMod *= 0.84;
-      counterRiskBonus += 0.38; // Deadly counters against us
-      synergyScore -= 16;
-      feedbackReasons.push('أسلوب الاستحواذ عانى من ضعف دقة تمرير لاعبي الوسط (نسبة كرات مقطوعة عالية تسببت في مرتدات ضد الفريق).');
-    } else {
-      // High passing midfield -> Dominates ball control!
-      midfieldMod *= 1.22;
+    if (midPassing >= attrBenchmark || isStrongerThanOpp || midVision >= attrBenchmark) {
+      midfieldMod *= 1.16;
       attackMod *= 1.10;
-      defenseMod *= 1.08; // Ball possession prevents opponent attacks
-      synergyScore += 16;
+      defenseMod *= 1.06;
+      synergyScore += 14;
+    } else {
+      turnoverPenaltyRate += 0.10;
+      midfieldMod *= 0.96;
+      attackMod *= 0.96;
+      synergyScore -= 4;
+      feedbackReasons.push('أسلوب الاستحواذ يحتاج لدقة تمرير أعلى في خط الوسط لزيادة الفاعلية.');
     }
   }
 
   // --- C. Low Block / Catenaccio Checks ---
   if (style === 'park_the_bus' || style === 'catenaccio' || tactics.mentality === 'ultra_defensive') {
-    if (defPhysical < 72 || avgPhysical < 70) {
-      // Defenders lack physical power / aerial strength -> Concedes from crosses!
-      defenseMod *= 0.85;
-      crossDangerBonus += 0.40;
-      synergyScore -= 12;
-      feedbackReasons.push('التكتل الدفاعي نجح في إغلاق العمق، لكن الفريق عانى من العرضيات والكرات الثابتة بسبب التفوق الهوائي للمنافس.');
+    if (defPhysical >= attrBenchmark - 2 || isStrongerThanOpp) {
+      defenseMod *= 1.18;
+      attackMod *= 0.88;
+      synergyScore += 10;
     } else {
-      // Solid defenders -> Impregnable fortress!
-      defenseMod *= 1.28;
-      attackMod *= 0.85;
-      synergyScore += 12;
+      defenseMod *= 1.04;
+      crossDangerBonus += 0.15;
+      synergyScore -= 4;
+      feedbackReasons.push('التكتل الدفاعي أغلق العمق مع بعض الخطورة من الكرات العرضية.');
     }
   }
 
   // --- D. Wing Play Checks ---
   if (style === 'wing_play') {
-    if (avgPace >= 74 && fwdShooting >= 72) {
-      attackMod *= 1.20;
-      crossDangerBonus += 0.35;
-      synergyScore += 15;
-      feedbackReasons.push('الهجوم عبر الأطراف حقق فاعلية استثنائية بفضل سرعة الأجنحة والعرضيات الخطيرة.');
+    if (avgPace >= attrBenchmark - 2 || fwdShooting >= attrBenchmark - 2 || isStrongerThanOpp) {
+      attackMod *= 1.14;
+      crossDangerBonus += 0.20;
+      synergyScore += 12;
+      feedbackReasons.push('الهجوم عبر الأطراف حقق فاعلية ممتازة بفضل انطلاقات الأجنحة والعرضيات.');
     } else {
-      attackMod *= 0.92;
-      feedbackReasons.push('العرضيات كانت تفتقر للدقة والتواجد الفعال للمهاجم في الصندوق.');
+      attackMod *= 0.97;
+      feedbackReasons.push('العرضيات تحتاج لمساندة أكبر داخل منطقة الجزاء.');
     }
   }
 
-  // 4. Tactical Clash Matrix (صراع التكتيكات المباشر)
+  // 4. Tactical Clash Matrix
   const oppStyle = oppTactics.tacticalStyle || 'total_football';
   const isOppHighPress = oppTactics.pressingIntensity === 'high' || oppTactics.pressingIntensity === 'gegenpress';
 
-  // High Press vs Low Block:
   if (isHighPressing && (oppStyle === 'park_the_bus' || oppStyle === 'catenaccio')) {
-    // High press suffocates low block, but if low block escapes, it's 1-on-1!
-    midfieldMod *= 1.15;
-    counterRiskBonus += 0.25;
+    midfieldMod *= 1.12;
+    attackMod *= 1.06;
   }
 
-  // Counter Attack vs High Defensive Line:
   if ((style === 'counter_attack' || tactics.mentality === 'defensive') && isOppHighPress) {
-    if (fwdPace > 73) {
-      attackMod *= 1.25; // Counter breaks offside trap!
-      feedbackReasons.push('المرتدات السريعة ضربت خط دفاع الخصم المتقدم بنجاح وصنعت انفرادات خطيرة.');
+    if (fwdPace >= attrBenchmark) {
+      attackMod *= 1.12;
+      feedbackReasons.push('المرتدات السريعة استغلت المساحات خلف خط وسط المنافس.');
     }
   }
 
-  // Central Overload vs 4-3-3:
   const isCentralOverload = tactics.formation === '4-1-2-1-2' || tactics.formation === '4-3-2-1' || tactics.formation === '3-2-4-1';
   if (isCentralOverload && oppTactics.formation === '4-3-3') {
-    midfieldMod *= 1.20; // Midfield dominance
-    defenseMod *= 0.90;  // But wide areas exposed to opp wingers
+    midfieldMod *= 1.12;
+    defenseMod *= 0.96;
   }
 
-  // 5. Match Events & Context (حالات الطرد، الدقائق الحاسمة، والسيناريوهات)
-  // Red Card / 10 men:
+  // 5. Match Events & Context
   if (isTenMen) {
+    staminaDrainMult *= 1.20;
+    defenseMod *= 0.90;
     if (isHighPressing) {
-      staminaDrainMult *= 2.1; // 10 men + High Press drains team at DOUBLE speed!
-      defenseMod *= 0.70;
-      fatigueWarning = 'الضغط العالي بـ 10 لاعبين استنزف طاقة الفريق بسرعة مضاعفة وترك ثغرات دفاعية واسعة!';
-      feedbackReasons.push('النقص العددي (طرد) مع الإصرار على الضغط العالي كلف الفريق إجهاداً هائلاً وفراغات دفاعية قاتلة.');
-    } else {
-      staminaDrainMult *= 1.25;
-      defenseMod *= 0.88;
+      fatigueWarning = 'اللعب بـ 10 لاعبين مع ضغط عالٍ يزيد من استهلاك اللياقة.';
     }
   }
 
-  // Ultra Attacking in late match (>80 min):
   if (tactics.mentality === 'ultra_attacking' && matchMinute >= 80) {
-    attackMod *= 1.35; // +35% goal chance
-    counterRiskBonus += 0.50; // +50% counter conceded chance
-    staminaDrainMult *= 1.40;
+    attackMod *= 1.22;
+    counterRiskBonus += 0.15;
+    staminaDrainMult *= 1.15;
   }
 
-  // Match State Preset: Protect Lead
   if (tactics.matchStatePreset === 'protect_lead') {
-    defenseMod *= 1.18;
-    staminaDrainMult *= 0.85; // Conserves energy
-    counterRiskBonus *= 0.60;
+    defenseMod *= 1.14;
+    staminaDrainMult *= 0.88;
+    counterRiskBonus *= 0.65;
   }
 
-  // Clamp synergy score
-  synergyScore = Math.min(100, Math.max(25, synergyScore));
+  // Bound modifiers cleanly so synergy never causes a stronger squad to collapse
+  attackMod = Math.max(0.92, Math.min(1.28, attackMod));
+  midfieldMod = Math.max(0.92, Math.min(1.28, midfieldMod));
+  defenseMod = Math.max(0.92, Math.min(1.28, defenseMod));
+  synergyScore = Math.min(100, Math.max(45, synergyScore));
 
   return {
     attackMod,

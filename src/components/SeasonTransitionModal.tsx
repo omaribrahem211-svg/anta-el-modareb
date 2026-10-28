@@ -1,40 +1,52 @@
 import React, { useState } from 'react';
 import { useGame } from '../context/GameContext';
 import { JobOfferCard } from './JobOfferCard';
+import { RetroLeagueSelectionScreen } from './RetroLeagueSelectionScreen';
+import {
+  evaluateLeagueEligibilityForManager,
+  getLicenseTitleArabic,
+  normalizeCoachingLicense,
+  CAREER_CONFIG,
+} from '../utils/careerProgressionEngine';
 import {
   Trophy,
   Award,
   DollarSign,
   TrendingUp,
   Briefcase,
-  ChevronLeft,
   Sparkles,
   ShieldCheck,
   CheckCircle2,
   AlertTriangle,
   ArrowUpRight,
   ArrowDownRight,
-  Minus,
-  Building2,
-  Calendar,
   Zap,
+  Lock,
+  Unlock,
+  Globe,
+  Wallet,
+  Eye,
+  EyeOff,
 } from 'lucide-react';
 
 export const SeasonTransitionModal: React.FC = () => {
   const {
     showSeasonTransitionModal,
-    closeSeasonModal,
     seasonEndSummary,
     season,
     userClub,
     manager,
+    allLeagues,
     jobOffers,
+    selectNextSeasonLeague,
     acceptJobOffer,
     rejectJobOffer,
     startNextSeason,
   } = useGame();
 
-  const [activeView, setActiveView] = useState<'summary' | 'offers'>('summary');
+  const [activeView, setActiveView] = useState<'summary' | 'league_selection' | 'offers'>('summary');
+  const [selectedLeagueId, setSelectedLeagueId] = useState<string | null>(null);
+  const [hideLockedLeagues, setHideLockedLeagues] = useState<boolean>(false);
 
   if (!showSeasonTransitionModal || !seasonEndSummary) return null;
 
@@ -42,10 +54,28 @@ export const SeasonTransitionModal: React.FC = () => {
   const acceptedOffer = safeJobOffers.find(o => o.status === 'accepted');
   const nextSeasonNum = season.seasonNumber + 1;
 
+  const activeLicense = normalizeCoachingLicense(
+    seasonEndSummary.licenseSettlement?.activeLicenseAfterRenewal || manager.license
+  );
+  const activeLicenseInfo = CAREER_CONFIG.LICENSES[activeLicense];
+  const settlement = seasonEndSummary.licenseSettlement;
+
   const isChampion = seasonEndSummary.resultStatus === 'champion';
   const isPromoted = seasonEndSummary.resultStatus === 'promoted';
   const isRelegated = seasonEndSummary.resultStatus === 'relegated';
-  const isPlayoffs = seasonEndSummary.resultStatus === 'playoffs';
+
+  const evaluatedLeagues = (allLeagues || []).map(lg =>
+    evaluateLeagueEligibilityForManager(lg, activeLicense)
+  );
+  const displayedLeagues = hideLockedLeagues
+    ? evaluatedLeagues.filter(item => item.isUnlocked)
+    : evaluatedLeagues;
+
+  const handleSelectLeague = (leagueId: string) => {
+    setSelectedLeagueId(leagueId);
+    selectNextSeasonLeague(leagueId);
+    setActiveView('offers');
+  };
 
   return (
     <div
@@ -96,39 +126,54 @@ export const SeasonTransitionModal: React.FC = () => {
           </p>
 
           {/* Destination Badge */}
-          <div className="mt-4 inline-flex items-center gap-2 bg-slate-950/80 px-4 py-2 rounded-2xl border border-white/10 text-xs sm:text-sm font-semibold">
+          <div className="mt-4 inline-flex flex-wrap items-center justify-center gap-2 bg-slate-950/80 px-4 py-2 rounded-2xl border border-white/10 text-xs sm:text-sm font-semibold">
             <span className="text-slate-400">الوجهة للموسم القادم:</span>
             <span className="text-amber-400 font-bold">
               {acceptedOffer ? acceptedOffer.clubName : seasonEndSummary.nextLeagueName} (الدرجة {acceptedOffer ? acceptedOffer.divisionTier : seasonEndSummary.nextDivisionTier})
             </span>
+            <span className="text-slate-600">•</span>
+            <span className="text-emerald-400 font-bold">
+              {activeLicenseInfo.badgeIcon} {activeLicenseInfo.titleArabic}
+            </span>
           </div>
 
           {/* Navigation Sub-Tabs */}
-          <div className="flex items-center justify-center gap-2 mt-6">
+          <div className="flex flex-wrap items-center justify-center gap-2 mt-6">
             <button
               id="btn_tab_season_summary"
               onClick={() => setActiveView('summary')}
-              className={`px-5 py-2 rounded-xl text-xs sm:text-sm font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+              className={`px-4 py-2 rounded-xl text-xs sm:text-sm font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
                 activeView === 'summary'
                   ? 'bg-white text-slate-950 shadow-lg'
                   : 'bg-slate-800/80 hover:bg-slate-800 text-slate-300 border border-slate-700'
               }`}
             >
-              <Award className="w-4 h-4" /> حصيلة الموسم والإنجازات
+              <Award className="w-4 h-4" /> 1. حصيلة الموسم وتسوية الرخصة
+            </button>
+            <button
+              id="btn_tab_league_selection"
+              onClick={() => setActiveView('league_selection')}
+              className={`px-4 py-2 rounded-xl text-xs sm:text-sm font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+                activeView === 'league_selection'
+                  ? 'bg-amber-400 text-slate-950 shadow-lg'
+                  : 'bg-slate-800/80 hover:bg-slate-800 text-amber-300 border border-amber-500/40'
+              }`}
+            >
+              <Globe className="w-4 h-4" /> 2. اختيار وجهتك القادمة للموسم الجديد
             </button>
             <button
               id="btn_tab_season_offers"
               onClick={() => setActiveView('offers')}
-              className={`px-5 py-2 rounded-xl text-xs sm:text-sm font-bold transition-all cursor-pointer flex items-center gap-1.5 relative ${
+              className={`px-4 py-2 rounded-xl text-xs sm:text-sm font-bold transition-all cursor-pointer flex items-center gap-1.5 relative ${
                 activeView === 'offers'
                   ? 'bg-white text-slate-950 shadow-lg'
                   : 'bg-slate-800/80 hover:bg-slate-800 text-slate-300 border border-slate-700'
               }`}
             >
-              <Briefcase className="w-4 h-4" /> العروض التدريبية المقدمة
-              {jobOffers.length > 0 && (
+              <Briefcase className="w-4 h-4" /> 3. عروض الأندية المتاحة
+              {safeJobOffers.length > 0 && (
                 <span className="w-5 h-5 rounded-full bg-emerald-500 text-white text-[10px] flex items-center justify-center font-bold">
-                  {jobOffers.length}
+                  {safeJobOffers.length}
                 </span>
               )}
             </button>
@@ -136,9 +181,70 @@ export const SeasonTransitionModal: React.FC = () => {
         </div>
 
         {/* Modal Content Body */}
-        <div className="p-5 sm:p-7 max-h-[55vh] overflow-y-auto space-y-6">
+        <div className="p-5 sm:p-7 max-h-[58vh] overflow-y-auto space-y-6">
           {activeView === 'summary' ? (
             <>
+              {/* End-of-Season Financial & License Renewal Settlement Card */}
+              <div className="bg-gradient-to-r from-slate-900 via-slate-800/90 to-slate-900 p-4 sm:p-5 rounded-3xl border border-amber-500/40 shadow-xl space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <Wallet className="w-5 h-5 text-amber-400" />
+                    <h4 className="text-sm sm:text-base font-black text-white">
+                      التسوية المالية الشخصية وتجديد الرخصة التدريبية للموسم الجديد
+                    </h4>
+                  </div>
+                  <span className="text-xs font-bold px-3 py-1 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                    {activeLicenseInfo.badgeIcon} {activeLicenseInfo.titleArabic}
+                  </span>
+                </div>
+
+                {settlement?.wasDowngraded && settlement.warningMessage && (
+                  <div className="p-3.5 rounded-2xl bg-rose-950/70 border border-rose-500/60 flex items-start gap-3 text-xs text-rose-200">
+                    <AlertTriangle className="w-5 h-5 text-rose-400 shrink-0 mt-0.5" />
+                    <div>
+                      <div className="font-black text-rose-300 mb-0.5">
+                        تنبيه هام: خفض تلقائي للرخصة التدريبية لعدم كفاية الرصيد الشخصي
+                      </div>
+                      <p className="leading-relaxed">{settlement.warningMessage}</p>
+                    </div>
+                  </div>
+                )}
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+                  <div className="bg-slate-950/70 p-3 rounded-2xl border border-slate-800">
+                    <div className="text-slate-400 mb-1">1. مكافأة وراتب نهاية الموسم (إيداع شخصي)</div>
+                    <div className="text-base font-black text-emerald-400">
+                      +{(settlement?.seasonBonusDeposited ?? Math.round(seasonEndSummary.prizeMoney * 0.15)).toLocaleString()}$
+                    </div>
+                  </div>
+                  <div className="bg-slate-950/70 p-3 rounded-2xl border border-slate-800">
+                    <div className="text-slate-400 mb-1">2. رسوم التجديد السنوية للرخصة</div>
+                    <div className="text-base font-black text-rose-400">
+                      -{(settlement?.renewalFeeDeducted ?? activeLicenseInfo.annualRenewalFee).toLocaleString()}$
+                    </div>
+                  </div>
+                  <div className="bg-slate-950/70 p-3 rounded-2xl border border-slate-800">
+                    <div className="text-slate-400 mb-1">3. الرصيد الشخصي الصافي للمدرب</div>
+                    <div className="text-base font-black text-amber-400">
+                      {(settlement?.personalWalletAfter ?? manager.personalWallet ?? 0).toLocaleString()}$
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-2 border-t border-slate-800/80">
+                  <p className="text-xs text-slate-300">
+                    صلاحيات رخصتك النشطة ({activeLicenseInfo.titleArabic}): <span className="text-amber-300 font-semibold">{activeLicenseInfo.description}</span>
+                  </p>
+                  <button
+                    onClick={() => setActiveView('league_selection')}
+                    className="w-full sm:w-auto px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs flex items-center justify-center gap-1.5 shadow-md cursor-pointer shrink-0"
+                  >
+                    <Globe className="w-4 h-4" />
+                    <span>اختيار الدوري القادم للموسم الجديد</span>
+                  </button>
+                </div>
+              </div>
+
               {/* Standings Numbers Grid */}
               <div>
                 <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3 flex items-center gap-1.5">
@@ -172,7 +278,7 @@ export const SeasonTransitionModal: React.FC = () => {
                 </div>
               </div>
 
-              {/* 🏆 Golden Trophies Showcase (سجل بطولات وإنجازات الموسم الذهبية) */}
+              {/* 🏆 Golden Trophies Showcase */}
               {((seasonEndSummary.trophiesWonList && seasonEndSummary.trophiesWonList.length > 0) ||
                 seasonEndSummary.leagueTrophyAwarded ||
                 seasonEndSummary.cupTrophyAwarded ||
@@ -222,9 +328,8 @@ export const SeasonTransitionModal: React.FC = () => {
                 </div>
               )}
 
-              {/* Competitions Outcome Section (League + National Cup + Continental) */}
+              {/* Competitions Outcome Section */}
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                {/* 1. League */}
                 <div className="bg-gradient-to-br from-amber-950/30 to-slate-800/80 p-4 rounded-2xl border border-amber-500/20">
                   <div className="flex items-center gap-2 mb-2">
                     <Trophy className="w-5 h-5 text-amber-400" />
@@ -248,7 +353,6 @@ export const SeasonTransitionModal: React.FC = () => {
                   )}
                 </div>
 
-                {/* 2. National Cup */}
                 <div className="bg-gradient-to-br from-purple-950/30 to-slate-800/80 p-4 rounded-2xl border border-purple-500/20">
                   <div className="flex items-center gap-2 mb-2">
                     <Award className="w-5 h-5 text-purple-400" />
@@ -265,7 +369,6 @@ export const SeasonTransitionModal: React.FC = () => {
                   </div>
                 </div>
 
-                {/* 3. Continental Tournament */}
                 <div className="bg-gradient-to-br from-cyan-950/30 to-slate-800/80 p-4 rounded-2xl border border-cyan-500/20">
                   <div className="flex items-center gap-2 mb-2">
                     <Sparkles className="w-5 h-5 text-cyan-400" />
@@ -283,83 +386,32 @@ export const SeasonTransitionModal: React.FC = () => {
                 </div>
               </div>
 
-              {/* Local Storage Integrity Badge */}
-              <div className="flex items-center justify-between bg-slate-950/70 px-4 py-2.5 rounded-2xl border border-slate-800 text-xs text-slate-400">
-                <span className="flex items-center gap-2">
-                  <ShieldCheck className="w-4 h-4 text-emerald-400" />
-                  <span>حفظ آمن ومستمر لعالم اللعبة محلياً (IndexedDB Persistent Universe)</span>
-                </span>
-                <span className="text-[11px] font-mono text-emerald-400 font-bold">100% Local</span>
-              </div>
-
-              {/* 🌍 World Domination Conquest Banner */}
-              {seasonEndSummary.worldDominationInfo && (
-                <div className={`p-4 rounded-2xl border flex items-center justify-between gap-3 shadow-xl ${
-                  seasonEndSummary.worldDominationInfo.percentage >= 100
-                    ? 'bg-gradient-to-r from-amber-500/25 via-yellow-500/35 to-amber-500/25 border-amber-400'
-                    : 'bg-gradient-to-r from-indigo-950/70 via-slate-900 to-indigo-950/70 border-indigo-500/40'
-                }`}>
-                  <div className="flex items-center gap-3">
-                    <div className="w-11 h-11 rounded-2xl bg-amber-500/20 text-amber-300 border border-amber-500/40 flex items-center justify-center font-bold text-xl shrink-0">
-                      🌍
-                    </div>
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <span className="font-black text-sm text-white">
-                          {seasonEndSummary.worldDominationInfo.percentage >= 100
-                            ? '👑 سيطرة كاملة على العالم الكروي (100%)!'
-                            : seasonEndSummary.worldDominationInfo.isNewConquest
-                            ? `🏆 فتح دوري جديد: ${seasonEndSummary.worldDominationInfo.leagueName}`
-                            : `مواصلة الهيمنة في ${seasonEndSummary.worldDominationInfo.leagueName}`}
-                        </span>
-                        <span className="text-[10px] bg-indigo-500/30 text-indigo-200 border border-indigo-500/40 px-2 py-0.5 rounded-full font-bold">
-                          {seasonEndSummary.worldDominationInfo.conqueredCount} / {seasonEndSummary.worldDominationInfo.totalCount} دوري
-                        </span>
-                      </div>
-                      <p className="text-xs text-slate-300 mt-0.5">
-                        {seasonEndSummary.worldDominationInfo.percentage >= 100
-                          ? 'إنجاز تاريخي أسطوري! حققت جميع ألقاب الدوريات في العالم من الدرجة الرابعة حتى القمة!'
-                          : `ارتفعت نسبة سيطرتك على العالم إلى ${seasonEndSummary.worldDominationInfo.percentage}%`}
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="text-left shrink-0">
-                    <span className="text-xl sm:text-2xl font-black font-mono text-amber-300">
-                      {seasonEndSummary.worldDominationInfo.percentage}%
-                    </span>
-                  </div>
-                </div>
-              )}
-
               {/* Financial, Manager XP & Player Development Rewards */}
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                {/* Finances */}
                 <div className="bg-slate-800/60 p-4 rounded-2xl border border-slate-700/50 space-y-2.5">
                   <div className="flex items-center gap-2 text-xs font-bold text-slate-400">
-                    <DollarSign className="w-4 h-4 text-emerald-400" /> المكافآت المالية المضافة للخزينة
+                    <DollarSign className="w-4 h-4 text-emerald-400" /> المكافآت المالية المضافة لخزينة النادي
                   </div>
                   <div className="flex justify-between items-center text-xs py-1 border-b border-slate-700/40">
                     <span className="text-slate-300">مكافأة ترتيب الدوري:</span>
-                    <span className="font-bold text-emerald-400">+{seasonEndSummary.prizeMoney.toLocaleString()} ج.م</span>
+                    <span className="font-bold text-emerald-400">+{seasonEndSummary.prizeMoney.toLocaleString()}$</span>
                   </div>
                   {(seasonEndSummary.cupPrizeMoney || 0) > 0 && (
                     <div className="flex justify-between items-center text-xs py-1 border-b border-slate-700/40">
                       <span className="text-amber-300 font-semibold">جوائز مسابقة الكأس:</span>
-                      <span className="font-bold text-amber-400">+{seasonEndSummary.cupPrizeMoney.toLocaleString()} ج.م</span>
+                      <span className="font-bold text-amber-400">+{seasonEndSummary.cupPrizeMoney.toLocaleString()}$</span>
                     </div>
                   )}
                   <div className="flex justify-between items-center text-xs py-1 border-b border-slate-700/40">
                     <span className="text-slate-300">عوائد التذاكر والرعاة:</span>
-                    <span className="font-semibold text-slate-200">+{seasonEndSummary.ticketRevenueTotal.toLocaleString()} ج.م</span>
+                    <span className="font-semibold text-slate-200">+{seasonEndSummary.ticketRevenueTotal.toLocaleString()}$</span>
                   </div>
                   <div className="flex justify-between items-center text-sm pt-1">
-                    <span className="font-bold text-slate-200">الرصيد المالي الجديد:</span>
-                    <span className="font-bold text-emerald-400">{seasonEndSummary.finalBudget.toLocaleString()} ج.م</span>
+                    <span className="font-bold text-slate-200">ميزانية النادي الجديدة:</span>
+                    <span className="font-bold text-emerald-400">{seasonEndSummary.finalBudget.toLocaleString()}$</span>
                   </div>
                 </div>
 
-                {/* Player Development Points Card */}
                 <div className="bg-slate-800/60 p-4 rounded-2xl border border-amber-500/30 space-y-2.5 bg-gradient-to-b from-amber-950/20 to-slate-800/60">
                   <div className="flex items-center gap-2 text-xs font-bold text-amber-400">
                     <Zap className="w-4 h-4 text-amber-400" /> نقاط تطوير اللاعبين المكتسبة
@@ -376,12 +428,8 @@ export const SeasonTransitionModal: React.FC = () => {
                     <span className="font-bold text-amber-300">إجمالي نقاط التطوير:</span>
                     <span className="font-black text-amber-400 text-base">+{seasonEndSummary.totalDevelopmentPoints || 0} ⚡</span>
                   </div>
-                  <p className="text-[10px] text-slate-400 leading-tight">
-                    يمكنك استهلاك هذه النقاط في مركز التدريب لترقية مهارات وسقف إمكانات اللاعبين!
-                  </p>
                 </div>
 
-                {/* Manager Rewards */}
                 <div className="bg-slate-800/60 p-4 rounded-2xl border border-slate-700/50 space-y-2.5">
                   <div className="flex items-center gap-2 text-xs font-bold text-slate-400">
                     <TrendingUp className="w-4 h-4 text-blue-400" /> مكاسب وتطور المدير الفني
@@ -397,30 +445,48 @@ export const SeasonTransitionModal: React.FC = () => {
                     </span>
                   </div>
                   <div className="flex justify-between items-center text-sm pt-1">
-                    <span className="font-bold text-slate-200">المستوى والرخصة:</span>
-                    <span className="font-bold text-slate-100">المستوى {manager.level} • رخصة {manager.license}</span>
+                    <span className="font-bold text-slate-200">الرخصة المعتمدة:</span>
+                    <span className="font-bold text-amber-400">{activeLicenseInfo.titleArabic}</span>
                   </div>
                 </div>
               </div>
             </>
+          ) : activeView === 'league_selection' ? (
+            /* End-of-Season League Selection Screen ("اختر وجهتك القادمة للموسم الجديد") */
+            <RetroLeagueSelectionScreen
+              activeLicenseOverride={activeLicense}
+              onSelectLeagueAndShowOffers={leagueId => handleSelectLeague(leagueId)}
+            />
           ) : (
             /* Job Offers View */
             <div className="space-y-4">
-              <div className="flex items-center justify-between">
+              <div className="flex flex-wrap items-center justify-between gap-2">
                 <div>
-                  <h3 className="font-bold text-slate-100 text-base">سوق المدربين والعروض التدريبية الواقعية</h3>
+                  <h3 className="font-bold text-slate-100 text-base">
+                    {selectedLeagueId
+                      ? `الأندية والعروض المتاحة في الدوري المختار (${safeJobOffers[0]?.leagueName || ''})`
+                      : 'سوق المدربين والعروض التدريبية المتاحة'}
+                  </h3>
                   <p className="text-xs text-slate-400">
-                    عروض واقعية مبنية على رخصتك التدريبية، سمعتك، إنجازاتك وألقابك، أسلوبك التكتيكي، وتدرج مسيرتك المهنية.
+                    عروض الأندية المسموح لك بتدريبها وفق صلاحيات ({activeLicenseInfo.titleArabic}). يمكنك أيضاً تغيير الدوري من تبويب "اختيار وجهتك القادمة".
                   </p>
                 </div>
-                {acceptedOffer && (
+                <div className="flex items-center gap-2">
                   <button
-                    onClick={() => rejectJobOffer(acceptedOffer.id)}
-                    className="text-xs text-amber-400 hover:text-amber-300 underline cursor-pointer"
+                    onClick={() => setActiveView('league_selection')}
+                    className="px-3 py-1.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/30 text-xs font-bold cursor-pointer"
                   >
-                    إلغاء اختيار العقد
+                    تغيير الدوري المختار 🌍
                   </button>
-                )}
+                  {acceptedOffer && (
+                    <button
+                      onClick={() => rejectJobOffer(acceptedOffer.id)}
+                      className="text-xs text-rose-400 hover:text-rose-300 underline cursor-pointer"
+                    >
+                      إلغاء اختيار العقد
+                    </button>
+                  )}
+                </div>
               </div>
 
               {/* Manager Market Profile Status Card */}
@@ -428,27 +494,19 @@ export const SeasonTransitionModal: React.FC = () => {
                 <div className="flex items-center gap-3">
                   <div className="bg-amber-500/20 text-amber-300 px-2.5 py-1 rounded-xl border border-amber-500/30 font-bold flex items-center gap-1.5">
                     <Award className="w-4 h-4 text-amber-400" />
-                    <span>رخصة {manager.license || 'D'}</span>
+                    <span>{activeLicenseInfo.titleArabic}</span>
+                  </div>
+                  <div className="text-slate-300">
+                    الرصيد الشخصي: <span className="text-emerald-400 font-bold">{(manager.personalWallet || 0).toLocaleString()}$</span>
                   </div>
                   <div className="text-slate-300">
                     السمعة: <span className="text-amber-400 font-bold">⭐ {manager.reputation || 15}/100</span>
-                  </div>
-                  <div className="text-slate-300">
-                    المستوى: <span className="text-blue-400 font-bold">{manager.level || 1}</span>
                   </div>
                 </div>
 
                 <div className="flex items-center gap-3 text-slate-400">
                   <span>
                     الألقاب: <strong className="text-slate-200">{(manager.leagueTitles || 0) + (manager.cupTitles || 0)} 🏆</strong>
-                  </span>
-                  <span>•</span>
-                  <span>
-                    نسبة الانتصارات: <strong className="text-emerald-400">
-                      {manager.matchesManaged && manager.matchesManaged > 0
-                        ? `${Math.round(((manager.wins || 0) / manager.matchesManaged) * 100)}%`
-                        : '—'}
-                    </strong>
                   </span>
                 </div>
               </div>
@@ -496,12 +554,12 @@ export const SeasonTransitionModal: React.FC = () => {
               {/* Incoming Offers List */}
               <div className="space-y-3 pt-2">
                 <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider">
-                  عروض الأندية الأخرى المتاحة ({safeJobOffers.length})
+                  عروض الأندية المتاحة للقيادة ({safeJobOffers.length})
                 </h4>
 
                 {safeJobOffers.length === 0 ? (
                   <div className="text-center py-8 text-slate-400 text-sm">
-                    لا توجد عروض إضافية متاحة حالياً. حقق نتائج أفضل لرفع سمعتك وجذب كبرى الأندية!
+                    لا توجد عروض إضافية في هذا القسم حالياً. اضغط على "اختيار وجهتك القادمة للموسم الجديد" لاختيار دوري متاح!
                   </div>
                 ) : (
                   safeJobOffers.map(offer => (
@@ -529,6 +587,15 @@ export const SeasonTransitionModal: React.FC = () => {
           </div>
 
           <div className="flex items-center gap-3 w-full sm:w-auto">
+            {activeView === 'summary' && (
+              <button
+                onClick={() => setActiveView('league_selection')}
+                className="py-3.5 px-5 rounded-2xl bg-slate-800 hover:bg-slate-700 text-amber-300 border border-amber-500/40 font-bold text-xs sm:text-sm flex items-center justify-center gap-2 cursor-pointer"
+              >
+                <Globe className="w-4 h-4" />
+                <span>اختيار الدوري القادم</span>
+              </button>
+            )}
             <button
               id="btn_start_new_season_cta"
               onClick={() => startNextSeason(acceptedOffer?.id)}
@@ -547,3 +614,4 @@ export const SeasonTransitionModal: React.FC = () => {
     </div>
   );
 };
+

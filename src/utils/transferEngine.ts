@@ -2128,4 +2128,390 @@ export function processFreeAgentsAndAiTransfers(
   };
 }
 
+/**
+ * Ensures multi-team competition (5 to 7 strong contender clubs) across League, Domestic Cup,
+ * and Continental tournaments. Rival AI clubs actively buy players to upgrade their weakest
+ * starting positions, train key starters, and upgrade their coaching licenses/levels during the season.
+ */
+export function executeCompetitiveAiTransfersAndGrowth(params: {
+  teams: Club[];
+  transferMarket: Player[];
+  seasonNumber: number;
+  currentRound: number;
+  activeLeagueTier?: number;
+}): {
+  updatedTeams: Club[];
+  updatedMarket: Player[];
+  newTransfers: TransferHistoryEntry[];
+  inboxNotifications: InboxMessage[];
+  newsHeadlines: { title: string; summary: string; category: 'transfer' | 'league' }[];
+} {
+  const {
+    teams,
+    transferMarket,
+    seasonNumber = 1,
+    currentRound = 1,
+    activeLeagueTier = 1,
+  } = params;
+
+  let safeTeams = Array.isArray(teams) ? teams.map(t => ({
+    ...t,
+    players: Array.isArray(t?.players) ? [...t.players] : [],
+  })) : [];
+  let safeMarket = Array.isArray(transferMarket) ? [...transferMarket] : [];
+  const newTransfers: TransferHistoryEntry[] = [];
+  const inboxNotifications: InboxMessage[] = [];
+  const newsHeadlines: { title: string; summary: string; category: 'transfer' | 'league' }[] = [];
+
+  const aiClubs = safeTeams.filter(t => t && !t.isUserClub);
+  if (aiClubs.length === 0) {
+    return {
+      updatedTeams: safeTeams,
+      updatedMarket: safeMarket,
+      newTransfers,
+      inboxNotifications,
+      newsHeadlines,
+    };
+  }
+
+  // Helper to compute average starting 11 OVR of a club
+  const getClubStarterAvgOvr = (club: Club): number => {
+    const players = Array.isArray(club.players) ? club.players : [];
+    if (players.length === 0) return club.rating || 60;
+    const starterIds = club.tactics?.startingPlayerIds || [];
+    const starters = starterIds.length >= 11
+      ? players.filter(p => p && starterIds.includes(p.id))
+      : [...players].sort((a, b) => (b.overallRating || 0) - (a.overallRating || 0)).slice(0, 11);
+    if (starters.length === 0) return club.rating || 60;
+    const sum = starters.reduce((acc, p) => acc + (p.overallRating || 60), 0);
+    return Math.round((sum / starters.length) * 10) / 10;
+  };
+
+  // Determine realistic OVR ceiling and target range based on division tier so competition is fierce & realistic
+  const userClub = safeTeams.find(t => t && t.isUserClub);
+  const userStarterAvg = userClub ? getClubStarterAvgOvr(userClub) : 0;
+  const tierBaseOvr =
+    activeLeagueTier === 1 ? 74 :
+    activeLeagueTier === 2 ? 66 :
+    activeLeagueTier === 3 ? 60 : 54;
+  const tierMaxCap =
+    activeLeagueTier === 1 ? 87 :
+    activeLeagueTier === 2 ? 77 :
+    activeLeagueTier === 3 ? 70 : 64;
+
+  // Target contender OVR keeps pace with both the division benchmark and the user's squad
+  const competitiveTargetOvr = Math.min(
+    tierMaxCap,
+    Math.max(tierBaseOvr, Math.round(userStarterAvg))
+  );
+
+  // 1. Identify 6 rival contender clubs (top 4 by reputation/rating + 2 ambitious challengers)
+  const sortedAiByStrength = [...aiClubs].sort((a, b) => {
+    const scoreA = getClubStarterAvgOvr(a) * 1.4 + (a.reputation || 50) * 0.4;
+    const scoreB = getClubStarterAvgOvr(b) * 1.4 + (b.reputation || 50) * 0.4;
+    return scoreB - scoreA;
+  });
+
+  const topContenders = sortedAiByStrength.slice(0, Math.min(4, sortedAiByStrength.length));
+  const midTablePool = sortedAiByStrength.slice(4, Math.min(8, sortedAiByStrength.length));
+  const darkHorses = midTablePool.sort(() => Math.random() - 0.5).slice(0, 1);
+  const activeContenders = [...topContenders, ...darkHorses];
+  const contenderIds = new Set(activeContenders.map(c => c.id));
+
+  // 2. Ensure top rival contenders have competitive AI Managers while weak/mid-table clubs stay at realistic baseline licenses
+  const licenseOrder: ('D' | 'C' | 'B' | 'A' | 'PRO' | 'ELITE')[] = ['D', 'C', 'B', 'A', 'PRO', 'ELITE'];
+  const minContenderLicenseIdx =
+    activeLeagueTier === 1 ? 2 : // 'B' or 'A' for top contenders in Tier 1
+    activeLeagueTier === 2 ? 1 : // 'C' in Tier 2
+    activeLeagueTier === 3 ? 1 : 0; // 'D'/'C' in Tier 3/4
+
+  safeTeams = safeTeams.map((club, idx) => {
+    if (!club || club.isUserClub) return club;
+    const isContender = contenderIds.has(club.id);
+    if (!isContender) {
+      // Do not inflate non-contender / weak AI clubs' manager licenses or ratings
+      return club;
+    }
+
+    const currentMgr: any = (club as any).manager || {
+      id: `ai_mgr_${club.id}`,
+      name: `المدير الفني لنادي ${club.shortName || club.name}`,
+      nationality: 'مصر',
+      age: 44 + (idx % 12),
+      level: Math.max(2, (5 - activeLeagueTier) * 2),
+      reputation: Math.max(45, (club.reputation || 55) + 4),
+      license: licenseOrder[Math.min(4, minContenderLicenseIdx)],
+      tacticalStyle: idx % 3 === 0 ? 'attacking' : idx % 3 === 1 ? 'possession' : 'counter',
+      preferredFormation: club.tactics?.formation || '4-3-3',
+    };
+
+    const curLicIdx = Math.max(0, licenseOrder.indexOf(currentMgr.license || 'C'));
+    let nextLicIdx = Math.max(curLicIdx, minContenderLicenseIdx);
+    let nextLevel = Math.max(1, Number(currentMgr.level || 2));
+
+    // Periodic coaching license / level upgrade for top contender clubs during the season (capped at 'A' / 'PRO')
+    if (currentRound > 1 && (currentRound + idx) % 8 === 0) {
+      if (nextLicIdx < Math.min(4, minContenderLicenseIdx + 1)) {
+        nextLicIdx += 1;
+      }
+      nextLevel = Math.min(18, nextLevel + 1);
+    }
+
+    const updatedMgr = {
+      ...currentMgr,
+      level: nextLevel,
+      license: licenseOrder[nextLicIdx],
+      reputation: Math.min(88, Math.max(Number(currentMgr.reputation || 55), (club.reputation || 55) + 4)),
+    };
+
+    // Board financial backing for contender clubs so they can actively buy players in the transfer market
+    const minContenderBudget =
+      activeLeagueTier === 1 ? 450000 :
+      activeLeagueTier === 2 ? 260000 :
+      activeLeagueTier === 3 ? 160000 : 110000;
+    const nextBudget = isContender && (club.budget || 0) < minContenderBudget
+      ? (club.budget || 0) + Math.round(minContenderBudget * 0.65)
+      : (club.budget || 0);
+
+    return {
+      ...club,
+      budget: nextBudget,
+      manager: updatedMgr,
+    } as Club;
+  });
+
+  // 3. Active AI Player Purchases: 2 to 3 rival clubs buy players to upgrade their weakest starting position
+  const buyingCandidates = safeTeams
+    .filter(t => t && !t.isUserClub && (contenderIds.has(t.id) || (t.budget || 0) >= 120000) && (t.players || []).length < 27)
+    .sort((a, b) => {
+      const aContender = contenderIds.has(a.id) ? 1 : 0;
+      const bContender = contenderIds.has(b.id) ? 1 : 0;
+      if (aContender !== bContender) return bContender - aContender;
+      return Math.random() - 0.5;
+    });
+
+  const dealsToExecute = Math.min(3, Math.max(1, buyingCandidates.length));
+  const usedPlayerIds = new Set<string>();
+
+  for (let d = 0; d < dealsToExecute; d++) {
+    const buyer = buyingCandidates[d];
+    if (!buyer) continue;
+
+    const squad = Array.isArray(buyer.players) ? buyer.players : [];
+    const starterIds = buyer.tactics?.startingPlayerIds || [];
+    const starters = starterIds.length >= 11
+      ? squad.filter(p => p && starterIds.includes(p.id))
+      : [...squad].sort((a, b) => (b.overallRating || 0) - (a.overallRating || 0)).slice(0, 11);
+
+    // Find the weakest starter position in the AI club's starting XI
+    const sortedStartersAsc = [...starters].sort((a, b) => (a.overallRating || 50) - (b.overallRating || 50));
+    const weakestStarter = sortedStartersAsc[0];
+    const neededPosCat: PositionCategory = weakestStarter?.positionCategory || 'FWD';
+    const neededPos: Position = weakestStarter?.position || (neededPosCat === 'GK' ? 'GK' : neededPosCat === 'DEF' ? 'CB' : neededPosCat === 'MID' ? 'CM' : 'ST');
+    const weakestOvr = weakestStarter?.overallRating || (tierBaseOvr - 3);
+
+    const desiredMinOvr = Math.min(tierMaxCap, Math.max(weakestOvr + 2, competitiveTargetOvr - 1));
+    const desiredMaxOvr = Math.min(tierMaxCap + 2, Math.max(desiredMinOvr + 2, competitiveTargetOvr + 3));
+
+    // Try finding a matching upgrade in the transferMarket first
+    let targetPlayer: Player | undefined = safeMarket.find(
+      p =>
+        p &&
+        !usedPlayerIds.has(p.id) &&
+        (p.positionCategory === neededPosCat || p.position === neededPos) &&
+        (p.overallRating || 60) >= desiredMinOvr &&
+        (p.overallRating || 60) <= desiredMaxOvr + 2
+    );
+
+    let sellerClubName = 'سوق الانتقالات';
+
+    // If no direct position match in market, look for any high-value upgrade in market
+    if (!targetPlayer) {
+      targetPlayer = safeMarket.find(
+        p =>
+          p &&
+          !usedPlayerIds.has(p.id) &&
+          (p.overallRating || 60) >= desiredMinOvr &&
+          (p.overallRating || 60) <= desiredMaxOvr + 2
+      );
+    }
+
+    // If transfer market doesn't have an upgrade for this tier/position, scout/generate a realistic signing for that position
+    if (!targetPlayer) {
+      try {
+        const targetOvr = Math.min(
+          tierMaxCap,
+          Math.max(desiredMinOvr, Math.round((desiredMinOvr + desiredMaxOvr) / 2))
+        );
+        const scoutedBatch = generateClubSquad(
+          buyer.id,
+          buyer.countryCode || 'EGY',
+          buyer.leagueId || 'egy_tier_1',
+          Math.max(buyer.reputation || 60, 65),
+          targetOvr
+        );
+        const matchingPosPlayers = scoutedBatch.filter(
+          gp => gp && (gp.position === neededPos || gp.positionCategory === neededPosCat)
+        );
+        const picked = (matchingPosPlayers.length > 0 ? matchingPosPlayers[0] : scoutedBatch[0]);
+        if (picked) {
+          const tunedOvr = Math.min(tierMaxCap, Math.max(desiredMinOvr, picked.overallRating || targetOvr));
+          const boostDelta = Math.max(0, tunedOvr - (picked.overallRating || targetOvr));
+          targetPlayer = {
+            ...picked,
+            id: `ai_scout_${buyer.id}_${seasonNumber}_${currentRound}_${d}_${Math.random().toString(36).slice(2, 6)}`,
+            position: neededPos,
+            positionCategory: neededPosCat,
+            overallRating: tunedOvr,
+            potentialRating: Math.min(94, Math.max(tunedOvr + 3, picked.potentialRating || tunedOvr + 3)),
+            attributes: {
+              ...picked.attributes,
+              pace: Math.min(95, (picked.attributes?.pace || 60) + boostDelta),
+              shooting: Math.min(95, (picked.attributes?.shooting || 60) + boostDelta),
+              passing: Math.min(95, (picked.attributes?.passing || 60) + boostDelta),
+              dribbling: Math.min(95, (picked.attributes?.dribbling || 60) + boostDelta),
+              defending: Math.min(95, (picked.attributes?.defending || 60) + boostDelta),
+              physical: Math.min(95, (picked.attributes?.physical || 60) + boostDelta),
+              ...(picked.attributes?.goalkeeping
+                ? { goalkeeping: Math.min(95, picked.attributes.goalkeeping + boostDelta) }
+                : {}),
+            },
+          };
+          const foreignOrLocalSellers = ['أكاديمية المحترفين الدولية', 'سوق الانتقالات الحرة', 'نادي وادي دجلة', 'نادي إنبي', 'نادي المقاولون العرب', 'الوداد الرياضي', 'الترجي التونسي'];
+          sellerClubName = foreignOrLocalSellers[(currentRound + d) % foreignOrLocalSellers.length];
+        }
+      } catch {
+        // Ignore generation fallback error
+      }
+    }
+
+    if (!targetPlayer) continue;
+    usedPlayerIds.add(targetPlayer.id);
+
+    const fairFee = Math.max(
+      25000,
+      Math.min(
+        Math.max(45000, Math.round((buyer.budget || 150000) * 0.55)),
+        Math.round(targetPlayer.marketValue || 65000)
+      )
+    );
+    const contractYears = 3;
+    const wage = targetPlayer.salary || calculateRealisticSalary(targetPlayer.overallRating || 65, {
+      divisionTier: buyer.division || activeLeagueTier || 1,
+      clubReputation: buyer.reputation || 60,
+    });
+
+    const signedPlayer: Player = {
+      ...targetPlayer,
+      currentClubId: buyer.id,
+      currentLeagueId: buyer.leagueId || '',
+      contractYears,
+      salary: wage,
+      isListedForTransfer: false,
+      morale: 94,
+      fitness: 100,
+    };
+
+    buyer.budget = Math.max(25000, (buyer.budget || 150000) - fairFee);
+    buyer.players = [...(buyer.players || []).filter(p => p && p.id !== signedPlayer.id), signedPlayer];
+    const syncedBuyer = syncClubLineupAfterTransfer(buyer, signedPlayer.id);
+    buyer.tactics = syncedBuyer.tactics;
+    buyer.rating = Math.max(buyer.rating || 60, Math.round(getClubStarterAvgOvr(buyer)));
+
+    safeMarket = safeMarket.filter(p => p && p.id !== signedPlayer.id);
+
+    const txEntry: TransferHistoryEntry = {
+      id: `tx_ai_comp_${Date.now()}_${signedPlayer.id}_${d}`,
+      playerId: signedPlayer.id,
+      playerName: signedPlayer.name,
+      playerRating: signedPlayer.overallRating,
+      position: signedPlayer.position,
+      type: 'buy',
+      fee: fairFee,
+      salary: wage,
+      date: `الموسم ${seasonNumber} - الجولة ${currentRound}`,
+      seasonNumber,
+      round: currentRound,
+      fromClubName: sellerClubName,
+      toClubName: buyer.name,
+      timestamp: Date.now() + d,
+    };
+    newTransfers.push(txEntry);
+
+    newsHeadlines.push({
+      title: `🔥 صفقة قوية للمنافسة: ${buyer.name} يتعاقد مع ${signedPlayer.name} (${signedPlayer.overallRating} OVR)`,
+      summary: `أبرم نادي ${buyer.name} صفقة مدوية بضم اللاعب ${signedPlayer.name} (${signedPlayer.position}) مقابل ${fairFee.toLocaleString()} ج.م لتدعيم تشكيلته الأساسية والمنافسة بقوة على البطولات هذا الموسم!`,
+      category: 'transfer',
+    });
+
+    if (d === 0) {
+      inboxNotifications.push({
+        id: `msg_ai_comp_tx_${seasonNumber}_${currentRound}_${signedPlayer.id}`,
+        title: `🚨 منافسوك يدعمون صفوفهم: ${buyer.name} يضم ${signedPlayer.name} (${signedPlayer.overallRating} ⭐)`,
+        sender: 'شبكة رصد الانتقالات والمنافسين',
+        date: `الجولة ${currentRound}`,
+        type: 'transfer',
+        read: false,
+        content: `واصلت الأندية المنافسة تعزيز صفوفها للمنافسة على اللقب؛ حيث أتم نادي (${buyer.name}) التعاقد الرسمي مع اللاعب ${signedPlayer.name} (مركز ${signedPlayer.position} - تقييم ${signedPlayer.overallRating}) قادماً من (${sellerClubName}) بقيمة ${fairFee.toLocaleString()} ج.م، ودخل اللاعب فوراً في التشكيلة الأساسية للفريق.`,
+      });
+    }
+  }
+
+  // 4. AI Contender Squad Training & Development: Rival contenders develop 1-2 starters (+1 OVR & attributes)
+  safeTeams = safeTeams.map(club => {
+    if (!club || club.isUserClub || !contenderIds.has(club.id)) return club;
+    const players = Array.isArray(club.players) ? [...club.players] : [];
+    if (players.length === 0) return club;
+
+    const starterIds = club.tactics?.startingPlayerIds || [];
+    // Pick 1 starter whose OVR is below tierMaxCap to receive a +1 training boost
+    const trainableIndices = players
+      .map((p, idx) => ({ p, idx }))
+      .filter(({ p }) => p && (starterIds.includes(p.id) || (p.overallRating || 0) >= tierBaseOvr - 4) && (p.overallRating || 0) < tierMaxCap);
+
+    if (trainableIndices.length > 0) {
+      const chosen = trainableIndices[(currentRound + club.id.length) % trainableIndices.length];
+      const targetP = chosen.p;
+      const newOvr = Math.min(tierMaxCap, (targetP.overallRating || 60) + 1);
+      players[chosen.idx] = {
+        ...targetP,
+        overallRating: newOvr,
+        potentialRating: Math.max(targetP.potentialRating || newOvr, newOvr + 1),
+        fitness: Math.max(targetP.fitness || 90, 94),
+        morale: Math.max(targetP.morale || 85, 90),
+        attributes: {
+          ...targetP.attributes,
+          pace: Math.min(96, (targetP.attributes?.pace || 60) + 1),
+          shooting: Math.min(96, (targetP.attributes?.shooting || 60) + 1),
+          passing: Math.min(96, (targetP.attributes?.passing || 60) + 1),
+          dribbling: Math.min(96, (targetP.attributes?.dribbling || 60) + 1),
+          defending: Math.min(96, (targetP.attributes?.defending || 60) + 1),
+          physical: Math.min(96, (targetP.attributes?.physical || 60) + 1),
+          ...(targetP.attributes?.goalkeeping
+            ? { goalkeeping: Math.min(96, targetP.attributes.goalkeeping + 1) }
+            : {}),
+        },
+      };
+    }
+
+    const synced = syncClubLineupAfterTransfer({
+      ...club,
+      players,
+    });
+    return {
+      ...synced,
+      rating: Math.max(club.rating || 60, Math.round(getClubStarterAvgOvr(synced))),
+    };
+  });
+
+  return {
+    updatedTeams: safeTeams,
+    updatedMarket: safeMarket,
+    newTransfers,
+    inboxNotifications,
+    newsHeadlines,
+  };
+}
+
+
 

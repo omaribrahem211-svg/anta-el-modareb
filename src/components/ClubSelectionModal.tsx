@@ -14,6 +14,7 @@ import {
   X,
   Trophy
 } from 'lucide-react';
+import { ModalPortal } from './common/ModalPortal';
 
 interface ClubSelectionModalProps {
   onClubSelected: (clubId: string) => void;
@@ -59,7 +60,8 @@ export const ClubSelectionModal: React.FC<ClubSelectionModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-slate-950/90 backdrop-blur-md animate-fadeIn" dir="rtl">
+    <ModalPortal>
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-slate-950/90 backdrop-blur-md animate-fadeIn" dir="rtl">
       <div className="bg-slate-900 border-2 border-emerald-500/40 rounded-3xl w-full max-w-4xl max-h-[92vh] flex flex-col shadow-2xl shadow-emerald-500/10 text-slate-100 relative overflow-hidden">
         
         {/* Header */}
@@ -223,6 +225,7 @@ export const ClubSelectionModal: React.FC<ClubSelectionModalProps> = ({
         </div>
 
       </div>
-    </div>
+      </div>
+    </ModalPortal>
   );
 };

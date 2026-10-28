@@ -37,6 +37,7 @@ import {
   ChevronDown,
   ChevronUp,
 } from 'lucide-react';
+import { ModalPortal } from './common/ModalPortal';
 
 interface SettingsBackupModalProps {
   isOpen: boolean;
@@ -249,7 +250,8 @@ export const SettingsBackupModal: React.FC<SettingsBackupModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-950/85 backdrop-blur-md animate-fadeIn" dir="rtl">
+    <ModalPortal>
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-950/85 backdrop-blur-md animate-fadeIn" dir="rtl">
       <div className="bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-lg p-5 sm:p-6 shadow-2xl relative text-slate-100 max-h-[90vh] overflow-y-auto">
         
         {/* Header Bar */}
@@ -580,6 +582,7 @@ export const SettingsBackupModal: React.FC<SettingsBackupModalProps> = ({
         isOpen={showRestartSeasonModal}
         onClose={() => setShowRestartSeasonModal(false)}
       />
-    </div>
+      </div>
+    </ModalPortal>
   );
 };

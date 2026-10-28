@@ -18,6 +18,7 @@ import {
   ChevronRight,
   Info
 } from 'lucide-react';
+import { ModalPortal } from './common/ModalPortal';
 
 interface YouthAcademyModalProps {
   isOpen: boolean;
@@ -131,7 +132,8 @@ export const YouthAcademyModal: React.FC<YouthAcademyModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-950/80 backdrop-blur-md animate-fade-in" dir="rtl">
+    <ModalPortal>
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-950/80 backdrop-blur-md animate-fade-in" dir="rtl">
       <div
         id="youth_academy_modal"
         className="bg-slate-900 border border-slate-700/80 rounded-3xl w-full max-w-4xl max-h-[92vh] flex flex-col shadow-2xl overflow-hidden"
@@ -440,6 +442,7 @@ export const YouthAcademyModal: React.FC<YouthAcademyModalProps> = ({
         </div>
 
       </div>
-    </div>
+      </div>
+    </ModalPortal>
   );
 };

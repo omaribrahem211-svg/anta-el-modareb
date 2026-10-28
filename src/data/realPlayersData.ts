@@ -3193,70 +3193,76 @@ export function isRealClub(clubId: string): boolean {
   return Boolean(REAL_SQUADS_BY_CLUB_ID[canonicalId]);
 }
 
+import { calibrateRealisticPlayerRating } from '../utils/playerGenerator';
+
 /**
  * Loads the predefined authentic real squad for a club.
- * Converts template definitions to full runtime Player objects.
+ * Converts template definitions to full runtime Player objects with realistic ratings.
  */
 export function loadRealClubSquad(clubId: string): Player[] {
   const canonicalId = (clubId || '').toLowerCase();
   const rawTemplates = REAL_SQUADS_BY_CLUB_ID[canonicalId];
 
-  if (!rawTemplates || rawTemplates.length === 0) {
+  if (!rawTemplates || !Array.isArray(rawTemplates) || rawTemplates.length === 0) {
     throw new Error(`[loadRealClubSquad] No predefined real squad found for club: ${clubId}`);
   }
 
   const templates = rawTemplates.filter(Boolean);
-  return templates.map((tmpl, index) => ({
-    id: tmpl.id,
-    name: tmpl.name,
-    firstName: tmpl.firstName,
-    lastName: tmpl.lastName,
-    nationality: tmpl.nationality,
-    nationalityCode: tmpl.nationalityCode,
-    countryOfBirth: tmpl.nationality,
-    currentClubId: clubId,
-    currentLeagueId: tmpl.leagueId,
-    position: tmpl.position,
-    positionCategory: tmpl.positionCategory,
-    age: tmpl.age,
-    overallRating: tmpl.overallRating,
-    potentialRating: tmpl.potentialRating,
-    marketValue: tmpl.marketValue,
-    salary: tmpl.salary,
-    preferredFoot: tmpl.preferredFoot || 'right',
-    personality: tmpl.personality || 'professional',
-    number: tmpl.number || index + 1,
-    morale: 92,
-    fitness: 100,
-    form: 8.0,
-    attributes: {
-      pace: tmpl.attributes.pace,
-      shooting: tmpl.attributes.shooting,
-      passing: tmpl.attributes.passing,
-      dribbling: tmpl.attributes.dribbling,
-      defending: tmpl.attributes.defending,
-      physical: tmpl.attributes.physical,
-      goalkeeping: tmpl.attributes.goalkeeping || (tmpl.position === 'GK' ? tmpl.overallRating : 50),
-    },
-    stats: {
-      appearances: 0,
-      starts: 0,
-      minutes: 0,
-      goals: 0,
-      assists: 0,
-      cleanSheets: 0,
-      yellowCards: 0,
-      redCards: 0,
-      shots: 0,
-      shotsOnTarget: 0,
-      passes: 0,
-      tackles: 0,
-      saves: 0,
-      averageRating: 7.2,
-      motm: 0,
-    },
-    contractYears: 3,
-    isListedForTransfer: false,
-    trainingFocus: 'general',
-  }));
+  return templates.map((tmpl, index) => {
+    const rawPlayer: Player = {
+      id: tmpl.id,
+      name: tmpl.name,
+      firstName: tmpl.firstName,
+      lastName: tmpl.lastName,
+      nationality: tmpl.nationality,
+      nationalityCode: tmpl.nationalityCode,
+      countryOfBirth: tmpl.nationality,
+      currentClubId: clubId,
+      currentLeagueId: tmpl.leagueId,
+      position: tmpl.position,
+      positionCategory: tmpl.positionCategory,
+      age: tmpl.age,
+      overallRating: tmpl.overallRating,
+      potentialRating: tmpl.potentialRating,
+      marketValue: tmpl.marketValue,
+      salary: tmpl.salary,
+      preferredFoot: tmpl.preferredFoot || 'right',
+      personality: tmpl.personality || 'professional',
+      number: tmpl.number || index + 1,
+      morale: 92,
+      fitness: 100,
+      form: 8.0,
+      attributes: {
+        pace: tmpl.attributes.pace,
+        shooting: tmpl.attributes.shooting,
+        passing: tmpl.attributes.passing,
+        dribbling: tmpl.attributes.dribbling,
+        defending: tmpl.attributes.defending,
+        physical: tmpl.attributes.physical,
+        goalkeeping: tmpl.attributes.goalkeeping || (tmpl.position === 'GK' ? tmpl.overallRating : 50),
+      },
+      stats: {
+        appearances: 0,
+        starts: 0,
+        minutes: 0,
+        goals: 0,
+        assists: 0,
+        cleanSheets: 0,
+        yellowCards: 0,
+        redCards: 0,
+        shots: 0,
+        shotsOnTarget: 0,
+        passes: 0,
+        tackles: 0,
+        saves: 0,
+        averageRating: 7.2,
+        motm: 0,
+      },
+      contractYears: 3,
+      isListedForTransfer: false,
+      trainingFocus: 'general',
+    };
+
+    return calibrateRealisticPlayerRating(rawPlayer, clubId, tmpl.leagueId);
+  });
 }

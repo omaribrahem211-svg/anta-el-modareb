@@ -420,6 +420,7 @@ export const LeagueTab: React.FC = () => {
                   const matchingFix = (fixtures || []).find(f => f.id === cm.id);
                   const matchDate = matchingFix?.date;
                   const isToday = Boolean(calendarDate?.rawDateStr && matchDate && matchDate <= calendarDate.rawDateStr);
+                  const isActuallyPlayed = Boolean(cm.isPlayed && cm.homeScore !== undefined && cm.awayScore !== undefined);
 
                   return (
                     <div
@@ -437,7 +438,7 @@ export const LeagueTab: React.FC = () => {
                         </span>
 
                         <div className="shrink-0">
-                          {!cm.isPlayed ? (
+                          {!isActuallyPlayed ? (
                             isToday && isUserMatch ? (
                               <button
                                 onClick={() => window.dispatchEvent(new CustomEvent('set-active-tab', { detail: { tab: 'matches' } }))}
@@ -455,7 +456,7 @@ export const LeagueTab: React.FC = () => {
                           ) : (
                             <span className="text-[11px] text-emerald-400 font-bold flex items-center gap-1 bg-emerald-950/40 px-2.5 py-1 rounded-xl border border-emerald-800/50">
                               <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
-                              <span>تأهل: {getClubName(cm.winnerTeamId || cm.homeTeamId)}</span>
+                              <span>تأهل: {getClubName(cm.winnerTeamId || (cm.homeScore! > cm.awayScore! ? cm.homeTeamId : cm.awayTeamId))}</span>
                             </span>
                           )}
                         </div>
@@ -465,7 +466,7 @@ export const LeagueTab: React.FC = () => {
                       <div className="flex items-center justify-between gap-2 w-full">
                         <span
                           className={`text-xs sm:text-sm font-bold leading-snug break-words flex-1 text-right ${
-                            cm.winnerTeamId === cm.homeTeamId
+                            isActuallyPlayed && cm.winnerTeamId === cm.homeTeamId
                               ? 'text-emerald-400 font-black'
                               : cm.homeTeamId === userClub?.id
                               ? 'text-amber-300 font-black'
@@ -476,7 +477,7 @@ export const LeagueTab: React.FC = () => {
                         </span>
 
                         <div className="px-3.5 py-1.5 bg-slate-900 border border-slate-800 rounded-xl font-mono font-black text-sm text-center shrink-0 min-w-[72px]">
-                          {cm.isPlayed ? (
+                          {isActuallyPlayed ? (
                             <div className="flex flex-col items-center leading-tight">
                               <span className="text-white">
                                 {cm.homeScore} - {cm.awayScore}
@@ -488,13 +489,13 @@ export const LeagueTab: React.FC = () => {
                               )}
                             </div>
                           ) : (
-                            <span className="text-slate-500 text-xs">VS</span>
+                            <span className="text-slate-500 text-xs font-bold">VS</span>
                           )}
                         </div>
 
                         <span
                           className={`text-xs sm:text-sm font-bold leading-snug break-words flex-1 text-left ${
-                            cm.winnerTeamId === cm.awayTeamId
+                            isActuallyPlayed && cm.winnerTeamId === cm.awayTeamId
                               ? 'text-emerald-400 font-black'
                               : cm.awayTeamId === userClub?.id
                               ? 'text-amber-300 font-black'

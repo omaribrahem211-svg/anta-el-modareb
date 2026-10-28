@@ -463,6 +463,7 @@ export interface MatchStats {
 export type CompetitionType = 
   | 'LEAGUE' 
   | 'DOMESTIC_COP' 
+  | 'DOMESTIC_CUP'
   | 'CONTINENTAL_CUP' 
   | 'league' 
   | 'cup' 
@@ -586,6 +587,22 @@ export interface SeasonEndSummary {
   developmentPointsEarned?: number;
   developmentPointsBreakdown?: { reason: string; points: number }[];
   worldDominationInfo?: { percentage: number; conqueredCount: number; totalCount: number; isNewConquest: boolean; leagueName: string };
+  licenseSettlement?: {
+    previousLicense: CoachingLicenseTier;
+    previousLicenseTitle: string;
+    activeLicense: CoachingLicenseTier;
+    activeLicenseAfterRenewal?: CoachingLicenseTier;
+    activeLicenseTitle: string;
+    seasonBonusDeposited: number;
+    renewalFeeRequired: number;
+    renewalFeeDeducted: number;
+    wasDowngraded: boolean;
+    walletBeforeSettlement: number;
+    walletAfterSettlement: number;
+    personalWalletAfter?: number;
+    messageArabic: string;
+    warningMessage?: string;
+  };
 }
 
 export interface LeagueDefinition {
@@ -634,7 +651,7 @@ export interface JobOffer {
   interestReason?: string; // سبب اهتمام النادي بالمدرب باللغة العربية
   minimumLevelRequired?: number;
   minimumReputationRequired?: number;
-  requiredLicense?: 'D' | 'C' | 'B' | 'A' | 'PRO' | 'ELITE';
+  requiredLicense?: CoachingLicenseTier;
   difficultyRating?: 'easy' | 'medium' | 'hard' | 'extreme';
   taskDifficultyArabic?: string; // e.g. "تحدي متوازن" | "مهمة شاقة" | "مشروع أسطوري"
   primaryColor: string;
@@ -784,7 +801,7 @@ export interface ManagerProfile {
   xp: number;
   xpToNextLevel: number;
   reputation: number; // 1 - 100
-  license: 'D' | 'C' | 'B' | 'A' | 'PRO' | 'ELITE';
+  license: CoachingLicenseTier;
   matchesManaged: number;
   wins: number;
   draws: number;
@@ -848,6 +865,8 @@ export interface ManagerProfile {
   personalWallet?: number; // الذمة المالية والمحفظة الشخصية للمدرب
   financialTransactions?: ManagerTransaction[]; // سجل المعاملات المالية
   completedCourses?: string[]; // الدورات والرخص التدريبية الحاصل عليها
+  ownedLicenses?: CoachingLicenseTier[]; // الرخص التي قام المدرب بشرائها سابقاً
+  lastSettledSeasonNumber?: number; // رقم الموسم الأخير الذي تمت تسوية مكافأته وتجديد رخصته
   totalClubDonations?: number; // إجمالي المبالغ المتبرع بها للنادي
   totalBonusesEarned?: number; // إجمالي مكافآت الفوز والبطولات
   dailyLoginRewardState?: DailyLoginRewardState; // حالة ومكافآت تسجيل الدخول اليومي المتتالية
@@ -871,11 +890,12 @@ export interface ManagerTransaction {
   id: string;
   date: string;
   amount: number;
-  type: 'salary' | 'trophy_bonus' | 'course_license' | 'club_donation' | 'player_bonus' | 'match_bonus';
+  type: 'salary' | 'trophy_bonus' | 'course_license' | 'license_upgrade' | 'license_renewal' | 'club_donation' | 'player_bonus' | 'match_bonus';
   description: string;
 }
 
-export type CoachingLicenseTier = 'D' | 'C' | 'B' | 'A' | 'PRO' | 'ELITE';
+export type OfficialCoachingLicenseTier = 'BASIC' | 'PREMIER' | 'CONTINENTAL' | 'LEGENDARY';
+export type CoachingLicenseTier = OfficialCoachingLicenseTier | 'D' | 'C' | 'B' | 'A' | 'PRO' | 'ELITE';
 
 export type ClubPrestigeTier = 'tier_dc' | 'tier_cb' | 'tier_ba' | 'tier_apro' | 'tier_pro' | 'tier_elite';
 

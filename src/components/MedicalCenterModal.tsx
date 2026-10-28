@@ -22,6 +22,7 @@ import {
   Film,
   Play
 } from 'lucide-react';
+import { ModalPortal } from './common/ModalPortal';
 
 interface MedicalCenterModalProps {
   isOpen: boolean;
@@ -109,7 +110,8 @@ export const MedicalCenterModal: React.FC<MedicalCenterModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-950/85 backdrop-blur-md animate-fade-in font-['Cairo',sans-serif]">
+    <ModalPortal>
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-950/85 backdrop-blur-md animate-fade-in font-['Cairo',sans-serif]">
       <div className="relative w-full max-w-2xl max-h-[90vh] bg-slate-900 border border-emerald-500/40 rounded-3xl p-4 sm:p-6 shadow-2xl overflow-hidden flex flex-col text-right">
         
         {/* Top Glow Border */}
@@ -389,6 +391,7 @@ export const MedicalCenterModal: React.FC<MedicalCenterModalProps> = ({
         </div>
 
       </div>
-    </div>
+      </div>
+    </ModalPortal>
   );
 };

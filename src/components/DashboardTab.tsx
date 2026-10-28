@@ -280,6 +280,16 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({ setActiveTab, onSele
   // Active upcoming fixture from unified calendar across all competitions (League, CAF Champions League, Cup)
   const activeUserFixture = React.useMemo(() => {
     if (!userClub?.id || !Array.isArray(userCalendarSchedule)) return undefined;
+    // 0. Priority: Any unplayed Continental or Cup match whose round trigger has arrived (<= currentRound)
+    const dueTournamentMatch = userCalendarSchedule.find(
+      m =>
+        m &&
+        !m.isPlayed &&
+        (m.competitionType === 'CONTINENTAL_CUP' || m.competitionType === 'continental' || m.competitionType === 'DOMESTIC_COP' || m.competitionType === 'cup') &&
+        m.round &&
+        m.round <= currentRound
+    );
+    if (dueTournamentMatch) return dueTournamentMatch;
     // 1. Unplayed match today (or overdue unplayed match)
     const todayMatch = userCalendarSchedule.find(m => m && !m.isPlayed && (m.date === calendarDate?.rawDateStr || (m.date || '') <= (calendarDate?.rawDateStr || '')));
     if (todayMatch) return todayMatch;
@@ -288,7 +298,7 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({ setActiveTab, onSele
     if (upcoming) return upcoming;
     // 3. Any remaining unplayed fixture
     return userCalendarSchedule.find(m => m && !m.isPlayed);
-  }, [userClub?.id, userCalendarSchedule, calendarDate?.rawDateStr]);
+  }, [userClub?.id, userCalendarSchedule, calendarDate?.rawDateStr, currentRound]);
 
   const nextFixture = activeUserFixture || (userClub?.id 
     ? roundFixtures.find(f => f && (f.homeTeamId === userClub.id || f.awayTeamId === userClub.id))
@@ -564,30 +574,18 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({ setActiveTab, onSele
                 </button>
               </div>
             ) : isMatchDay ? (
-              <div className="grid grid-cols-2 gap-2">
+              <div className="w-full">
                 <button
                   id="dashboard_play_live_btn"
                   disabled={isSimulationRunning}
                   onClick={() => {
                     setActiveTab('matches');
-                    startLiveMatch();
+                    startLiveMatch(nextFixture?.id);
                   }}
-                  className="flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs sm:text-sm py-2.5 px-3 rounded-xl shadow transition-all active:scale-95 cursor-pointer disabled:opacity-50"
+                  className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-600 hover:from-emerald-500 hover:to-teal-500 text-white font-black text-xs sm:text-sm py-3 px-4 rounded-xl shadow-lg transition-all active:scale-95 cursor-pointer disabled:opacity-50"
                 >
                   <Play className="w-4 h-4 fill-white" />
-                  <span>بدء المباراة لايف ⚽</span>
-                </button>
-
-                <button
-                  id="dashboard_instant_sim_btn"
-                  disabled={isSimulationRunning}
-                  onClick={async () => {
-                    await instantSimulateCurrentRound({ advanceDate: false, forcePlayUserMatch: true });
-                  }}
-                  className="flex items-center justify-center gap-1.5 bg-slate-800 hover:bg-slate-750 border border-slate-700 text-amber-300 font-bold text-xs py-2.5 px-3 rounded-xl transition-all active:scale-95 cursor-pointer disabled:opacity-50"
-                >
-                  <Zap className="w-3.5 h-3.5 text-amber-400" />
-                  <span>{isSimulationRunning ? 'جارٍ المحاكاة...' : 'محاكاة الجولة ⚡'}</span>
+                  <span>خوض مباراة ({nextFixture?.stageName || nextFixture?.stage || `الجولة ${currentRound}`}) لايف الآن ⚽⚡</span>
                 </button>
               </div>
             ) : (
@@ -596,7 +594,7 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({ setActiveTab, onSele
                   id="dashboard_play_match_direct_btn"
                   onClick={() => {
                     setActiveTab('matches');
-                    startLiveMatch();
+                    startLiveMatch(nextFixture?.id);
                   }}
                   disabled={isSimulationRunning}
                   className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-600 hover:from-emerald-500 hover:to-teal-500 text-white font-black text-xs sm:text-sm py-2.5 px-3 rounded-xl transition-all shadow active:scale-95 cursor-pointer disabled:opacity-50"

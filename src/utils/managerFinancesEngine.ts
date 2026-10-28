@@ -1,10 +1,10 @@
-import { ManagerProfile, Player, Club, FormationType } from '../types/game';
+import { ManagerProfile, Player, Club, FormationType, CoachingLicenseTier, OfficialCoachingLicenseTier } from '../types/game';
 
 export interface ManagerTransaction {
   id: string;
   date: string;
   amount: number;
-  type: 'salary' | 'trophy_bonus' | 'course_license' | 'club_donation' | 'player_bonus' | 'match_bonus';
+  type: 'salary' | 'trophy_bonus' | 'course_license' | 'license_upgrade' | 'license_renewal' | 'club_donation' | 'player_bonus' | 'match_bonus';
   description: string;
 }
 
@@ -13,8 +13,9 @@ export interface CoachingCourse {
   title: string;
   category: 'license' | 'tactic' | 'psychology' | 'fitness' | 'fellowship';
   cost: number;
-  requiredLicense?: 'D' | 'C' | 'B' | 'A' | 'PRO';
-  grantsLicense?: 'D' | 'C' | 'B' | 'A' | 'PRO' | 'ELITE';
+  annualRenewalFee?: number;
+  requiredLicense?: OfficialCoachingLicenseTier;
+  grantsLicense?: OfficialCoachingLicenseTier;
   description: string;
   xpReward: number;
   reputationReward: number;
@@ -23,82 +24,60 @@ export interface CoachingCourse {
 }
 
 export const COACHING_COURSES: CoachingCourse[] = [
-  // Official Licenses
+  // Official 4 Coaching Licenses
   {
-    id: 'license_d',
-    title: 'رخصة التدريب التأسيسية (CAF / الاتحاد المحلي D)',
+    id: 'license_basic',
+    title: 'الرخصة الأولية (Basic License)',
     category: 'license',
-    cost: 15000,
-    grantsLicense: 'D',
-    description: 'الدورة التأسيسية المعتمدة لمدربي كرة القدم لدراسة مبادئ التدريب، إدارة الحصص التدريبية، والتطوير الفني والبدني للاعبين.',
+    cost: 0,
+    annualRenewalFee: 0,
+    grantsLicense: 'BASIC',
+    description: 'الرخصة الافتراضية المجانية التي تُمنح تلقائياً لأي مدرب جديد عند بدء مسيرته التدريبية.',
     xpReward: 200,
     reputationReward: 4,
-    specialBenefit: 'الاعتماد الرسمي لرخصة التدريب D، فتح مسار التراخيص القارية المتقدمة (C و B)، وزيادة رصيد تصنيفك العالمي (+20 نقطة).',
+    specialBenefit: 'صلاحية تدريب أندية الدرجة الثانية (وما دونها) في الدوريات العربية فقط. رسوم التجديد السنوية: مجانية (0$).',
     iconName: 'Award',
   },
   {
-    id: 'license_c',
-    title: 'رخصة التدريب القارية (CAF / UEFA C)',
+    id: 'license_premier',
+    title: 'الرخصة الممتازة (Premier License)',
     category: 'license',
-    cost: 50000,
-    requiredLicense: 'D',
-    grantsLicense: 'C',
-    description: 'دورة تدريبية معتمدة لتطوير أسس بناء اللعب، إدارة الحصص التدريبية، والتمركز التكتيكي الحديث.',
-    xpReward: 400,
-    reputationReward: 6,
-    specialBenefit: 'ترقية الرخصة الرسمية إلى C، وزيادة تأثيرك التدريبي ونقاط تصنيفك العالمي (+30 نقطة).',
+    cost: 5_000_000,
+    annualRenewalFee: 500_000,
+    requiredLicense: 'BASIC',
+    grantsLicense: 'PREMIER',
+    description: 'رخصة احترافية تمنحك صلاحية قيادة جميع أندية الدوريات الممتازة العربية دون قيود.',
+    xpReward: 1200,
+    reputationReward: 15,
+    specialBenefit: 'صلاحية تدريب جميع أندية الدوريات الممتازة العربية دون قيود. رسوم التجديد السنوية: 500,000$ (تُخصم مع بداية كل موسم جديد).',
     iconName: 'Award',
   },
   {
-    id: 'license_b',
-    title: 'رخصة التدريب المتقدمة (CAF / UEFA B)',
+    id: 'license_continental',
+    title: 'الرخصة الأوروبية (Continental License)',
     category: 'license',
-    cost: 150000,
-    requiredLicense: 'C',
-    grantsLicense: 'B',
-    description: 'تأهيل متقدم للمدربين في تحليل الأداء الرقمي، التحولات الهجومية السريعة، والتكتيك المضاد.',
-    xpReward: 850,
-    reputationReward: 12,
-    specialBenefit: 'ترقية الرخصة إلى B، تسريع تطور لاعبيك الشباب بنسبة 15%، ورفع تصنيفك العالمي (+60 نقطة).',
+    cost: 12_000_000,
+    annualRenewalFee: 1_200_000,
+    requiredLicense: 'PREMIER',
+    grantsLicense: 'CONTINENTAL',
+    description: 'رخصة قارية ودولية تفتح لك أبواب التدريب في أوروبا وبقية قارات العالم.',
+    xpReward: 2800,
+    reputationReward: 30,
+    specialBenefit: 'صلاحية التدريب في أوروبا وبقية قارات العالم، باستثناء فرق النخبة والقمة (Tier 1 / Elite Clubs). رسوم التجديد السنوية: 1,200,000$.',
     iconName: 'Award',
   },
   {
-    id: 'license_a',
-    title: 'رخصة النخبة الإدارية والتكتيكية (CAF / UEFA A)',
+    id: 'license_legendary',
+    title: 'الرخصة الأسطورية (Legendary / Pro License)',
     category: 'license',
-    cost: 350000,
-    requiredLicense: 'B',
-    grantsLicense: 'A',
-    description: 'الشهادة التكتيكية الاحترافية العليا لإدارة أندية الدوريات الممتازة والمنافسة على الألقاب الكبرى.',
-    xpReward: 1600,
-    reputationReward: 20,
-    specialBenefit: 'ترقية الرخصة إلى A، تحسين قراءة المباريات، تقليل الإرهاق البدني للاعبيك، وتصنيف عالمي مرموق (+120 نقطة).',
-    iconName: 'Award',
-  },
-  {
-    id: 'license_pro',
-    title: 'رخصة الاتحاد الدولي للمحترفين (FIFA / CAF PRO)',
-    category: 'license',
-    cost: 850000,
-    requiredLicense: 'A',
-    grantsLicense: 'PRO',
-    description: 'أعلى وسام تدريبي عالمي للمحترفين يُمنح لصفوة مدربي العالم لقيادة المنتخبات والأندية العملاقة.',
-    xpReward: 3200,
-    reputationReward: 35,
-    specialBenefit: 'ترقية الرخصة لأعلى مستوى PRO دولي، زيادة قدرة الحسم في النهائيات، وقفزة كبرى في التصنيف العالمي (+250 نقطة).',
-    iconName: 'Award',
-  },
-  {
-    id: 'license_elite',
-    title: 'رخصة النخبة العالمية للمدربين (World Elite Master)',
-    category: 'license',
-    cost: 2000000,
-    requiredLicense: 'PRO',
-    grantsLicense: 'ELITE',
-    description: 'أسمى وأرفع رخصة تدريبية في تاريخ كرة القدم لصفوة مدربي العالم لقيادة نخبة أندية أوروبا وكبرى المنتخبات العالمية.',
+    cost: 30_000_000,
+    annualRenewalFee: 3_000_000,
+    requiredLicense: 'CONTINENTAL',
+    grantsLicense: 'LEGENDARY',
+    description: 'أعلى وسام تدريبي في العالم لقيادة كبرى فرق النخبة والعمالقة في أوروبا والعالم دون أي قيود.',
     xpReward: 5000,
     reputationReward: 50,
-    specialBenefit: 'ترقية رتبتك إلى رخصة ELITE العالمية، فتح عروض نخبة أندية العالم التاريخية، وقفزة هائلة في التصنيف العالمي (+400 نقطة).',
+    specialBenefit: 'صلاحية تدريب كبرى فرق النخبة والعمالقة في أوروبا والعالم دون أي قيود. رسوم التجديد السنوية: 3,000,000$.',
     iconName: 'Award',
   },
 

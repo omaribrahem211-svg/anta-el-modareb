@@ -10,7 +10,8 @@ import {
   MatchStats,
 } from '../types/game';
 import { updateLeagueStandings } from '../utils/engine';
-import { recalculateContinentalGroupStandings } from '../utils/continentalEngine';
+import { recalculateContinentalGroupStandings, simulateKnockoutMatch } from '../utils/continentalEngine';
+import { findClubInWorld } from '../data/leaguesData';
 import { CalendarManager } from './calendarManager';
 import { getDomesticCupDefinitionForCountry } from '../data/competitionsData';
 
@@ -440,6 +441,32 @@ export function processMatchResult(
       updatedContinental.currentStage = 'completed';
     } else if (isSemi) {
       const semiMatches = updatedContinental.matches.filter(m => m.stage === 'semi');
+      // Resolve any remaining unplayed AI semi-final match immediately
+      semiMatches.forEach(m => {
+        if (!m.isPlayed) {
+          const homeClub = teams.find(t => t.id === m.homeTeamId) || findClubInWorld(m.homeTeamId) || ({ id: m.homeTeamId, name: 'فريق إفريقي' } as any);
+          const awayClub = teams.find(t => t.id === m.awayTeamId) || findClubInWorld(m.awayTeamId) || ({ id: m.awayTeamId, name: 'فريق إفريقي' } as any);
+          const res = simulateKnockoutMatch(homeClub, awayClub);
+          m.homeScore = res.homeScore;
+          m.awayScore = res.awayScore;
+          m.homePenalties = res.homePenalties;
+          m.awayPenalties = res.awayPenalties;
+          m.winnerTeamId = res.winnerTeamId;
+          m.isPlayed = true;
+          const fixIdx = updatedFixtures.findIndex(f => f.id === m.id);
+          if (fixIdx !== -1) {
+            updatedFixtures[fixIdx] = {
+              ...updatedFixtures[fixIdx],
+              homeScore: res.homeScore,
+              awayScore: res.awayScore,
+              homePenalties: res.homePenalties,
+              awayPenalties: res.awayPenalties,
+              winnerTeamId: res.winnerTeamId,
+              isPlayed: true,
+            };
+          }
+        }
+      });
       if (semiMatches.length >= 2 && semiMatches.every(m => m.isPlayed)) {
         const finalist1 =
           resolveMatchWinner(
@@ -481,6 +508,32 @@ export function processMatchResult(
       }
     } else if (isQuarter) {
       const qfMatches = updatedContinental.matches.filter(m => m.stage === 'quarter');
+      // Resolve any remaining unplayed AI quarter-final matches immediately
+      qfMatches.forEach(m => {
+        if (!m.isPlayed) {
+          const homeClub = teams.find(t => t.id === m.homeTeamId) || findClubInWorld(m.homeTeamId) || ({ id: m.homeTeamId, name: 'فريق إفريقي' } as any);
+          const awayClub = teams.find(t => t.id === m.awayTeamId) || findClubInWorld(m.awayTeamId) || ({ id: m.awayTeamId, name: 'فريق إفريقي' } as any);
+          const res = simulateKnockoutMatch(homeClub, awayClub);
+          m.homeScore = res.homeScore;
+          m.awayScore = res.awayScore;
+          m.homePenalties = res.homePenalties;
+          m.awayPenalties = res.awayPenalties;
+          m.winnerTeamId = res.winnerTeamId;
+          m.isPlayed = true;
+          const fixIdx = updatedFixtures.findIndex(f => f.id === m.id);
+          if (fixIdx !== -1) {
+            updatedFixtures[fixIdx] = {
+              ...updatedFixtures[fixIdx],
+              homeScore: res.homeScore,
+              awayScore: res.awayScore,
+              homePenalties: res.homePenalties,
+              awayPenalties: res.awayPenalties,
+              winnerTeamId: res.winnerTeamId,
+              isPlayed: true,
+            };
+          }
+        }
+      });
       if (qfMatches.length >= 4 && qfMatches.every(m => m.isPlayed)) {
         const qfWinners = qfMatches.map(
           m =>
@@ -618,7 +671,34 @@ export function processMatchResult(
       const nextInfo = stageProgressionMap[currentStageName];
       const alreadyHasNextStage = updatedCup.matches.some(m => m.stage === nextInfo.nextStage);
 
-      if (stageMatches.length >= 2 && stageMatches.every(m => m.isPlayed) && !alreadyHasNextStage) {
+      // Resolve any remaining unplayed AI matches of this stage immediately
+      stageMatches.forEach(m => {
+        if (!m.isPlayed) {
+          const homeClub = teams.find(t => t.id === m.homeTeamId) || findClubInWorld(m.homeTeamId) || ({ id: m.homeTeamId, name: 'فريق الكأس' } as any);
+          const awayClub = teams.find(t => t.id === m.awayTeamId) || findClubInWorld(m.awayTeamId) || ({ id: m.awayTeamId, name: 'فريق الكأس' } as any);
+          const res = simulateKnockoutMatch(homeClub, awayClub);
+          m.homeScore = res.homeScore;
+          m.awayScore = res.awayScore;
+          m.homePenalties = res.homePenalties;
+          m.awayPenalties = res.awayPenalties;
+          m.winnerTeamId = res.winnerTeamId;
+          m.isPlayed = true;
+          const fixIdx = updatedFixtures.findIndex(f => f.id === m.id);
+          if (fixIdx !== -1) {
+            updatedFixtures[fixIdx] = {
+              ...updatedFixtures[fixIdx],
+              homeScore: res.homeScore,
+              awayScore: res.awayScore,
+              homePenalties: res.homePenalties,
+              awayPenalties: res.awayPenalties,
+              winnerTeamId: res.winnerTeamId,
+              isPlayed: true,
+            };
+          }
+        }
+      });
+
+      if (stageMatches.length >= 1 && stageMatches.every(m => m.isPlayed) && !alreadyHasNextStage) {
         const winners = stageMatches.map(
           m =>
             resolveMatchWinner(

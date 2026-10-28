@@ -5,6 +5,7 @@ import { getPositionArabic, getPositionBadgeClass } from '../utils/positionHelpe
 import { PlayerKit3DModel } from './models/Football3DModels';
 import { useLazyList } from '../utils/useLazyList';
 import { compressImage } from '../utils/imageCompressor';
+import { ModalPortal } from './common/ModalPortal';
 import {
   Users,
   Search,
@@ -414,7 +415,8 @@ export const SquadTab: React.FC<SquadTabProps> = ({ onSelectPlayer }) => {
 
       {/* Bonus Distribution Modal */}
       {bonusModalOpen && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+        <ModalPortal>
+          <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4" dir="rtl">
           <div className="bg-slate-900 border border-slate-800 w-full max-w-md rounded-3xl p-5 space-y-4 shadow-2xl animate-scale-in max-h-[90vh] overflow-y-auto">
             
             <div className="flex items-center justify-between border-b border-slate-800 pb-3">
@@ -639,7 +641,8 @@ export const SquadTab: React.FC<SquadTabProps> = ({ onSelectPlayer }) => {
             </div>
 
           </div>
-        </div>
+          </div>
+        </ModalPortal>
       )}
 
     </div>

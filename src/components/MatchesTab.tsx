@@ -25,6 +25,8 @@ import {
   Pause,
   FastForward,
   CheckCircle2,
+  Gamepad2,
+  Globe,
   Calendar,
   Shield,
   Activity,
@@ -105,6 +107,7 @@ export const MatchesTab: React.FC = () => {
     rematchLiveMatch,
     userCalendarSchedule,
     calendarSchedule,
+    recordUserMatchAction,
   } = useGame();
 
   const { t, language } = useLanguage();
@@ -270,6 +273,16 @@ export const MatchesTab: React.FC = () => {
   // Active user fixture across all competitions (League, CAF CL, Cup)
   const userFixture = useMemo(() => {
     if (!userClub?.id || manager.isUnemployed) return undefined;
+    // 0. Priority: Any unplayed Continental or Cup match whose round trigger has arrived (<= currentRound)
+    const dueTournamentMatch = (userCalendarSchedule || []).find(
+      m =>
+        m &&
+        !m.isPlayed &&
+        (m.competitionType === 'CONTINENTAL_CUP' || m.competitionType === 'continental' || m.competitionType === 'DOMESTIC_COP' || m.competitionType === 'cup') &&
+        m.round &&
+        m.round <= currentRound
+    );
+    if (dueTournamentMatch) return dueTournamentMatch;
     // 1. Match scheduled for today on real-world calendar (or overdue unplayed match)
     const todayMatch = (userCalendarSchedule || []).find(m => m && !m.isPlayed && (m.date === calendarDate?.rawDateStr || (m.date || '') <= (calendarDate?.rawDateStr || '')));
     if (todayMatch) return todayMatch;
@@ -278,7 +291,7 @@ export const MatchesTab: React.FC = () => {
     if (upcoming) return upcoming;
     // 3. Round fixture fallback
     return roundFixtures.find(f => f && (f.homeTeamId === userClub.id || f.awayTeamId === userClub.id));
-  }, [userClub?.id, manager.isUnemployed, userCalendarSchedule, calendarDate?.rawDateStr, roundFixtures]);
+  }, [userClub?.id, manager.isUnemployed, userCalendarSchedule, calendarDate?.rawDateStr, roundFixtures, currentRound]);
 
   // Resolve upcoming match details for user club
   const upcomingMatchAnalysis = useMemo(() => {
@@ -831,7 +844,7 @@ export const MatchesTab: React.FC = () => {
           />
         )}
 
-        {/* 3D Interactive Tactical Stadium Pitch */}
+        {/* 2.5D Tactical Stadium Simulation */}
         <div className="space-y-2.5">
           <TacticalPitch2D
             homeTeam={liveMatch.homeTeam}
@@ -1629,7 +1642,7 @@ export const MatchesTab: React.FC = () => {
               </div>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+            <div className="w-full">
               <button
                 id="start_live_match_btn"
                 disabled={isSimulationRunning}
@@ -1637,17 +1650,7 @@ export const MatchesTab: React.FC = () => {
                 className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-black text-sm py-3.5 px-4 rounded-2xl shadow-lg shadow-emerald-950/60 transition-all active:scale-95 cursor-pointer disabled:opacity-50 disabled:pointer-events-none"
               >
                 <Play className="w-4 h-4 fill-white" />
-                <span>خوض مباراة ({userFixture?.stageName || `الجولة ${currentRound}`}) الآن ⚽</span>
-              </button>
-
-              <button
-                id="instant_simulate_round_btn"
-                disabled={isSimulationRunning}
-                onClick={() => instantSimulateCurrentRound({ advanceDate: false, forcePlayUserMatch: true })}
-                className="w-full flex items-center justify-center gap-2 bg-slate-800 hover:bg-slate-750 text-amber-300 border border-slate-700 font-bold text-xs sm:text-sm py-3 px-4 rounded-2xl shadow transition-all active:scale-95 cursor-pointer disabled:opacity-50 disabled:pointer-events-none"
-              >
-                <FastForward className="w-4 h-4 text-amber-400" />
-                <span>{isSimulationRunning ? 'جارٍ المحاكاة...' : `محاكاة نتائج مباريات (${userFixture?.stageName || `الجولة ${currentRound}`})`}</span>
+                <span>خوض مباراة ({userFixture?.stageName || `الجولة ${currentRound}`}) لايف الآن ⚽⚡</span>
               </button>
             </div>
           </div>

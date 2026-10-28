@@ -6,6 +6,7 @@ import { calculateSuggestedRenewalWage } from '../utils/contractAlertEngine';
 import { getPositionArabic, getPositionBadgeClass } from '../utils/positionHelper';
 import { AdManager } from '../services/adManager';
 import { PlayerKit3DModel } from './models/Football3DModels';
+import { ModalPortal } from './common/ModalPortal';
 import {
   X,
   Zap,
@@ -225,11 +226,12 @@ export const PlayerModal: React.FC<PlayerModalProps> = ({ player, onClose, onSta
   ];
 
   return (
-    <div 
-      className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-3 animate-fade-in"
-      onClick={onClose}
-      dir="rtl"
-    >
+    <ModalPortal>
+      <div 
+        className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-3 animate-fade-in"
+        onClick={onClose}
+        dir="rtl"
+      >
       <div 
         className="w-full max-w-lg bg-slate-900 border border-slate-700/80 rounded-3xl p-5 shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto custom-scrollbar"
         onClick={(e) => e.stopPropagation()}
@@ -868,7 +870,8 @@ export const PlayerModal: React.FC<PlayerModalProps> = ({ player, onClose, onSta
         )}
 
       </div>
-    </div>
+      </div>
+    </ModalPortal>
   );
 };
 

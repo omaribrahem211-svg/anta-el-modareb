@@ -439,6 +439,7 @@ export const AfricanChampionsLeagueView: React.FC<AfricanChampionsLeagueViewProp
                 const home = getClub(match.homeTeamId);
                 const away = getClub(match.awayTeamId);
                 const isUserMatch = userClub && (match.homeTeamId === userClub.id || match.awayTeamId === userClub.id);
+                const isActuallyPlayed = Boolean(match.isPlayed && match.homeScore !== undefined && match.awayScore !== undefined);
 
                 return (
                   <div
@@ -456,7 +457,7 @@ export const AfricanChampionsLeagueView: React.FC<AfricanChampionsLeagueViewProp
                       </span>
 
                       <div className="shrink-0">
-                        {!match.isPlayed ? (
+                        {!isActuallyPlayed ? (
                           (() => {
                             const matchingFix = (fixtures || []).find(f => f.id === match.id);
                             const matchDate = matchingFix?.date || (match as any).date;
@@ -505,7 +506,7 @@ export const AfricanChampionsLeagueView: React.FC<AfricanChampionsLeagueViewProp
                       </div>
 
                       <div className="px-3 py-1.5 bg-slate-950 border border-slate-800 rounded-xl font-mono font-black text-sm text-center shrink-0 min-w-[68px]">
-                        {match.isPlayed ? (
+                        {isActuallyPlayed ? (
                           <span className="text-amber-400">
                             {match.homeScore} - {match.awayScore}
                           </span>
@@ -561,7 +562,9 @@ export const AfricanChampionsLeagueView: React.FC<AfricanChampionsLeagueViewProp
                   const home = getClub(km.homeTeamId);
                   const away = getClub(km.awayTeamId);
                   const isUserMatch = userClub && (km.homeTeamId === userClub.id || km.awayTeamId === userClub.id);
+                  const isActuallyPlayed = Boolean(km.isPlayed && km.homeScore !== undefined && km.awayScore !== undefined);
                   const winnerClub = km.winnerTeamId ? getClub(km.winnerTeamId) : null;
+                  const shortStageName = km.stageName ? km.stageName.replace(/^.+?-\s*/, '') : 'دور إقصائي';
 
                   return (
                     <div
@@ -573,13 +576,15 @@ export const AfricanChampionsLeagueView: React.FC<AfricanChampionsLeagueViewProp
                       }`}
                     >
                       {/* Top Header Row: Stage Name + Winner Badge or Date/Play CTA */}
-                      <div className="flex items-center justify-between gap-2 w-full border-b border-slate-800/80 pb-2">
-                        <span className="text-xs font-black text-amber-400 bg-amber-500/10 border border-amber-500/30 px-2.5 py-1 rounded-xl">
-                          {km.stageName}
-                        </span>
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 w-full border-b border-slate-800/80 pb-2">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span className="text-xs font-black text-amber-400 bg-amber-500/10 border border-amber-500/30 px-2.5 py-1 rounded-xl">
+                            {shortStageName}
+                          </span>
+                        </div>
 
-                        <div className="shrink-0">
-                          {!km.isPlayed ? (
+                        <div className="shrink-0 flex items-center">
+                          {!isActuallyPlayed ? (
                             (() => {
                               const matchingFix = (fixtures || []).find(f => f.id === km.id);
                               const matchDate = matchingFix?.date || (km as any).date;
@@ -605,18 +610,18 @@ export const AfricanChampionsLeagueView: React.FC<AfricanChampionsLeagueViewProp
                               );
                             })()
                           ) : (
-                            <span className="text-[11px] text-emerald-400 font-bold flex items-center gap-1 bg-emerald-950/40 px-2.5 py-1 rounded-xl border border-emerald-700/40">
+                            <span className="text-[11px] text-emerald-400 font-bold flex items-center gap-1.5 bg-emerald-950/60 px-2.5 py-1 rounded-xl border border-emerald-700/50 shadow-sm">
                               <Trophy className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-                              <span>الفائز: {winnerClub?.name || 'متأهل'}</span>
+                              <span className="truncate max-w-[190px]">الفائز: {winnerClub?.name || 'متأهل'}</span>
                             </span>
                           )}
                         </div>
                       </div>
 
-                      {/* Main Matchup Row: Home Team - Score Box - Away Team */}
-                      <div className="flex items-center justify-between gap-2 w-full">
+                      {/* Main Matchup Row: Home Team - Score Box - Away Team in Responsive Grid */}
+                      <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2 sm:gap-4 w-full pt-1">
                         {/* Home Team */}
-                        <div className="flex items-center gap-2 justify-start flex-1 min-w-0">
+                        <div className="flex items-center gap-2 justify-start min-w-0">
                           <div
                             className="w-8 h-8 rounded-xl flex items-center justify-center text-xs font-black text-white shrink-0 shadow"
                             style={{ backgroundColor: home.primaryColor || '#dc2626' }}
@@ -626,7 +631,7 @@ export const AfricanChampionsLeagueView: React.FC<AfricanChampionsLeagueViewProp
                           <div className="min-w-0 flex-1">
                             <span
                               className={`text-xs sm:text-sm font-bold block leading-snug break-words ${
-                                km.winnerTeamId === home.id
+                                isActuallyPlayed && km.winnerTeamId === home.id
                                   ? 'text-emerald-400 font-black'
                                   : home.id === userClub?.id
                                   ? 'text-amber-300 font-black'
@@ -639,25 +644,25 @@ export const AfricanChampionsLeagueView: React.FC<AfricanChampionsLeagueViewProp
                         </div>
 
                         {/* Center Score Box */}
-                        <div className="px-3.5 py-1.5 bg-slate-900 border border-slate-700/80 rounded-xl font-mono font-black text-sm sm:text-base text-center shrink-0 min-w-[76px] shadow-inner">
-                          {km.isPlayed ? (
+                        <div className="px-3 py-1.5 bg-slate-900 border border-slate-700/80 rounded-xl font-mono font-black text-xs sm:text-sm text-center shrink-0 min-w-[72px] shadow-inner">
+                          {isActuallyPlayed ? (
                             <div className="flex flex-col items-center leading-tight">
                               <span className="text-white tracking-wider">
                                 {km.homeScore} - {km.awayScore}
                               </span>
                               {km.homePenalties !== undefined && km.awayPenalties !== undefined && (
-                                <span className="text-[10px] text-amber-400 font-bold mt-0.5 whitespace-nowrap">
+                                <span className="text-[9px] text-amber-400 font-bold mt-0.5 whitespace-nowrap">
                                   ({km.homePenalties} - {km.awayPenalties} ر.ت)
                                 </span>
                               )}
                             </div>
                           ) : (
-                            <span className="text-slate-400 text-xs">VS</span>
+                            <span className="text-slate-400 text-xs font-bold">VS</span>
                           )}
                         </div>
 
                         {/* Away Team */}
-                        <div className="flex items-center gap-2 justify-end flex-1 min-w-0 text-left">
+                        <div className="flex items-center gap-2 justify-end min-w-0 text-left">
                           <div className="min-w-0 flex-1 text-left">
                             <span
                               className={`text-xs sm:text-sm font-bold block leading-snug break-words text-left ${

@@ -1,7 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { useGame } from '../context/GameContext';
 import { COACHING_COURSES, CoachingCourse } from '../utils/managerFinancesEngine';
+import { getLicenseTitleArabic, normalizeCoachingLicense, CAREER_CONFIG } from '../utils/careerProgressionEngine';
 import { getLocalTrainerProfile } from '../services/trainerProfileService';
+import { ModalPortal } from './common/ModalPortal';
 import {
   UserCheck,
   Award,
@@ -245,7 +247,7 @@ export const CareerTab: React.FC = () => {
               <div className="flex flex-wrap items-center gap-2 mt-1">
                 <span className="text-xs text-slate-400">{manager.age} سنة • {manager.nationality}</span>
                 <span className="text-[10px] bg-amber-950 text-amber-300 border border-amber-700 px-2 py-0.5 rounded-full font-bold">
-                  رخصة التدريب: CAF-{manager.license || 'D'}
+                  {getLicenseTitleArabic(manager.license)}
                 </span>
                 <span className="text-[10px] bg-blue-950 text-blue-300 border border-blue-800 px-2 py-0.5 rounded-full font-bold">
                   الموسم الحالي: {season.seasonNumber}
@@ -471,27 +473,33 @@ export const CareerTab: React.FC = () => {
           </div>
         </div>
 
-        {/* Courses Grid */}
+        {/* Courses & Official Licenses Grid */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           {filteredCourses.map(course => {
             const licenseRankMap: Record<string, number> = {
-              'D': 1,
-              'C': 2,
-              'B': 3,
-              'A': 4,
-              'PRO': 5,
-              'ELITE': 6,
+              'BASIC': 1,
+              'PREMIER': 2,
+              'CONTINENTAL': 3,
+              'LEGENDARY': 4,
             };
-            const currentLicense = (manager.license && licenseRankMap[manager.license]) ? manager.license : 'D';
+            const currentLicense = normalizeCoachingLicense(manager.license);
             const currentRank = licenseRankMap[currentLicense] || 1;
+            const ownedList = ['BASIC', ...(manager.ownedLicenses || []).map(l => normalizeCoachingLicense(l))];
 
-            const courseGrantsRank = course.grantsLicense ? (licenseRankMap[course.grantsLicense] || 0) : 0;
-            const isCompleted = completedCoursesList.includes(course.id) || 
-              (course.category === 'license' && courseGrantsRank > 0 && (course.id === 'license_d' ? (completedCoursesList.includes('license_d') || currentRank > 1) : currentRank >= courseGrantsRank));
+            const targetLicense = course.grantsLicense ? normalizeCoachingLicense(course.grantsLicense) : null;
+            const courseGrantsRank = targetLicense ? (licenseRankMap[targetLicense] || 0) : 0;
+            const isLicenseOwned = targetLicense ? (ownedList.includes(targetLicense) || currentRank >= courseGrantsRank) : false;
+            const isActiveLicense = targetLicense ? currentLicense === targetLicense : false;
 
-            const canAfford = (manager.personalWallet || 0) >= course.cost;
-            const requiredRank = course.requiredLicense ? (licenseRankMap[course.requiredLicense] || 1) : 0;
-            const hasPrerequisite = !course.requiredLicense || (currentRank >= requiredRank);
+            const isCompleted = course.category === 'license'
+              ? isActiveLicense
+              : completedCoursesList.includes(course.id);
+
+            const effectiveCost = (course.category === 'license' && isLicenseOwned) ? 0 : course.cost;
+            const canAfford = (manager.personalWallet || 0) >= effectiveCost;
+            const reqLicenseNorm = course.requiredLicense ? normalizeCoachingLicense(course.requiredLicense) : null;
+            const requiredRank = reqLicenseNorm ? (licenseRankMap[reqLicenseNorm] || 1) : 0;
+            const hasPrerequisite = course.category === 'license' || !reqLicenseNorm || (currentRank >= requiredRank);
 
             return (
               <div
@@ -516,8 +524,18 @@ export const CareerTab: React.FC = () => {
                       </div>
                       <div>
                         <h4 className="font-bold text-xs text-white">{course.title}</h4>
-                        <div className="flex items-center gap-1.5 text-[10px] mt-0.5">
-                          <span className="text-amber-400 font-mono font-bold">{course.cost.toLocaleString()} ج.م</span>
+                        <div className="flex flex-wrap items-center gap-1.5 text-[10px] mt-0.5">
+                          <span className="text-amber-400 font-mono font-bold">
+                            {course.cost === 0 ? 'مجانية (0$)' : `${course.cost.toLocaleString()}$`}
+                          </span>
+                          {course.annualRenewalFee !== undefined && (
+                            <>
+                              <span className="text-slate-500">•</span>
+                              <span className="text-cyan-400 font-mono">
+                                تجديد سنوي: {course.annualRenewalFee === 0 ? '0$' : `${course.annualRenewalFee.toLocaleString()}$`}
+                              </span>
+                            </>
+                          )}
                           <span className="text-slate-500">•</span>
                           <span className="text-purple-300">+{course.xpReward} XP</span>
                           <span className="text-slate-500">•</span>
@@ -528,11 +546,15 @@ export const CareerTab: React.FC = () => {
 
                     {isCompleted ? (
                       <span className="text-[10px] bg-emerald-950 text-emerald-300 border border-emerald-700 px-2 py-0.5 rounded-full font-bold shrink-0">
-                        مكتملة ومُعتمدة ✓
+                        {course.category === 'license' ? 'رخصتك النشطة ✓' : 'مكتملة ومُعتمدة ✓'}
                       </span>
-                    ) : !hasPrerequisite ? (
+                    ) : isLicenseOwned ? (
+                      <span className="text-[10px] bg-amber-950 text-amber-300 border border-amber-700 px-2 py-0.5 rounded-full font-bold shrink-0">
+                        مملوكة مسبقاً ✓
+                      </span>
+                    ) : !hasPrerequisite && reqLicenseNorm ? (
                       <span className="text-[10px] bg-slate-800 text-slate-400 border border-slate-700 px-2 py-0.5 rounded-full font-bold shrink-0">
-                        تتطلب رخصة {course.requiredLicense}
+                        تتطلب {getLicenseTitleArabic(reqLicenseNorm)}
                       </span>
                     ) : null}
                   </div>
@@ -542,7 +564,7 @@ export const CareerTab: React.FC = () => {
                   </p>
 
                   <div className="bg-slate-900/90 p-2.5 rounded-xl border border-slate-800/80 text-[11px] text-slate-300">
-                    <strong className="text-amber-300 font-bold block mb-0.5">⚡ الامتياز الفني:</strong>
+                    <strong className="text-amber-300 font-bold block mb-0.5">⚡ الصلاحيات والامتياز الفني:</strong>
                     <span>{course.specialBenefit}</span>
                   </div>
                 </div>
@@ -559,11 +581,13 @@ export const CareerTab: React.FC = () => {
                   >
                     <GraduationCap className="w-4 h-4" />
                     <span>
-                      {!hasPrerequisite
-                        ? `تتطلب أولاً الحصول على رخصة ${course.requiredLicense}`
+                      {!hasPrerequisite && reqLicenseNorm
+                        ? `تتطلب أولاً الحصول على ${getLicenseTitleArabic(reqLicenseNorm)}`
                         : !canAfford
-                        ? `الرصيد المتاح غير كافٍ (ناقص ${(course.cost - (manager.personalWallet || 0)).toLocaleString()} ج.م)`
-                        : `التسجيل وسداد ${course.cost.toLocaleString()} ج.م من محفظتك`}
+                        ? `الرصيد الشخصي غير كافٍ (ناقص ${(effectiveCost - (manager.personalWallet || 0)).toLocaleString()}$)`
+                        : isLicenseOwned
+                        ? `تفعيل ${course.title} مجاناً`
+                        : `شراء وسداد ${effectiveCost.toLocaleString()}$ من ميزانيتك الشخصية`}
                     </span>
                   </button>
                 )}
@@ -625,7 +649,21 @@ export const CareerTab: React.FC = () => {
                         <span>{tx.date}</span>
                         <span>•</span>
                         <span className="text-slate-300">
-                          {tx.type === 'salary' ? 'مرتب شهري' : tx.type === 'trophy_bonus' ? 'مكافأة بطولة' : tx.type === 'match_bonus' ? 'مكافأة مباراة' : tx.type === 'club_donation' ? 'مساهمة للنادي' : tx.type === 'course_license' ? 'رسوم رخصة/دورة' : 'مكافأة لاعب'}
+                          {tx.type === 'salary'
+                            ? 'مرتب شهري'
+                            : tx.type === 'trophy_bonus'
+                            ? 'مكافأة بطولة'
+                            : tx.type === 'match_bonus'
+                            ? 'مكافأة مباراة'
+                            : tx.type === 'club_donation'
+                            ? 'مساهمة للنادي'
+                            : tx.type === 'license_upgrade'
+                            ? 'شراء/ترقية رخصة تدريبية'
+                            : tx.type === 'license_renewal'
+                            ? 'تجديد سنوي للرخصة'
+                            : tx.type === 'course_license'
+                            ? 'رسوم رخصة/دورة'
+                            : 'مكافأة لاعب'}
                         </span>
                       </div>
                     </div>
@@ -854,7 +892,8 @@ export const CareerTab: React.FC = () => {
 
       {/* 🤝 DONATE TO CLUB MODAL (دعم ومساعدة النادي من أموالك الخاصة) */}
       {showDonateModal && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4 animate-fade-in" dir="rtl">
+        <ModalPortal>
+          <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4 animate-fade-in" dir="rtl">
           <div className="bg-slate-900 border-2 border-emerald-500/50 rounded-3xl p-6 max-w-md w-full shadow-2xl space-y-4 text-right relative">
             <button
               onClick={() => setShowDonateModal(false)}
@@ -950,12 +989,14 @@ export const CareerTab: React.FC = () => {
               </button>
             </div>
           </div>
-        </div>
+          </div>
+        </ModalPortal>
       )}
 
       {/* Reset Confirmation Modal */}
       {showResetModal && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4 animate-fade-in" dir="rtl">
+        <ModalPortal>
+          <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4 animate-fade-in" dir="rtl">
           <div className="bg-slate-900 border-2 border-red-500/50 rounded-3xl p-6 max-w-md w-full shadow-2xl shadow-red-500/20 space-y-5 text-right relative">
             
             <button
@@ -1004,7 +1045,8 @@ export const CareerTab: React.FC = () => {
             </div>
 
           </div>
-        </div>
+          </div>
+        </ModalPortal>
       )}
 
       {/* Official Coach Card Modal */}

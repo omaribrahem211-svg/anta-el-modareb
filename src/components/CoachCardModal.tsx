@@ -24,6 +24,7 @@ import {
   Activity,
   Award,
 } from 'lucide-react';
+import { ModalPortal } from './common/ModalPortal';
 
 interface CoachCardModalProps {
   isOpen: boolean;
@@ -268,11 +269,12 @@ export const CoachCardModal: React.FC<CoachCardModalProps> = ({
   };
 
   return (
-    <div
-      id="coach_card_modal_backdrop"
-      className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-950/85 backdrop-blur-sm animate-fadeIn"
-      dir="rtl"
-    >
+    <ModalPortal>
+      <div
+        id="coach_card_modal_backdrop"
+        className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-950/85 backdrop-blur-sm animate-fadeIn"
+        dir="rtl"
+      >
       <div className="bg-slate-900 border border-slate-800/80 rounded-3xl w-full max-w-md p-4 sm:p-5 shadow-2xl text-slate-100 relative overflow-hidden flex flex-col items-center max-h-[95vh] overflow-y-auto">
         {/* Modal Close Button */}
         <button
@@ -517,6 +519,7 @@ export const CoachCardModal: React.FC<CoachCardModalProps> = ({
           </button>
         </div>
       </div>
-    </div>
+      </div>
+    </ModalPortal>
   );
 };

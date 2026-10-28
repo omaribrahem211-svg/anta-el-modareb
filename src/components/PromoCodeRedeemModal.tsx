@@ -14,6 +14,7 @@ import {
   ShieldCheck
 } from 'lucide-react';
 import { useGame } from '../context/GameContext';
+import { ModalPortal } from './common/ModalPortal';
 
 interface PromoCodeRedeemModalProps {
   isOpen: boolean;
@@ -83,7 +84,8 @@ export const PromoCodeRedeemModal: React.FC<PromoCodeRedeemModalProps> = ({ isOp
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md animate-fade-in text-right" dir="rtl">
+    <ModalPortal>
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md animate-fade-in text-right" dir="rtl">
       <div className="bg-slate-900 border border-amber-500/30 rounded-3xl max-w-md w-full p-6 shadow-2xl space-y-5 text-right relative overflow-hidden">
         
         {/* Subtle decorative glow */}
@@ -268,6 +270,7 @@ export const PromoCodeRedeemModal: React.FC<PromoCodeRedeemModalProps> = ({ isOp
         )}
 
       </div>
-    </div>
+      </div>
+    </ModalPortal>
   );
 };

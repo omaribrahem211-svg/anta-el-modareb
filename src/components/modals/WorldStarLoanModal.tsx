@@ -9,6 +9,7 @@ import { useGame } from '../../context/GameContext';
 import { AdManager } from '../../services/adManager';
 import { Player } from '../../types/game';
 import { WorldStarTemplate } from '../../services/worldStarService';
+import { ModalPortal } from '../common/ModalPortal';
 
 interface WorldStarLoanModalProps {
   isOpen: boolean;
@@ -113,7 +114,8 @@ export const WorldStarLoanModal: React.FC<WorldStarLoanModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-950/85 backdrop-blur-md animate-fade-in font-['Cairo',sans-serif]">
+    <ModalPortal>
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-950/85 backdrop-blur-md animate-fade-in font-['Cairo',sans-serif]">
       <div className="relative w-full max-w-xl max-h-[92vh] bg-slate-900 border border-amber-500/40 rounded-3xl p-4 sm:p-6 shadow-2xl overflow-y-auto flex flex-col text-right">
         
         {/* Glow Header Accent */}
@@ -427,6 +429,7 @@ export const WorldStarLoanModal: React.FC<WorldStarLoanModalProps> = ({
           </div>
         )}
       </div>
-    </div>
+      </div>
+    </ModalPortal>
   );
 };

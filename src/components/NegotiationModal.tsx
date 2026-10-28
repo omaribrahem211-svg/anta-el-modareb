@@ -14,6 +14,7 @@ import {
   Wallet,
   Lock,
 } from 'lucide-react';
+import { ModalPortal } from './common/ModalPortal';
 
 interface NegotiationModalProps {
   player: Player | null;
@@ -122,7 +123,8 @@ export const NegotiationModal: React.FC<NegotiationModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-fade-in" dir="rtl">
+    <ModalPortal>
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-fade-in" dir="rtl">
       <div className="relative w-full max-w-xl bg-gradient-to-b from-slate-900 via-slate-900 to-slate-950 border border-slate-700/80 rounded-3xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
         
         {/* Modal Header with 3D Kit Figurine */}
@@ -380,7 +382,8 @@ export const NegotiationModal: React.FC<NegotiationModalProps> = ({
         </div>
 
       </div>
-    </div>
+      </div>
+    </ModalPortal>
   );
 };
 

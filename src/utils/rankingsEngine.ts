@@ -105,13 +105,17 @@ export function calculateDynamicManagerRating(manager: ManagerProfile): number {
 
   // 3. License Contribution (Hard milestones)
   switch (manager.license) {
-    case 'D': base += 2; break;
+    case 'BASIC':
+    case 'D': base += 4; break;
     case 'C': base += 5; break;
     case 'B': base += 9; break;
-    case 'A': base += 14; break;
+    case 'PREMIER':
+    case 'A': base += 12; break;
+    case 'CONTINENTAL':
     case 'PRO': base += 20; break;
+    case 'LEGENDARY':
     case 'ELITE': base += 28; break;
-    default: break;
+    default: base += 4; break;
   }
 
   // 4. Reputation Contribution (max +8)

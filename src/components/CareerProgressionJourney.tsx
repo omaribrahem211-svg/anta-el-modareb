@@ -41,7 +41,7 @@ export const CareerProgressionJourney: React.FC = () => {
 
   // 1. License Evaluation
   const licenseEval = evaluateLicenseEligibility(manager, userClub);
-  const currentLicense = (manager.license as CoachingLicenseTier) || 'D';
+  const currentLicense = licenseEval.currentLicense;
   const currentRank = getLicenseRank(currentLicense);
 
   // 2. Reputation Details
@@ -52,14 +52,15 @@ export const CareerProgressionJourney: React.FC = () => {
   const milestonesResult = evaluateCareerMilestones(manager, userClub);
 
   // 4. Handle License Upgrade Click
-  const handleUpgradeLicense = () => {
-    if (!licenseEval.nextLicense) return;
-    const courseId = `license_${licenseEval.nextLicense.toLowerCase()}`;
+  const handleUpgradeLicense = (targetTier?: CoachingLicenseTier) => {
+    const tierToBuy = targetTier || licenseEval.nextLicense;
+    if (!tierToBuy) return;
+    const courseId = `license_${tierToBuy.toLowerCase()}`;
     const res = enrollInCoachingCourse(courseId);
     setActionMessage({ text: res.message, success: res.success });
     setTimeout(() => {
       setActionMessage(null);
-    }, 4000);
+    }, 4500);
   };
 
   const filteredMilestones = milestonesResult.milestones.filter(m => {
@@ -67,7 +68,13 @@ export const CareerProgressionJourney: React.FC = () => {
     return m.category === activeCategory;
   });
 
-  const allLicenses: CoachingLicenseTier[] = ['D', 'C', 'B', 'A', 'PRO', 'ELITE'];
+  const allLicenses: Array<'BASIC' | 'PREMIER' | 'CONTINENTAL' | 'LEGENDARY'> = [
+    'BASIC',
+    'PREMIER',
+    'CONTINENTAL',
+    'LEGENDARY',
+  ];
+  const ownedSet = new Set(['BASIC', ...(manager.ownedLicenses || [])]);
 
   return (
     <div className="space-y-4 text-right" dir="rtl">
@@ -91,7 +98,7 @@ export const CareerProgressionJourney: React.FC = () => {
       )}
 
       {/* ========================================================================= */}
-      {/* 1. COACHING LICENSES TIMELINE & NEXT LICENSE PROGRESSION */}
+      {/* 1. COACHING LICENSES STORE & STRUCTURE (هيكل ومتجر الرخص التدريبية الـ 4) */}
       {/* ========================================================================= */}
       <div className="bg-gradient-to-br from-slate-900 via-slate-900 to-amber-950/20 border-2 border-amber-500/40 rounded-3xl p-5 space-y-4 shadow-xl">
         <div className="flex items-center justify-between flex-wrap gap-2">
@@ -101,13 +108,13 @@ export const CareerProgressionJourney: React.FC = () => {
             </div>
             <div>
               <h3 className="font-black text-sm text-white flex items-center gap-1.5">
-                <span>مسار الرخص التدريبية المعتمدة (Coaching Licenses)</span>
-                <span className="text-[10px] bg-amber-500/20 text-amber-300 border border-amber-500/40 px-2 py-0.5 rounded-full font-bold">
-                  {CAREER_CONFIG.LICENSES[currentLicense]?.codeName || currentLicense}
+                <span>نظام ومتجر الرخص التدريبية المعتمد (4 رخص تدريبية)</span>
+                <span className="text-[10px] bg-amber-500/20 text-amber-300 border border-amber-500/40 px-2.5 py-0.5 rounded-full font-bold">
+                  {CAREER_CONFIG.LICENSES[currentLicense]?.titleArabic}
                 </span>
               </h3>
               <p className="text-[11px] text-slate-400">
-                الرخص تفتح لك أبواب تدريب أندية أقوى، ولا يمكن تجاوزها بالانتظار بل بإنجازات حقيقية في المباريات.
+                تُخصم جميع عمليات شراء الرخص وتجديدها السنوي حصراً من ميزانيتك الشخصية ({(manager.personalWallet || 0).toLocaleString()}$) وليس من ميزانية النادي.
               </p>
             </div>
           </div>
@@ -115,57 +122,111 @@ export const CareerProgressionJourney: React.FC = () => {
           <button
             type="button"
             onClick={() => setShowTiersGuide(!showTiersGuide)}
-            className="text-xs text-amber-400 hover:text-amber-300 font-bold flex items-center gap-1 bg-amber-500/10 px-3 py-1.5 rounded-xl border border-amber-500/30 transition-all"
+            className="text-xs text-amber-400 hover:text-amber-300 font-bold flex items-center gap-1 bg-amber-500/10 px-3 py-1.5 rounded-xl border border-amber-500/30 transition-all cursor-pointer"
           >
             <HelpCircle className="w-3.5 h-3.5" />
-            <span>{showTiersGuide ? 'إخفاء دليل الأندية' : 'دليل الأندية والرخص'}</span>
+            <span>{showTiersGuide ? 'إخفاء دليل الأندية' : 'دليل تصنيف الأندية'}</span>
           </button>
         </div>
 
-        {/* Horizontal License Milestones Stepper */}
-        <div className="bg-slate-950/80 p-3.5 rounded-2xl border border-slate-800 overflow-x-auto">
-          <div className="flex items-center justify-between min-w-[500px] gap-2">
-            {allLicenses.map((lic, idx) => {
-              const licRank = getLicenseRank(lic);
-              const isCurrent = lic === currentLicense;
-              const isEarned = licRank <= currentRank;
-              const isNext = lic === licenseEval.nextLicense;
-              const licConfig = CAREER_CONFIG.LICENSES[lic];
+        {/* 4 Coaching Licenses Cards Grid */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+          {allLicenses.map((lic) => {
+            const licConfig = CAREER_CONFIG.LICENSES[lic];
+            const licRank = getLicenseRank(lic);
+            const isCurrent = lic === currentLicense;
+            const isOwned = ownedSet.has(lic) || licRank <= currentRank;
+            const canAfford = (manager.personalWallet || 0) >= licConfig.purchaseCost;
 
-              return (
-                <div key={lic} className="flex-1 flex flex-col items-center text-center relative group">
-                  {idx > 0 && (
-                    <div
-                      className={`absolute top-4 -right-1/2 w-full h-1 -z-0 transition-all ${
-                        licRank <= currentRank ? 'bg-amber-500' : 'bg-slate-800'
-                      }`}
-                    />
-                  )}
+            return (
+              <div
+                key={lic}
+                className={`p-4 rounded-2xl border transition-all flex flex-col justify-between space-y-3 ${
+                  isCurrent
+                    ? 'bg-gradient-to-br from-amber-950/40 via-slate-900 to-slate-950 border-amber-400 ring-2 ring-amber-500/20 shadow-lg'
+                    : isOwned
+                    ? 'bg-emerald-950/20 border-emerald-500/40'
+                    : 'bg-slate-950/80 border-slate-800 hover:border-purple-500/40'
+                }`}
+              >
+                <div className="space-y-2">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex items-center gap-2.5">
+                      <div className="w-10 h-10 rounded-2xl bg-slate-900 border border-slate-700 flex items-center justify-center text-lg shadow-inner shrink-0">
+                        {licConfig.badgeIcon}
+                      </div>
+                      <div>
+                        <h4 className="font-black text-xs sm:text-sm text-white flex items-center gap-1.5">
+                          <span>{licConfig.titleArabic}</span>
+                        </h4>
+                        <span className="text-[10px] text-slate-400 font-mono block">
+                          {licConfig.titleEnglish}
+                        </span>
+                      </div>
+                    </div>
 
-                  <div
-                    className={`w-9 h-9 rounded-2xl flex items-center justify-center font-black text-xs z-10 transition-all shadow-md ${
-                      isCurrent
-                        ? 'bg-amber-500 text-slate-950 ring-4 ring-amber-500/30 scale-110'
-                        : isEarned
-                        ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/50'
-                        : isNext
-                        ? 'bg-purple-950 text-purple-300 border-2 border-purple-500 animate-pulse'
-                        : 'bg-slate-900 text-slate-500 border border-slate-800'
-                    }`}
-                  >
-                    {isEarned ? lic : <Lock className="w-3.5 h-3.5" />}
+                    {isCurrent ? (
+                      <span className="text-[10px] bg-amber-500 text-slate-950 px-2.5 py-0.5 rounded-full font-black shrink-0">
+                        رخصتك النشطة ✓
+                      </span>
+                    ) : isOwned ? (
+                      <span className="text-[10px] bg-emerald-950 text-emerald-300 border border-emerald-600/50 px-2.5 py-0.5 rounded-full font-bold shrink-0">
+                        مملوكة ✓
+                      </span>
+                    ) : (
+                      <span className="text-[10px] bg-slate-800 text-slate-400 border border-slate-700 px-2 py-0.5 rounded-full font-bold flex items-center gap-1 shrink-0">
+                        <Lock className="w-3 h-3" /> غير مملوكة
+                      </span>
+                    )}
                   </div>
 
-                  <span className={`text-[11px] font-bold mt-1.5 ${isCurrent ? 'text-amber-400' : isEarned ? 'text-emerald-400' : 'text-slate-500'}`}>
-                    {licConfig.codeName}
-                  </span>
-                  <span className="text-[9px] text-slate-400 truncate max-w-[80px]">
-                    {isCurrent ? 'رخصتك الحالية' : isNext ? 'هدفك القادم' : licConfig.badgeName}
-                  </span>
+                  <p className="text-xs text-slate-300 leading-relaxed bg-slate-900/70 p-2.5 rounded-xl border border-slate-800/80">
+                    <strong className="text-amber-300 block mb-0.5">الصلاحيات:</strong>
+                    {licConfig.description}
+                  </p>
+
+                  <div className="grid grid-cols-2 gap-2 text-[11px]">
+                    <div className="bg-slate-900/90 p-2 rounded-xl border border-slate-800">
+                      <span className="text-slate-400 block text-[10px]">سعر الشراء (لمرة واحدة)</span>
+                      <span className="font-mono font-black text-amber-400">
+                        {licConfig.purchaseCost === 0 ? 'مجانية (0$)' : `${licConfig.purchaseCost.toLocaleString()}$`}
+                      </span>
+                    </div>
+                    <div className="bg-slate-900/90 p-2 rounded-xl border border-slate-800">
+                      <span className="text-slate-400 block text-[10px]">رسوم التجديد السنوية</span>
+                      <span className="font-mono font-black text-cyan-400">
+                        {licConfig.annualRenewalFee === 0 ? 'مجانية (0$)' : `${licConfig.annualRenewalFee.toLocaleString()}$`}
+                      </span>
+                    </div>
+                  </div>
                 </div>
-              );
-            })}
-          </div>
+
+                {!isCurrent && (
+                  <button
+                    type="button"
+                    onClick={() => handleUpgradeLicense(lic)}
+                    disabled={!isOwned && !canAfford}
+                    className={`w-full py-2.5 px-3 rounded-xl font-black text-xs transition-all flex items-center justify-center gap-2 shadow-md ${
+                      isOwned
+                        ? 'bg-emerald-600 hover:bg-emerald-500 text-white cursor-pointer'
+                        : canAfford
+                        ? 'bg-gradient-to-r from-amber-500 to-emerald-500 hover:from-amber-400 hover:to-emerald-400 text-slate-950 cursor-pointer active:scale-98'
+                        : 'bg-slate-800 text-slate-500 cursor-not-allowed border border-slate-700/60'
+                    }`}
+                  >
+                    <GraduationCap className="w-4 h-4" />
+                    <span>
+                      {isOwned
+                        ? `تفعيل ${licConfig.titleArabic} مجاناً`
+                        : canAfford
+                        ? `شراء وترقية إلى ${licConfig.titleArabic} (${licConfig.purchaseCost.toLocaleString()}$)`
+                        : `الرصيد الشخصي غير كافٍ (${licConfig.purchaseCost.toLocaleString()}$)`}
+                    </span>
+                  </button>
+                )}
+              </div>
+            );
+          })}
         </div>
 
         {/* Collapsible Club Tiers Guide */}
@@ -173,153 +234,21 @@ export const CareerProgressionJourney: React.FC = () => {
           <div className="bg-slate-950 p-4 rounded-2xl border border-amber-500/30 space-y-3 animate-fade-in text-xs">
             <h4 className="font-bold text-amber-300 flex items-center gap-1.5">
               <Shield className="w-4 h-4" />
-              <span>دليل متطلبات تدريب أندية العالم:</span>
+              <span>دليل صلاحيات الرخص وتصنيفات الدوريات والأندية:</span>
             </h4>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
               {Object.values(CAREER_CONFIG.CLUB_TIERS).map(ct => (
                 <div key={ct.id} className="p-2.5 rounded-xl bg-slate-900 border border-slate-800 space-y-1">
                   <div className="flex items-center justify-between">
                     <span className="font-bold text-white">{ct.nameArabic}</span>
-                    <span className="text-[10px] bg-amber-500/20 text-amber-300 px-1.5 py-0.5 rounded font-mono font-bold">
-                      رخصة {ct.minLicense}+
+                    <span className="text-[10px] bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded font-bold">
+                      {CAREER_CONFIG.LICENSES[ct.minLicense]?.titleArabic}
                     </span>
                   </div>
                   <p className="text-[10px] text-slate-400">{ct.description}</p>
-                  <div className="text-[10px] text-slate-300 flex items-center gap-2 pt-1 border-t border-slate-800/80">
-                    <span>السمعة: {ct.minReputation}+</span>
-                    <span>•</span>
-                    <span>البطولات: {ct.minTrophies}</span>
-                    <span>•</span>
-                    <span>المباريات: {ct.minMatches}</span>
-                  </div>
                 </div>
               ))}
             </div>
-          </div>
-        )}
-
-        {/* Next License Target Card & Checklist */}
-        {licenseEval.nextLicense && licenseEval.nextLicenseConfig ? (
-          <div className="bg-gradient-to-br from-slate-950 via-slate-900 to-purple-950/30 border border-purple-500/40 rounded-2xl p-4 space-y-3 shadow-inner">
-            <div className="flex items-center justify-between flex-wrap gap-2">
-              <div className="flex items-center gap-2">
-                <Sparkles className="w-4 h-4 text-purple-400" />
-                <h4 className="font-black text-xs text-white">
-                  متطلبات الحصول على: {licenseEval.nextLicenseConfig.arabicTitle} ({licenseEval.nextLicenseConfig.codeName})
-                </h4>
-              </div>
-              <span className="text-[11px] bg-purple-500/20 text-purple-300 px-2.5 py-0.5 rounded-full font-bold border border-purple-500/30">
-                {licenseEval.missingCount === 0 ? 'مستوفٍ لجميع الشروط! 🚀' : `متبقي ${licenseEval.missingCount} شروط`}
-              </span>
-            </div>
-
-            <p className="text-[11px] text-slate-300">
-              {licenseEval.nextLicenseConfig.tierDescription} • <strong className="text-amber-300">تفتح:</strong> {licenseEval.nextLicenseConfig.unlockedClubsDescription}
-            </p>
-
-            {/* Overall License Progress Bar */}
-            <div className="space-y-1.5 bg-slate-950/70 p-3 rounded-xl border border-slate-800">
-              <div className="flex items-center justify-between text-xs">
-                <span className="text-slate-400 flex items-center gap-1.5">
-                  <TrendingUp className="w-3.5 h-3.5 text-purple-400" />
-                  <span>نسبة استيفاء متطلبات الرخصة ({licenseEval.nextLicenseConfig.codeName})</span>
-                </span>
-                <span className="font-mono font-bold text-purple-300">
-                  {licenseEval.overallProgressPercent}%
-                </span>
-              </div>
-              <div className="w-full h-2.5 bg-slate-800 rounded-full overflow-hidden p-0.5 border border-slate-700/50">
-                <div
-                  className="h-full rounded-full bg-gradient-to-r from-purple-500 via-amber-400 to-emerald-400 transition-all duration-500"
-                  style={{ width: `${Math.min(100, Math.max(0, licenseEval.overallProgressPercent))}%` }}
-                />
-              </div>
-            </div>
-
-            {/* Checklist Grid */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
-              {licenseEval.checklist.map((item) => (
-                <div
-                  key={item.key}
-                  className={`p-2.5 rounded-xl border flex flex-col gap-1.5 text-xs transition-all ${
-                    item.isMet
-                      ? 'bg-emerald-950/40 border-emerald-500/40 text-emerald-200'
-                      : 'bg-slate-950/60 border-slate-800 text-slate-300'
-                  }`}
-                >
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <div
-                        className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] shrink-0 ${
-                          item.isMet
-                            ? 'bg-emerald-500 text-slate-950 font-bold'
-                            : 'bg-slate-800 text-slate-500'
-                        }`}
-                      >
-                        {item.isMet ? '✓' : '•'}
-                      </div>
-                      <span className="font-medium text-[11px]">{item.label}</span>
-                    </div>
-
-                    <div className="text-left shrink-0">
-                      <span className={`font-mono text-[11px] font-bold ${item.isMet ? 'text-emerald-400' : 'text-amber-400'}`}>
-                        {item.current} / {item.target} {item.unit || ''}
-                      </span>
-                    </div>
-                  </div>
-
-                  {/* Individual criteria progress bar */}
-                  <div className="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden">
-                    <div
-                      className={`h-full rounded-full transition-all duration-300 ${
-                        item.isMet ? 'bg-emerald-500' : 'bg-amber-500'
-                      }`}
-                      style={{ width: `${item.progressPercent}%` }}
-                    />
-                  </div>
-                </div>
-              ))}
-            </div>
-
-            {/* Anti-AFK Play Time Informative Tip */}
-            <div className="bg-slate-950/80 border border-cyan-500/30 rounded-xl p-2.5 flex items-center justify-between text-[11px] text-cyan-300 gap-2">
-              <div className="flex items-center gap-1.5">
-                <Clock className="w-4 h-4 text-cyan-400 shrink-0" />
-                <span>
-                  وقت اللعب الفعلي المسجل: <strong className="text-white font-mono">{licenseEval.activePlayFormatted}</strong> (نظام الحماية ضد الخمول Anti-AFK مفعل)
-                </span>
-              </div>
-              <span className="text-[10px] bg-cyan-950/80 px-2 py-0.5 rounded text-cyan-200 border border-cyan-500/40">
-                ميداني فقط ⏱️
-              </span>
-            </div>
-
-            {/* Upgrade Action Button */}
-            <div className="pt-2">
-              <button
-                type="button"
-                onClick={handleUpgradeLicense}
-                disabled={!licenseEval.canUpgrade}
-                className={`w-full py-3 px-4 rounded-xl font-black text-xs transition-all flex items-center justify-center gap-2 shadow-lg ${
-                  licenseEval.canUpgrade
-                    ? 'bg-gradient-to-r from-amber-500 via-amber-400 to-emerald-500 hover:from-amber-400 hover:to-emerald-400 text-slate-950 cursor-pointer active:scale-98 animate-pulse'
-                    : 'bg-slate-800 text-slate-500 cursor-not-allowed border border-slate-700/60'
-                }`}
-              >
-                <GraduationCap className="w-4 h-4" />
-                <span>
-                  {licenseEval.canUpgrade
-                    ? `اجتياز الاختبار وترقية الرخصة إلى (${licenseEval.nextLicenseConfig.codeName}) الآن! 🎓`
-                    : `استكمل شروط الاعتماد الفنية (${licenseEval.missingCount} نواقص) لفتح اختبار الرخصة`}
-                </span>
-              </button>
-            </div>
-          </div>
-        ) : (
-          <div className="bg-gradient-to-r from-purple-950/40 via-amber-950/40 to-slate-950 p-4 rounded-2xl border border-amber-500/40 text-center space-y-1">
-            <span className="text-2xl">👑🌍</span>
-            <h4 className="font-black text-sm text-amber-300">بلغت أعلى رخصة تدريبية في تاريخ كرة القدم (WORLD ELITE)!</h4>
-            <p className="text-xs text-slate-300">أنت في قمة المجد الكروي ولديك الأهلية لقيادة أي نادٍ أو منتخب على وجه الأرض.</p>
           </div>
         )}
       </div>

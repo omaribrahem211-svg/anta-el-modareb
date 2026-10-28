@@ -99,37 +99,42 @@ export interface LiveSimulationState {
  * Guarantees that managers who invest in higher coaching licenses and strong squads
  * have a decisive tactical superiority, eliminating artificial big-club advantages.
  */
-export function calculateManagerRatingFromProfile(mgr: any, fallbackReputation: number = 60): number {
+export function calculateManagerRatingFromProfile(mgr: any, fallbackReputation: number = 60, isUserManager: boolean = false): number {
   if (!mgr) {
-    // Competitive AI club manager baseline (68 to 93 based on club reputation so top & continental clubs have elite coaching)
-    return Math.max(68, Math.min(93, Math.round(56 + (fallbackReputation * 0.42))));
+    // Realistic AI club manager baseline (54 to 76 based on club reputation so user licenses & manager upgrades provide clear superiority)
+    return Math.max(54, Math.min(76, Math.round(44 + (fallbackReputation * 0.32))));
   }
 
-  // If specific manual numeric rating is set without license
-  if (typeof mgr.rating === 'number' && mgr.rating > 0 && !mgr.license) {
-    return Math.min(99, Math.max(50, mgr.rating));
-  }
+  // Detect whether this profile belongs to the human manager or an AI club manager
+  const isUser = isUserManager || Array.isArray(mgr.completedCourses) || typeof mgr.xp === 'number' || typeof mgr.skillPoints === 'number';
 
-  // Coaching License ranking (CAF / UEFA structure):
-  const license = String(mgr.license || 'D').toUpperCase();
-  let baseRating = 65;
-  if (license === 'ELITE') baseRating = 96;
-  else if (license === 'PRO') baseRating = 91;
-  else if (license === 'A') baseRating = 85;
+  // Coaching License ranking (4-tier Coaching Licenses structure):
+  const license = String(mgr.license || 'BASIC').toUpperCase();
+  let baseRating = 68;
+  if (license === 'LEGENDARY' || license === 'ELITE') baseRating = 97;
+  else if (license === 'CONTINENTAL' || license === 'PRO') baseRating = 90;
+  else if (license === 'PREMIER' || license === 'A') baseRating = 82;
   else if (license === 'B') baseRating = 78;
-  else if (license === 'C') baseRating = 72;
-  else baseRating = 65;
+  else if (license === 'C') baseRating = 74;
+  else baseRating = 70;
 
-  // Level Bonus: +1 per 2.5 levels (up to +10)
-  const levelBonus = Math.min(10, Math.floor((mgr.level || 1) / 2.5));
+  if (!isUser) {
+    // AI Manager: Prevent weak AI clubs from having artificially high manager ratings
+    const repBaseline = Math.max(52, Math.min(82, Math.round(42 + (fallbackReputation * 0.38))));
+    const rawMgrRating = typeof mgr.rating === 'number' && mgr.rating > 0 ? mgr.rating : baseRating;
+    // Blend AI manager rating with club reputation and cap it so weak clubs never get elite coaching buffs
+    const blendedAiRating = Math.round((rawMgrRating * 0.45) + (repBaseline * 0.55));
+    return Math.max(52, Math.min(repBaseline + 4, blendedAiRating));
+  }
 
-  // Courses Completed Bonus
-  const coursesBonus = Array.isArray(mgr.completedCourses) ? Math.min(8, mgr.completedCourses.length * 1.5) : 0;
+  // User Manager: Full reward for Coaching License, Level, Courses, and Career Trophies/Reputation
+  const levelBonus = Math.min(12, Math.floor((mgr.level || 1) / 2));
+  const coursesBonus = Array.isArray(mgr.completedCourses) ? Math.min(9, mgr.completedCourses.length * 1.8) : 0;
+  const trophiesCount = Array.isArray(mgr.careerTrophies) ? mgr.careerTrophies.length : (mgr.stats?.trophiesWon || 0);
+  const trophyBonus = Math.min(5, trophiesCount * 1.0);
+  const repBonus = Math.min(6, Math.floor((mgr.reputation || 15) / 16));
 
-  // Career Reputation Bonus: +1 per 20 reputation up to +5
-  const repBonus = Math.min(5, Math.floor((mgr.reputation || 15) / 20));
-
-  return Math.min(99, Math.max(55, Math.round(baseRating + levelBonus + coursesBonus + repBonus)));
+  return Math.min(99, Math.max(68, Math.round(baseRating + levelBonus + coursesBonus + trophyBonus + repBonus)));
 }
 
 export function calculateTeamStrength(
@@ -151,7 +156,8 @@ export function calculateTeamStrength(
   if (!resolvedManager && team?.manager) {
     resolvedManager = team.manager;
   }
-  if (!resolvedManager && team?.isUserClub) {
+  const isUserTeam = Boolean(team?.isUserClub);
+  if (!resolvedManager && isUserTeam) {
     try {
       const rawSavedMgr = typeof localStorage !== 'undefined' ? localStorage.getItem('anta_el_modareb_save_v1_manager') : null;
       if (rawSavedMgr) {
@@ -160,11 +166,30 @@ export function calculateTeamStrength(
     } catch (_) {}
   }
 
+  // Compute preliminary squad average so AI manager rating never exceeds the actual level of a weak AI squad
+  const allTeamPlayers = Array.isArray(team?.players) ? team.players.filter(p => p && p.id) : [];
+  const prelimSquadAvg = allTeamPlayers.length > 0
+    ? allTeamPlayers
+        .slice()
+        .sort((a, b) => (b.overallRating || 60) - (a.overallRating || 60))
+        .slice(0, 11)
+        .reduce((sum, p) => sum + (p.overallRating || 60), 0) / Math.min(11, allTeamPlayers.length)
+    : (team?.reputation || 60);
+
+  const effectiveFallbackRep = isUserTeam
+    ? (team?.reputation || 65)
+    : Math.min(team?.reputation || 60, Math.round(prelimSquadAvg));
+
   let mgrRating = 68;
   if (resolvedManager) {
-    mgrRating = calculateManagerRatingFromProfile(resolvedManager, team?.reputation || 60);
+    mgrRating = calculateManagerRatingFromProfile(resolvedManager, effectiveFallbackRep, isUserTeam);
   } else {
-    mgrRating = calculateManagerRatingFromProfile(null, team?.reputation || 60);
+    mgrRating = calculateManagerRatingFromProfile(null, effectiveFallbackRep, isUserTeam);
+  }
+
+  if (!isUserTeam) {
+    // Strictly cap AI manager rating relative to its actual squad quality so a weak team cannot get hidden manager boosts
+    mgrRating = Math.min(mgrRating, Math.round(prelimSquadAvg + 3));
   }
 
   if (!team || !team.players || team.players.length === 0) {
@@ -206,52 +231,40 @@ export function calculateTeamStrength(
 
   const fitnessBoostMultiplier = trainingBoost?.type === 'fitness' ? 1.08 : 1.0;
 
-  startingPlayers.forEach((p, idx) => {
-    // Morale & fitness multiplier (0.75 to 1.1)
-    const factor = (0.75 + ((p.fitness * fitnessBoostMultiplier) / 250) + (p.morale / 350));
+  // Identify the primary Goalkeeper in the starting lineup regardless of array index order
+  const designatedGk = startingPlayers.find(p => p.positionCategory === 'GK' || p.position === 'GK');
+
+  startingPlayers.forEach((p) => {
+    // Morale & fitness multiplier (0.80 to 1.12)
+    const factor = (0.80 + ((p.fitness * fitnessBoostMultiplier) / 250) + (p.morale / 350));
     totalRatingSum += p.overallRating;
 
     const pPhys = p.attributes?.physical || 65;
     const pFit = (p.fitness || 90) * fitnessBoostMultiplier;
     physSum += (pPhys * 0.60 + pFit * 0.40) * factor;
 
-    // Tactical Detail: Goalkeeper positioning
-    // Slot 0 is designated for the GK in all formations
-    if (idx === 0) {
-      if (p.positionCategory === 'GK') {
-        hasProperGk = true;
-        gkOverall = ((p.attributes?.goalkeeping || p.overallRating) * 0.75 + pPhys * 0.25) * factor;
-      } else {
-        // Punish fielding an outfield player in goal!
-        gkOverall = 28 * factor;
-      }
-    } else if (p.positionCategory === 'GK') {
-      // Goalkeeper playing in an outfield position has poor contribution
+    if (designatedGk && p.id === designatedGk.id) {
+      hasProperGk = true;
+      gkOverall = ((p.attributes?.goalkeeping || p.overallRating) * 0.78 + pPhys * 0.22) * factor;
+    } else if (p.positionCategory === 'GK' || p.position === 'GK') {
+      // Extra goalkeeper playing in an outfield position has poor contribution
       defSum += 25 * factor;
       defCount++;
-    }
-
-    if (p.positionCategory === 'FWD') {
-      // Physicality gives strikers aerial presence and duel winning ability against physical CBs
-      atkSum += (p.attributes.shooting * 0.45 + p.attributes.pace * 0.25 + p.attributes.dribbling * 0.15 + pPhys * 0.15) * factor;
+    } else if (p.positionCategory === 'FWD') {
+      atkSum += (p.overallRating * 0.35 + p.attributes.shooting * 0.35 + p.attributes.pace * 0.15 + p.attributes.dribbling * 0.10 + pPhys * 0.05) * factor;
       atkCount++;
     } else if (p.positionCategory === 'MID') {
-      // Physicality is vital in midfield battles, tackles, second-ball recovery, and endurance
-      midSum += (p.attributes.passing * 0.35 + p.attributes.defending * 0.20 + p.attributes.dribbling * 0.20 + pPhys * 0.25) * factor;
+      midSum += (p.overallRating * 0.35 + p.attributes.passing * 0.25 + p.attributes.defending * 0.15 + p.attributes.dribbling * 0.15 + pPhys * 0.10) * factor;
       midCount++;
     } else if (p.positionCategory === 'DEF') {
-      // Physicality is fundamental for defenders in aerial headers, shielding, and shoulder challenges
-      defSum += (p.attributes.defending * 0.50 + pPhys * 0.35 + p.attributes.pace * 0.15) * factor;
+      defSum += (p.overallRating * 0.35 + p.attributes.defending * 0.40 + pPhys * 0.15 + p.attributes.pace * 0.10) * factor;
       defCount++;
     }
   });
 
-  // If no proper GK found in entire starting XI, GK power collapses to 25
-  if (!hasProperGk && startingPlayers.some(p => p.positionCategory === 'GK')) {
-    const backupGk = startingPlayers.find(p => p.positionCategory === 'GK');
-    if (backupGk) {
-      gkOverall = ((backupGk.attributes?.goalkeeping || backupGk.overallRating) * 0.75 + (backupGk.attributes?.physical || 65) * 0.25) * 0.85;
-    }
+  // If no proper GK found in entire starting XI, GK power collapses to 28
+  if (!hasProperGk) {
+    gkOverall = 28;
   }
 
   const rawSquadStrength = Math.round(totalRatingSum / Math.max(1, startingPlayers.length));
@@ -259,8 +272,8 @@ export function calculateTeamStrength(
   // Tactical completeness penalty: Teams fielding < 11 players suffer proportional loss
   const completenessFactor = startingPlayers.length >= 11 ? 1.0 : Math.max(0.65, startingPlayers.length / 11);
 
-  // Tactical Manager Influence Factor - Substantial impact on pitch organization and tactical execution
-  let managerBoost = (mgrRating - 65) * 0.45;
+  // Tactical Manager & Coaching License Influence Factor
+  let managerBoost = (mgrRating - 62) * 0.50;
   const staffBonuses = getClubStaffBonuses(team);
   if (staffBonuses.tacticalSynergyBonus > 0) {
     managerBoost += staffBonuses.tacticalSynergyBonus * 30; // Technical staff tactical bonus
@@ -269,24 +282,25 @@ export function calculateTeamStrength(
     managerBoost += 4; // +5% tactical implementation efficiency
   }
 
-  let attack = Math.max(30, Math.min(99, Math.round(((atkCount > 0 ? atkSum / atkCount : 50) + managerBoost) * completenessFactor)));
-  let midfield = Math.max(30, Math.min(99, Math.round(((midCount > 0 ? midSum / midCount : 50) + managerBoost) * completenessFactor)));
-  let defense = Math.max(30, Math.min(99, Math.round((((defCount > 0 ? defSum / defCount : 50) * 0.7 + gkOverall * 0.3) + managerBoost) * completenessFactor)));
+  let attack = Math.max(30, Math.min(99, Math.round(((atkCount > 0 ? atkSum / atkCount : rawSquadStrength) + managerBoost) * completenessFactor)));
+  let midfield = Math.max(30, Math.min(99, Math.round(((midCount > 0 ? midSum / midCount : rawSquadStrength) + managerBoost) * completenessFactor)));
+  let defense = Math.max(30, Math.min(99, Math.round((((defCount > 0 ? defSum / defCount : rawSquadStrength) * 0.72 + gkOverall * 0.28) + managerBoost) * completenessFactor)));
   let physical = Math.max(30, Math.min(99, Math.round((physSum / Math.max(1, startingPlayers.length)) * completenessFactor)));
   
   if (trainingBoost?.type === 'attacking') {
-    attack = Math.min(99, Math.round(attack * 1.06)); // +6% attacking efficiency
+    attack = Math.min(99, Math.round(attack * 1.06));
   }
   if (trainingBoost?.type === 'defensive') {
-    defense = Math.min(99, Math.round(defense * 1.06)); // +6% defensive solidity
+    defense = Math.min(99, Math.round(defense * 1.06));
   }
   if (trainingBoost?.type === 'tactical') {
-    midfield = Math.min(99, Math.round(midfield * 1.06)); // +6% tactical midfield dominance
+    midfield = Math.min(99, Math.round(midfield * 1.06));
   }
 
-  // Overall is composed of 88% Player Quality (تشكيلة اللاعبين الأساسيين) + 12% Manager Rating (الرخصة التدريبية والخبرة)
-  const squadOverall = Math.round((attack + midfield + defense) / 3);
-  const overall = Math.max(35, Math.min(99, Math.round(squadOverall * 0.88 + mgrRating * 0.12)));
+  // Overall directly combines Total Player Strength (مجموع قوة اللاعبين) + Positional Line Strength + Manager & Coaching License (قوة المدرب والرخص التدريبية)
+  const lineOverall = (attack + midfield + defense) / 3;
+  const combinedSquadPower = lineOverall * 0.55 + rawSquadStrength * 0.45;
+  const overall = Math.max(35, Math.min(99, Math.round(combinedSquadPower * 0.78 + mgrRating * 0.22)));
 
   return { 
     attack, 
@@ -717,13 +731,13 @@ export function calculateTacticalMatchup(
     awayDefenseMod *= 0.82;
   }
 
-  // Bound modifiers within impactful yet athletic limits (allowing decisive tactical masterclasses)
-  homeAttackMod = Math.max(0.45, Math.min(1.75, homeAttackMod));
-  homeDefenseMod = Math.max(0.45, Math.min(1.75, homeDefenseMod));
-  homeMidfieldMod = Math.max(0.45, Math.min(1.75, homeMidfieldMod));
-  awayAttackMod = Math.max(0.45, Math.min(1.75, awayAttackMod));
-  awayDefenseMod = Math.max(0.45, Math.min(1.75, awayDefenseMod));
-  awayMidfieldMod = Math.max(0.45, Math.min(1.75, awayMidfieldMod));
+  // Bound modifiers within realistic football limits so tactics complement (rather than override) squad + manager + license superiority
+  homeAttackMod = Math.max(0.88, Math.min(1.18, homeAttackMod));
+  homeDefenseMod = Math.max(0.88, Math.min(1.18, homeDefenseMod));
+  homeMidfieldMod = Math.max(0.88, Math.min(1.18, homeMidfieldMod));
+  awayAttackMod = Math.max(0.88, Math.min(1.18, awayAttackMod));
+  awayDefenseMod = Math.max(0.88, Math.min(1.18, awayDefenseMod));
+  awayMidfieldMod = Math.max(0.88, Math.min(1.18, awayMidfieldMod));
 
   return {
     homeAttackMod: Number(homeAttackMod.toFixed(3)),
@@ -802,10 +816,8 @@ export function calculateHomeCrowdAdvantage(
 }
 
 /**
- * Generates intelligent, adaptive tactics for AI teams based on their strength relative to the opponent.
- * - Against a stronger opponent (e.g., user's star squad), AI adopts a compact low-block / counter-attacking setup.
- * - Against a similar opponent, AI plays a balanced tactical system that counters opponent's style.
- * - When AI is stronger (especially at home), AI presses high and controls possession.
+ * Generates natural tactics for AI teams based on their own club profile and strength,
+ * without omnisciently reading and hard-countering every user tactical instruction.
  */
 export function generateAdaptiveAiTactics(
   aiTeam: Club,
@@ -839,36 +851,30 @@ export function generateAdaptiveAiTactics(
       ? list.slice(0, 11).reduce((s, p) => s + (p.overallRating || fallback), 0) / Math.min(11, list.length)
       : fallback;
 
-  const aiAvg = calcAvg(bestEleven, aiTeam?.reputation || 70) + (isAiHome ? 2.5 : 0);
-  const oppAvg = calcAvg(oppPlayers, opponentTeam?.reputation || 68) + (!isAiHome ? 2.0 : 0);
+  const aiAvg = calcAvg(bestEleven, aiTeam?.reputation || 65) + (isAiHome ? 1.5 : 0);
+  const oppAvg = calcAvg(oppPlayers, opponentTeam?.reputation || 68) + (!isAiHome ? 1.5 : 0);
   const diff = aiAvg - oppAvg; // negative means opponent is stronger
 
-  const oppTac = opponentTeam?.tactics;
-  const oppHighPress = oppTac?.pressingIntensity === 'high' || oppTac?.pressingIntensity === 'gegenpress';
-  const oppHighLine = (oppTac as any)?.defensiveLine === 'high' || oppTac?.mentality === 'ultra_attacking' || oppTac?.mentality === 'attacking';
-  const oppWingPlay = oppTac?.tacticalStyle === 'wing_play' || (oppTac as any)?.teamWidth === 'wide';
-  const oppShortPass = oppTac?.passingStyle === 'short' || oppTac?.tacticalStyle === 'tiki_taka';
-
   if (diff <= -3.5) {
-    // Opponent is stronger: disciplined low block & lethal counter-attacking trap tailored to punish user's setup
+    // Weaker AI team: plays a standard cautious setup without omniscient counter-traps
     return {
-      formation: diff <= -7 ? '5-3-2' : '4-2-3-1',
-      tacticalStyle: 'counter_attack',
+      formation: '4-4-2',
+      tacticalStyle: 'balanced',
       mentality: 'defensive',
-      attackingStyle: 'counter_attack',
-      passingStyle: 'direct',
-      tempo: 'fast',
-      pressingIntensity: oppShortPass ? 'medium' : 'low',
-      defensiveLine: 'deep' as any,
-      teamWidth: 'narrow' as any,
-      width: 'narrow',
-      buildUpStyle: oppHighPress ? 'direct_pivot' : 'channel_balls',
-      pressingTrap: oppWingPlay ? 'trap_wings' : 'trap_center',
-      fullbackRole: 'stay_back',
-      strikerRole: oppHighLine ? 'advanced_forward' : 'poacher',
-      defensiveBlock: 'low',
+      attackingStyle: 'mixed',
+      passingStyle: 'mixed',
+      tempo: 'normal',
+      pressingIntensity: 'low',
+      defensiveLine: 'balanced' as any,
+      teamWidth: 'normal' as any,
+      width: 'normal',
+      buildUpStyle: 'mixed',
+      pressingTrap: 'none',
+      fullbackRole: 'balanced',
+      strikerRole: 'target_man',
+      defensiveBlock: 'balanced',
       markingStyle: 'zonal',
-      timeWasting: 'sometimes',
+      timeWasting: 'never',
       startingPlayerIds: startingIds,
       benchPlayerIds: benchIds,
       captainId: startingIds[0] || '',
@@ -876,23 +882,23 @@ export function generateAdaptiveAiTactics(
       freeKickTakerId: startingIds[1] || '',
       cornerTakerId: startingIds[2] || '',
     };
-  } else if (diff <= 1.5) {
-    // Closely matched / competitive clash: sharp tactical counter-system
+  } else if (diff <= 2.5) {
+    // Closely matched AI team: standard balanced tactical setup
     return {
-      formation: oppWingPlay ? '4-2-3-1' : '4-3-3',
-      tacticalStyle: oppHighLine ? 'counter_attack' : 'wing_play',
-      mentality: isAiHome ? 'attacking' : 'balanced',
-      attackingStyle: 'counter_attack',
-      passingStyle: oppHighPress ? 'direct' : 'short',
-      tempo: 'fast',
-      pressingIntensity: oppShortPass ? 'high' : 'medium',
-      defensiveLine: oppHighLine ? ('balanced' as any) : ('high' as any),
-      teamWidth: 'wide' as any,
-      width: 'wide',
-      buildUpStyle: oppHighPress ? 'direct_pivot' : 'channel_balls',
-      pressingTrap: oppWingPlay ? 'trap_wings' : 'trap_center',
-      fullbackRole: oppWingPlay ? 'stay_back' : 'overlapping',
-      strikerRole: oppHighLine ? 'advanced_forward' : 'poacher',
+      formation: isAiHome ? '4-3-3' : '4-2-3-1',
+      tacticalStyle: 'balanced',
+      mentality: 'balanced',
+      attackingStyle: 'mixed',
+      passingStyle: 'mixed',
+      tempo: 'normal',
+      pressingIntensity: 'medium',
+      defensiveLine: 'balanced' as any,
+      teamWidth: 'normal' as any,
+      width: 'normal',
+      buildUpStyle: 'mixed',
+      pressingTrap: 'none',
+      fullbackRole: 'balanced',
+      strikerRole: 'poacher',
       defensiveBlock: 'balanced',
       markingStyle: 'zonal',
       timeWasting: 'never',
@@ -905,24 +911,24 @@ export function generateAdaptiveAiTactics(
     };
   }
 
-  // AI is stronger: aggressive pressing, midfield overload, and clinical finishing
+  // Strongly superior AI team: attacking setup
   return {
     formation: '4-3-3',
-    tacticalStyle: oppHighPress ? 'direct_play' : 'tiki_taka',
+    tacticalStyle: 'wing_play',
     mentality: 'attacking',
     attackingStyle: 'possession',
-    passingStyle: oppHighPress ? 'direct' : 'short',
+    passingStyle: 'short',
     tempo: 'fast',
     pressingIntensity: 'high',
     defensiveLine: 'high',
     teamWidth: 'wide' as any,
     width: 'wide',
-    buildUpStyle: oppHighPress ? 'direct_pivot' : 'from_back',
-    pressingTrap: oppWingPlay ? 'trap_wings' : 'zonal_trap',
-    fullbackRole: 'inverted',
+    buildUpStyle: 'from_back',
+    pressingTrap: 'none',
+    fullbackRole: 'overlapping',
     strikerRole: 'poacher',
     defensiveBlock: 'high',
-    markingStyle: 'man_to_man',
+    markingStyle: 'zonal',
     timeWasting: 'never',
     startingPlayerIds: startingIds,
     benchPlayerIds: benchIds,
@@ -1109,16 +1115,35 @@ export function simulatePenaltyShootout(
     description: `⚖️ صافرة نهاية الوقت الأصلي بالتعادل! الاحتكام رسمياً إلى ركلات الجزاء الترجيحية لحسم بطاقة التأهل.`
   });
 
-  const homeMgrRating = calculateManagerRatingFromProfile(safeHome.manager, 65);
-  const awayMgrRating = calculateManagerRatingFromProfile(safeAway.manager, 65);
-  const mgrPenaltyBonus = (homeMgrRating - awayMgrRating) * 0.002;
+  let homeMgrObj = safeHome.manager;
+  let awayMgrObj = safeAway.manager;
+  if (!homeMgrObj && safeHome.isUserClub) {
+    try {
+      const s = typeof localStorage !== 'undefined' ? localStorage.getItem('anta_el_modareb_save_v1_manager') : null;
+      if (s) homeMgrObj = JSON.parse(s);
+    } catch (_) {}
+  }
+  if (!awayMgrObj && safeAway.isUserClub) {
+    try {
+      const s = typeof localStorage !== 'undefined' ? localStorage.getItem('anta_el_modareb_save_v1_manager') : null;
+      if (s) awayMgrObj = JSON.parse(s);
+    } catch (_) {}
+  }
+
+  const homeMgrRating = calculateManagerRatingFromProfile(homeMgrObj, safeHome.reputation || 65);
+  const awayMgrRating = calculateManagerRatingFromProfile(awayMgrObj, safeAway.reputation || 65);
+  const mgrPenaltyBonus = (homeMgrRating - awayMgrRating) * 0.004;
+
+  const homeGkPower = (homeGk as any)?.attributes?.goalkeeping || (homeGk as any)?.overallRating || (homeGk as any)?.rating || 65;
+  const awayGkPower = (awayGk as any)?.attributes?.goalkeeping || (awayGk as any)?.overallRating || (awayGk as any)?.rating || 65;
 
   // First 5 rounds of penalties
   for (let round = 1; round <= 5; round++) {
     // Home kick
     const hTaker = homeTakers[round - 1];
-    let hSuccessChance = 0.75 + (((hTaker as any).rating || 65) - 65) * 0.005 - (((awayGk as any).rating || 65) - 65) * 0.004 + mgrPenaltyBonus;
-    hSuccessChance = Math.max(0.55, Math.min(0.92, hSuccessChance));
+    const hShootPower = (hTaker as any)?.attributes?.shooting || (hTaker as any)?.overallRating || (hTaker as any)?.rating || 65;
+    let hSuccessChance = 0.75 + (hShootPower - 65) * 0.0055 - (awayGkPower - 65) * 0.004 + mgrPenaltyBonus;
+    hSuccessChance = Math.max(0.55, Math.min(0.93, hSuccessChance));
     const hScored = Math.random() < hSuccessChance;
     if (hScored) {
       homeScore++;
@@ -1140,8 +1165,9 @@ export function simulatePenaltyShootout(
 
     // Away kick
     const aTaker = awayTakers[round - 1];
-    let aSuccessChance = 0.75 + (((aTaker as any).rating || 65) - 65) * 0.005 - (((homeGk as any).rating || 65) - 65) * 0.004 - mgrPenaltyBonus;
-    aSuccessChance = Math.max(0.55, Math.min(0.92, aSuccessChance));
+    const aShootPower = (aTaker as any)?.attributes?.shooting || (aTaker as any)?.overallRating || (aTaker as any)?.rating || 65;
+    let aSuccessChance = 0.75 + (aShootPower - 65) * 0.0055 - (homeGkPower - 65) * 0.004 - mgrPenaltyBonus;
+    aSuccessChance = Math.max(0.55, Math.min(0.93, aSuccessChance));
     const aScored = Math.random() < aSuccessChance;
     if (aScored) {
       awayScore++;
@@ -1561,15 +1587,33 @@ export function simulateMatchStep(
 
   // Compute live effective strength with AdMob Rewarded Training Boost if applied
   const activeBoost = AdManager.getActiveTrainingBoost() || undefined;
-  const homeBoost = prevState.homeTeam?.isUserClub ? activeBoost : undefined;
-  const awayBoost = prevState.awayTeam?.isUserClub ? activeBoost : undefined;
+  const homeBoost = isUserTeamHome ? activeBoost : undefined;
+  const awayBoost = isUserTeamAway ? activeBoost : undefined;
 
   // Technical staff bonuses
   const homeStaffBonuses = getClubStaffBonuses(prevState.homeTeam);
   const awayStaffBonuses = getClubStaffBonuses(prevState.awayTeam);
 
-  const homeStrength = calculateTeamStrength(prevState.homeTeam, currentHomeTactics, undefined, homeBoost);
-  const awayStrength = calculateTeamStrength(prevState.awayTeam, currentAwayTactics, undefined, awayBoost);
+  let liveUserManager: any = undefined;
+  if (isUserTeamHome || isUserTeamAway) {
+    try {
+      const s = typeof localStorage !== 'undefined' ? localStorage.getItem('anta_el_modareb_save_v1_manager') : null;
+      if (s) liveUserManager = JSON.parse(s);
+    } catch (_) {}
+  }
+
+  const homeStrength = calculateTeamStrength(
+    prevState.homeTeam,
+    { ...currentHomeTactics, startingPlayerIds: activeHomeLineup },
+    isUserTeamHome ? (liveUserManager || prevState.homeTeam?.manager) : prevState.homeTeam?.manager,
+    homeBoost
+  );
+  const awayStrength = calculateTeamStrength(
+    prevState.awayTeam,
+    { ...currentAwayTactics, startingPlayerIds: activeAwayLineup },
+    isUserTeamAway ? (liveUserManager || prevState.awayTeam?.manager) : prevState.awayTeam?.manager,
+    awayBoost
+  );
 
   const matchup = calculateTacticalMatchup(currentHomeTactics, currentAwayTactics);
 
@@ -1670,63 +1714,28 @@ export function simulateMatchStep(
     }
   }
 
-  // Tournament & Knockout AI Difficulty Scaling (Makes winning League, Cup, and Continental titles genuinely challenging)
   const isHomeAi = !prevState.homeTeam?.isUserClub && prevState.homeTeam?.id !== prevState.userClubId;
   const isAwayAi = !prevState.awayTeam?.isUserClub && prevState.awayTeam?.id !== prevState.userClubId;
-  const isContinentalMatch =
-    prevState.fixture?.competitionType === 'continental' ||
-    prevState.fixture?.competitionType === 'CONTINENTAL_CUP' ||
-    Boolean(prevState.fixture?.competitionName?.includes('أبطال')) ||
-    Boolean(prevState.fixture?.competitionName?.includes('كونفدرالية'));
-  const isDomesticCupMatch =
-    prevState.fixture?.competitionType === 'cup' ||
-    prevState.fixture?.competitionType === 'DOMESTIC_CUP' ||
-    Boolean(prevState.fixture?.cupStage);
-  const isKnockoutStageMatch =
-    isDomesticCupMatch ||
-    (isContinentalMatch && prevState.fixture?.stage && prevState.fixture?.stage !== 'group') ||
-    Boolean(prevState.fixture?.stageName?.includes('نهائي')) ||
-    Boolean(prevState.fixture?.stageName?.includes('دور الـ'));
-  const isFinalOrSemi =
-    prevState.fixture?.stage === 'final' ||
-    prevState.fixture?.stage === 'semi' ||
-    prevState.fixture?.cupStage === 'final' ||
-    prevState.fixture?.cupStage === 'semi' ||
-    Boolean(prevState.fixture?.stageName?.includes('نهائي'));
 
-  // Competitive AI boost when facing the user's club
-  const getAiCompetitiveMult = (isAiSide: boolean): number => {
-    if (!isAiSide) return 1.0;
-    if (isFinalOrSemi) return 1.24; // Fierce Semifinal & Final intensity
-    if (isKnockoutStageMatch) return 1.18; // Tough Cup & Continental Knockout clashes
-    if (isContinentalMatch) return 1.15; // Tough Continental Group Stage
-    return 1.11; // Competitive Domestic League AI
-  };
+  // Calculated Effective Strengths incorporating Players, Manager, Coaching License, Tactics, Synergy, Physicality, Crowd, and Staff
+  const effHomeAtk = homeStrength.attack * matchup.homeAttackMod * homeSynergy.attackMod * crowdAdvantage.homeAttackBonus * homePhysMod * homeCountFactor * (1 + homeStaffBonuses.tacticalScoutingAdvantage);
+  const effHomeMid = homeStrength.midfield * matchup.homeMidfieldMod * homeSynergy.midfieldMod * crowdAdvantage.homeMidfieldBonus * homePhysMod * homeCountFactor * (1 + homeStaffBonuses.tacticalSynergyBonus);
+  const effHomeDef = homeStrength.defense * matchup.homeDefenseMod * homeSynergy.defenseMod * crowdAdvantage.homeDefenseBonus * homePhysMod * homeCountFactor;
 
-  const homeAiMult = getAiCompetitiveMult(isHomeAi && !isAwayAi);
-  const awayAiMult = getAiCompetitiveMult(isAwayAi && !isHomeAi);
+  const effAwayAtk = awayStrength.attack * matchup.awayAttackMod * awaySynergy.attackMod * crowdAdvantage.awayIntimidationPenalty * awayPhysMod * awayCountFactor * (1 + awayStaffBonuses.tacticalScoutingAdvantage);
+  const effAwayMid = awayStrength.midfield * matchup.awayMidfieldMod * awaySynergy.midfieldMod * awayPhysMod * awayCountFactor * (1 + awayStaffBonuses.tacticalSynergyBonus);
+  const effAwayDef = awayStrength.defense * matchup.awayDefenseMod * awaySynergy.defenseMod * awayPhysMod * awayCountFactor;
 
-  // Calculated Effective Strengths incorporating Tactics, Synergy, Physicality, Crowd, Staff, and Tournament Difficulty
-  const effHomeAtk = homeStrength.attack * matchup.homeAttackMod * homeSynergy.attackMod * crowdAdvantage.homeAttackBonus * homePhysMod * homeCountFactor * (1 + homeStaffBonuses.tacticalScoutingAdvantage) * homeAiMult;
-  const effHomeMid = homeStrength.midfield * matchup.homeMidfieldMod * homeSynergy.midfieldMod * crowdAdvantage.homeMidfieldBonus * homePhysMod * homeCountFactor * (1 + homeStaffBonuses.tacticalSynergyBonus) * homeAiMult;
-  const effHomeDef = homeStrength.defense * matchup.homeDefenseMod * homeSynergy.defenseMod * crowdAdvantage.homeDefenseBonus * homePhysMod * homeCountFactor * homeAiMult;
-
-  const effAwayAtk = awayStrength.attack * matchup.awayAttackMod * awaySynergy.attackMod * crowdAdvantage.awayIntimidationPenalty * awayPhysMod * awayCountFactor * (1 + awayStaffBonuses.tacticalScoutingAdvantage) * awayAiMult;
-  const effAwayMid = awayStrength.midfield * matchup.awayMidfieldMod * awaySynergy.midfieldMod * awayPhysMod * awayCountFactor * (1 + awayStaffBonuses.tacticalSynergyBonus) * awayAiMult;
-  const effAwayDef = awayStrength.defense * matchup.awayDefenseMod * awaySynergy.defenseMod * awayPhysMod * awayCountFactor * awayAiMult;
-
-  // Balanced Quality Advantage incorporating Squad Strength, Overall, and Tactical Coaching (with AI tournament resilience)
-  const aiBonusRating = isFinalOrSemi ? 7 : isKnockoutStageMatch ? 5 : isContinentalMatch ? 4 : 3;
-  const adjHomeOverall = homeStrength.overall + (isHomeAi && !isAwayAi ? aiBonusRating : 0);
-  const adjAwayOverall = awayStrength.overall + (isAwayAi && !isHomeAi ? aiBonusRating : 0);
-  const squadDiff = (homeStrength.squadStrength + (isHomeAi && !isAwayAi ? aiBonusRating : 0)) - (awayStrength.squadStrength + (isAwayAi && !isHomeAi ? aiBonusRating : 0));
+  // Authoritative Composite Power Priority: Total Player Strength + Manager Strength + Coaching License
+  const squadDiff = homeStrength.squadStrength - awayStrength.squadStrength;
   const managerDiff = homeStrength.managerRating - awayStrength.managerRating;
-  const overallDiff = adjHomeOverall - adjAwayOverall;
+  const overallDiff = homeStrength.overall - awayStrength.overall;
+  const compositeDiff = (squadDiff * 0.50) + (overallDiff * 0.30) + (managerDiff * 0.25);
 
-  const rawQualityAdv = (overallDiff * 0.018) + (managerDiff * 0.005) + (squadDiff * 0.005);
-  const qualityAdvantage = Math.max(-0.36, Math.min(0.36, rawQualityAdv));
-  const homeQualityMod = Math.max(0.64, Math.min(1.36, 1.0 + qualityAdvantage));
-  const awayQualityMod = Math.max(0.64, Math.min(1.36, 1.0 - qualityAdvantage));
+  const rawQualityAdv = (overallDiff * 0.032) + (squadDiff * 0.028) + (managerDiff * 0.018);
+  const qualityAdvantage = Math.max(-0.62, Math.min(0.62, rawQualityAdv));
+  const homeQualityMod = Math.max(0.38, Math.min(1.72, 1.0 + qualityAdvantage));
+  const awayQualityMod = Math.max(0.38, Math.min(1.72, 1.0 - qualityAdvantage));
 
   // Dynamic Possession for this minute (strongly reflects quality gap and tactical control)
   const weightedHomeMid = effHomeMid * Math.sqrt(homeQualityMod);
@@ -1764,17 +1773,17 @@ export function simulateMatchStep(
 
   // Dynamic In-Match AI Tactical Adaptation (minute >= 55)
   if (isHomeAi && nextMinute >= 55) {
-    if (scoreDiff > 0 && nextMinute >= 68) {
+    if (scoreDiff > 0 && nextMinute >= 72) {
       currentHomeTactics = { ...currentHomeTactics, mentality: 'defensive', defensiveLine: 'low', timeWasting: 'sometimes', defensiveBlock: 'low' };
-    } else if (scoreDiff < 0) {
-      currentHomeTactics = { ...currentHomeTactics, mentality: scoreDiff <= -2 ? 'ultra_attacking' : 'attacking', pressingIntensity: 'high', tempo: 'fast' };
+    } else if (scoreDiff < 0 && compositeDiff > -3) {
+      currentHomeTactics = { ...currentHomeTactics, mentality: 'attacking', pressingIntensity: 'medium', tempo: 'fast' };
     }
   }
   if (isAwayAi && nextMinute >= 55) {
-    if (scoreDiff < 0 && nextMinute >= 68) {
+    if (scoreDiff < 0 && nextMinute >= 72) {
       currentAwayTactics = { ...currentAwayTactics, mentality: 'defensive', defensiveLine: 'low', timeWasting: 'sometimes', defensiveBlock: 'low' };
-    } else if (scoreDiff > 0) {
-      currentAwayTactics = { ...currentAwayTactics, mentality: scoreDiff >= 2 ? 'ultra_attacking' : 'attacking', pressingIntensity: 'high', tempo: 'fast' };
+    } else if (scoreDiff > 0 && compositeDiff < 3) {
+      currentAwayTactics = { ...currentAwayTactics, mentality: 'attacking', pressingIntensity: 'medium', tempo: 'fast' };
     }
   }
 
@@ -1782,46 +1791,55 @@ export function simulateMatchStep(
   const calcTeamLiveFatigueMod = (players: Player[], map: Record<string, number>): number => {
     if (!players || players.length === 0) return 1.0;
     const avgFit = players.reduce((s, p) => s + (map[p.id] ?? p.fitness ?? 85), 0) / players.length;
-    if (avgFit < 55) return 0.78;
-    if (avgFit < 68) return 0.88;
-    if (avgFit < 78) return 0.94;
+    if (avgFit < 55) return 0.85;
+    if (avgFit < 68) return 0.92;
+    if (avgFit < 78) return 0.96;
     return 1.0;
   };
   const homeTeamFatigueMod = calcTeamLiveFatigueMod(homeActivePlayers, prevState.homeFatigueMap);
   const awayTeamFatigueMod = calcTeamLiveFatigueMod(awayActivePlayers, prevState.awayFatigueMap);
 
-  // Realistic Lead Governor: Leading teams manage tempo and trailing AI teams push hard for an equalizer
+  // Realistic Lead Governor & Superiority Priority (Prevents weak teams from beating stronger teams and breaks deadlocks)
   let homeLeadMod = 1.0;
-  if (scoreDiff >= 3) homeLeadMod = 0.38;
-  else if (scoreDiff === 2) homeLeadMod = 0.58;
-  else if (scoreDiff === 1) homeLeadMod = isHomeAi ? 0.88 : 0.76;
-  else if (scoreDiff < 0) homeLeadMod = isHomeAi ? 1.24 : 1.06;
+  if (scoreDiff >= 3) homeLeadMod = 0.36;
+  else if (scoreDiff === 2) homeLeadMod = 0.65;
+  else if (scoreDiff === 1) homeLeadMod = compositeDiff >= 2.5 ? 1.05 : 0.82;
+  else if (scoreDiff === 0 && compositeDiff >= 1.5) {
+    homeLeadMod = nextMinute >= 45 ? 1.65 : 1.35;
+  } else if (scoreDiff < 0) {
+    homeLeadMod = compositeDiff >= 1.5 ? 1.85 : 1.12;
+  }
 
   let awayLeadMod = 1.0;
-  if (scoreDiff <= -3) awayLeadMod = 0.38;
-  else if (scoreDiff === -2) awayLeadMod = 0.58;
-  else if (scoreDiff === -1) awayLeadMod = isAwayAi ? 0.88 : 0.76;
-  else if (scoreDiff > 0) awayLeadMod = isAwayAi ? 1.24 : 1.06;
+  if (scoreDiff <= -3) awayLeadMod = 0.36;
+  else if (scoreDiff === -2) awayLeadMod = 0.65;
+  else if (scoreDiff === -1) awayLeadMod = compositeDiff <= -2.5 ? 1.05 : 0.82;
+  else if (scoreDiff === 0 && compositeDiff <= -1.5) {
+    awayLeadMod = nextMinute >= 45 ? 1.65 : 1.35;
+  } else if (scoreDiff > 0) {
+    awayLeadMod = compositeDiff <= -1.5 ? 1.85 : 1.12;
+  }
 
-  // Overextended risk: If a team recklessly stays on ultra_attacking or high line, opponent gets counter-attack opportunities
-  const homeOverextended = currentHomeTactics.mentality === 'ultra_attacking' || currentHomeTactics.defensiveLine === 'high';
-  const awayOverextended = currentAwayTactics.mentality === 'ultra_attacking' || currentAwayTactics.defensiveLine === 'high';
+  // Heavy suppression for clearly weaker teams so they cannot mount unrealistic attacks against a much stronger opponent
+  if (compositeDiff >= 3.5 || squadDiff >= 3.5) {
+    awayLeadMod *= compositeDiff >= 6.5 ? 0.25 : 0.42;
+    if (awayScore >= 1) awayLeadMod *= 0.22; // Prevent weak team from scoring multiple goals
+  } else if (compositeDiff <= -3.5 || squadDiff <= -3.5) {
+    homeLeadMod *= compositeDiff <= -6.5 ? 0.25 : 0.42;
+    if (homeScore >= 1) homeLeadMod *= 0.22;
+  }
 
-  let homeAttackProb = (weightedHomeMid / totalMid) * 0.165 * homeLeadMod * homeQualityMod * homeTeamFatigueMod * crowdAdvantage.homeAttackBonus * (isHomeAi && !isAwayAi ? 1.12 : 1.0);
-  let awayAttackProb = (weightedAwayMid / totalMid) * 0.152 * awayLeadMod * awayQualityMod * awayTeamFatigueMod * (isAwayAi && !isHomeAi ? 1.14 : 1.0);
+  let homeAttackProb = (weightedHomeMid / totalMid) * 0.185 * homeLeadMod * homeQualityMod * homeTeamFatigueMod * crowdAdvantage.homeAttackBonus;
+  let awayAttackProb = (weightedAwayMid / totalMid) * 0.165 * awayLeadMod * awayQualityMod * awayTeamFatigueMod;
 
-  if (awayOverextended) homeAttackProb *= 1.20;
-  if (homeOverextended) awayAttackProb *= 1.20;
-
-  // Defensive block suppression from Park the Bus, Catenaccio, Low Block, or 5-back formations
   const awayLowBlock = isAwayParked || currentAwayTactics.mentality === 'defensive' || currentAwayTactics.defensiveLine === 'low';
   const homeLowBlock = isHomeParked || currentHomeTactics.mentality === 'defensive' || currentHomeTactics.defensiveLine === 'low';
 
-  if (awayLowBlock) homeAttackProb *= isAwayParked ? 0.72 : 0.82;
-  if (homeLowBlock) awayAttackProb *= isHomeParked ? 0.72 : 0.82;
+  if (awayLowBlock) homeAttackProb *= compositeDiff >= 2.5 ? 0.96 : 0.90;
+  if (homeLowBlock) awayAttackProb *= compositeDiff <= -2.5 ? 0.96 : 0.90;
 
-  homeAttackProb = Math.min(0.22, Math.max(0.025, homeAttackProb));
-  awayAttackProb = Math.min(0.21, Math.max(0.025, awayAttackProb));
+  homeAttackProb = Math.min(0.32, Math.max(0.012, homeAttackProb));
+  awayAttackProb = Math.min(0.30, Math.max(0.012, awayAttackProb));
 
   const roll = Math.random();
 
@@ -1830,27 +1848,24 @@ export function simulateMatchStep(
     homeDangerousAttacks++;
     const shotRoll = Math.random();
 
-    // Shot creation probability modulated by attack vs opponent defense
-    const homeShotChance = Math.max(0.34, Math.min(0.54, 0.43 + (overallDiff * 0.004)));
+    const homeShotChance = Math.max(0.24, Math.min(0.68, 0.46 + (compositeDiff * 0.014)));
     if (shotRoll < homeShotChance) {
       homeShots++;
       const topHomeAttacker = pickPlayerByPosition(homeActivePlayers, 'FWD', 'MID');
       const shootingSkill = topHomeAttacker?.attributes?.shooting || topHomeAttacker?.overallRating || effHomeAtk;
       
-      // Fatigue and physical stamina impact on attacker finishing
       const attackerFatigue = prevState.homeFatigueMap[topHomeAttacker?.id] ?? 85;
-      const fatigueFactor = attackerFatigue < 55 ? 0.76 : (attackerFatigue < 70 ? 0.88 : 1.0);
+      const fatigueFactor = attackerFatigue < 55 ? 0.85 : (attackerFatigue < 70 ? 0.94 : 1.0);
 
-      // Blocked shot check: High defending skill & compact defensive block intercepts more shots
+      // Blocked shot check
       const awayDefenders = awayActivePlayers.filter(p => p.positionCategory === 'DEF');
       const avgAwayDefSkill = awayDefenders.length > 0
         ? awayDefenders.reduce((s, d) => s + (d.attributes?.defending || d.overallRating || 68), 0) / awayDefenders.length
         : effAwayDef;
-      const baseBlockProb = awayLowBlock ? 0.36 : 0.26;
-      const blockProb = Math.max(0.16, Math.min(0.44, baseBlockProb + ((avgAwayDefSkill - shootingSkill) * 0.004)));
+      const baseBlockProb = awayLowBlock ? 0.23 : 0.18;
+      const blockProb = Math.max(0.08, Math.min(0.32, baseBlockProb + ((avgAwayDefSkill - shootingSkill) * 0.003) - (compositeDiff > 0 ? compositeDiff * 0.008 : 0)));
 
       if (Math.random() < blockProb) {
-        // Defensive Block
         const defendingCb = pickPlayerByPosition(awayActivePlayers, 'DEF', 'MID');
         if (Math.random() < 0.42) {
           homeCorners++;
@@ -1862,10 +1877,8 @@ export function simulateMatchStep(
           });
         }
       } else {
-        // Shot is through on goal
-        let onTargetProb = (0.35 + ((shootingSkill - 65) * 0.0032)) * fatigueFactor;
-        if (awayLowBlock) onTargetProb -= 0.05;
-        onTargetProb = Math.min(0.54, Math.max(0.22, onTargetProb));
+        let onTargetProb = (0.40 + ((shootingSkill - 65) * 0.0045) + (compositeDiff * 0.008)) * fatigueFactor;
+        onTargetProb = Math.min(0.68, Math.max(0.18, onTargetProb));
 
         const isTarget = Math.random() < onTargetProb;
         const shotXg = isTarget ? (Math.random() * 0.14 + 0.07) : (Math.random() * 0.04 + 0.02);
@@ -1878,21 +1891,25 @@ export function simulateMatchStep(
           const awayGkFatigue = prevState.awayFatigueMap[awayGk?.id] ?? 90;
           const gkEfficiency = awayGkFatigue < 55 ? 0.90 : 1.0;
 
-          // Calibrated Goal Conversion on Target (Factoring Shooter vs Goalkeeper & Defense)
-          const atkVsGk = ((shootingSkill - (awayGkPower * gkEfficiency)) * 0.0038);
-          const defSuppression = ((avgAwayDefSkill - 65) * 0.0022);
-          const qualityConversionBonus = (overallDiff * 0.0055) + (managerDiff * 0.0035);
-          let goalProb = 0.21 + atkVsGk - defSuppression + qualityConversionBonus;
+          // Calibrated Goal Conversion on Target prioritizing Player Strength + Manager Rating + Coaching License
+          const atkVsGk = ((shootingSkill - (awayGkPower * gkEfficiency)) * 0.0055);
+          const defSuppression = ((avgAwayDefSkill - 65) * 0.0015);
+          const qualityConversionBonus = (compositeDiff * 0.015) + (managerDiff * 0.005);
+          let goalProb = 0.24 + atkVsGk - defSuppression + qualityConversionBonus;
 
-          if (awayLowBlock) goalProb -= 0.04;
-          if (awayTeamFatigueMod < 0.85) goalProb += 0.03; // Tired defense concedes more space
+          if (scoreDiff <= 0 && compositeDiff >= 1.8) {
+            goalProb += nextMinute >= 45 ? 0.12 : 0.07;
+          }
+          // Strongly suppress weak home team when playing against a much stronger away team
+          if (compositeDiff <= -3.5 || squadDiff <= -3.5) {
+            goalProb = Math.min(0.05, goalProb * 0.25);
+            if (homeScore >= awayScore) goalProb *= 0.20; // Weak team almost never takes the lead against a strong team
+          }
           // Anti-blowout conversion dampener
-          if (scoreDiff >= 3) goalProb *= 0.42;
-          else if (scoreDiff === 2) goalProb *= 0.68;
-          else if (scoreDiff === 1) goalProb *= 0.88;
+          if (scoreDiff >= 3) goalProb *= 0.38;
+          else if (scoreDiff === 2) goalProb *= 0.65;
 
-          // Realistic conversion clamp
-          goalProb = Math.max(0.06, Math.min(0.38, goalProb));
+          goalProb = Math.max(0.01, Math.min(0.55, goalProb));
 
           if (Math.random() < goalProb) {
             homeScore++;
@@ -1942,21 +1959,21 @@ export function simulateMatchStep(
     awayDangerousAttacks++;
     const shotRoll = Math.random();
 
-    const awayShotChance = Math.max(0.34, Math.min(0.54, 0.42 - (overallDiff * 0.004)));
+    const awayShotChance = Math.max(0.24, Math.min(0.68, 0.45 - (compositeDiff * 0.014)));
     if (shotRoll < awayShotChance) {
       awayShots++;
       const topAwayAttacker = pickPlayerByPosition(awayActivePlayers, 'FWD', 'MID');
       const shootingSkill = topAwayAttacker?.attributes?.shooting || topAwayAttacker?.overallRating || effAwayAtk;
 
       const attackerFatigue = prevState.awayFatigueMap[topAwayAttacker?.id] ?? 85;
-      const fatigueFactor = attackerFatigue < 55 ? 0.76 : (attackerFatigue < 70 ? 0.88 : 1.0);
+      const fatigueFactor = attackerFatigue < 55 ? 0.85 : (attackerFatigue < 70 ? 0.94 : 1.0);
 
       const homeDefenders = homeActivePlayers.filter(p => p.positionCategory === 'DEF');
       const avgHomeDefSkill = homeDefenders.length > 0
         ? homeDefenders.reduce((s, d) => s + (d.attributes?.defending || d.overallRating || 68), 0) / homeDefenders.length
         : effHomeDef;
-      const baseBlockProb = homeLowBlock ? 0.36 : 0.26;
-      const blockProb = Math.max(0.16, Math.min(0.44, baseBlockProb + ((avgHomeDefSkill - shootingSkill) * 0.004)));
+      const baseBlockProb = homeLowBlock ? 0.23 : 0.18;
+      const blockProb = Math.max(0.08, Math.min(0.32, baseBlockProb + ((avgHomeDefSkill - shootingSkill) * 0.003) - (compositeDiff < 0 ? Math.abs(compositeDiff) * 0.008 : 0)));
 
       if (Math.random() < blockProb) {
         const defendingCb = pickPlayerByPosition(homeActivePlayers, 'DEF', 'MID');
@@ -1970,9 +1987,8 @@ export function simulateMatchStep(
           });
         }
       } else {
-        let onTargetProb = (0.35 + ((shootingSkill - 65) * 0.0032)) * fatigueFactor * crowdAdvantage.awayIntimidationPenalty;
-        if (homeLowBlock) onTargetProb -= 0.05;
-        onTargetProb = Math.min(0.54, Math.max(0.22, onTargetProb));
+        let onTargetProb = (0.40 + ((shootingSkill - 65) * 0.0045) - (compositeDiff * 0.008)) * fatigueFactor * crowdAdvantage.awayIntimidationPenalty;
+        onTargetProb = Math.min(0.68, Math.max(0.18, onTargetProb));
 
         const isTarget = Math.random() < onTargetProb;
         const shotXg = isTarget ? (Math.random() * 0.14 + 0.07) : (Math.random() * 0.04 + 0.02);
@@ -1985,19 +2001,23 @@ export function simulateMatchStep(
           const homeGkFatigue = prevState.homeFatigueMap[homeGk?.id] ?? 90;
           const gkEfficiency = homeGkFatigue < 55 ? 0.90 : 1.0;
 
-          const atkVsGk = ((shootingSkill - (homeGkPower * gkEfficiency)) * 0.0038);
-          const defSuppression = ((avgHomeDefSkill - 65) * 0.0022);
-          const qualityConversionBonus = (-overallDiff * 0.0055) + (-managerDiff * 0.0035);
-          let goalProb = 0.20 + atkVsGk - defSuppression + qualityConversionBonus;
+          const atkVsGk = ((shootingSkill - (homeGkPower * gkEfficiency)) * 0.0055);
+          const defSuppression = ((avgHomeDefSkill - 65) * 0.0015);
+          const qualityConversionBonus = (-compositeDiff * 0.015) + (-managerDiff * 0.005);
+          let goalProb = 0.23 + atkVsGk - defSuppression + qualityConversionBonus;
 
-          if (homeLowBlock) goalProb -= 0.04;
-          if (homeTeamFatigueMod < 0.85) goalProb += 0.03;
-          if (scoreDiff <= -3) goalProb *= 0.42;
-          else if (scoreDiff === -2) goalProb *= 0.68;
-          else if (scoreDiff === -1) goalProb *= 0.88;
+          if (scoreDiff >= 0 && compositeDiff <= -1.8) {
+            goalProb += nextMinute >= 45 ? 0.12 : 0.07;
+          }
+          // Strongly suppress weak away team when playing against a much stronger home team
+          if (compositeDiff >= 3.5 || squadDiff >= 3.5) {
+            goalProb = Math.min(0.05, goalProb * 0.25);
+            if (awayScore >= homeScore) goalProb *= 0.20; // Weak team almost never takes the lead against a strong team
+          }
+          if (scoreDiff <= -3) goalProb *= 0.38;
+          else if (scoreDiff === -2) goalProb *= 0.65;
 
-          // Realistic conversion clamp
-          goalProb = Math.max(0.06, Math.min(0.38, goalProb));
+          goalProb = Math.max(0.01, Math.min(0.55, goalProb));
 
           if (Math.random() < goalProb) {
             awayScore++;
@@ -2043,12 +2063,56 @@ export function simulateMatchStep(
       }
     }
   } else {
-    // Secondary Events (Fouls, Cards, Corners, Penalties, Tactical Play)
+    // Secondary Events (Fouls, Cards, Corners, Penalties, Tactical Breakthrough)
     const subRoll = Math.random();
-    
-    // Penalties check: realistic football frequency (~0.35% per minute -> ~1 penalty every 3.5 matches)
-    if (subRoll < 0.0035 && nextMinute > 12) {
-      const isHomePenalty = Math.random() > 0.48;
+
+    // Superior Team Second-Half Breakthrough: if a clearly stronger team (Players + Manager + License) is trailing or tied in the second half, sustained pressure creates high-danger breakthroughs
+    if (nextMinute >= 52 && ((compositeDiff >= 2.5 || squadDiff >= 3.0) && homeScore <= awayScore) && subRoll < 0.065) {
+      homeDangerousAttacks++;
+      homeShots++;
+      homeShotsOnTarget++;
+      homeXg += 0.32;
+      const breakthroughChance = compositeDiff >= 5.0 ? 0.58 : 0.42;
+      if (Math.random() < breakthroughChance) {
+        homeScore++;
+        const scorer = pickGoalScorer(homeActivePlayers);
+        const assister = pickAssister(homeActivePlayers, scorer.id);
+        newEvents.push({
+          minute: nextMinute,
+          type: 'goal',
+          teamId: prevState.homeTeam.id,
+          playerId: scorer.id,
+          playerName: scorer.name,
+          assistPlayerId: assister?.id,
+          assistPlayerName: assister?.name,
+          description: `🔥 ضغط هجومي كاسح يثمر أخيراً! تفوق واضح في المهارة والتكتيك ينتهي بهدف رائع سجله (${scorer.name})${assister ? ` بصناعة (${assister.name})` : ''} لصالح ${prevState.homeTeam.shortName}!`
+        });
+      }
+    } else if (nextMinute >= 52 && ((compositeDiff <= -2.5 || squadDiff <= -3.0) && awayScore <= homeScore) && subRoll < 0.065) {
+      awayDangerousAttacks++;
+      awayShots++;
+      awayShotsOnTarget++;
+      awayXg += 0.32;
+      const breakthroughChance = compositeDiff <= -5.0 ? 0.58 : 0.42;
+      if (Math.random() < breakthroughChance) {
+        awayScore++;
+        const scorer = pickGoalScorer(awayActivePlayers);
+        const assister = pickAssister(awayActivePlayers, scorer.id);
+        newEvents.push({
+          minute: nextMinute,
+          type: 'goal',
+          teamId: prevState.awayTeam.id,
+          playerId: scorer.id,
+          playerName: scorer.name,
+          assistPlayerId: assister?.id,
+          assistPlayerName: assister?.name,
+          description: `🔥 الفارق الفني يحسم الموقف! جملة تكتيكية متقنة يخترق بها (${scorer.name}) الدفاع ويسجل هدف التقدم لصالح ${prevState.awayTeam.shortName}!`
+        });
+      }
+    } else if (subRoll < 0.0032 && nextMinute > 12) {
+      // Penalties weighted heavily by attacking dominance so weak teams don't get random 50/50 penalties
+      const homePenWeight = Math.max(0.10, Math.min(0.90, 0.50 + (compositeDiff * 0.06)));
+      const isHomePenalty = Math.random() < homePenWeight;
       const penaltyTeam = isHomePenalty ? prevState.homeTeam : prevState.awayTeam;
       const defendingTeam = isHomePenalty ? prevState.awayTeam : prevState.homeTeam;
       const activeShooters = isHomePenalty ? homeActivePlayers : awayActivePlayers;
@@ -2102,14 +2166,13 @@ export function simulateMatchStep(
       }
     } else if (subRoll < 0.07) {
       // Fouls & Cards with real red card dismissal enforcement
-      const isHomeFoul = Math.random() < (currentHomeTactics.pressingIntensity === 'high' ? 0.60 : 0.45);
+      const isHomeFoul = Math.random() < (currentHomeTactics.pressingIntensity === 'high' ? 0.55 : 0.45);
       if (isHomeFoul) {
         homeFouls++;
-        if (Math.random() < 0.26) {
+        if (Math.random() < 0.24) {
           homeYellowCards++;
           const p = pickPlayerByPosition(homeActivePlayers, 'DEF', 'MID');
           if (updatedHomeYellowed.includes(p.id)) {
-            // Second yellow -> RED CARD!
             homeRedCards++;
             activeHomeLineup = activeHomeLineup.filter(id => id !== p.id);
             updatedHomeRedded.push(p.id);
@@ -2135,11 +2198,10 @@ export function simulateMatchStep(
         }
       } else {
         awayFouls++;
-        if (Math.random() < 0.26) {
+        if (Math.random() < 0.24) {
           awayYellowCards++;
           const p = pickPlayerByPosition(awayActivePlayers, 'DEF', 'MID');
           if (updatedAwayYellowed.includes(p.id)) {
-            // Second yellow -> RED CARD!
             awayRedCards++;
             activeAwayLineup = activeAwayLineup.filter(id => id !== p.id);
             updatedAwayRedded.push(p.id);
@@ -2165,13 +2227,18 @@ export function simulateMatchStep(
         }
       }
     } else if (subRoll < 0.12) {
-      // Corner kick
-      const isHomeCorner = Math.random() > 0.48;
+      // Corner kick weighted by team dominance instead of 50/50
+      const homeCornerWeight = Math.max(0.12, Math.min(0.88, 0.50 + (compositeDiff * 0.055)));
+      const isHomeCorner = Math.random() < homeCornerWeight;
       if (isHomeCorner) homeCorners++;
       else awayCorners++;
 
-      // Corner header chance (~4.5% of corners score in professional football)
-      if (Math.random() < 0.045) {
+      // Corner header chance weighted by team superiority
+      const cornerGoalChance = isHomeCorner
+        ? (compositeDiff <= -3.5 ? 0.01 : 0.045)
+        : (compositeDiff >= 3.5 ? 0.01 : 0.045);
+
+      if (Math.random() < cornerGoalChance) {
         const cornerTeam = isHomeCorner ? prevState.homeTeam : prevState.awayTeam;
         const cornerPlayers = isHomeCorner ? homeActivePlayers : awayActivePlayers;
         const header = pickCornerHeader(cornerPlayers);
@@ -2415,35 +2482,46 @@ export function simulateMatch(
   const homeGkRating = homeGk?.attributes?.goalkeeping || homeGk?.overallRating || 68;
   const awayGkRating = awayGk?.attributes?.goalkeeping || awayGk?.overallRating || 68;
 
-  // 4. Home Pitch & Crowd Advantage + AI Competitive Challenge Boost against User
-  const homePitchAdvantage = 2.6;
-  const homeAiChallengeBonus = !safeHome.isUserClub && safeAway.isUserClub ? 4.2 : 0;
-  const awayAiChallengeBonus = !safeAway.isUserClub && safeHome.isUserClub ? 4.2 : 0;
+  // 4. Home Pitch Advantage & Authoritative Composite Rating (Total Player Strength + Manager Strength + Coaching License)
+  const homePitchAdvantage = 1.6;
 
   // 5. Effective Overall Ratings
-  const effHomeRating = Math.max(30, Math.min(99, homeStrength.overall + homePitchAdvantage + homeTacBonus + homeFitnessModifier + homeAiChallengeBonus));
-  const effAwayRating = Math.max(30, Math.min(99, awayStrength.overall + awayTacBonus + awayFitnessModifier + awayAiChallengeBonus));
+  const homeCompositeBase = (homeStrength.overall * 0.50) + (homeStrength.squadStrength * 0.32) + (homeStrength.managerRating * 0.18);
+  const awayCompositeBase = (awayStrength.overall * 0.50) + (awayStrength.squadStrength * 0.32) + (awayStrength.managerRating * 0.18);
 
-  // True Rating Disparity (Rating Delta)
+  const effHomeRating = Math.max(30, Math.min(99, homeCompositeBase + homePitchAdvantage + homeTacBonus + homeFitnessModifier));
+  const effAwayRating = Math.max(30, Math.min(99, awayCompositeBase + awayTacBonus + awayFitnessModifier));
+
+  // True Rating Disparity (Rating Delta) & Raw Squad Disparity
   const ratingDelta = effHomeRating - effAwayRating;
+  const rawSquadDelta = homeStrength.squadStrength - awayStrength.squadStrength;
 
-  // 6. Base Expected Goals (xG) calibrated for realistic 2.0–2.6 average total goals per match
-  const attackDefDeltaHome = (homeStrength.attack - (awayStrength.defense * 0.65 + awayGkRating * 0.35)) * 0.018;
-  const attackDefDeltaAway = (awayStrength.attack - (homeStrength.defense * 0.65 + homeGkRating * 0.35)) * 0.018;
-  const ratingDeltaEffect = Math.max(-0.55, Math.min(0.55, ratingDelta * 0.022));
+  // 6. Base Expected Goals (xG) calibrated for realistic 2.2–2.8 average total goals per match with strong priority for superior team
+  const attackDefDeltaHome = (homeStrength.attack - (awayStrength.defense * 0.65 + awayGkRating * 0.35)) * 0.028;
+  const attackDefDeltaAway = (awayStrength.attack - (homeStrength.defense * 0.65 + homeGkRating * 0.35)) * 0.028;
+  const ratingDeltaEffect = Math.max(-1.05, Math.min(1.05, ratingDelta * 0.048));
 
-  const awayLowBlockMod = (awayTac.tacticalStyle === 'park_the_bus' || awayTac.mentality === 'defensive' || awayTac.defensiveLine === 'low') ? 0.85 : 1.0;
-  const homeLowBlockMod = (homeTac.tacticalStyle === 'park_the_bus' || homeTac.mentality === 'defensive' || homeTac.defensiveLine === 'low') ? 0.85 : 1.0;
+  const awayLowBlockMod = (awayTac.tacticalStyle === 'park_the_bus' || awayTac.mentality === 'defensive' || awayTac.defensiveLine === 'low') ? 0.94 : 1.0;
+  const homeLowBlockMod = (homeTac.tacticalStyle === 'park_the_bus' || homeTac.mentality === 'defensive' || homeTac.defensiveLine === 'low') ? 0.94 : 1.0;
 
-  let baseHomeXg = (1.18 + (homePitchAdvantage * 0.04) + attackDefDeltaHome + ratingDeltaEffect) * awayLowBlockMod;
-  let baseAwayXg = (0.92 + attackDefDeltaAway - ratingDeltaEffect) * homeLowBlockMod;
+  let baseHomeXg = (1.32 + (homePitchAdvantage * 0.04) + attackDefDeltaHome + ratingDeltaEffect) * awayLowBlockMod;
+  let baseAwayXg = (1.00 + attackDefDeltaAway - ratingDeltaEffect) * homeLowBlockMod;
 
-  // 7. Realistic Football Variance & Form Momentum (-10% to +10%)
-  const homeVariance = (Math.random() - 0.5) * 0.20;
-  const awayVariance = (Math.random() - 0.5) * 0.20;
+  // Strongly suppress weaker team's expected goals when facing a clearly stronger squad + manager
+  if (ratingDelta >= 3.5 || rawSquadDelta >= 3.0) {
+    baseAwayXg = Math.min(0.42, baseAwayXg * 0.40);
+    baseHomeXg = Math.max(1.85, baseHomeXg * 1.18);
+  } else if (ratingDelta <= -3.5 || rawSquadDelta <= -3.0) {
+    baseHomeXg = Math.min(0.42, baseHomeXg * 0.40);
+    baseAwayXg = Math.max(1.85, baseAwayXg * 1.18);
+  }
 
-  let finalHomeXg = Math.max(0.22, Math.min(2.65, baseHomeXg * (1 + homeVariance)));
-  let finalAwayXg = Math.max(0.18, Math.min(2.45, baseAwayXg * (1 + awayVariance)));
+  // 7. Realistic Football Variance (-6% to +6%)
+  const homeVariance = (Math.random() - 0.5) * 0.12;
+  const awayVariance = (Math.random() - 0.5) * 0.12;
+
+  let finalHomeXg = Math.max(0.15, Math.min(3.15, baseHomeXg * (1 + homeVariance)));
+  let finalAwayXg = Math.max(0.12, Math.min(2.95, baseAwayXg * (1 + awayVariance)));
 
   // 8. Poisson-based Goal Sampling (Authentic probabilistic football engine)
   const samplePoisson = (lambda: number): number => {
@@ -2459,6 +2537,39 @@ export function simulateMatch(
 
   let homeScore = samplePoisson(finalHomeXg);
   let awayScore = samplePoisson(finalAwayXg);
+
+  // 9. Superiority Priority & Anti-Upset Resolution
+  // Guarantees that a team with clearly superior (Player Strength + Manager Strength + Coaching License) dominates weak teams and wins consistently
+  if (ratingDelta >= 4.0 || rawSquadDelta >= 3.5) {
+    // Clear superiority over a weak team: cap weak team goals at 0 or 1, and ensure strong team wins ~93% (or draws ~7%, never loses)
+    if (awayScore > 1) awayScore = Math.random() < 0.70 ? 0 : 1;
+    if (homeScore <= awayScore) {
+      if (Math.random() < 0.93) {
+        homeScore = awayScore + (ratingDelta >= 7.0 && Math.random() < 0.55 ? 2 : 1);
+      } else {
+        homeScore = awayScore; // Rare competitive draw, never a loss to a very weak team
+      }
+    }
+  } else if (ratingDelta <= -4.0 || rawSquadDelta <= -3.5) {
+    if (homeScore > 1) homeScore = Math.random() < 0.70 ? 0 : 1;
+    if (awayScore <= homeScore) {
+      if (Math.random() < 0.93) {
+        awayScore = homeScore + (ratingDelta <= -7.0 && Math.random() < 0.55 ? 2 : 1);
+      } else {
+        awayScore = homeScore;
+      }
+    }
+  } else if (ratingDelta >= 1.5 || rawSquadDelta >= 1.8) {
+    const winPriorityChance = Math.min(0.88, 0.62 + (ratingDelta * 0.06));
+    if (homeScore <= awayScore && Math.random() < winPriorityChance) {
+      homeScore = awayScore + 1;
+    }
+  } else if (ratingDelta <= -1.5 || rawSquadDelta <= -1.8) {
+    const winPriorityChance = Math.min(0.88, 0.62 + (Math.abs(ratingDelta) * 0.06));
+    if (awayScore <= homeScore && Math.random() < winPriorityChance) {
+      awayScore = homeScore + 1;
+    }
+  }
 
   // 10. Generate Match Events (Goals, Cards, Subs, Stats)
   const events: MatchEvent[] = [];

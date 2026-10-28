@@ -13,6 +13,7 @@ import {
   Sparkles,
   Loader2,
 } from 'lucide-react';
+import { ModalPortal } from './common/ModalPortal';
 
 interface RestartSeasonModalProps {
   isOpen: boolean;
@@ -70,11 +71,12 @@ export const RestartSeasonModal: React.FC<RestartSeasonModalProps> = ({
   };
 
   return (
-    <div
-      id="restart_season_modal_backdrop"
-      className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-3 sm:p-5 animate-in fade-in duration-200"
-      dir="rtl"
-    >
+    <ModalPortal>
+      <div
+        id="restart_season_modal_backdrop"
+        className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-3 sm:p-5 animate-in fade-in duration-200"
+        dir="rtl"
+      >
       <div
         id="restart_season_modal_content"
         className="relative w-full max-w-lg bg-slate-900 border-2 border-amber-500/50 rounded-3xl shadow-2xl shadow-amber-500/10 overflow-hidden text-right"
@@ -247,6 +249,7 @@ export const RestartSeasonModal: React.FC<RestartSeasonModalProps> = ({
           </button>
         </div>
       </div>
-    </div>
+      </div>
+    </ModalPortal>
   );
 };

@@ -1,6 +1,7 @@
 import { Club, LeagueStanding, ManagerProfile } from '../types/game';
 import { INITIAL_MANAGER } from '../data/initialData';
 import { generateTrainerId } from '../services/trainerProfileService';
+import { calibrateRealisticPlayerRating } from './playerGenerator';
 
 export function normalizeClub(t: any): Club {
   if (!t || typeof t !== 'object') {
@@ -10,21 +11,25 @@ export function normalizeClub(t: any): Club {
   const rawPlayers = Array.isArray(t.players) ? t.players : [];
   const players = rawPlayers
     .filter((p: any) => p && typeof p === 'object' && p.id)
-    .map((p: any) => ({
-      ...p,
-      name: p.name || 'لاعب',
-      position: p.position || 'CM',
-      positionCategory: p.positionCategory || 'MID',
-      overallRating: Number.isFinite(p.overallRating) ? p.overallRating : 60,
-      isGuestStar: Boolean(p.isGuestStar),
-      nationality: p.nationality || t.country || 'مصر',
-      nationalityCode: p.nationalityCode || t.countryCode || 'EGY',
-      currentClubId: p.currentClubId || t.id,
-      stats: p.stats || { appearances: 0, goals: 0, assists: 0, yellowCards: 0, redCards: 0, cleanSheets: 0, averageRating: 6.5 },
-      attributes: p.attributes || { pace: 60, shooting: 60, passing: 60, dribbling: 60, defending: 60, physical: 60 },
-      savings: p.savings !== undefined ? p.savings : 0,
-      totalBonusesReceived: p.totalBonusesReceived ?? 0,
-    }));
+    .map((p: any) => {
+      const baseP = {
+        ...p,
+        name: p.name || 'لاعب',
+        position: p.position || 'CM',
+        positionCategory: p.positionCategory || 'MID',
+        overallRating: Number.isFinite(p.overallRating) ? p.overallRating : 60,
+        isGuestStar: Boolean(p.isGuestStar),
+        nationality: p.nationality || t.country || 'مصر',
+        nationalityCode: p.nationalityCode || t.countryCode || 'EGY',
+        currentClubId: p.currentClubId || t.id,
+        currentLeagueId: p.currentLeagueId || t.leagueId || '',
+        stats: p.stats || { appearances: 0, goals: 0, assists: 0, yellowCards: 0, redCards: 0, cleanSheets: 0, averageRating: 6.5 },
+        attributes: p.attributes || { pace: 60, shooting: 60, passing: 60, dribbling: 60, defending: 60, physical: 60 },
+        savings: p.savings !== undefined ? p.savings : 0,
+        totalBonusesReceived: p.totalBonusesReceived ?? 0,
+      };
+      return calibrateRealisticPlayerRating(baseP, t.id, t.leagueId, t.reputation || 65);
+    });
 
   const playerIds = new Set(players.map((p: any) => p.id));
   const rawStarting = Array.isArray(t.tactics?.startingPlayerIds) ? t.tactics.startingPlayerIds : [];
@@ -136,8 +141,13 @@ export function normalizeManagerProfile(parsed: any): ManagerProfile {
     monthlySalary: parsed?.monthlySalary ?? 25000,
     personalWallet: parsed?.personalWallet !== undefined ? parsed.personalWallet : 65000,
     financialTransactions: Array.isArray(parsed?.financialTransactions) ? parsed.financialTransactions : [],
-    completedCourses: Array.isArray(parsed?.completedCourses) ? parsed.completedCourses : [],
-    license: (parsed?.license && ['D', 'C', 'B', 'A', 'PRO', 'ELITE'].includes(parsed.license)) ? parsed.license : 'D',
+    completedCourses: Array.isArray(parsed?.completedCourses)
+      ? parsed.completedCourses.filter((c: string) => !['license_d', 'license_c', 'license_b', 'license_a', 'license_pro', 'license_elite'].includes(c))
+      : [],
+    license: (parsed?.license && ['BASIC', 'PREMIER', 'CONTINENTAL', 'LEGENDARY'].includes(parsed.license)) ? parsed.license : 'BASIC',
+    ownedLicenses: Array.isArray(parsed?.ownedLicenses)
+      ? Array.from(new Set(['BASIC', ...parsed.ownedLicenses.filter((l: string) => ['BASIC', 'PREMIER', 'CONTINENTAL', 'LEGENDARY'].includes(l))]))
+      : ['BASIC'],
     favoriteFormation: parsed?.favoriteFormation || INITIAL_MANAGER.favoriteFormation || '4-3-3',
     matchesManaged: matches,
     wins: parsed?.wins ?? parsed?.careerWins ?? 0,

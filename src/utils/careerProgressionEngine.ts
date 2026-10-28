@@ -24,16 +24,21 @@ export interface LicenseRequirements {
   minReputation: number;
   minPlayersDeveloped: number;
   minActivePlayMinutes: number; // Real active in-game minutes (Anti-AFK verified)
-  examCost: number; // in EGP
+  examCost: number; // One-time purchase cost ($)
 }
 
 export interface LicenseConfigItem {
   id: CoachingLicenseTier;
   codeName: string;
   arabicTitle: string;
+  titleArabic: string;
   badgeName: string;
+  badgeIcon: string;
   rankIndex: number;
+  purchaseCost: number;
+  annualRenewalFee: number;
   tierDescription: string;
+  description: string;
   unlockedClubsDescription: string;
   requirements: LicenseRequirements;
   perks: string[];
@@ -53,252 +58,235 @@ export interface ClubTierDefinition {
   exampleClubs: string;
 }
 
+export const OFFICIAL_LICENSES: ('BASIC' | 'PREMIER' | 'CONTINENTAL' | 'LEGENDARY')[] = [
+  'BASIC',
+  'PREMIER',
+  'CONTINENTAL',
+  'LEGENDARY',
+];
+
+const BASIC_LICENSE_DEF: LicenseConfigItem = {
+  id: 'BASIC',
+  codeName: 'BASIC',
+  arabicTitle: 'الرخصة الأولية (Basic License)',
+  titleArabic: 'الرخصة الأولية (Basic License)',
+  badgeName: 'Basic License',
+  badgeIcon: '🪪',
+  rankIndex: 1,
+  purchaseCost: 0,
+  annualRenewalFee: 0,
+  tierDescription: 'تُمنح تلقائياً لأي مدرب جديد عند بدء مسيرته التدريبية.',
+  description: 'تدريب أندية الدرجة الثانية (وما دونها) في الدوريات العربية فقط.',
+  unlockedClubsDescription: 'تدريب أندية الدرجة الثانية (وما دونها) في الدوريات العربية فقط.',
+  requirements: {
+    minLevel: 1,
+    minMatches: 0,
+    minWins: 0,
+    minWinRate: 0,
+    minTrophies: 0,
+    minReputation: 0,
+    minPlayersDeveloped: 0,
+    minActivePlayMinutes: 0,
+    examCost: 0,
+  },
+  perks: [
+    'تدريب أندية الدرجة الثانية وما دونها في الدوريات العربية فقط',
+    'سعر الشراء لمرة واحدة: مجانية (0$)',
+    'رسوم التجديد السنوية: مجانية (0$)',
+  ],
+};
+
+const PREMIER_LICENSE_DEF: LicenseConfigItem = {
+  id: 'PREMIER',
+  codeName: 'PREMIER',
+  arabicTitle: 'الرخصة الممتازة (Premier License)',
+  titleArabic: 'الرخصة الممتازة (Premier License)',
+  badgeName: 'Premier License',
+  badgeIcon: '🥈',
+  rankIndex: 2,
+  purchaseCost: 5_000_000,
+  annualRenewalFee: 500_000,
+  tierDescription: 'رخصة المحترفين لقيادة كبرى أندية الدوريات الممتازة العربية.',
+  description: 'تدريب جميع أندية الدوريات الممتازة العربية دون قيود.',
+  unlockedClubsDescription: 'تدريب جميع أندية الدوريات الممتازة العربية دون قيود.',
+  requirements: {
+    minLevel: 1,
+    minMatches: 0,
+    minWins: 0,
+    minWinRate: 0,
+    minTrophies: 0,
+    minReputation: 0,
+    minPlayersDeveloped: 0,
+    minActivePlayMinutes: 0,
+    examCost: 5_000_000,
+  },
+  perks: [
+    'تدريب جميع أندية الدوريات الممتازة العربية دون قيود',
+    'سعر الشراء لمرة واحدة: 5,000,000$ (من الميزانية الشخصية للمدرب)',
+    'رسوم التجديد السنوية: 500,000$ (تُخصم مع بداية كل موسم جديد)',
+  ],
+};
+
+const CONTINENTAL_LICENSE_DEF: LicenseConfigItem = {
+  id: 'CONTINENTAL',
+  codeName: 'CONTINENTAL',
+  arabicTitle: 'الرخصة الأوروبية (Continental License)',
+  titleArabic: 'الرخصة الأوروبية (Continental License)',
+  badgeName: 'Continental License',
+  badgeIcon: '🌍',
+  rankIndex: 3,
+  purchaseCost: 12_000_000,
+  annualRenewalFee: 1_200_000,
+  tierDescription: 'رخصة قارية ودولية تفتح أبواب التدريب في أوروبا وبقية قارات العالم.',
+  description: 'التدريب في أوروبا وبقية قارات العالم، باستثناء فرق النخبة والقمة (Tier 1 / Elite Clubs).',
+  unlockedClubsDescription: 'التدريب في أوروبا وبقية قارات العالم، باستثناء فرق النخبة والقمة (Tier 1 / Elite Clubs).',
+  requirements: {
+    minLevel: 1,
+    minMatches: 0,
+    minWins: 0,
+    minWinRate: 0,
+    minTrophies: 0,
+    minReputation: 0,
+    minPlayersDeveloped: 0,
+    minActivePlayMinutes: 0,
+    examCost: 12_000_000,
+  },
+  perks: [
+    'التدريب في أوروبا وبقية قارات العالم (باستثناء فرق النخبة والقمة)',
+    'سعر الشراء لمرة واحدة: 12,000,000$ (من الميزانية الشخصية للمدرب)',
+    'رسوم التجديد السنوية: 1,200,000$ (تُخصم مع بداية كل موسم جديد)',
+  ],
+};
+
+const LEGENDARY_LICENSE_DEF: LicenseConfigItem = {
+  id: 'LEGENDARY',
+  codeName: 'LEGENDARY',
+  arabicTitle: 'الرخصة الأسطورية (Legendary / Pro License)',
+  titleArabic: 'الرخصة الأسطورية (Legendary / Pro License)',
+  badgeName: 'Legendary / Pro License',
+  badgeIcon: '👑',
+  rankIndex: 4,
+  purchaseCost: 30_000_000,
+  annualRenewalFee: 3_000_000,
+  tierDescription: 'أعلى رخصة تدريبية في العالم لقيادة عمالقة ونخبة أندية كوكب الأرض.',
+  description: 'تدريب كبرى فرق النخبة والعمالقة في أوروبا والعالم دون أي قيود.',
+  unlockedClubsDescription: 'تدريب كبرى فرق النخبة والعمالقة في أوروبا والعالم دون أي قيود.',
+  requirements: {
+    minLevel: 1,
+    minMatches: 0,
+    minWins: 0,
+    minWinRate: 0,
+    minTrophies: 0,
+    minReputation: 0,
+    minPlayersDeveloped: 0,
+    minActivePlayMinutes: 0,
+    examCost: 30_000_000,
+  },
+  perks: [
+    'تدريب كبرى فرق النخبة والعمالقة في أوروبا والعالم دون أي قيود',
+    'سعر الشراء لمرة واحدة: 30,000,000$ (من الميزانية الشخصية للمدرب)',
+    'رسوم التجديد السنوية: 3,000,000$ (تُخصم مع بداية كل موسم جديد)',
+  ],
+};
+
 export const CAREER_CONFIG = {
   // ----------------------------------------------------
-  // A. COACHING LICENSES SPECIFICATION (الرخص التدريبية المتدرجة)
+  // A. COACHING LICENSES SPECIFICATION (4 الرخص التدريبية الجديدة)
   // ----------------------------------------------------
   LICENSES: {
-    D: {
-      id: 'D',
-      codeName: 'CAF-D',
-      arabicTitle: 'رخصة التدريب التأسيسية D',
-      badgeName: 'CAF / Local D',
-      rankIndex: 1,
-      tierDescription: 'بداية المسيرة التدريبية وأسس إدارة التدريبات والمباريات.',
-      unlockedClubsDescription: 'أندية الهواة والدرجة الرابعة وأكاديميات الناشئين.',
-      requirements: {
-        minLevel: 1,
-        minMatches: 0,
-        minWins: 0,
-        minWinRate: 0,
-        minTrophies: 0,
-        minReputation: 0,
-        minPlayersDeveloped: 0,
-        minActivePlayMinutes: 60, // ساعة واحدة لعب فعلي (بدلاً من 5 ساعات)
-        examCost: 15000,
-      },
-      perks: [
-        'تسجيل رسمي في سجلات الاتحاد المحلي',
-        'قيادة أندية الدرجة الرابعة والهواة',
-        'فتح نظام الخطط التأسيسية (4-4-2، 4-3-3، 4-5-1)',
-      ],
-    },
-    C: {
-      id: 'C',
-      codeName: 'CAF-C',
-      arabicTitle: 'رخصة التدريب القارية C',
-      badgeName: 'CAF / UEFA C',
-      rankIndex: 2,
-      tierDescription: 'تأهيل قاري لتطوير الخطط، استيعاب أساليب الضغط والتمركز.',
-      unlockedClubsDescription: 'أندية الدرجة الثالثة والأندية الصاعدة في الدرجات الأدنى.',
-      requirements: {
-        minLevel: 2,
-        minMatches: 10,
-        minWins: 4,
-        minWinRate: 35,
-        minTrophies: 0,
-        minReputation: 25,
-        minPlayersDeveloped: 1,
-        minActivePlayMinutes: 180, // 3 ساعات لعب فعلي (بدلاً من 15 ساعة)
-        examCost: 50000,
-      },
-      perks: [
-        'أهلية تدريب أندية الدرجة الثالثة ومشاريع الصعود',
-        'فتح خطط تكتيكية حديثة (4-2-3-1، 3-5-2، 4-4-1-1)',
-        'فتح أساليب اللعب المرتد، الكاتيناتشو، التكتل الدفاعي، والأطراف',
-        'زيادة نقاط التصنيف العالمي للمدرب (+30 نقطة)',
-      ],
-    },
-    B: {
-      id: 'B',
-      codeName: 'CAF-B',
-      arabicTitle: 'رخصة التدريب المتقدمة B',
-      badgeName: 'CAF / UEFA B',
-      rankIndex: 3,
-      tierDescription: 'احتراف تكتيكي متقدم لإدارة غرف الملابس والتحولات السريعة.',
-      unlockedClubsDescription: 'أندية الدرجة الثانية والمنافسين على الصعود للدوري الممتاز.',
-      requirements: {
-        minLevel: 4,
-        minMatches: 25,
-        minWins: 11,
-        minWinRate: 42,
-        minTrophies: 0,
-        minReputation: 45,
-        minPlayersDeveloped: 3,
-        minActivePlayMinutes: 360, // 6 ساعات لعب فعلي (بدلاً من 30 ساعة)
-        examCost: 150000,
-      },
-      perks: [
-        'أهلية تدريب أندية الدرجة الثانية والدرجات المتوسطة',
-        'فتح التيكي تاكا، الضغط العكسي (Gegenpress)، والبناء من الخلف',
-        'فتح أدوار اللاعبين التكتيكية: المهاجم الوهمي، المهاجم المحطة، الأظهرة المتداخلة',
-        'فتح 8 تشكيلات هجومية متقدمة (3-4-3، 4-1-2-1-2، 4-3-2-1)',
-        'رفع تصنيفك العالمي للمدربين (+60 نقطة)',
-      ],
-    },
-    A: {
-      id: 'A',
-      codeName: 'CAF-A',
-      arabicTitle: 'رخصة النخبة التكتيكية A',
-      badgeName: 'CAF / UEFA A',
-      rankIndex: 4,
-      tierDescription: 'شهادة القيادة العليا لإدارة أندية الدوري الممتاز والمحترفين.',
-      unlockedClubsDescription: 'أندية الدرجة الأولى والدوري الممتاز والأندية الكبيرة محلياً.',
-      requirements: {
-        minLevel: 7,
-        minMatches: 45,
-        minWins: 22,
-        minWinRate: 48,
-        minTrophies: 1, // تتطلب تحقيق بطولة أو صعود رسمي واحد على الأقل
-        minReputation: 65,
-        minPlayersDeveloped: 5,
-        minActivePlayMinutes: 600, // 10 ساعات لعب فعلي (بدلاً من 50 ساعة)
-        examCost: 350000,
-      },
-      perks: [
-        'أهلية تدريب أندية الدوري الممتاز رسمياً',
-        'فتح تشكيل 3-2-4-1 لمربع غوارديولا، والتحكم بالاستحواذ، والدفاع الوقائي',
-        'فتح مصائد الضغط التكتيكية (مصيدة الأطراف، مصيدة العمق)',
-        'فتح منظومات الدفاع الخماسي الحصين (5-3-2، 5-4-1، 5-2-3)',
-        'قفزة قوية في التصنيف العالمي (+120 نقطة)',
-      ],
-    },
-    PRO: {
-      id: 'PRO',
-      codeName: 'FIFA-PRO',
-      arabicTitle: 'رخصة المحترفين القارية والدولية PRO',
-      badgeName: 'FIFA / Continental PRO',
-      rankIndex: 5,
-      tierDescription: 'أعلى وسام تدريبي قاري لقيادة عمالقة القارة والبطولات الدولية.',
-      unlockedClubsDescription: 'الأندية الكبيرة، أبطال القارات، وأندية الدوريات الأوروبية القوية.',
-      requirements: {
-        minLevel: 10,
-        minMatches: 70,
-        minWins: 38,
-        minWinRate: 54,
-        minTrophies: 2, // تتطلب بطولتين رسميتين على الأقل
-        minReputation: 80,
-        minPlayersDeveloped: 8,
-        minActivePlayMinutes: 900, // 15 ساعة لعب فعلي (بدلاً من 80 ساعة)
-        examCost: 850000,
-      },
-      perks: [
-        'أهلية تدريب كبرى أندية إفريقيا وآسيا وأوروبا',
-        'فتح اللعب التموضعي الفائق (Juego de Posición)',
-        'فتح تشكيل 3-4-3 ماسة كرويف و 3-2-2-3 لخبراء التموضع',
-        'فتح محفزات الضغط وتكتيكات سيناريوهات المباراة (حماية التقدم / مطاردة النتيجة)',
-        'قفزة ضخمة في التصنيف العالمي (+250 نقطة)',
-      ],
-    },
-    ELITE: {
-      id: 'ELITE',
-      codeName: 'WORLD-ELITE',
-      arabicTitle: 'رخصة النخبة العالمية للمدربين ELITE',
-      badgeName: 'World Elite Master',
-      rankIndex: 6,
-      tierDescription: 'المستوى الأسطوري الأعلى في تاريخ كرة القدم لصفوة مدربي كوكب الأرض.',
-      unlockedClubsDescription: 'أقوى أندية العالم (ريال مدريد، مانشستر سيتي، بايرن ميونخ) والمنتخبات العالمية.',
-      requirements: {
-        minLevel: 14,
-        minMatches: 100,
-        minWins: 60,
-        minWinRate: 58,
-        minTrophies: 4, // 4 ألقاب وبطولات كبرى
-        minReputation: 90,
-        minPlayersDeveloped: 12,
-        minActivePlayMinutes: 1200, // 20 ساعة لعب فعلي (بدلاً من 120 ساعة)
-        examCost: 2000000,
-      },
-      perks: [
-        'الوصول الحصري لأقوى عروض التدريب العالمية ونخبة الأندية الأوروبية',
-        'فتح المنظومة الهجينة المتكيفة لحظياً (Tactical Mastermind)',
-        'فتح تشكيل 2-3-5 الهرم التكتيكي المعكوس و 4-2-1-3 المتغيرة أوتوماتيكياً',
-        'فتح نظام ابتكار الفلسفة التكتيكية الخاصة وتسميتها باسمك',
-        'مكافأة تصنيف عالمي هائلة (+400 نقطة)',
-      ],
-    },
+    BASIC: BASIC_LICENSE_DEF,
+    PREMIER: PREMIER_LICENSE_DEF,
+    CONTINENTAL: CONTINENTAL_LICENSE_DEF,
+    LEGENDARY: LEGENDARY_LICENSE_DEF,
+    // Legacy fallback aliases mapped to BASIC so no legacy lookup ever fails
+    D: BASIC_LICENSE_DEF,
+    C: BASIC_LICENSE_DEF,
+    B: BASIC_LICENSE_DEF,
+    A: PREMIER_LICENSE_DEF,
+    PRO: CONTINENTAL_LICENSE_DEF,
+    ELITE: LEGENDARY_LICENSE_DEF,
   } as Record<CoachingLicenseTier, LicenseConfigItem>,
 
   // ----------------------------------------------------
-  // B. CLUB PRESTIGE TIERS (منطقية تصنيف الأندية)
+  // B. CLUB PRESTIGE TIERS (منطقية تصنيف الأندية وفق الرخص الـ 4)
   // ----------------------------------------------------
   CLUB_TIERS: {
     tier_dc: {
       id: 'tier_dc',
       tierLevel: 1,
-      nameArabic: 'أندية الدرجات الدنيا والتأسيسية (D/C)',
-      minLicense: 'D',
+      nameArabic: 'أندية الدرجة الرابعة والثالثة العربية (Basic)',
+      minLicense: 'BASIC',
       minReputation: 0,
       minTrophies: 0,
       minMatches: 0,
       minWinRate: 0,
       minManagerLevel: 1,
-      description: 'أندية الهواة والمناطق والدرجة الرابعة ذات الإمكانيات المحدودة.',
-      exampleClubs: 'أندية الدرجة الرابعة، مراكز الشباب، وأندية الهواة',
+      description: 'أندية الدرجات الدنيا (الرابعة والثالثة) في الدوريات العربية.',
+      exampleClubs: 'أندية الدرجة الرابعة والثالثة في الدوريات العربية',
     },
     tier_cb: {
       id: 'tier_cb',
       tierLevel: 2,
-      nameArabic: 'أندية الدرجات المتوسطة والدنيا (C/B)',
-      minLicense: 'C',
-      minReputation: 25,
+      nameArabic: 'أندية الدرجة الثانية العربية (Basic)',
+      minLicense: 'BASIC',
+      minReputation: 0,
       minTrophies: 0,
-      minMatches: 8,
-      minWinRate: 35,
-      minManagerLevel: 2,
-      description: 'أندية الدرجة الثالثة ومشاريع الصعود الصاعدة الطامحة للاحتراف.',
-      exampleClubs: 'أندية الدرجة الثالثة، أندية القسم الثاني (ب)',
+      minMatches: 0,
+      minWinRate: 0,
+      minManagerLevel: 1,
+      description: 'أندية الدرجة الثانية وما دونها في الدوريات العربية.',
+      exampleClubs: 'أندية الدرجة الثانية ودوري المحترفين العربي',
     },
     tier_ba: {
       id: 'tier_ba',
-      tierLevel: 3,
-      nameArabic: 'أندية الدرجة الأولى والمتوسطة (B/A)',
-      minLicense: 'B',
-      minReputation: 45,
+      tierLevel: 2,
+      nameArabic: 'متصدرو الدرجة الثانية العربية (Basic)',
+      minLicense: 'BASIC',
+      minReputation: 0,
       minTrophies: 0,
-      minMatches: 20,
-      minWinRate: 42,
-      minManagerLevel: 4,
-      description: 'أندية الدرجة الثانية القوية والمتنافسة بضراوة على الصعود للممتاز.',
-      exampleClubs: 'متصدرو دوري المحترفين (الدرجة الثانية)',
+      minMatches: 0,
+      minWinRate: 0,
+      minManagerLevel: 1,
+      description: 'أندية الدرجة الثانية المتنافسة على الصعود في الدوريات العربية.',
+      exampleClubs: 'متصدرو دوري الدرجة الثانية العربي',
     },
     tier_apro: {
       id: 'tier_apro',
-      tierLevel: 4,
-      nameArabic: 'الأندية الكبيرة محلياً والدوري الممتاز (A/Pro)',
-      minLicense: 'A',
-      minReputation: 65,
-      minTrophies: 1,
-      minMatches: 40,
-      minWinRate: 48,
-      minManagerLevel: 7,
-      description: 'أندية الدوري الممتاز القوية والمنافسة محلياً وقارياً.',
-      exampleClubs: 'الأهلي، الزمالك، بيراميدز، الهلال، النصر، الوداد، الترجي',
+      tierLevel: 3,
+      nameArabic: 'أندية الدوريات الممتازة العربية (Premier)',
+      minLicense: 'PREMIER',
+      minReputation: 0,
+      minTrophies: 0,
+      minMatches: 0,
+      minWinRate: 0,
+      minManagerLevel: 1,
+      description: 'جميع أندية الدوريات الممتازة العربية دون قيود.',
+      exampleClubs: 'الأهلي، الزمالك، بيراميدز، الهلال، النصر، الوداد، الترجي، السد، العين',
     },
     tier_pro: {
       id: 'tier_pro',
-      tierLevel: 5,
-      nameArabic: 'الأندية القارية والأوروبية القوية (Pro)',
-      minLicense: 'PRO',
-      minReputation: 78,
-      minTrophies: 2,
-      minMatches: 60,
-      minWinRate: 52,
-      minManagerLevel: 10,
-      description: 'أندية البطولات القارية وأندية الدوريات الأوروبية الخمس الكبرى المستقرة.',
-      exampleClubs: 'إشبيلية، بورتو، بنفيكا، روما، أستون فيلا، مارسيليا',
+      tierLevel: 4,
+      nameArabic: 'أندية أوروبا والعالم - غير النخبة (Continental)',
+      minLicense: 'CONTINENTAL',
+      minReputation: 0,
+      minTrophies: 0,
+      minMatches: 0,
+      minWinRate: 0,
+      minManagerLevel: 1,
+      description: 'أندية أوروبا وبقية قارات العالم، باستثناء فرق النخبة والقمة.',
+      exampleClubs: 'أندية الدوريات الأوروبية والعالمية المتوسطة والطموحة',
     },
     tier_elite: {
       id: 'tier_elite',
-      tierLevel: 6,
-      nameArabic: 'نخبة أندية العالم (World Elite)',
-      minLicense: 'ELITE',
-      minReputation: 88,
-      minTrophies: 3,
-      minMatches: 80,
-      minWinRate: 58,
-      minManagerLevel: 13,
-      description: 'عمالقة العالم التاريخيون الأكثر تتويجاً وهيمنة في كوكب الأرض.',
+      tierLevel: 5,
+      nameArabic: 'عمالقة ونخبة أوروبا والعالم (Legendary)',
+      minLicense: 'LEGENDARY',
+      minReputation: 0,
+      minTrophies: 0,
+      minMatches: 0,
+      minWinRate: 0,
+      minManagerLevel: 1,
+      description: 'كبرى فرق النخبة والعمالقة في أوروبا والعالم دون أي قيود.',
       exampleClubs: 'ريال مدريد، مانشستر سيتي، بايرن ميونخ، باريس سان جيرمان، برشلونة، ليفربول',
     },
   } as Record<ClubPrestigeTier, ClubTierDefinition>,
@@ -341,17 +329,6 @@ export const CAREER_CONFIG = {
       rewardXp: 250,
       rewardCash: 40000,
       badgeIcon: 'Flame',
-    },
-    {
-      id: 'ms_license_c',
-      title: 'نيل رخصة التدريب C 📜',
-      description: 'اجتز شروط الاعتماد واحصل على رخصة التدريب القارية C.',
-      category: 'short',
-      targetValue: 1,
-      rewardReputation: 5,
-      rewardXp: 350,
-      rewardCash: 50000,
-      badgeIcon: 'Award',
     },
     {
       id: 'ms_develop_prospect',
@@ -400,14 +377,14 @@ export const CAREER_CONFIG = {
       badgeIcon: 'Trophy',
     },
     {
-      id: 'ms_license_b',
-      title: 'الارتقاء إلى رخصة B 🎓',
-      description: 'حقق متطلبات الرخصة المتقدمة B واجتز الاختبار بنجاح.',
+      id: 'ms_license_a',
+      title: 'نيل الرخصة الممتازة 🎓',
+      description: 'احصل على الرخصة الممتازة (Premier License) لتدريب أندية الدوريات الممتازة العربية.',
       category: 'mid',
       targetValue: 1,
-      rewardReputation: 6,
-      rewardXp: 450,
-      rewardCash: 80000,
+      rewardReputation: 10,
+      rewardXp: 800,
+      rewardCash: 250000,
       badgeIcon: 'Award',
     },
     {
@@ -420,17 +397,6 @@ export const CAREER_CONFIG = {
       rewardXp: 550,
       rewardCash: 90000,
       badgeIcon: 'Shield',
-    },
-    {
-      id: 'ms_license_a',
-      title: 'الرخصة الذهبية A 👑',
-      description: 'ارتقِ إلى مصاف مدربي الدرجة الأولى بنيل رخصة A.',
-      category: 'mid',
-      targetValue: 1,
-      rewardReputation: 10,
-      rewardXp: 800,
-      rewardCash: 200000,
-      badgeIcon: 'Award',
     },
     {
       id: 'ms_giant_slayer',
@@ -469,8 +435,8 @@ export const CAREER_CONFIG = {
     },
     {
       id: 'ms_license_pro',
-      title: 'رخصة المحترفين PRO 🌟',
-      description: 'احصل على رخصة المحترفين الدولية PRO.',
+      title: 'الرخصة الأوروبية 🌟',
+      description: 'احصل على الرخصة الأوروبية (Continental License) لفتح دوريات أوروبا والعالم.',
       category: 'long',
       targetValue: 1,
       rewardReputation: 14,
@@ -502,8 +468,8 @@ export const CAREER_CONFIG = {
     },
     {
       id: 'ms_license_elite',
-      title: 'رخصة النخبة العالمية ELITE 👑🌍',
-      description: 'احصل على أسمى رخصة تدريبية في تاريخ كرة القدم (World Elite Master).',
+      title: 'الرخصة الأسطورية (Legendary License) 👑🌍',
+      description: 'احصل على الرخصة الأسطورية لقيادة كبرى فرق النخبة والعمالقة في أوروبا والعالم.',
       category: 'long',
       targetValue: 1,
       rewardReputation: 20,
@@ -526,8 +492,377 @@ export const CAREER_CONFIG = {
 };
 
 // ============================================================================
-// 2. LICENSE EVALUATION & CHECKLIST (فحص الأهلية وشروط الرخص)
+// 2. LICENSE NORMALIZATION, ELIGIBILITY & LEAGUE ELIGIBILITY SERVICE
 // ============================================================================
+
+export function normalizeCoachingLicense(lic?: string | null): 'BASIC' | 'PREMIER' | 'CONTINENTAL' | 'LEGENDARY' {
+  if (!lic) return 'BASIC';
+  const upper = String(lic).toUpperCase().trim();
+  if (upper === 'BASIC' || upper === 'PREMIER' || upper === 'CONTINENTAL' || upper === 'LEGENDARY') {
+    return upper;
+  }
+  // Migration rule: reset any old license names/identifiers ('D', 'C', 'B', 'A', 'PRO', 'ELITE') to 'BASIC'
+  return 'BASIC';
+}
+
+export function getLicenseTitleArabic(lic?: string | null): string {
+  const norm = normalizeCoachingLicense(lic);
+  switch (norm) {
+    case 'LEGENDARY':
+      return 'الرخصة الأسطورية';
+    case 'CONTINENTAL':
+      return 'الرخصة الأوروبية';
+    case 'PREMIER':
+      return 'الرخصة الممتازة';
+    case 'BASIC':
+    default:
+      return 'الرخصة الأولية';
+  }
+}
+
+export function getLicenseRank(license: CoachingLicenseTier | string | undefined | null): number {
+  const norm = normalizeCoachingLicense(license);
+  switch (norm) {
+    case 'BASIC':
+      return 1;
+    case 'PREMIER':
+      return 2;
+    case 'CONTINENTAL':
+      return 3;
+    case 'LEGENDARY':
+      return 4;
+    default:
+      return 1;
+  }
+}
+
+export function getNextLicense(current: CoachingLicenseTier | string | undefined | null): 'PREMIER' | 'CONTINENTAL' | 'LEGENDARY' | null {
+  const norm = normalizeCoachingLicense(current);
+  switch (norm) {
+    case 'BASIC':
+      return 'PREMIER';
+    case 'PREMIER':
+      return 'CONTINENTAL';
+    case 'CONTINENTAL':
+      return 'LEGENDARY';
+    case 'LEGENDARY':
+      return null;
+    default:
+      return 'PREMIER';
+  }
+}
+
+export const ARAB_COUNTRIES_LIST = [
+  'مصر',
+  'السعودية',
+  'المملكة العربية السعودية',
+  'الإمارات',
+  'قطر',
+  'المغرب',
+  'تونس',
+  'الجزائر',
+  'الكويت',
+  'الأردن',
+  'العراق',
+  'البحرين',
+  'عمان',
+];
+
+export const ARAB_LEAGUE_PREFIXES = [
+  'egy_',
+  'ksa_',
+  'uae_',
+  'qat_',
+  'mar_',
+  'tun_',
+  'alg_',
+  'arab_',
+];
+
+export function isArabLeagueOrCountry(country?: string, leagueId?: string): boolean {
+  if (leagueId) {
+    const lid = leagueId.toLowerCase();
+    if (ARAB_LEAGUE_PREFIXES.some(p => lid.startsWith(p))) {
+      return true;
+    }
+    if (lid.startsWith('eng_') || lid.startsWith('esp_') || lid.startsWith('ita_') || lid.startsWith('ger_') || lid.startsWith('fra_')) {
+      return false;
+    }
+  }
+  if (country) {
+    return ARAB_COUNTRIES_LIST.some(c => country.includes(c));
+  }
+  return false;
+}
+
+export const ELITE_GLOBAL_CLUB_NAMES = [
+  'ريال مدريد',
+  'برشلونة',
+  'أتلتيكو مدريد',
+  'مانشستر سيتي',
+  'ليفربول',
+  'أرسنال',
+  'تشيلسي',
+  'مانشستر يونايتد',
+  'بايرن ميونخ',
+  'بوروسيا دورتموند',
+  'باريس سان جيرمان',
+  'إنتر ميلان',
+  'إيه سي ميلان',
+  'ميلان',
+  'يوفنتوس',
+];
+
+export function isEliteGlobalClub(club: Club, league?: LeagueDefinition): boolean {
+  const country = league?.country || (club as any).country || '';
+  const leagueId = league?.id || (club as any).leagueId || '';
+  if (isArabLeagueOrCountry(country, leagueId)) {
+    return false; // Arab Premier League clubs are unlocked by PREMIER license without restrictions
+  }
+  const tier = league?.tier ?? league?.divisionTier ?? (club as any).divisionTier ?? 1;
+  const rep = club.reputation || 50;
+  if (ELITE_GLOBAL_CLUB_NAMES.some(name => club.name.includes(name))) {
+    return true;
+  }
+  return tier === 1 && rep >= 85;
+}
+
+export function getRequiredLicenseForLeague(league: LeagueDefinition): 'BASIC' | 'PREMIER' | 'CONTINENTAL' | 'LEGENDARY' {
+  const isArab = isArabLeagueOrCountry(league.country, league.id);
+  const tier = league.tier ?? league.divisionTier ?? 1;
+  if (isArab) {
+    return tier >= 2 ? 'BASIC' : 'PREMIER';
+  }
+  return 'CONTINENTAL';
+}
+
+export function getRequiredLicenseForClub(club: Club, league?: LeagueDefinition): 'BASIC' | 'PREMIER' | 'CONTINENTAL' | 'LEGENDARY' {
+  const country = league?.country || (club as any).country || 'مصر';
+  const leagueId = league?.id || (club as any).leagueId || '';
+  const tier = league?.tier ?? league?.divisionTier ?? (club as any).divisionTier ?? 1;
+  const isArab = isArabLeagueOrCountry(country, leagueId);
+
+  if (isArab) {
+    return tier >= 2 ? 'BASIC' : 'PREMIER';
+  }
+  if (isEliteGlobalClub(club, league)) {
+    return 'LEGENDARY';
+  }
+  return 'CONTINENTAL';
+}
+
+export function isClubEligibleForManager(
+  club: Club,
+  league?: LeagueDefinition,
+  managerLicense?: string | null
+): {
+  allowed: boolean;
+  requiredLicense: 'BASIC' | 'PREMIER' | 'CONTINENTAL' | 'LEGENDARY';
+  reasonArabic?: string;
+} {
+  const activeLic = normalizeCoachingLicense(managerLicense);
+  const reqLic = getRequiredLicenseForClub(club, league);
+  const allowed = getLicenseRank(activeLic) >= getLicenseRank(reqLic);
+  return {
+    allowed,
+    requiredLicense: reqLic,
+    reasonArabic: allowed ? undefined : `يتطلب ${CAREER_CONFIG.LICENSES[reqLic].arabicTitle}`,
+  };
+}
+
+export interface LeagueEligibilityResult {
+  leagueId: string;
+  leagueName: string;
+  country: string;
+  tier: number;
+  isArabLeague: boolean;
+  isUnlocked: boolean;
+  requiredLicense: 'BASIC' | 'PREMIER' | 'CONTINENTAL' | 'LEGENDARY';
+  requiredLicenseTitle: string;
+  requiredLicenseTitleArabic: string;
+  purchaseCost: number;
+  annualRenewalFee: number;
+  lockReasonArabic?: string;
+  hasRestrictedEliteClubs: boolean;
+  eliteClubsLocked: boolean;
+  unlockedClubsCount: number;
+  totalClubsCount: number;
+  eligibleClubs: Club[];
+  restrictedEliteClubs: Club[];
+}
+
+export function evaluateLeagueEligibilityForManager(
+  league: LeagueDefinition,
+  managerLicense?: string | null
+): LeagueEligibilityResult {
+  const activeLic = normalizeCoachingLicense(managerLicense);
+  const activeRank = getLicenseRank(activeLic);
+  const requiredLicense = getRequiredLicenseForLeague(league);
+  const requiredRank = getLicenseRank(requiredLicense);
+  const reqConfig = CAREER_CONFIG.LICENSES[requiredLicense];
+  const isUnlocked = activeRank >= requiredRank;
+  const isArab = isArabLeagueOrCountry(league.country, league.id);
+  const tier = league.tier ?? league.divisionTier ?? 1;
+
+  const teams = Array.isArray(league.teams) ? league.teams : [];
+  const eligibleClubs: Club[] = [];
+  const restrictedEliteClubs: Club[] = [];
+
+  for (const club of teams) {
+    const clubReqLic = getRequiredLicenseForClub(club, league);
+    if (activeRank >= getLicenseRank(clubReqLic)) {
+      eligibleClubs.push(club);
+    } else {
+      restrictedEliteClubs.push(club);
+    }
+  }
+
+  let lockReasonArabic: string | undefined;
+  if (!isUnlocked) {
+    lockReasonArabic = `يتطلب ${reqConfig.arabicTitle} لفتح هذا الدوري`;
+  }
+
+  return {
+    leagueId: league.id,
+    leagueName: league.name,
+    country: league.country,
+    tier,
+    isArabLeague: isArab,
+    isUnlocked,
+    requiredLicense,
+    requiredLicenseTitle: reqConfig.arabicTitle,
+    requiredLicenseTitleArabic: reqConfig.arabicTitle,
+    purchaseCost: reqConfig.purchaseCost,
+    annualRenewalFee: reqConfig.annualRenewalFee,
+    lockReasonArabic,
+    hasRestrictedEliteClubs: restrictedEliteClubs.length > 0,
+    eliteClubsLocked: restrictedEliteClubs.length > 0,
+    unlockedClubsCount: eligibleClubs.length,
+    totalClubsCount: teams.length,
+    eligibleClubs,
+    restrictedEliteClubs,
+  };
+}
+
+/**
+ * Executes the exact 4-step End-of-Season Financial Settlement & Renewal:
+ * 1) Calculate and deposit end-of-season bonus into manager's personalWallet.
+ * 2) Execute deduction of the annual renewal fee for the current license.
+ * 3) If personalWallet is insufficient, automatically downgrade to the highest license tier
+ *    covered by the balance (or back to free BASIC) with a warning notification.
+ * 4) Return settled active license & breakdown for opening the League Selection Screen.
+ */
+export function settleEndOfSeasonLicenseAndBonus(
+  manager: ManagerProfile,
+  seasonBonusAmount: number,
+  seasonNumber: number
+): {
+  updatedManager: ManagerProfile;
+  settlement: NonNullable<import('../types/game').SeasonEndSummary['licenseSettlement']>;
+} {
+  const previousLicense = normalizeCoachingLicense(manager.license);
+  const previousConfig = CAREER_CONFIG.LICENSES[previousLicense];
+  const walletBeforeSettlement = Math.max(0, manager.personalWallet || 0);
+  const bonusToDeposit = Math.max(0, Math.round(seasonBonusAmount || 0));
+
+  // Step 1: Deposit end-of-season bonus & salary reward into Manager Personal Balance
+  const walletAfterBonus = walletBeforeSettlement + bonusToDeposit;
+  const transactions = Array.isArray(manager.financialTransactions) ? [...manager.financialTransactions] : [];
+
+  if (bonusToDeposit > 0) {
+    transactions.unshift({
+      id: `tx_eos_bonus_s${seasonNumber}_${Date.now()}`,
+      date: `ختام الموسم ${seasonNumber}`,
+      amount: bonusToDeposit,
+      type: 'trophy_bonus',
+      description: `مكافأة وراتب ختام الموسم ${seasonNumber} (إيداع في الميزانية الشخصية للمدرب)`,
+    });
+  }
+
+  // Step 2 & 3: Deduct annual renewal fee for current license, or downgrade if insufficient
+  const renewalRequired = previousConfig.annualRenewalFee;
+  let activeLicense: 'BASIC' | 'PREMIER' | 'CONTINENTAL' | 'LEGENDARY' = previousLicense;
+  let renewalDeducted = 0;
+  let wasDowngraded = false;
+  let messageArabic = '';
+
+  if (walletAfterBonus >= renewalRequired) {
+    renewalDeducted = renewalRequired;
+    if (renewalDeducted > 0) {
+      transactions.unshift({
+        id: `tx_eos_renewal_s${seasonNumber}_${Date.now() + 1}`,
+        date: `بداية الموسم ${seasonNumber + 1}`,
+        amount: renewalDeducted,
+        type: 'license_renewal',
+        description: `خصم رسوم التجديد السنوية لـ ${previousConfig.arabicTitle}`,
+      });
+      messageArabic = `تم إيداع مكافأة نهاية الموسم (${bonusToDeposit.toLocaleString()}$) وتجديد ${previousConfig.arabicTitle} بنجاح مقابل ${renewalDeducted.toLocaleString()}$.`;
+    } else {
+      messageArabic = `تم إيداع مكافأة نهاية الموسم (${bonusToDeposit.toLocaleString()}$). ${previousConfig.arabicTitle} مجانية ومفعّلة للموسم الجديد.`;
+    }
+  } else {
+    // Insufficient balance -> downgrade to highest license whose renewal fee is covered by walletAfterBonus
+    wasDowngraded = true;
+    const downgradeCandidates: ('CONTINENTAL' | 'PREMIER' | 'BASIC')[] = ['CONTINENTAL', 'PREMIER', 'BASIC'];
+    const currentRank = getLicenseRank(previousLicense);
+    for (const candidate of downgradeCandidates) {
+      if (getLicenseRank(candidate) < currentRank) {
+        const candFee = CAREER_CONFIG.LICENSES[candidate].annualRenewalFee;
+        if (walletAfterBonus >= candFee) {
+          activeLicense = candidate;
+          renewalDeducted = candFee;
+          break;
+        }
+      }
+    }
+
+    const activeConfig = CAREER_CONFIG.LICENSES[activeLicense];
+    if (renewalDeducted > 0) {
+      transactions.unshift({
+        id: `tx_eos_renewal_downgrade_s${seasonNumber}_${Date.now() + 1}`,
+        date: `بداية الموسم ${seasonNumber + 1}`,
+        amount: renewalDeducted,
+        type: 'license_renewal',
+        description: `تجديد تلقائي مخفض لـ ${activeConfig.arabicTitle} لعدم كفاية الرصيد لتجديد ${previousConfig.arabicTitle}`,
+      });
+    }
+
+    messageArabic = `⚠️ تحذير مالي: رصيد ميزانيتك الشخصية (${walletAfterBonus.toLocaleString()}$) لم يكفِ لسداد رسوم التجديد السنوية لـ ${previousConfig.arabicTitle} (${renewalRequired.toLocaleString()}$). تم خفض رخصتك تلقائياً إلى ${activeConfig.arabicTitle}${renewalDeducted > 0 ? ` وخصم ${renewalDeducted.toLocaleString()}$` : ' (المجانية)'}.`;
+  }
+
+  const walletAfterSettlement = Math.max(0, walletAfterBonus - renewalDeducted);
+  const activeConfig = CAREER_CONFIG.LICENSES[activeLicense];
+
+  const updatedManager: ManagerProfile = {
+    ...manager,
+    license: activeLicense,
+    personalWallet: walletAfterSettlement,
+    careerEarnings: (manager.careerEarnings || 0) + bonusToDeposit,
+    totalBonusesEarned: (manager.totalBonusesEarned || 0) + bonusToDeposit,
+    financialTransactions: transactions.slice(0, 60),
+    lastSettledSeasonNumber: seasonNumber,
+  };
+
+  return {
+    updatedManager,
+    settlement: {
+      previousLicense,
+      previousLicenseTitle: previousConfig.arabicTitle,
+      activeLicense,
+      activeLicenseAfterRenewal: activeLicense,
+      activeLicenseTitle: activeConfig.arabicTitle,
+      seasonBonusDeposited: bonusToDeposit,
+      renewalFeeRequired: renewalRequired,
+      renewalFeeDeducted: renewalDeducted,
+      wasDowngraded,
+      walletBeforeSettlement,
+      walletAfterSettlement,
+      personalWalletAfter: walletAfterSettlement,
+      messageArabic,
+      warningMessage: wasDowngraded ? messageArabic : undefined,
+    },
+  };
+}
 
 export interface LicenseChecklistItem {
   key: string;
@@ -537,8 +872,8 @@ export interface LicenseChecklistItem {
   isMet: boolean;
   unit?: string;
   progressPercent: number; // 0 to 100%
-  displayCurrent: string; // Formatted current (e.g. "42", "50%", "12h")
-  displayTarget: string; // Formatted target (e.g. "70", "55%", "20h")
+  displayCurrent: string;
+  displayTarget: string;
 }
 
 export interface LicenseEvaluationResult {
@@ -550,7 +885,7 @@ export interface LicenseEvaluationResult {
   missingCount: number;
   walletBalance: number;
   hasEnoughCash: boolean;
-  overallProgressPercent: number; // Overall progression towards next license (0 - 100%)
+  overallProgressPercent: number;
   activePlayMinutes: number;
   activePlayFormatted: string;
 }
@@ -564,37 +899,13 @@ export function formatPlayTimeHours(minutes: number): string {
   return `${hours}h ${remainingMinutes}m`;
 }
 
-export function getLicenseRank(license: CoachingLicenseTier | string): number {
-  switch (license) {
-    case 'D': return 1;
-    case 'C': return 2;
-    case 'B': return 3;
-    case 'A': return 4;
-    case 'PRO': return 5;
-    case 'ELITE': return 6;
-    default: return 1;
-  }
-}
-
-export function getNextLicense(current: CoachingLicenseTier | string): CoachingLicenseTier | null {
-  switch (current) {
-    case 'D': return 'C';
-    case 'C': return 'B';
-    case 'B': return 'A';
-    case 'A': return 'PRO';
-    case 'PRO': return 'ELITE';
-    case 'ELITE': return null;
-    default: return 'C';
-  }
-}
-
 export function evaluateLicenseEligibility(
   manager: ManagerProfile,
-  userClub: Club | null
+  _userClub: Club | null
 ): LicenseEvaluationResult {
-  const currentLicense: CoachingLicenseTier = (manager.license as CoachingLicenseTier) || 'D';
+  const currentLicense = normalizeCoachingLicense(manager.license);
   const nextLicense = getNextLicense(currentLicense);
-
+  const wallet = manager.personalWallet || 0;
   const activePlayMinutes = Math.max(0, manager.totalPlayTimeMinutes || 0);
   const activePlayFormatted = formatPlayTimeHours(activePlayMinutes);
 
@@ -606,7 +917,7 @@ export function evaluateLicenseEligibility(
       canUpgrade: false,
       checklist: [],
       missingCount: 0,
-      walletBalance: manager.personalWallet || 0,
+      walletBalance: wallet,
       hasEnoughCash: true,
       overallProgressPercent: 100,
       activePlayMinutes,
@@ -615,149 +926,45 @@ export function evaluateLicenseEligibility(
   }
 
   const config = CAREER_CONFIG.LICENSES[nextLicense];
-  const req = config.requirements;
-
-  // Real stats resolution (combining manager career + current club if higher)
-  const matchesManaged = Math.max(manager.matchesManaged || 0, userClub?.stats?.played || 0);
-  const wins = Math.max(manager.wins || 0, userClub?.stats?.won || 0);
-  const winRate = matchesManaged > 0 ? Math.round((wins / matchesManaged) * 100) : 0;
-  const level = manager.level || 1;
-  const reputation = manager.reputation || 15;
-  const trophiesCount =
-    (manager.leagueTitles || 0) + (manager.cupTitles || 0) ||
-    (Array.isArray(manager.trophies) ? manager.trophies.length : 0);
-  const playersDeveloped = manager.totalPlayersDeveloped || Math.floor((manager.developmentPoints || 0) / 15) || 0;
-  const wallet = manager.personalWallet || 0;
-
-  // Compute individual progress ratios (0 - 100%)
-  const matchesProgress = req.minMatches === 0 ? 100 : Math.min(100, Math.round((matchesManaged / req.minMatches) * 100));
-  const winsProgress = req.minWins === 0 ? 100 : Math.min(100, Math.round((wins / req.minWins) * 100));
-  const winRateProgress = req.minWinRate === 0 ? 100 : Math.min(100, Math.round((winRate / req.minWinRate) * 100));
-  const trophiesProgress = req.minTrophies === 0 ? 100 : Math.min(100, Math.round((trophiesCount / req.minTrophies) * 100));
-  const playersProgress = req.minPlayersDeveloped === 0 ? 100 : Math.min(100, Math.round((playersDeveloped / req.minPlayersDeveloped) * 100));
-  const activePlayProgress = req.minActivePlayMinutes === 0 ? 100 : Math.min(100, Math.round((activePlayMinutes / req.minActivePlayMinutes) * 100));
-  const levelProgress = req.minLevel <= 1 ? 100 : Math.min(100, Math.round((level / req.minLevel) * 100));
-  const repProgress = req.minReputation === 0 ? 100 : Math.min(100, Math.round((reputation / req.minReputation) * 100));
-  const walletProgress = req.examCost === 0 ? 100 : Math.min(100, Math.round((wallet / req.examCost) * 100));
+  const cost = config.purchaseCost;
+  const walletProgress = cost === 0 ? 100 : Math.min(100, Math.round((wallet / cost) * 100));
+  const hasEnoughCash = wallet >= cost;
 
   const checklist: LicenseChecklistItem[] = [
     {
-      key: 'matches',
-      label: 'المباريات الفعلية (Matches)',
-      current: matchesManaged,
-      target: req.minMatches,
-      displayCurrent: `${matchesManaged}`,
-      displayTarget: `${req.minMatches}`,
-      unit: 'مباراة',
-      isMet: matchesManaged >= req.minMatches,
-      progressPercent: matchesProgress,
-    },
-    {
-      key: 'wins',
-      label: 'الانتصارات الرسمية (Wins)',
-      current: wins,
-      target: req.minWins,
-      displayCurrent: `${wins}`,
-      displayTarget: `${req.minWins}`,
-      unit: 'فوز',
-      isMet: wins >= req.minWins,
-      progressPercent: winsProgress,
-    },
-    {
-      key: 'win_rate',
-      label: 'نسبة الفوز (Win Rate)',
-      current: `${winRate}%`,
-      target: `${req.minWinRate}%`,
-      displayCurrent: `${winRate}%`,
-      displayTarget: `${req.minWinRate}%`,
-      isMet: winRate >= req.minWinRate,
-      progressPercent: winRateProgress,
-    },
-    {
-      key: 'trophies',
-      label: 'الألقاب والإنجازات (Titles)',
-      current: trophiesCount,
-      target: req.minTrophies,
-      displayCurrent: `${trophiesCount}`,
-      displayTarget: `${req.minTrophies}`,
-      unit: 'لقب',
-      isMet: trophiesCount >= req.minTrophies,
-      progressPercent: trophiesProgress,
-    },
-    {
-      key: 'players',
-      label: 'تطوير اللاعبين (Player Development)',
-      current: playersDeveloped,
-      target: req.minPlayersDeveloped,
-      displayCurrent: `${playersDeveloped}`,
-      displayTarget: `${req.minPlayersDeveloped}`,
-      unit: 'لاعب',
-      isMet: playersDeveloped >= req.minPlayersDeveloped,
-      progressPercent: playersProgress,
-    },
-    {
-      key: 'active_play_time',
-      label: 'وقت اللعب الفعلي (Active Play Time)',
-      current: formatPlayTimeHours(activePlayMinutes),
-      target: formatPlayTimeHours(req.minActivePlayMinutes),
-      displayCurrent: formatPlayTimeHours(activePlayMinutes),
-      displayTarget: formatPlayTimeHours(req.minActivePlayMinutes),
-      unit: '',
-      isMet: activePlayMinutes >= req.minActivePlayMinutes,
-      progressPercent: activePlayProgress,
-    },
-    {
-      key: 'level',
-      label: 'المستوى التدريبي (Manager Level)',
-      current: `المستوى ${level}`,
-      target: `المستوى ${req.minLevel}`,
-      displayCurrent: `${level}`,
-      displayTarget: `${req.minLevel}`,
-      isMet: level >= req.minLevel,
-      progressPercent: levelProgress,
-    },
-    {
-      key: 'reputation',
-      label: 'السمعة التراكمية (Manager Reputation)',
-      current: reputation,
-      target: req.minReputation,
-      displayCurrent: `${reputation}`,
-      displayTarget: `${req.minReputation}`,
-      unit: 'نقطة',
-      isMet: reputation >= req.minReputation,
-      progressPercent: repProgress,
-    },
-    {
-      key: 'exam_fee',
-      label: 'رسوم الاختبار (Exam Fee)',
-      current: `${wallet.toLocaleString()} ج.م`,
-      target: `${req.examCost.toLocaleString()} ج.م`,
-      displayCurrent: `${wallet.toLocaleString()} ج.م`,
-      displayTarget: `${req.examCost.toLocaleString()} ج.م`,
-      isMet: wallet >= req.examCost,
+      key: 'purchase_cost',
+      label: 'سعر الشراء لمرة واحدة (من الميزانية الشخصية للمدرب)',
+      current: `${wallet.toLocaleString()}$`,
+      target: `${cost.toLocaleString()}$`,
+      displayCurrent: `${wallet.toLocaleString()}$`,
+      displayTarget: `${cost.toLocaleString()}$`,
+      isMet: hasEnoughCash,
       progressPercent: walletProgress,
+    },
+    {
+      key: 'annual_renewal_info',
+      label: 'رسوم التجديد السنوية (تُخصم بداية كل موسم جديد)',
+      current: `${config.annualRenewalFee.toLocaleString()}$ / موسم`,
+      target: `${config.annualRenewalFee.toLocaleString()}$`,
+      displayCurrent: `${config.annualRenewalFee.toLocaleString()}$`,
+      displayTarget: `${config.annualRenewalFee.toLocaleString()}$`,
+      isMet: true,
+      progressPercent: 100,
     },
   ];
 
-  const missingCount = checklist.filter(c => !c.isMet).length;
-  const hasEnoughCash = wallet >= req.examCost;
-  const canUpgrade = missingCount === 0;
-
-  // Overall progression towards next license (weighted mean of all criteria)
-  const overallProgressPercent = checklist.length > 0
-    ? Math.round(checklist.reduce((sum, item) => sum + item.progressPercent, 0) / checklist.length)
-    : 0;
+  const missingCount = hasEnoughCash ? 0 : 1;
 
   return {
     currentLicense,
     nextLicense,
     nextLicenseConfig: config,
-    canUpgrade,
+    canUpgrade: hasEnoughCash,
     checklist,
     missingCount,
     walletBalance: wallet,
     hasEnoughCash,
-    overallProgressPercent,
+    overallProgressPercent: walletProgress,
     activePlayMinutes,
     activePlayFormatted,
   };
@@ -768,46 +975,21 @@ export function evaluateLicenseEligibility(
 // ============================================================================
 
 export function getClubPrestigeTier(club: Club, league?: LeagueDefinition): ClubTierDefinition {
-  const rep = club.reputation || 50;
+  const reqLic = getRequiredLicenseForClub(club, league);
   const tier = league?.tier ?? (club as any).divisionTier ?? 1;
-  const country = league?.country || (club as any).country || 'مصر';
 
-  // World Elite Clubs: Top clubs in European Tier 1 or clubs with reputation >= 88
-  const eliteClubNames = [
-    'ريال مدريد', 'مانشستر سيتي', 'بايرن ميونخ', 'باريس سان جيرمان', 'برشلونة',
-    'ليفربول', 'إنتر ميلان', 'أرسنال', 'ريال مدريد كاستيا', 'يوفنتوس',
-  ];
-
-  if (eliteClubNames.some(name => club.name.includes(name)) || (rep >= 88 && tier === 1)) {
+  if (reqLic === 'LEGENDARY') {
     return CAREER_CONFIG.CLUB_TIERS.tier_elite;
   }
-
-  // Continental Pro Giants: Egyptian & Arab Champions or Strong European contenders
-  const proClubNames = [
-    'الأهلي', 'الزمالك', 'بيراميدز', 'الهلال', 'النصر', 'الاتحاد', 'الوداد',
-    'الترجي', 'الرجاء', 'صن داونز', 'إشبيلية', 'بوروسيا دورتموند', 'بنفيكا', 'بورتو', 'روما',
-  ];
-
-  if (proClubNames.some(name => club.name.includes(name)) || (rep >= 76 && rep < 88)) {
+  if (reqLic === 'CONTINENTAL') {
     return CAREER_CONFIG.CLUB_TIERS.tier_pro;
   }
-
-  // Premier League / Division 1 clubs (A/Pro or B/A)
-  if (tier === 1 || rep >= 62) {
+  if (reqLic === 'PREMIER') {
     return CAREER_CONFIG.CLUB_TIERS.tier_apro;
   }
-
-  // Division 2 (B/A)
-  if (tier === 2 || (rep >= 45 && rep < 62)) {
-    return CAREER_CONFIG.CLUB_TIERS.tier_ba;
-  }
-
-  // Division 3 (C/B)
-  if (tier === 3 || (rep >= 30 && rep < 45)) {
+  if (tier === 2) {
     return CAREER_CONFIG.CLUB_TIERS.tier_cb;
   }
-
-  // Division 4 / Lower (D/C)
   return CAREER_CONFIG.CLUB_TIERS.tier_dc;
 }
 
@@ -819,35 +1001,13 @@ export function isManagerQualifiedForClub(
   const clubTier = getClubPrestigeTier(club, league);
   const reasons: string[] = [];
 
-  const managerLicenseRank = getLicenseRank(manager.license || 'D');
-  const requiredLicenseRank = getLicenseRank(clubTier.minLicense);
+  const activeLicense = normalizeCoachingLicense(manager.license);
+  const requiredLicense = getRequiredLicenseForClub(club, league);
 
-  if (managerLicenseRank < requiredLicenseRank) {
-    reasons.push(`يتطلب رخصة ${clubTier.minLicense} على الأقل (لديك ${manager.license || 'D'}).`);
-  }
-
-  const rep = manager.reputation || 15;
-  if (rep < clubTier.minReputation) {
-    reasons.push(`يتطلب سمعة تدريبية لا تقل عن ${clubTier.minReputation} (سمعتك الحالية: ${rep}).`);
-  }
-
-  const trophiesCount =
-    (manager.leagueTitles || 0) + (manager.cupTitles || 0) ||
-    (Array.isArray(manager.trophies) ? manager.trophies.length : 0);
-
-  if (trophiesCount < clubTier.minTrophies) {
-    reasons.push(`يتطلب تحقيق ${clubTier.minTrophies} بطولات رسمية على الأقل (حققت: ${trophiesCount}).`);
-  }
-
-  const matches = manager.matchesManaged || 0;
-  if (matches < clubTier.minMatches) {
-    reasons.push(`يتطلب خبرة لا تقل عن ${clubTier.minMatches} مباراة رسمية.`);
-  }
-
-  const wins = manager.wins || 0;
-  const winRate = matches > 0 ? Math.round((wins / matches) * 100) : 0;
-  if (winRate < clubTier.minWinRate) {
-    reasons.push(`يتطلب نسبة فوز لا تقل عن ${clubTier.minWinRate}% (نسبتك الحالية: ${winRate}%).`);
+  if (getLicenseRank(activeLicense) < getLicenseRank(requiredLicense)) {
+    reasons.push(
+      `يتطلب ${getLicenseTitleArabic(requiredLicense)} على الأقل لتدريب ${club.name} (لديك حالياً: ${getLicenseTitleArabic(activeLicense)}).`
+    );
   }
 
   return {
@@ -857,153 +1017,34 @@ export function isManagerQualifiedForClub(
   };
 }
 
-/**
- * Evaluates whether a candidate club can extend a job offer to the manager.
- * Strictly computes all 10 realistic factors:
- * 1. Coaching License (الرخصة التدريبية المطلوبة وفق سلم التدرج)
- * 2. Manager Reputation (السمعة التدريبية للمدرب)
- * 3. Career Achievements & Trophies (البطولات، الألقاب، عدد المباريات، نسبة الفوز)
- * 4. Current Club Level & Division Tier (مستوى النادي الحالي وسلم الترقي المنطقي)
- * 5. Manager's Tactical Style (الأسلوب التكتيكي ومدى تناسبه مع هوية النادي)
- * 6. Previous League/Club Experience (الخبرة التدريبية في الدوريات)
- * 7. Club's Current Situation (وضع النادي الحالي: إنقاذ، مشروع، منافسة، بناء)
- * 8. Club Budget & Ambitions (الميزانية والطموح الإداري)
- * 9. Squad Quality (جودة التشكيلة وقوة العناصر)
- * 10. Competition Level (مستوى المنافسة والدرجة)
- */
 export function isClubEligibleToMakeJobOffer(
   manager: ManagerProfile,
   currentClub: Club,
   currentLeague: LeagueDefinition,
   candidateClub: Club,
   candidateLeague: LeagueDefinition,
-  isChampion: boolean = false,
-  isPromoted: boolean = false,
+  _isChampion: boolean = false,
+  _isPromoted: boolean = false,
   offerCategory?: JobOfferCategory,
   managerTactics?: TeamTactics
 ): { eligible: boolean; reasons: string[]; clubTier: ClubTierDefinition; score: number; tacticalFit: number } {
   const clubTier = getClubPrestigeTier(candidateClub, candidateLeague);
   const reasons: string[] = [];
 
-  const managerLicenseRank = getLicenseRank(manager.license || 'D');
-  const requiredLicenseRank = getLicenseRank(clubTier.minLicense);
+  const activeLicense = normalizeCoachingLicense(manager.license);
+  const requiredLicense = getRequiredLicenseForClub(candidateClub, candidateLeague);
+  const managerLicenseRank = getLicenseRank(activeLicense);
+  const requiredLicenseRank = getLicenseRank(requiredLicense);
 
-  // ----------------------------------------------------
-  // FACTOR 1: Coaching License (الرخصة التدريبية)
-  // ----------------------------------------------------
-  // World Elite (tier_elite): strictly requires at least PRO (rank 5) or ELITE (rank 6).
-  if (clubTier.tierLevel >= 6 && managerLicenseRank < 5) {
-    reasons.push(`أندية النخبة العالمية تشترط رخصة المحترفين PRO أو ELITE على الأقل.`);
-  } else if (clubTier.tierLevel >= 5 && managerLicenseRank < 4) {
-    // Continental Pro Giants (Al Ahly, Zamalek, Pyramids, Al Hilal, Porto, etc.): strictly requires at least License A (rank 4).
-    reasons.push(`عمالقة القارة يتطلبون رخصة النخبة A على الأقل.`);
-  } else if (clubTier.tierLevel >= 4 && managerLicenseRank < 4 && !isPromoted && !isChampion) {
-    // Domestic Tier 1: requires License A unless promoted from Tier 2 as champion with License B
-    if (managerLicenseRank < 3) {
-      reasons.push(`أندية الدوري الممتاز تشترط رخصة A على الأقل (لديك: رخصة ${manager.license || 'D'}).`);
-    }
-  } else if (managerLicenseRank < requiredLicenseRank) {
-    // Category exception: youth foundation projects may accept one license level lower if manager has high reputation
-    const isYouthProject = offerCategory === 'youth_foundation';
-    if (!isYouthProject || managerLicenseRank < requiredLicenseRank - 1) {
-      reasons.push(`الرخصة التدريبية غير كافية لهذا المستوى (المطلوب: ${clubTier.minLicense}).`);
-    }
+  // Strictly enforce the 4-License permissions
+  if (managerLicenseRank < requiredLicenseRank) {
+    reasons.push(
+      `يتطلب ${getLicenseTitleArabic(requiredLicense)} لتدريب هذا النادي (رخصتك الفعّالة: ${getLicenseTitleArabic(activeLicense)}).`
+    );
   }
 
-  // ----------------------------------------------------
-  // FACTOR 2: Manager Reputation (السمعة التدريبية)
-  // ----------------------------------------------------
-  const baseRep = manager.reputation || 15;
-  let repModifier = 0;
-  if (isChampion) repModifier += 8;
-  else if (isPromoted) repModifier += 5;
-
-  // Category adjustments:
-  let thresholdAdjustment = 0;
-  if (offerCategory === 'youth_foundation') thresholdAdjustment -= 8; // More accessible
-  else if (offerCategory === 'relegation_salvage') thresholdAdjustment -= 5; // Desperate for help
-  else if (offerCategory === 'title_challenger') thresholdAdjustment += 4; // Demanding
-  else if (offerCategory === 'higher_competition') thresholdAdjustment += 6; // High prestige step
-
-  const effectiveRep = baseRep + repModifier;
-  const targetMinRep = Math.max(5, clubTier.minReputation + thresholdAdjustment);
-
-  if (effectiveRep < targetMinRep) {
-    reasons.push(`سمعة المدرب (${baseRep}) أقل من الحد الأدنى المقبول لإدارة النادي (${targetMinRep}).`);
-  }
-
-  // ----------------------------------------------------
-  // FACTOR 3: Career Achievements & Trophies (البطولات والخبرة)
-  // ----------------------------------------------------
-  const trophiesCount =
-    (manager.leagueTitles || 0) + (manager.cupTitles || 0) ||
-    (Array.isArray(manager.trophies) ? manager.trophies.length : 0);
-  const matches = manager.matchesManaged || 0;
-  const wins = manager.wins || 0;
-  const winRate = matches > 0 ? Math.round((wins / matches) * 100) : 0;
-
-  // Elite clubs: at least 2 major trophies, 50 matches, 50% win rate
-  if (clubTier.tierLevel >= 6) {
-    if (trophiesCount < 2) {
-      reasons.push(`أندية النخبة العالمية تطلب سجلاً بطولياً يحوي بطولتين كبريين على الأقل (حققت: ${trophiesCount}).`);
-    }
-    if (matches < 50) {
-      reasons.push(`الخبرة الميدانية أقل من 50 مباراة رسمية (خضت: ${matches}).`);
-    }
-    if (winRate < 48) {
-      reasons.push(`نسبة الفوز (${winRate}%) غير كافية لعمالقة العالم (المطلوب 50%+).`);
-    }
-  } else if (clubTier.tierLevel >= 5) {
-    // Continental Pro Giants: at least 1 trophy (or champion promotion) and 25 matches
-    if (trophiesCount < 1 && !isChampion && !isPromoted) {
-      reasons.push(`عمالقة القارة يطلبون تتويجاً ببطولة سابقة أو تحقيق إنجاز الصعود التاريخي.`);
-    }
-    if (matches < 25) {
-      reasons.push(`الخبرة الميدانية غير كافية (المطلوب 25 مباراة على الأقل، خضت: ${matches}).`);
-    }
-  } else if (clubTier.tierLevel >= 4 && matches < 12 && !isPromoted && !isChampion) {
-    // Domestic Tier 1: requires at least some match experience
-    reasons.push(`إدارة النادي تبحث عن مدرب متمرس خاض 12 مباراة رسمية على الأقل.`);
-  }
-
-  // ----------------------------------------------------
-  // FACTOR 4: Current Club Level (مستوى النادي وسلم التدرج المنطقي)
-  // ----------------------------------------------------
-  const currentTier = currentLeague?.tier ?? (currentClub as any).divisionTier ?? 1;
-  const candidateTier = candidateLeague?.tier ?? (candidateClub as any).divisionTier ?? 1;
-
-  // Division 4 Coach (الدرجة الرابعة):
-  if (currentTier === 4) {
-    // Can ONLY receive offers from Tier 4 or Tier 3 (or Tier 2 ONLY if champion with reputation >= 40)
-    if (candidateTier <= 1 || clubTier.tierLevel >= 4) {
-      reasons.push(`القفز من الدرجة الرابعة مباشرة إلى أندية الدوري الممتاز أو النخبة غير منطقي كروياً.`);
-    } else if (candidateTier === 2 && !isChampion && effectiveRep < 40) {
-      reasons.push(`الانتقال لدوري المحترفين (الدرجة الثانية) يتطلب تحقيق لقب بطولة أو سمعة أعلى.`);
-    }
-  } else if (currentTier === 3) {
-    // Division 3 Coach (الدرجة الثالثة):
-    // Can move to Tier 3, Tier 2, or lower Tier 4. Cannot jump directly to Tier 1 giants or World Elite.
-    if (clubTier.tierLevel >= 5 || (candidateTier === 1 && !isChampion && !isPromoted && effectiveRep < 60)) {
-      reasons.push(`الفارق الفني بين دوري الدرجة الثالثة وأندية القمة في الممتاز يتطلب التدرج أولاً في الدرجة الثانية.`);
-    }
-  } else if (currentTier === 2) {
-    // Division 2 Coach (دوري المحترفين):
-    // Can move to Tier 2, Tier 1, or Arab Tier 2/1. Elite clubs (Real Madrid) are blocked.
-    if (clubTier.tierLevel >= 6) {
-      reasons.push(`أندية النخبة العالمية لا تتعاقد مباشرة مع مدربي الدرجة الثانية دون تجربة ممتازة في دوري الأضواء.`);
-    }
-  }
-
-  // Limit reputation jump per transfer to prevent unrealistic surges
-  const maxRepJump = isChampion ? 38 : isPromoted ? 30 : 25;
-  if (candidateClub.reputation > (currentClub.reputation + maxRepJump) && offerCategory !== 'youth_foundation') {
-    reasons.push(`الفارق في مكانة الناديين (${candidateClub.reputation} مقابل ${currentClub.reputation}) يتجاوز الحد المنطقي لانتقال المدرب.`);
-  }
-
-  // ----------------------------------------------------
-  // FACTOR 5: Manager's Tactical Style Match (التوافق التكتيكي)
-  // ----------------------------------------------------
-  let tacticalFit = 75; // baseline neutral fit
+  // Tactical Fit calculation for UI cards
+  let tacticalFit = 78;
   const tactics = managerTactics || currentClub.tactics;
   if (tactics) {
     const mentality = tactics.mentality || 'balanced';
@@ -1011,39 +1052,30 @@ export function isClubEligibleToMakeJobOffer(
     const passing = tactics.passingStyle || 'short';
 
     if (offerCategory === 'relegation_salvage') {
-      // Relegation fight favors defensive discipline and high pressing
       if (mentality === 'defensive' || mentality === 'ultra_defensive' || pressing === 'high' || pressing === 'gegenpress') {
-        tacticalFit += 18;
-      } else if (mentality === 'ultra_attacking') {
-        tacticalFit -= 10;
-      }
-    } else if (offerCategory === 'title_challenger' || clubTier.tierLevel >= 5) {
-      // Big clubs favor attacking, dominant possession football
-      if (mentality === 'attacking' || mentality === 'ultra_attacking' || passing === 'short') {
         tacticalFit += 15;
-      } else if (mentality === 'ultra_defensive') {
-        tacticalFit -= 12;
+      }
+    } else if (offerCategory === 'title_challenger' || clubTier.tierLevel >= 4) {
+      if (mentality === 'attacking' || mentality === 'ultra_attacking' || passing === 'short') {
+        tacticalFit += 14;
       }
     } else if (offerCategory === 'youth_foundation') {
-      // Youth foundation favors progressive build up
       if (tactics.buildUpStyle === 'from_back' || passing === 'short' || mentality === 'balanced') {
-        tacticalFit += 15;
+        tacticalFit += 14;
       }
     }
   }
-  tacticalFit = Math.max(40, Math.min(100, tacticalFit));
+  tacticalFit = Math.max(50, Math.min(100, tacticalFit));
 
-  // ----------------------------------------------------
-  // Overall Suitability Score (0 - 100)
-  // ----------------------------------------------------
-  const licenseWeight = Math.min(1, managerLicenseRank / Math.max(1, requiredLicenseRank)) * 25;
-  const repWeight = Math.min(1, effectiveRep / Math.max(1, targetMinRep)) * 30;
-  const achievementWeight = Math.min(1, (trophiesCount * 10 + matches * 0.5) / 25) * 20;
+  const currentTier = currentLeague?.tier ?? (currentClub as any).divisionTier ?? 1;
+  const candidateTier = candidateLeague?.tier ?? (candidateClub as any).divisionTier ?? 1;
+  const licenseWeight = Math.min(1, managerLicenseRank / Math.max(1, requiredLicenseRank)) * 45;
+  const repWeight = Math.min(1, (manager.reputation || 25) / Math.max(20, candidateClub.reputation || 50)) * 30;
   const tacticalWeight = (tacticalFit / 100) * 15;
-  const tierFitBonus = Math.max(0, 10 - Math.abs(currentTier - candidateTier) * 3);
+  const tierFitBonus = Math.max(0, 10 - Math.abs(currentTier - candidateTier) * 2);
 
   const score = Math.max(0, Math.min(100, Math.round(
-    licenseWeight + repWeight + achievementWeight + tacticalWeight + tierFitBonus
+    licenseWeight + repWeight + tacticalWeight + tierFitBonus
   )));
 
   return {
@@ -1088,7 +1120,7 @@ export function evaluateCareerMilestones(
   const trophiesCount =
     (manager.leagueTitles || 0) + (manager.cupTitles || 0) ||
     (Array.isArray(manager.trophies) ? manager.trophies.length : 0);
-  const licenseRank = getLicenseRank(manager.license || 'D');
+  const licenseRank = getLicenseRank(manager.license);
   const clubsCount = (manager.clubsManaged || []).length || (manager.currentClubId ? 1 : 0);
   const worldRank = manager.worldRank || 850;
   const playersDeveloped = manager.totalPlayersDeveloped || Math.floor((manager.developmentPoints || 0) / 20) || 0;
@@ -1103,9 +1135,6 @@ export function evaluateCareerMilestones(
       case 'ms_win_streak_3':
         currentVal = wins >= 3 ? 3 : wins;
         break;
-      case 'ms_license_c':
-        currentVal = licenseRank >= 2 ? 1 : 0;
-        break;
       case 'ms_develop_prospect':
         currentVal = playersDeveloped >= 1 ? 1 : 0;
         break;
@@ -1118,14 +1147,11 @@ export function evaluateCareerMilestones(
       case 'ms_cup_glory':
         currentVal = (manager.cupTitles || 0) >= 1 ? 1 : 0;
         break;
-      case 'ms_license_b':
-        currentVal = licenseRank >= 3 ? 1 : 0;
-        break;
       case 'ms_matches_50':
         currentVal = Math.min(50, matchesManaged);
         break;
       case 'ms_license_a':
-        currentVal = licenseRank >= 4 ? 1 : 0;
+        currentVal = licenseRank >= 2 ? 1 : 0;
         break;
       case 'ms_giant_slayer':
         currentVal = wins >= 5 ? 2 : (wins >= 2 ? 1 : 0);
@@ -1137,7 +1163,7 @@ export function evaluateCareerMilestones(
         currentVal = (manager.trophies || []).some(t => t.includes('إفريقيا') || t.includes('أبطال') || t.includes('قارة')) ? 1 : 0;
         break;
       case 'ms_license_pro':
-        currentVal = licenseRank >= 5 ? 1 : 0;
+        currentVal = licenseRank >= 3 ? 1 : 0;
         break;
       case 'ms_two_clubs_trophies':
         currentVal = Math.min(2, clubsCount > 1 && trophiesCount >= 2 ? 2 : (trophiesCount >= 1 ? 1 : 0));
@@ -1146,7 +1172,7 @@ export function evaluateCareerMilestones(
         currentVal = matchesManaged >= 100 && winRate >= 55 ? 100 : Math.min(100, matchesManaged);
         break;
       case 'ms_license_elite':
-        currentVal = licenseRank >= 6 ? 1 : 0;
+        currentVal = licenseRank >= 4 ? 1 : 0;
         break;
       case 'ms_world_rank_one':
         currentVal = worldRank === 1 ? 1 : 0;
