@@ -206,6 +206,7 @@ import {
   loadActiveLiveMatchFromDb,
   clearActiveLiveMatchFromDb,
   saveContinentalCacheToDb,
+  safeLocalStorageGet,
   safeLocalStorageSet,
   safeLocalStorageRemove,
   pruneMatchEventsForStorage,
@@ -458,6 +459,27 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const isFinishingMatchRef = useRef(false);
   const isMatchFinishedRef = useRef(false);
   const completedMatchFixtureIdRef = useRef<string | null>(null);
+
+  // Diagnostic render frequency protection (>200 renders within 1 second logs a warning without halting gameplay)
+  const providerRenderDiagRef = useRef<{ count: number; windowStart: number; warned: boolean }>({
+    count: 0,
+    windowStart: Date.now(),
+    warned: false,
+  });
+  const nowRenderTs = Date.now();
+  if (nowRenderTs - providerRenderDiagRef.current.windowStart >= 1000) {
+    providerRenderDiagRef.current.count = 1;
+    providerRenderDiagRef.current.windowStart = nowRenderTs;
+    providerRenderDiagRef.current.warned = false;
+  } else {
+    providerRenderDiagRef.current.count += 1;
+    if (providerRenderDiagRef.current.count > 200 && !providerRenderDiagRef.current.warned) {
+      providerRenderDiagRef.current.warned = true;
+      console.warn(
+        `[GameProvider Diagnostics] Render loop warning: GameProvider rendered more than 200 times in 1 second (${providerRenderDiagRef.current.count}).`
+      );
+    }
+  }
 
   // 1. Season State
   const [season, setSeason] = useState<SeasonInfo>(() => {
@@ -899,6 +921,8 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     if (!activeLeague || !Array.isArray(teams) || teams.length === 0) return;
     const seasonNum = season?.seasonNumber || 1;
     const country = activeLeague.country || userClub?.country || 'مصر';
+    const effectiveTotalRounds = Math.max(18, season?.totalRounds || (teams.length - 1) * 2 || 38);
+    const cupPrematureRoundLimit = Math.floor(effectiveTotalRounds * 0.32);
     const hasPlayedCupFinal = Boolean(
       cupTournament?.matches?.some(m => m.stage === 'final' && m.isPlayed)
     );
@@ -906,7 +930,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       cupTournament?.isCompleted &&
       !hasPlayedCupFinal &&
       season?.currentRound &&
-      season.currentRound < 12
+      season.currentRound < cupPrematureRoundLimit
     );
 
     if (
@@ -1135,6 +1159,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   }, [africanChampionsLeague, season?.seasonNumber]);
 
   const continentalOverlapGuardRef = useRef<string>('');
+  const continentalInitGuardRef = useRef<{ key: string; attempts: number }>({ key: '', attempts: 0 });
 
   // Auto-initialize Continental Tournament if null, if region changed, if foreign-continent clubs exist, or if secondary tournament has duplicate primary clubs
   useEffect(() => {
@@ -1143,8 +1168,19 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const managedRegion = resolveClubContinentRegion(userClub, activeLeague);
     const defaultCode: 'ccl' | 'acl' | 'ucl' =
       managedRegion === 'europe' ? 'ucl' : managedRegion === 'asia' ? 'acl' : 'ccl';
+    const effectiveTotalRounds = Math.max(18, season?.totalRounds || (teams.length - 1) * 2 || 38);
+    const contPrematureRoundLimit = Math.floor(effectiveTotalRounds * 0.37);
 
     if (!africanChampionsLeague || africanChampionsLeague.seasonNumber !== seasonNum) {
+      const initKey = `init_${seasonNum}_${defaultCode}_${userClub?.id || ''}`;
+      if (continentalInitGuardRef.current.key === initKey && continentalInitGuardRef.current.attempts >= 3) {
+        return;
+      }
+      continentalInitGuardRef.current = {
+        key: initKey,
+        attempts: continentalInitGuardRef.current.key === initKey ? continentalInitGuardRef.current.attempts + 1 : 1,
+      };
+
       const cachedRaw = localStorage.getItem(`${STORAGE_KEY}_contCache_s${seasonNum}_${defaultCode}`);
       if (cachedRaw) {
         try {
@@ -1152,7 +1188,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           const hasPlayedFinal = Boolean(
             parsed?.matches?.some((m: ContinentalMatch) => m.stage === 'final' && m.isPlayed)
           );
-          const isPremature = parsed.isCompleted && (season?.currentRound || 1) < 14 && !hasPlayedFinal;
+          const isPremature = parsed.isCompleted && (season?.currentRound || 1) < contPrematureRoundLimit && !hasPlayedFinal;
           const expectedCont = getTargetContinentForCompetition(parsed?.competitionId || defaultCode);
           const hasForeignInCached = Array.isArray(parsed?.groups) && parsed.groups.some((g: any) =>
             Array.isArray(g.teamIds) && g.teamIds.some((tid: string) => {
@@ -1201,6 +1237,15 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         currentCompRegion === managedRegion
           ? (africanChampionsLeague.competitionId as 'ccl' | 'ccc' | 'ucl' | 'uel' | 'acl' | 'acl2')
           : defaultCode;
+      const rebuildKey = `rebuild_${seasonNum}_${targetCodeToInit}_${managedRegion}_${userClub?.id || ''}`;
+      if (continentalInitGuardRef.current.key === rebuildKey && continentalInitGuardRef.current.attempts >= 3) {
+        return;
+      }
+      continentalInitGuardRef.current = {
+        key: rebuildKey,
+        attempts: continentalInitGuardRef.current.key === rebuildKey ? continentalInitGuardRef.current.attempts + 1 : 1,
+      };
+
       if (!hasForeignClubInGroups) {
         const cachedRaw = localStorage.getItem(`${STORAGE_KEY}_contCache_s${seasonNum}_${targetCodeToInit}`);
         if (cachedRaw) {
@@ -1613,40 +1658,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   });
 
   const [showSeasonTransitionModal, setShowSeasonTransitionModal] = useState<boolean>(false);
-  const [liveMatch, setLiveMatch] = useState<LiveMatchState | null>(() => {
-    try {
-      const matchKey = `${STORAGE_KEY}_active_live_match`;
-      const saved = localStorage.getItem(matchKey);
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        const isValid =
-          Boolean(parsed) &&
-          Boolean(parsed.fixture) &&
-          typeof parsed.homeTeam === 'object' && parsed.homeTeam !== null &&
-          typeof parsed.awayTeam === 'object' && parsed.awayTeam !== null &&
-          Array.isArray(parsed.events) &&
-          typeof parsed.stats === 'object' && parsed.stats !== null &&
-          typeof parsed.currentMinute === 'number' &&
-          parsed.currentMinute >= 0 &&
-          parsed.currentMinute <= 90 &&
-          parsed.fixture.isPlayed !== true;
-
-        if (!isValid) {
-          localStorage.removeItem(matchKey);
-          return null;
-        }
-
-        // When restoring an in-progress match from storage, start paused so player can resume when ready
-        return { ...parsed, isPlaying: false };
-      }
-    } catch (e) {
-      console.warn('[GameContext] Failed to restore active live match from storage:', e);
-      try {
-        localStorage.removeItem(`${STORAGE_KEY}_active_live_match`);
-      } catch {}
-    }
-    return null;
-  });
+  const [liveMatch, setLiveMatch] = useState<LiveMatchState | null>(null);
 
   const clearMatchSimulationTimers = useCallback(() => {
     if (liveMatchTimerRef.current) {
@@ -1671,29 +1683,68 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     liveMatchRef.current = liveMatch;
   }, [liveMatch]);
 
-  // Restore any active in-progress live match from IndexedDB on initial mount
+  // Migrate legacy localStorage _active_live_match (if present) and restore any active in-progress live match from IndexedDB on initial mount
   useEffect(() => {
     let cancelled = false;
-    loadActiveLiveMatchFromDb().then((savedMatch) => {
-      if (cancelled || !savedMatch) return;
-      const isValid =
-        Boolean(savedMatch.fixture) &&
-        typeof savedMatch.homeTeam === 'object' &&
-        savedMatch.homeTeam !== null &&
-        typeof savedMatch.awayTeam === 'object' &&
-        savedMatch.awayTeam !== null &&
-        typeof savedMatch.currentMinute === 'number' &&
-        savedMatch.currentMinute >= 0 &&
-        savedMatch.currentMinute < 90 &&
-        savedMatch.fixture.isPlayed !== true &&
-        savedMatch.isFinished !== true;
+    const isValidSavedLiveMatch = (candidate: any): boolean =>
+      Boolean(candidate) &&
+      Boolean(candidate.fixture) &&
+      typeof candidate.homeTeam === 'object' &&
+      candidate.homeTeam !== null &&
+      typeof candidate.awayTeam === 'object' &&
+      candidate.awayTeam !== null &&
+      Array.isArray(candidate.events) &&
+      typeof candidate.stats === 'object' &&
+      candidate.stats !== null &&
+      typeof candidate.currentMinute === 'number' &&
+      candidate.currentMinute >= 0 &&
+      candidate.currentMinute < 90 &&
+      candidate.fixture.isPlayed !== true &&
+      candidate.isFinished !== true;
 
-      if (isValid) {
-        setLiveMatch((prev) => prev || { ...savedMatch, isPlaying: false });
+    const migrateAndRestoreLiveMatch = async () => {
+      const legacyMatchKey = `${STORAGE_KEY}_active_live_match`;
+      try {
+        const legacyRaw = localStorage.getItem(legacyMatchKey);
+        if (legacyRaw !== null) {
+          let parsedLegacy: any = null;
+          try {
+            parsedLegacy = JSON.parse(legacyRaw);
+          } catch {
+            parsedLegacy = null;
+          }
+          if (isValidSavedLiveMatch(parsedLegacy)) {
+            const pausedLegacy = { ...parsedLegacy, isPlaying: false };
+            await saveActiveLiveMatchToDb(pausedLegacy);
+            try {
+              localStorage.removeItem(legacyMatchKey);
+            } catch {}
+            if (!cancelled) {
+              setLiveMatch(prev => prev || pausedLegacy);
+            }
+            return;
+          } else {
+            try {
+              localStorage.removeItem(legacyMatchKey);
+            } catch {}
+          }
+        }
+      } catch {
+        try {
+          localStorage.removeItem(legacyMatchKey);
+        } catch {}
+      }
+
+      const savedMatch = await loadActiveLiveMatchFromDb();
+      if (cancelled || !savedMatch) return;
+      if (isValidSavedLiveMatch(savedMatch)) {
+        setLiveMatch(prev => prev || { ...savedMatch, isPlaying: false });
       } else {
         clearActiveLiveMatchFromDb();
       }
-    });
+    };
+
+    migrateAndRestoreLiveMatch();
     return () => {
       cancelled = true;
     };
@@ -2041,16 +2092,33 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
   };
 
+  const careerStateValidationGuardRef = useRef<string>('');
+
   // Self-healing invariant: Ensure manager is actively linked to their club in state
   useEffect(() => {
     const validated = validateCareerState(manager, teams, GLOBAL_LEAGUES);
+    const targetSig = `${validated.manager.currentClubId || ''}_${validated.manager.isUnemployed ? 1 : 0}`;
+    const hasUserClubInTeams = (Array.isArray(teams) ? teams : []).some(
+      t => t && t.isUserClub && t.id === validated.manager.currentClubId
+    );
     if (
       manager.isUnemployed !== validated.manager.isUnemployed ||
       manager.currentClubId !== validated.manager.currentClubId ||
-      !(Array.isArray(teams) ? teams : []).some(t => t && t.isUserClub && t.id === validated.manager.currentClubId)
+      !hasUserClubInTeams
     ) {
-      setManager(validated.manager);
-      setTeams(validated.teams);
+      if (careerStateValidationGuardRef.current === targetSig && hasUserClubInTeams) {
+        return;
+      }
+      careerStateValidationGuardRef.current = targetSig;
+      if (
+        manager.isUnemployed !== validated.manager.isUnemployed ||
+        manager.currentClubId !== validated.manager.currentClubId
+      ) {
+        setManager(validated.manager);
+      }
+      if (!hasUserClubInTeams) {
+        setTeams(validated.teams);
+      }
     }
   }, [manager.currentClubId]);
 
@@ -6156,22 +6224,17 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       const defaultContractYears = 3;
       const isInTransferMarket =
         Array.isArray(transferMarket) && transferMarket.some(p => p && p.id === player.id);
-      const isFreeAgent =
-        (!player.currentClubId && !(player as any).clubId) ||
-        player.currentLeagueId === 'free_agents' ||
-        player.isFreeAgent === true ||
-        isInTransferMarket;
 
-      const transferFee = isFreeAgent
-        ? 0
-        : customFee !== undefined && customFee > 0
-          ? customFee
-          : calculateContractDurationTransferFee(baseThreeYearPrice, defaultContractYears, false);
-      const salary = Math.max(2500, Number(player.salary) || recommendedMonthlyWage || 2500);
+      // Search for the player across local teams and world clubs BEFORE treating missing currentClubId as a free agent
+      let sellingClubId = isInTransferMarket
+        ? ''
+        : player.currentClubId && player.currentClubId !== 'free_agents'
+          ? player.currentClubId
+          : (player as any).clubId && (player as any).clubId !== 'free_agents'
+            ? (player as any).clubId
+            : '';
 
-      // Robust selling club resolution for cross-league transfers (skip for free agents)
-      let sellingClubId = isFreeAgent ? '' : (player.currentClubId || (player as any).clubId || '');
-      if (!isFreeAgent && !sellingClubId) {
+      if (!isInTransferMarket && !sellingClubId) {
         const localSelling = teams.find(t => (t.players || []).some(p => p && p.id === player.id));
         if (localSelling) {
           sellingClubId = localSelling.id;
@@ -6197,6 +6260,16 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           } catch {}
         }
       }
+
+      // Only treat as free agent if in transferMarket or not found in any club
+      const isFreeAgent = isInTransferMarket || !sellingClubId;
+
+      const transferFee = isFreeAgent
+        ? 0
+        : customFee !== undefined && customFee > 0
+          ? customFee
+          : calculateContractDurationTransferFee(baseThreeYearPrice, defaultContractYears, false);
+      const salary = Math.max(2500, Number(player.salary) || recommendedMonthlyWage || 2500);
 
       const transferResult = executeAtomicTransfer({
         player: { ...player, currentClubId: isFreeAgent ? '' : sellingClubId, isFreeAgent },
@@ -7730,11 +7803,17 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     setAvailableSponsorOffers([]);
   };
 
-  // Universal Sponsorship Cancellation & Budget Deduction Migration
+  // Universal Sponsorship Cancellation & Budget Deduction Migration (guarded with ref + safeLocalStorage to prevent render loops)
+  const sponsorshipMigrationGuardRef = useRef(false);
   useEffect(() => {
+    if (sponsorshipMigrationGuardRef.current) return;
     try {
       const migrationKey = 'anta_el_modareb_sponsorship_deducted_v4';
-      if (localStorage.getItem(migrationKey)) return;
+      if (safeLocalStorageGet(migrationKey)) {
+        sponsorshipMigrationGuardRef.current = true;
+        return;
+      }
+      sponsorshipMigrationGuardRef.current = true;
 
       let totalDeductedForUser = 0;
       let anyChanged = false;
@@ -7791,9 +7870,6 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           });
         }
         setTeams(finalTeams);
-        try {
-          localStorage.setItem(`${STORAGE_KEY}_teams`, JSON.stringify(finalTeams));
-        } catch {}
 
         if (totalDeductedForUser > 0) {
           const deductionMsg: InboxMessage = {
@@ -7809,8 +7885,8 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         }
       }
 
-      localStorage.setItem(migrationKey, 'true');
-      localStorage.removeItem(`${STORAGE_KEY}_sponsorOffers`);
+      safeLocalStorageSet(migrationKey, 'true');
+      safeLocalStorageRemove(`${STORAGE_KEY}_sponsorOffers`);
     } catch (e) {
       console.warn('Error in sponsorship cancellation migration:', e);
     }

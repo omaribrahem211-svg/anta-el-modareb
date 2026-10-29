@@ -41,6 +41,7 @@ import {
 import { getDomesticCupDefinitionForCountry } from '../data/competitionsData';
 import { CalendarManager } from '../services/calendarManager';
 import { parseDateString } from './calendarEngine';
+import { pruneMatchEventsForStorage } from './storage/indexedDbStorage';
 
 // ----------------------------------------------------
 // 1. END OF SEASON RESULT CALCULATION
@@ -1581,7 +1582,7 @@ export function advanceCupTournament(
         match.awayPenalties = res.awayPenalties;
         match.isPlayed = true;
         match.winnerTeamId = res.winnerTeamId;
-        match.events = [];
+        match.events = pruneMatchEventsForStorage(res.events, true);
         match.stats = res.stats;
       }
 

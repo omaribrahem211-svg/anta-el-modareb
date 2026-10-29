@@ -26,8 +26,9 @@ import {
 } from 'lucide-react';
 import { useGame } from '../context/GameContext';
 import { NegotiationModal } from './NegotiationModal';
-import { GLOBAL_LEAGUES, getCustomLeagues, findClubInWorld } from '../data/leaguesData';
+import { GLOBAL_LEAGUES, getCustomLeagues } from '../data/leaguesData';
 import { calibrateRealisticPlayerRating } from '../utils/playerGenerator';
+import { loadWorldStateFromDb } from '../utils/storage/indexedDbStorage';
 
 export interface TransferRumor {
   id: string;
@@ -563,7 +564,11 @@ const MarketPlayerCard = React.memo<MarketPlayerCardProps>(
         </div>
       </div>
     );
-  }
+  },
+  (prevProps, nextProps) =>
+    prevProps.item.player.id === nextProps.item.player.id &&
+    prevProps.item.askingPrice === nextProps.item.askingPrice &&
+    prevProps.item.statusType === nextProps.item.statusType
 );
 
 MarketPlayerCard.displayName = 'MarketPlayerCard';
@@ -802,155 +807,224 @@ export const TransfersTab: React.FC<TransfersTabProps> = ({
     let isCancelled = false;
     setIsLoadingWorld(true);
 
-    const localClubIdSet = new Set((teams || []).map(c => c && c.id).filter(Boolean));
-    const seenIds = new Set<string>();
-    (teams || []).forEach(c => {
-      (c?.players || []).forEach(p => {
-        if (p?.id) seenIds.add(p.id);
-      });
-    });
-    if (userClub?.players) {
-      userClub.players.forEach(p => {
-        if (p?.id) seenIds.add(p.id);
-      });
-    }
-    localDbPlayers.forEach(item => {
-      if (item.player?.id) seenIds.add(item.player.id);
-    });
+    const startWorldLoading = async () => {
+      // 1. Build a single Map<clubId, Club> once from persisted WorldState (IndexedDB) + custom leagues
+      const worldClubMap = new Map<string, Club>();
 
-    // Priority ordering of world clubs using findClubInWorld(clubId) with fallback to static club:
-    // 1. teams (already in localDbPlayers)
-    // 2. getCustomLeagues() (custom saved rosters)
-    // 3. GLOBAL_LEAGUES (static world leagues)
-    const seenClubIds = new Set<string>(localClubIdSet as Set<string>);
-    const externalClubEntries: { club: Club; leagueId: string; leagueName: string }[] = [];
+      try {
+        const custom = getCustomLeagues();
+        Object.values(custom).forEach(league => {
+          (league?.teams || []).forEach(c => {
+            if (c && c.id && !worldClubMap.has(c.id)) {
+              worldClubMap.set(c.id, c);
+            }
+          });
+        });
+      } catch {}
 
-    try {
-      const custom = getCustomLeagues();
-      Object.values(custom).forEach(league => {
+      try {
+        const savedWorldState = await loadWorldStateFromDb();
+        if (isCancelled) return;
+        if (savedWorldState && savedWorldState.teams && typeof savedWorldState.teams === 'object') {
+          const playersByClub = new Map<string, Player[]>();
+          if (savedWorldState.players && typeof savedWorldState.players === 'object') {
+            Object.values(savedWorldState.players).forEach(p => {
+              if (!p || !p.id || !p.currentClubId) return;
+              const list = playersByClub.get(p.currentClubId);
+              const mappedPlayer: Player = { ...p };
+              if (list) {
+                list.push(mappedPlayer);
+              } else {
+                playersByClub.set(p.currentClubId, [mappedPlayer]);
+              }
+            });
+          }
+
+          Object.entries(savedWorldState.teams).forEach(([clubId, wTeam]) => {
+            if (!wTeam || !clubId) return;
+            const existingFallback = worldClubMap.get(clubId);
+            const clubPlayers =
+              playersByClub.get(clubId) ||
+              (Array.isArray((wTeam as any).players) ? (wTeam as any).players : existingFallback?.players || []);
+            const clubObj: Club = {
+              ...(existingFallback || ({} as Club)),
+              id: wTeam.id || clubId,
+              name: wTeam.name || existingFallback?.name || clubId,
+              shortName: wTeam.shortName || existingFallback?.shortName || wTeam.name || clubId,
+              city: wTeam.city || existingFallback?.city || '',
+              country: wTeam.country || existingFallback?.country,
+              countryCode: wTeam.countryCode || existingFallback?.countryCode,
+              division: wTeam.division ?? existingFallback?.division ?? 1,
+              leagueId: wTeam.currentLeagueId || existingFallback?.leagueId || 'other',
+              reputation: wTeam.reputation ?? existingFallback?.reputation ?? 65,
+              budget: wTeam.budget ?? existingFallback?.budget ?? 250000,
+              transferBudget: wTeam.transferBudget ?? wTeam.budget ?? existingFallback?.transferBudget ?? 250000,
+              wageBudgetMonthly: wTeam.wageBudgetMonthly ?? existingFallback?.wageBudgetMonthly ?? 30000,
+              primaryColor: wTeam.primaryColor || existingFallback?.primaryColor || '#10b981',
+              secondaryColor: wTeam.secondaryColor || existingFallback?.secondaryColor || '#0f172a',
+              facilities: wTeam.facilities || existingFallback?.facilities,
+              sponsors: wTeam.sponsors || existingFallback?.sponsors || [],
+              isUserClub: clubId === savedWorldState.userCurrentTeamId,
+              players: clubPlayers,
+              tactics: wTeam.tactics || existingFallback?.tactics,
+              staff: wTeam.staff || existingFallback?.staff,
+              manager: wTeam.manager || existingFallback?.manager,
+            };
+            worldClubMap.set(clubId, clubObj);
+          });
+        }
+      } catch {
+        // Fallback silently to custom/static data if IndexedDB read fails
+      }
+
+      if (isCancelled) return;
+
+      const localClubIdSet = new Set((teams || []).map(c => c && c.id).filter(Boolean));
+      const seenIds = new Set<string>();
+      (teams || []).forEach(c => {
+        (c?.players || []).forEach(p => {
+          if (p?.id) seenIds.add(p.id);
+        });
+      });
+      if (userClub?.players) {
+        userClub.players.forEach(p => {
+          if (p?.id) seenIds.add(p.id);
+        });
+      }
+      localDbPlayers.forEach(item => {
+        if (item.player?.id) seenIds.add(item.player.id);
+      });
+
+      const seenClubIds = new Set<string>(localClubIdSet as Set<string>);
+      const externalClubEntries: { club: Club; leagueId: string; leagueName: string }[] = [];
+
+      // Add clubs from worldClubMap first (persisted WorldState + custom leagues)
+      worldClubMap.forEach((liveClub, clubId) => {
+        if (liveClub && clubId && !seenClubIds.has(clubId)) {
+          seenClubIds.add(clubId);
+          const lId = liveClub.leagueId || 'other';
+          externalClubEntries.push({
+            club: liveClub,
+            leagueId: lId,
+            leagueName: leagueNameMap[lId] || 'دوري عالمي',
+          });
+        }
+      });
+
+      // Fallback to static GLOBAL_LEAGUES for any club not in worldClubMap
+      Object.values(GLOBAL_LEAGUES).forEach(league => {
         (league?.teams || []).forEach(c => {
           if (c && c.id && !seenClubIds.has(c.id)) {
             seenClubIds.add(c.id);
-            const liveClub = findClubInWorld(c.id) || c;
+            const liveClub = worldClubMap.get(c.id) || c;
+            const lId = liveClub.leagueId || league.id || c.leagueId || 'other';
             externalClubEntries.push({
               club: liveClub,
-              leagueId: liveClub.leagueId || league.id || c.leagueId || 'other',
-              leagueName: leagueNameMap[liveClub.leagueId || league.id] || league.name || 'دوري عالمي',
+              leagueId: lId,
+              leagueName: leagueNameMap[lId] || league.name || 'دوري عالمي',
             });
           }
         });
       });
-    } catch {}
 
-    Object.values(GLOBAL_LEAGUES).forEach(league => {
-      (league?.teams || []).forEach(c => {
-        if (c && c.id && !seenClubIds.has(c.id)) {
-          seenClubIds.add(c.id);
-          const liveClub = findClubInWorld(c.id) || c;
-          externalClubEntries.push({
-            club: liveClub,
-            leagueId: liveClub.leagueId || league.id || c.leagueId || 'other',
-            leagueName: leagueNameMap[liveClub.leagueId || league.id] || league.name || 'دوري عالمي',
+      // Flatten raw player entries for progressive chunking
+      const rawQueue: { rawP: Player; club: Club; leagueId: string; leagueName: string }[] = [];
+
+      externalClubEntries.forEach(({ club, leagueId, leagueName }) => {
+        (club.players || []).forEach(rawP => {
+          if (rawP && rawP.id && !seenIds.has(rawP.id)) {
+            seenIds.add(rawP.id);
+            rawQueue.push({ rawP, club, leagueId, leagueName });
+          }
+        });
+      });
+
+      if (rawQueue.length === 0) {
+        setExternalDbPlayers([]);
+        setIsLoadingWorld(false);
+        return;
+      }
+
+      const CHUNK_SIZE = 500;
+      let currentIndex = 0;
+      let chunkCount = 0;
+      const accumulated: MarketPlayerItem[] = [];
+
+      const processNextChunk = () => {
+        if (isCancelled) return;
+        const end = Math.min(currentIndex + CHUNK_SIZE, rawQueue.length);
+        for (let i = currentIndex; i < end; i++) {
+          const { rawP, club, leagueId, leagueName } = rawQueue[i];
+          const posCat = POSITION_CATEGORY_MAP[rawP.position] || 'MID';
+          const isArab =
+            ARAB_NAT_CODES.has(String(rawP.nationalityCode || '').toUpperCase()) ||
+            /^(egy|sau|mar|tun|alg|uae|qat)_/.test(leagueId);
+
+          let priceMultiplier = 1.0;
+          let statusLabel = 'تحت العقد';
+          let statusType: MarketPlayerItem['statusType'] = 'contract';
+
+          if (rawP.isListedForTransfer) {
+            priceMultiplier = 0.85;
+            statusLabel = 'معروض للبيع';
+            statusType = 'listed';
+          } else if ((rawP.contractYears || 2) <= 1) {
+            priceMultiplier = 0.75;
+            statusLabel = 'عقد ينتهي';
+            statusType = 'expiring';
+          } else if ((rawP.overallRating || (rawP as any).rating || 65) >= 78) {
+            priceMultiplier = 1.2;
+            statusLabel = 'نجم بارز';
+            statusType = 'star';
+          }
+
+          const askingPrice = Math.round((rawP.marketValue || 50000) * priceMultiplier);
+
+          accumulated.push({
+            player: rawP,
+            club,
+            clubName: club.name,
+            leagueId,
+            leagueName,
+            isUserClubPlayer: false,
+            isArabPlayer: isArab,
+            posCategory: posCat,
+            askingPrice,
+            statusLabel,
+            statusType,
           });
         }
-      });
-    });
 
-    // Flatten raw player entries for progressive chunking
-    const rawQueue: { rawP: Player; club: Club; leagueId: string; leagueName: string }[] = [];
+        currentIndex = end;
+        chunkCount++;
+        const isLastChunk = currentIndex >= rawQueue.length;
 
-    externalClubEntries.forEach(({ club, leagueId, leagueName }) => {
-      (club.players || []).forEach(rawP => {
-        if (rawP && rawP.id && !seenIds.has(rawP.id)) {
-          seenIds.add(rawP.id);
-          rawQueue.push({ rawP, club, leagueId, leagueName });
-        }
-      });
-    });
-
-    if (rawQueue.length === 0) {
-      setExternalDbPlayers([]);
-      setIsLoadingWorld(false);
-      return;
-    }
-
-    const CHUNK_SIZE = 500;
-    let currentIndex = 0;
-    let chunkCount = 0;
-    const accumulated: MarketPlayerItem[] = [];
-
-    const processNextChunk = () => {
-      if (isCancelled) return;
-      const end = Math.min(currentIndex + CHUNK_SIZE, rawQueue.length);
-      for (let i = currentIndex; i < end; i++) {
-        const { rawP, club, leagueId, leagueName } = rawQueue[i];
-        const posCat = POSITION_CATEGORY_MAP[rawP.position] || 'MID';
-        const isArab =
-          ARAB_NAT_CODES.has(String(rawP.nationalityCode || '').toUpperCase()) ||
-          /^(egy|sau|mar|tun|alg|uae|qat)_/.test(leagueId);
-
-        let priceMultiplier = 1.0;
-        let statusLabel = 'تحت العقد';
-        let statusType: MarketPlayerItem['statusType'] = 'contract';
-
-        if (rawP.isListedForTransfer) {
-          priceMultiplier = 0.85;
-          statusLabel = 'معروض للبيع';
-          statusType = 'listed';
-        } else if ((rawP.contractYears || 2) <= 1) {
-          priceMultiplier = 0.75;
-          statusLabel = 'عقد ينتهي';
-          statusType = 'expiring';
-        } else if ((rawP.overallRating || (rawP as any).rating || 65) >= 78) {
-          priceMultiplier = 1.2;
-          statusLabel = 'نجم بارز';
-          statusType = 'star';
+        // Only copy accumulated array when actually updating state (every 2 chunks and on the final chunk)
+        if (chunkCount % 2 === 0 || isLastChunk) {
+          setExternalDbPlayers(accumulated.slice());
         }
 
-        const askingPrice = Math.round((rawP.marketValue || 50000) * priceMultiplier);
-
-        accumulated.push({
-          player: rawP,
-          club,
-          clubName: club.name,
-          leagueId,
-          leagueName,
-          isUserClubPlayer: false,
-          isArabPlayer: isArab,
-          posCategory: posCat,
-          askingPrice,
-          statusLabel,
-          statusType,
-        });
-      }
-
-      currentIndex = end;
-      chunkCount++;
-      const isLastChunk = currentIndex >= rawQueue.length;
-
-      // Update state every 2 chunks (and on the final chunk) to reduce re-filtering and re-sorting
-      if (chunkCount % 2 === 0 || isLastChunk) {
-        setExternalDbPlayers([...accumulated]);
-      }
-
-      if (!isLastChunk) {
-        if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
-          (window as any).requestIdleCallback(processNextChunk);
+        if (!isLastChunk) {
+          if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
+            (window as any).requestIdleCallback(processNextChunk, { timeout: 200 });
+          } else {
+            setTimeout(processNextChunk, 16);
+          }
         } else {
-          setTimeout(processNextChunk, 16);
+          if (!isCancelled) {
+            setIsLoadingWorld(false);
+          }
         }
+      };
+
+      if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
+        (window as any).requestIdleCallback(processNextChunk, { timeout: 200 });
       } else {
-        if (!isCancelled) {
-          setIsLoadingWorld(false);
-        }
+        setTimeout(processNextChunk, 16);
       }
     };
 
-    if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
-      (window as any).requestIdleCallback(processNextChunk);
-    } else {
-      setTimeout(processNextChunk, 16);
-    }
+    startWorldLoading();
 
     return () => {
       isCancelled = true;

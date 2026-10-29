@@ -2242,8 +2242,13 @@ export function repairContinentalTournamentIntegrity(
       ).length
     : 0;
 
-  const isPrematureComplete = tournament.isCompleted && currentRound < 14 && !hasPlayedFinal;
-  const isPrematureKnockout = hasKnockoutMatches && currentRound < 14;
+  const maxFixtureRound = updatedFixtures.length > 0 ? Math.max(0, ...updatedFixtures.map(f => f?.round || 0)) : 0;
+  const effectiveTotalRounds =
+    allTeams.length > 1 ? (allTeams.length - 1) * 2 : maxFixtureRound > 0 ? maxFixtureRound : 38;
+  const prematureContThreshold = Math.floor(effectiveTotalRounds * 0.37);
+
+  const isPrematureComplete = tournament.isCompleted && currentRound < prematureContThreshold && !hasPlayedFinal;
+  const isPrematureKnockout = hasKnockoutMatches && currentRound < prematureContThreshold;
   const isPrematureSkip = userParticipates && hasKnockoutMatches && userContFixPlayedCount === 0;
 
   // Check 1.5: Strict Continent Isolation Integrity
