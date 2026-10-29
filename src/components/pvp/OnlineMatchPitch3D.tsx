@@ -393,13 +393,17 @@ export const OnlineMatchPitch3D: React.FC<OnlineMatchPitch3DProps> = ({
   };
 
   // Animation frame tick for lifelike miniature movement - 700ms smooth tactical tick matching CSS transitions
+  // Immediately halted when match ends or enters halftime break to free CPU/GPU resources
   const [animTick, setAnimTick] = useState<number>(0);
   useEffect(() => {
+    if (isFullTimeFinished || isHalfTimeBreak) {
+      return;
+    }
     const interval = setInterval(() => {
       setAnimTick((t) => (t + 1) % 10000);
     }, 700);
     return () => clearInterval(interval);
-  }, []);
+  }, [isFullTimeFinished, isHalfTimeBreak]);
 
   // Audio triggers for important match events (Goal Roar & Referee Whistle)
   useEffect(() => {

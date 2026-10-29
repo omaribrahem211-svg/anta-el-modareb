@@ -1,4 +1,5 @@
 import { Player, PlayerAttributes, CupTournament, Club } from '../types/game';
+import { syncPlayerMarketValueWithRating } from './transferEngine';
 
 export interface StageRewardInfo {
   stageKey: string;
@@ -236,7 +237,8 @@ export function applyAttributeUpgrade(
   const newOverall = Math.max(player.overallRating, Math.min(99, avg));
   const newPotential = Math.max(player.potentialRating, newOverall);
 
-  const updatedPlayer: Player = {
+  const previousOvr = player.overallRating;
+  const tempPlayer: Player = {
     ...player,
     attributes: updatedAttrs,
     overallRating: newOverall,
@@ -245,11 +247,22 @@ export function applyAttributeUpgrade(
     morale: Math.min(100, player.morale + 3),
   };
 
+  // Even if overallRating didn't jump a full integer, attribute upgrade increases market value slightly (~4%)
+  const syncedVal =
+    newOverall > previousOvr
+      ? syncPlayerMarketValueWithRating(tempPlayer, previousOvr)
+      : Math.round(Math.max(syncPlayerMarketValueWithRating(tempPlayer, previousOvr), (player.marketValue || 50000) * 1.04) / 1000) * 1000;
+
+  const updatedPlayer: Player = {
+    ...tempPlayer,
+    marketValue: syncedVal,
+  };
+
   return {
     updatedPlayer,
     cost,
     success: true,
-    message: `تمت ترقية سمة اللاعب بنجاح (+1)! الرصيد المتبقي: ${availablePoints - cost} نقطة.`,
+    message: `تمت ترقية سمة اللاعب بنجاح (+1)! القيمة السوقية الجديدة: ${syncedVal.toLocaleString()} ج.م (الرصيد المتبقي: ${availablePoints - cost} نقطة).`,
   };
 }
 
@@ -300,7 +313,8 @@ export function applyOverallBoost(
     }
   }
 
-  const updatedPlayer: Player = {
+  const previousOvr = player.overallRating;
+  const tempPlayer: Player = {
     ...player,
     overallRating: newOverall,
     potentialRating: newPotential,
@@ -309,12 +323,17 @@ export function applyOverallBoost(
     morale: 100,
     form: Math.min(10, player.form + 1),
   };
+  const newMarketValue = syncPlayerMarketValueWithRating(tempPlayer, previousOvr);
+  const updatedPlayer: Player = {
+    ...tempPlayer,
+    marketValue: newMarketValue,
+  };
 
   return {
     updatedPlayer,
     cost,
     success: true,
-    message: `🌟 إنجاز رائع! ارتفع المستوى العام لـ ${player.name} إلى (${newOverall}) بنجاح!`,
+    message: `🌟 إنجاز رائع! ارتفع المستوى العام لـ ${player.name} إلى (${newOverall}) وارتفع سعره السوقي إلى ${newMarketValue.toLocaleString()} ج.م!`,
   };
 }
 
@@ -345,17 +364,25 @@ export function applyPotentialBoost(
   }
 
   const newPotential = Math.min(99, player.potentialRating + 2);
-  const updatedPlayer: Player = {
+  const tempPlayer: Player = {
     ...player,
     potentialRating: newPotential,
     morale: Math.min(100, player.morale + 10),
+  };
+  const newMarketValue = Math.max(
+    Math.round(((player.marketValue || 50000) * 1.08) / 1000) * 1000,
+    syncPlayerMarketValueWithRating(tempPlayer, player.overallRating)
+  );
+  const updatedPlayer: Player = {
+    ...tempPlayer,
+    marketValue: newMarketValue,
   };
 
   return {
     updatedPlayer,
     cost,
     success: true,
-    message: `🚀 تم صقل موهبة ${player.name} ورفع سقف إمكاناته إلى (${newPotential})!`,
+    message: `🚀 تم صقل موهبة ${player.name} ورفع سقف إمكاناته إلى (${newPotential}) وسعره السوقي إلى ${newMarketValue.toLocaleString()} ج.م!`,
   };
 }
 
@@ -385,12 +412,14 @@ export function applyConditionRecovery(
     isInjured: false,
     injury: null,
     injuryType: undefined,
+    injuryWeeks: undefined,
+    injuryMatches: undefined,
   };
 
   return {
     updatedPlayer,
     cost,
     success: true,
-    message: `⚡ استعاد ${player.name} كامل لياقته (100%) وجاهزيته الفنية والبدنية للقتال في المباريات القادمة!`,
+    message: `⚡ استعاد ${player.name} كامل لياقته (100%) وتعافى من أي إصابات ليصبح جاهزاً للمشاركة فوراً!`,
   };
 }

@@ -49,6 +49,7 @@ export const InboxTab: React.FC = () => {
   const [showClearConfirm, setShowClearConfirm] = useState(false);
   const [activeFilter, setActiveFilter] = useState<'all' | 'contract' | 'offer' | 'board' | 'news'>('all');
   const [searchQuery, setSearchQuery] = useState('');
+  const [visibleCount, setVisibleCount] = useState<number>(20);
   const [feedbackToast, setFeedbackToast] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
 
   // Renewal Form local states keyed by playerId
@@ -64,10 +65,22 @@ export const InboxTab: React.FC = () => {
     }, 4000);
   };
 
-  // Helper to find player object in userClub
+  // O(1) Map lookup for userClub players to prevent O(N*M) freeze when opening Inbox
+  const playerByIdMap = useMemo(() => {
+    const map = new Map<string, Player>();
+    if (userClub && Array.isArray(userClub.players)) {
+      for (let i = 0; i < userClub.players.length; i++) {
+        const p = userClub.players[i];
+        if (p && p.id) map.set(p.id, p);
+      }
+    }
+    return map;
+  }, [userClub?.players]);
+
+  // Helper to find player object in userClub in O(1)
   const getPlayerById = (playerId?: string): Player | undefined => {
-    if (!playerId || !userClub || !Array.isArray(userClub.players)) return undefined;
-    return userClub.players.find(p => p.id === playerId);
+    if (!playerId) return undefined;
+    return playerByIdMap.get(playerId);
   };
 
   // Get active wage for a player
@@ -214,6 +227,11 @@ export const InboxTab: React.FC = () => {
       return true;
     });
   }, [inbox, activeFilter, searchQuery, userClub?.players]);
+
+  const paginatedInbox = useMemo(
+    () => filteredInbox.slice(0, visibleCount),
+    [filteredInbox, visibleCount]
+  );
 
   const getBadgeType = (type: InboxMessage['type'], priority?: string) => {
     switch (type) {
@@ -380,7 +398,7 @@ export const InboxTab: React.FC = () => {
         <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
           <div className="flex flex-wrap items-center gap-1.5">
             <button
-              onClick={() => setActiveFilter('all')}
+              onClick={() => { setActiveFilter('all'); setVisibleCount(20); }}
               className={`px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
                 activeFilter === 'all'
                   ? 'bg-emerald-600 text-white shadow-sm'
@@ -392,7 +410,7 @@ export const InboxTab: React.FC = () => {
             </button>
 
             <button
-              onClick={() => setActiveFilter('contract')}
+              onClick={() => { setActiveFilter('contract'); setVisibleCount(20); }}
               className={`px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
                 activeFilter === 'contract'
                   ? 'bg-amber-600 text-white shadow-sm'
@@ -409,7 +427,7 @@ export const InboxTab: React.FC = () => {
             </button>
 
             <button
-              onClick={() => setActiveFilter('offer')}
+              onClick={() => { setActiveFilter('offer'); setVisibleCount(20); }}
               className={`px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
                 activeFilter === 'offer'
                   ? 'bg-teal-600 text-white shadow-sm'
@@ -426,7 +444,7 @@ export const InboxTab: React.FC = () => {
             </button>
 
             <button
-              onClick={() => setActiveFilter('board')}
+              onClick={() => { setActiveFilter('board'); setVisibleCount(20); }}
               className={`px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
                 activeFilter === 'board'
                   ? 'bg-purple-600 text-white shadow-sm'
@@ -438,7 +456,7 @@ export const InboxTab: React.FC = () => {
             </button>
 
             <button
-              onClick={() => setActiveFilter('news')}
+              onClick={() => { setActiveFilter('news'); setVisibleCount(20); }}
               className={`px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
                 activeFilter === 'news'
                   ? 'bg-blue-600 text-white shadow-sm'
@@ -455,7 +473,7 @@ export const InboxTab: React.FC = () => {
             <input
               type="text"
               value={searchQuery}
-              onChange={e => setSearchQuery(e.target.value)}
+              onChange={e => { setSearchQuery(e.target.value); setVisibleCount(20); }}
               placeholder="بحث في الرسائل..."
               className="w-full bg-slate-950/80 border border-slate-700/80 rounded-xl px-3 py-1.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500"
             />
@@ -472,7 +490,7 @@ export const InboxTab: React.FC = () => {
             <div className="text-xs text-slate-500">ستصلك الإشعارات والعروض والتنبيهات مع استمرار الموسم وجولاته.</div>
           </div>
         ) : (
-          filteredInbox.map(msg => {
+          paginatedInbox.map(msg => {
             const badge = getBadgeType(msg.type, msg.priority);
             const isSelected = selectedMessageId === msg.id;
             const isContractMsg = msg.type === 'contract' || !!msg.contractDetails;
@@ -495,13 +513,13 @@ export const InboxTab: React.FC = () => {
               <div
                 key={msg.id}
                 id={`inbox_msg_${msg.id}`}
-                className={`rounded-3xl border transition-all space-y-3 p-4 sm:p-5 ${
+                className={`rounded-3xl border transition-colors space-y-3 p-4 sm:p-5 ${
                   !msg.read
                     ? isUrgent
-                      ? 'bg-slate-900/95 border-rose-500/70 shadow-lg ring-1 ring-rose-500/30'
+                      ? 'bg-slate-900/95 border-rose-500/70'
                       : isHigh
-                      ? 'bg-slate-900/95 border-amber-500/70 shadow-md ring-1 ring-amber-500/30'
-                      : 'bg-slate-900/90 border-emerald-500/60 shadow-md ring-1 ring-emerald-500/30'
+                      ? 'bg-slate-900/95 border-amber-500/70'
+                      : 'bg-slate-900/90 border-emerald-500/60'
                     : 'bg-slate-900/60 border-slate-800 hover:bg-slate-900/80'
                 }`}
               >
@@ -515,8 +533,8 @@ export const InboxTab: React.FC = () => {
                       {msg.read ? (
                         <MailOpen className="w-4 h-4 text-slate-500" />
                       ) : (
-                        <span className={`w-3 h-3 rounded-full flex items-center justify-center ${
-                          isUrgent ? 'bg-rose-500 animate-ping' : isHigh ? 'bg-amber-400 animate-ping' : 'bg-emerald-500 animate-ping'
+                        <span className={`w-2.5 h-2.5 rounded-full block ${
+                          isUrgent ? 'bg-rose-500' : isHigh ? 'bg-amber-400' : 'bg-emerald-500'
                         }`} />
                       )}
                     </div>
@@ -850,6 +868,18 @@ export const InboxTab: React.FC = () => {
               </div>
             );
           })
+        )}
+
+        {filteredInbox.length > visibleCount && (
+          <div className="pt-2 text-center">
+            <button
+              type="button"
+              onClick={() => setVisibleCount(prev => prev + 20)}
+              className="px-6 py-2.5 rounded-2xl bg-slate-800 hover:bg-slate-700 text-emerald-400 font-bold text-xs border border-slate-700 transition cursor-pointer"
+            >
+              عرض المزيد من الرسائل ({filteredInbox.length - visibleCount} متبقية)
+            </button>
+          </div>
         )}
       </div>
 

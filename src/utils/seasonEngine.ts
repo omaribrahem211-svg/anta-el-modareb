@@ -23,6 +23,7 @@ import { getLeagueByCountryAndTier, getLeagueById, GLOBAL_LEAGUES, updateLeagueR
 import { generateLeagueSchedule, generateInitialStandings } from '../data/initialData';
 import { simulateMatch } from './engine';
 import { simulateKnockoutMatch } from './continentalEngine';
+import { syncPlayerMarketValueWithRating } from './transferEngine';
 import { generateYouthAcademyBatch } from './youthAcademyEngine';
 import { checkCupStageAdvancementRewards, StageRewardInfo } from './rewardsEngine';
 import { isRealClub, loadRealClubSquad } from '../data/realPlayersData';
@@ -1580,7 +1581,7 @@ export function advanceCupTournament(
         match.awayPenalties = res.awayPenalties;
         match.isPlayed = true;
         match.winnerTeamId = res.winnerTeamId;
-        match.events = res.events;
+        match.events = [];
         match.stats = res.stats;
       }
 
@@ -1797,6 +1798,19 @@ export function repairCupProgressionIntegrity(
       (userPen !== undefined && oppPen !== undefined && userPen > oppPen) ||
       (userPen === undefined && oppPen === undefined && hs !== as && userGoals > oppGoals);
 
+    if (!userWonMatch) {
+      // User was eliminated in this knockout stage: record userEliminatedStage if missing and halt subsequent stage repairs!
+      const stageArabic =
+        stage === 'final'
+          ? 'وصيف الكأس (المباراة النهائية)'
+          : stageMeta[stage]?.arabic || userMatch?.stageName || userFix?.stageName || 'الكأس الوطنية';
+      if (!eliminatedStage) {
+        eliminatedStage = stageArabic;
+        repaired = true;
+      }
+      break;
+    }
+
     if (userWonMatch) {
       if (userMatch) {
         if (userMatch.winnerTeamId !== userClubId) {
@@ -1815,7 +1829,7 @@ export function repairCupProgressionIntegrity(
       // Only clear userEliminatedStage if the player has NOT lost any cup match played with a final result
       const hasLostAnyPlayedCupMatch =
         matches.some(m => {
-          if (!m.isPlayed || m.homeScore === undefined || m.awayScore === undefined) return false;
+          if (!m?.isPlayed || m.homeScore === undefined || m.awayScore === undefined) return false;
           if (m.homeTeamId !== userClubId && m.awayTeamId !== userClubId) return false;
           const isHome = m.homeTeamId === userClubId;
           const hs = m.homeScore ?? 0;
@@ -1829,6 +1843,7 @@ export function repairCupProgressionIntegrity(
           return myGoals < oppGoals;
         }) ||
         updatedFixtures.some(f => {
+          if (!f) return false;
           const isCup =
             f.competitionType === 'cup' ||
             f.competitionType === 'DOMESTIC_CUP' ||
@@ -1856,11 +1871,11 @@ export function repairCupProgressionIntegrity(
       // Ensure user is placed into the next stage as an UNPLAYED match
       if (sIdx < stages.length - 1) {
         const nextStage = stages[sIdx + 1];
-        let nextMatches = matches.filter(m => m.stage === nextStage);
+        let nextMatches = matches.filter(m => m?.stage === nextStage);
 
         // If nextMatches is empty, GENERATE the next stage matches immediately!
         if (nextMatches.length === 0) {
-          const currentStageMatches = matches.filter(m => m.stage === stage);
+          const currentStageMatches = matches.filter(m => m?.stage === stage);
           currentStageMatches.forEach(cm => {
             if (!cm.isPlayed) {
               const home = findClubInWorld(cm.homeTeamId) || ({ id: cm.homeTeamId, name: 'فريق الكأس' } as any);
@@ -1872,11 +1887,12 @@ export function repairCupProgressionIntegrity(
               cm.awayPenalties = res.awayPenalties;
               cm.winnerTeamId = res.winnerTeamId;
               cm.isPlayed = true;
+              cm.events = [];
               repaired = true;
             }
           });
 
-          const currentWinners = currentStageMatches.map(m => m.winnerTeamId || (m.homeScore! > m.awayScore! ? m.homeTeamId : m.awayTeamId));
+          const currentWinners = currentStageMatches.map(m => m.winnerTeamId || ((m.homeScore ?? 0) > (m.awayScore ?? 0) ? m.homeTeamId : m.awayTeamId));
           const otherWinners = currentWinners.filter(id => id !== userClubId);
           const nextMeta = stageMeta[nextStage];
           const numMatches = Math.max(1, Math.floor(currentWinners.length / 2));
@@ -1896,14 +1912,14 @@ export function repairCupProgressionIntegrity(
             matches.push(generatedNextMatch);
             repaired = true;
           }
-          nextMatches = matches.filter(m => m.stage === nextStage);
+          nextMatches = matches.filter(m => m?.stage === nextStage);
         }
 
-        const userInNext = nextMatches.some(m => m.homeTeamId === userClubId || m.awayTeamId === userClubId);
+        const userInNext = nextMatches.some(m => m?.homeTeamId === userClubId || m?.awayTeamId === userClubId);
 
         let targetNextMatch =
-          nextMatches.find(m => m.homeTeamId === userClubId || m.awayTeamId === userClubId) ||
-          nextMatches.find(m => !m.isPlayed) ||
+          nextMatches.find(m => m?.homeTeamId === userClubId || m?.awayTeamId === userClubId) ||
+          nextMatches.find(m => !m?.isPlayed) ||
           nextMatches[0];
 
         if (!userInNext && nextMatches.length > 0 && targetNextMatch) {
@@ -1918,6 +1934,7 @@ export function repairCupProgressionIntegrity(
         if (targetNextMatch) {
           const nextFixes = updatedFixtures.filter(
             f =>
+              f &&
               (f.competitionType === 'cup' ||
                 f.competitionType === 'DOMESTIC_CUP' ||
                 f.competitionType === 'DOMESTIC_COP' ||
@@ -1925,7 +1942,7 @@ export function repairCupProgressionIntegrity(
                 f.id === targetNextMatch!.id) &&
               (f.cupStage === nextStage || f.stage === nextStage || f.id === targetNextMatch!.id)
           );
-          const userInNextFix = nextFixes.some(f => f.homeTeamId === userClubId || f.awayTeamId === userClubId);
+          const userInNextFix = nextFixes.some(f => f?.homeTeamId === userClubId || f?.awayTeamId === userClubId);
           if (nextFixes.length === 0) {
             const nextMeta = stageMeta[nextStage];
             const dateStr = resolveStageCanonicalDate(nextStage, cup.seasonNumber || 1);
@@ -1934,7 +1951,7 @@ export function repairCupProgressionIntegrity(
               round: targetNextMatch.roundTrigger || nextMeta?.trigger || 29,
               homeTeamId: targetNextMatch.homeTeamId,
               awayTeamId: targetNextMatch.awayTeamId,
-              competitionType: 'DOMESTIC_CUP',
+              competitionType: 'DOMESTIC_COP',
               competitionId: 'domestic_cup',
               tournamentId: 'cup',
               competitionName: cup.name || 'كأس مصر العريق 🏆',
@@ -1949,13 +1966,13 @@ export function repairCupProgressionIntegrity(
             repaired = true;
           } else if (!userInNextFix && nextFixes.length > 0) {
             const targetFix =
-              nextFixes.find(f => f.id === targetNextMatch!.id) || nextFixes.find(f => !f.isPlayed) || nextFixes[0];
-            const fixIdx = updatedFixtures.findIndex(f => f.id === targetFix.id);
+              nextFixes.find(f => f?.id === targetNextMatch!.id) || nextFixes.find(f => !f?.isPlayed) || nextFixes[0];
+            const fixIdx = updatedFixtures.findIndex(f => f?.id === targetFix?.id);
             if (fixIdx !== -1) {
               updatedFixtures[fixIdx] = {
                 ...updatedFixtures[fixIdx],
                 id: targetNextMatch.id,
-                competitionType: 'DOMESTIC_CUP',
+                competitionType: 'DOMESTIC_COP',
                 cupStage: nextStage,
                 stage: nextStage,
                 date: updatedFixtures[fixIdx].date || resolveStageCanonicalDate(nextStage, cup.seasonNumber || 1),
@@ -2248,7 +2265,10 @@ export function processNewSeasonAdvancement(
 
     squad.forEach(p => {
       const newAge = p.age + 1;
-      const newContractYears = Math.max(0, p.contractYears - 1);
+      const alreadyDecrementedThisSeason = (p as any).lastContractDecrementedSeason === currentSeason.seasonNumber;
+      const newContractYears = alreadyDecrementedThisSeason
+        ? Math.max(0, typeof p.contractYears === 'number' ? p.contractYears : 0)
+        : Math.max(0, (typeof p.contractYears === 'number' ? p.contractYears : 2) - 1);
 
       // Flexible Retirement Age Rules:
       // - Under 35: NEVER retires (strictly 0% chance).
@@ -2321,18 +2341,27 @@ export function processNewSeasonAdvancement(
         }
 
         const newOverall = Math.min(99, Math.max(35, p.overallRating + overallDelta));
-
-        survivingPlayers.push({
+        const updatedPlayerObj: Player = {
           ...p,
           age: newAge,
           contractYears: newContractYears,
           overallRating: newOverall,
           fitness: 100,
+          isInjured: false,
+          injury: null,
+          injuryType: undefined,
+          injuryWeeks: undefined,
+          injuryMatches: undefined,
           morale: Math.min(100, Math.max(70, p.morale + 10)),
           stats: resetStats,
           unhappyMatchesCount: 0,
           transferRequestSubmitted: false,
-        });
+        };
+        if (newOverall > p.overallRating) {
+          updatedPlayerObj.marketValue = syncPlayerMarketValueWithRating(updatedPlayerObj, p.overallRating);
+        }
+
+        survivingPlayers.push(updatedPlayerObj);
       }
     });
 

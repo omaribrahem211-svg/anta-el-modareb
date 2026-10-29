@@ -279,19 +279,35 @@ const MarketPlayerCard = React.memo<MarketPlayerCardProps>(
   }) => {
     const { isUserClubPlayer } = item;
 
-    // Lazily calibrate rating ONLY for visible cards in the virtual viewport
+    // Lazily calibrate rating ONLY for visible cards in the virtual viewport, invalidating cache if rating or marketValue changed
     const player = useMemo(() => {
       const raw = item.player;
       if (!raw || !raw.id) return raw;
-      if (playerCalibrationCache.has(raw.id)) {
-        return playerCalibrationCache.get(raw.id)!;
+      const cached = playerCalibrationCache.get(raw.id);
+      if (
+        cached &&
+        cached.overallRating === raw.overallRating &&
+        cached.marketValue === raw.marketValue
+      ) {
+        return cached;
       }
       const calibrated =
         item.statusType === 'free'
           ? calibrateRealisticPlayerRating(raw, '', 'free_agents', 50)
           : calibrateRealisticPlayerRating(raw, item.club?.id || '', item.leagueId, item.club?.reputation || 65);
-      playerCalibrationCache.set(raw.id, calibrated);
-      return calibrated;
+      // If player was trained and their rating/marketValue increased beyond the static club template, preserve their trained rating & marketValue
+      const finalPlayer: Player =
+        raw.overallRating > calibrated.overallRating || (raw.marketValue || 0) > (calibrated.marketValue || 0)
+          ? {
+              ...calibrated,
+              overallRating: Math.max(raw.overallRating, calibrated.overallRating),
+              potentialRating: Math.max(raw.potentialRating || 0, calibrated.potentialRating || 0),
+              marketValue: Math.max(raw.marketValue || 0, calibrated.marketValue || 0),
+              attributes: raw.attributes || calibrated.attributes,
+            }
+          : calibrated;
+      playerCalibrationCache.set(raw.id, finalPlayer);
+      return finalPlayer;
     }, [item.player, item.club?.id, item.leagueId, item.club?.reputation, item.statusType]);
 
     const safeClubName = item.clubName || 'وكيل حر';

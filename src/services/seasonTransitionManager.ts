@@ -11,19 +11,21 @@ import {
 import { CalendarManager, CalendarScheduleItem } from './calendarManager';
 import {
   initContinentalTournamentByCode,
-  isEuropeanCountry,
+  resolveClubContinent,
+  getContinentalCodesForContinent,
 } from '../utils/continentalEngine';
 import {
   calculateSeasonEndSummary,
   initNationalCupTournament,
 } from '../utils/seasonEngine';
 import { getDomesticCupDefinitionForCountry } from '../data/competitionsData';
+import { resolveCountryContinent } from '../data/realClubsData';
 
 export interface ContinentalQualifications {
-  primaryContinentalCode: 'ccl' | 'ucl';
-  secondaryContinentalCode: 'ccc' | 'uel';
-  cclQualifiedClubIds: string[]; // 1st & 2nd (Champions League: CCL or UCL)
-  cccQualifiedClubIds: string[]; // Cup Winner & 3rd/4th (Confederation Cup or Europa League)
+  primaryContinentalCode: 'ccl' | 'ucl' | 'acl';
+  secondaryContinentalCode: 'ccc' | 'uel' | 'acl2';
+  cclQualifiedClubIds: string[]; // 1st & 2nd (Champions League: CCL, ACL Elite, or UCL)
+  cccQualifiedClubIds: string[]; // Cup Winner & 3rd/4th (Confederation Cup, AFC Two, or Europa League)
   qualificationNotes: string[];
 }
 
@@ -50,22 +52,38 @@ export interface SeasonTransitionResult {
 
 export class SeasonTransitionManager {
   /**
-   * Evaluates continental qualifications according to official CAF & UEFA rules:
-   * - League 1st & 2nd Place: Qualify for Champions League (CAF Champions League in Africa / UEFA Champions League in Europe).
-   * - National Cup Winner & League 3rd Place: Qualify for CAF Confederation Cup (Africa) or UEFA Europa League (Europe).
+   * Evaluates continental qualifications according to official CAF, AFC & UEFA rules:
+   * - League 1st & 2nd Place: Qualify for Primary Continental (CAF CL in Africa, AFC CL Elite in Asia, UEFA CL in Europe).
+   * - National Cup Winner & League 3rd Place: Qualify for Secondary Continental (CAF CC in Africa, AFC Two in Asia, UEFA EL in Europe).
    *   (If Cup Winner is already in Top 3, League 4th place qualifies).
    */
   static evaluateContinentalQualifications(
     standings: LeagueStanding[],
     cupTournament: CupTournament | null,
-    country: string = 'مصر'
+    country: string = 'مصر',
+    userClub?: Club | null,
+    activeLeague?: LeagueDefinition | null
   ): ContinentalQualifications {
-    const isEuro = isEuropeanCountry(country);
-    const primaryContinentalCode: 'ccl' | 'ucl' = isEuro ? 'ucl' : 'ccl';
-    const secondaryContinentalCode: 'ccc' | 'uel' = isEuro ? 'uel' : 'ccc';
+    const continent =
+      userClub || activeLeague
+        ? resolveClubContinent(userClub, activeLeague)
+        : resolveCountryContinent(country);
+    const codes = getContinentalCodesForContinent(continent);
+    const primaryContinentalCode: 'ccl' | 'ucl' | 'acl' = codes.primary;
+    const secondaryContinentalCode: 'ccc' | 'uel' | 'acl2' = codes.secondary;
 
-    const primaryName = isEuro ? 'دوري أبطال أوروبا (UCL)' : 'دوري أبطال إفريقيا (CAF CL)';
-    const secondaryName = isEuro ? 'الدوري الأوروبي (UEL)' : 'كأس الكونفدرالية الإفريقية (CAF CC)';
+    const primaryName =
+      continent === 'EUROPE'
+        ? 'دوري أبطال أوروبا (UCL)'
+        : continent === 'ASIA'
+        ? 'دوري أبطال آسيا للنخبة (ACL Elite)'
+        : 'دوري أبطال إفريقيا (CAF CL)';
+    const secondaryName =
+      continent === 'EUROPE'
+        ? 'الدوري الأوروبي (UEL)'
+        : continent === 'ASIA'
+        ? 'دوري أبطال آسيا 2 (AFC Two)'
+        : 'كأس الكونفدرالية الإفريقية (CAF CC)';
     const cupDef = getDomesticCupDefinitionForCountry(country);
 
     const cclQualifiedClubIds: string[] = [];
@@ -74,7 +92,7 @@ export class SeasonTransitionManager {
     const primarySet = new Set<string>();
     const secondarySet = new Set<string>();
 
-    // 1. League Champion & Runner-Up -> Primary Continental (CCL / UCL)
+    // 1. League Champion & Runner-Up -> Primary Continental (CCL / ACL / UCL)
     if (standings.length > 0) {
       cclQualifiedClubIds.push(standings[0].teamId);
       primarySet.add(standings[0].teamId);
@@ -105,7 +123,7 @@ export class SeasonTransitionManager {
       }
     }
 
-    // 3. League 3rd Place (or highest team not in Primary) -> Secondary Continental (CCC / UEL)
+    // 3. League 3rd Place (or highest team not in Primary) -> Secondary Continental (CCC / ACL2 / UEL)
     for (let i = 2; i < standings.length; i++) {
       const candidate = standings[i];
       if (!primarySet.has(candidate.teamId) && !secondarySet.has(candidate.teamId)) {
@@ -181,7 +199,13 @@ export class SeasonTransitionManager {
     const country = activeLeague?.country || userClub?.country || 'مصر';
 
     // 1. Evaluate Standings & Continental Qualifications
-    const qualifications = this.evaluateContinentalQualifications(standings, cupTournament, country);
+    const qualifications = this.evaluateContinentalQualifications(
+      standings,
+      cupTournament,
+      country,
+      userClub,
+      activeLeague
+    );
 
     // 2. Generate End of Season Summary
     const summaryClub = userClub || teams[0];
@@ -205,14 +229,14 @@ export class SeasonTransitionManager {
       totalLeagueRounds
     );
 
-    // 4. Determine Which Continental Tournament User's Club Participates In (with Strict Mutual Exclusion)
+    // 4. Determine Which Continental Tournament User's Club Participates In (with Strict Mutual Exclusion & Continent Isolation)
     const userId = userClub?.id;
     const userQualifiedForSecondary = Boolean(
       userId &&
       qualifications.cccQualifiedClubIds.includes(userId) &&
       !qualifications.cclQualifiedClubIds.includes(userId)
     );
-    const targetContinentalCode: 'ccl' | 'ccc' | 'ucl' | 'uel' = userQualifiedForSecondary
+    const targetContinentalCode: 'ccl' | 'ccc' | 'ucl' | 'uel' | 'acl' | 'acl2' = userQualifiedForSecondary
       ? qualifications.secondaryContinentalCode
       : qualifications.primaryContinentalCode;
 

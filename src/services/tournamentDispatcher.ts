@@ -14,6 +14,7 @@ import { recalculateContinentalGroupStandings, simulateKnockoutMatch } from '../
 import { findClubInWorld } from '../data/leaguesData';
 import { CalendarManager } from './calendarManager';
 import { getDomesticCupDefinitionForCountry } from '../data/competitionsData';
+import { pruneMatchEventsForStorage } from '../utils/storage/indexedDbStorage';
 
 export interface ProcessMatchResultOptions {
   fixture: Fixture;
@@ -282,6 +283,8 @@ export function processMatchResult(
       ? 'DOMESTIC_COP'
       : 'LEAGUE');
 
+  const compactEvents = pruneMatchEventsForStorage(events, true);
+
   const updatedFixture: Fixture = {
     ...fixture,
     homeScore,
@@ -290,7 +293,7 @@ export function processMatchResult(
     awayPenalties,
     winnerTeamId: resolvedWinner,
     isPlayed: true,
-    events,
+    events: compactEvents,
     stats,
     competitionType: preservedCompetitionType,
     competitionName: fixture?.competitionName || branding.name,
@@ -383,7 +386,7 @@ export function processMatchResult(
                 awayPenalties,
                 winnerTeamId: resolvedWinner,
                 isPlayed: true,
-                events,
+                events: [],
                 stats,
               }
             : { ...m }
@@ -409,7 +412,7 @@ export function processMatchResult(
             awayPenalties,
             winnerTeamId: resolvedWinner,
             isPlayed: true,
-            events,
+            events: [],
             stats,
           },
         ],
@@ -645,9 +648,21 @@ export function processMatchResult(
         awayPenalties,
         winnerTeamId: resolvedWinner,
         isPlayed: true,
-        events,
+        events: [],
         stats,
       };
+    }
+
+    if (isUserMatch && userClubId && resolvedWinner) {
+      if (resolvedWinner === userClubId) {
+        updatedCup.userEliminatedStage = undefined;
+      } else {
+        updatedCup.userEliminatedStage =
+          updatedFixture.stageName ||
+          updatedCup.matches[cupMatchIdx]?.stageName ||
+          branding.stageName ||
+          'الكأس الوطنية';
+      }
     }
 
     const currentStageName =

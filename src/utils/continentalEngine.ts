@@ -1,5 +1,6 @@
 import {
   Club,
+  ContinentCode,
   ContinentalGroup,
   ContinentalGroupStanding,
   ContinentalMatch,
@@ -12,11 +13,16 @@ import {
 } from '../types/game';
 import { simulateMatch, calculateTeamStrength } from './engine';
 import { GLOBAL_LEAGUES, findClubInWorld } from '../data/leaguesData';
+import { resolveCountryContinent } from '../data/realClubsData';
 import {
   EGYPT_PREMIER_CLUBS,
   MOROCCO_BOTOLA_CLUBS,
   TUNISIA_LIGUE_CLUBS,
   ALGERIA_LIGUE_CLUBS,
+  SAUDI_PRO_CLUBS,
+  SAUDI_TIER_2_CLUBS,
+  UAE_PRO_CLUBS,
+  QATAR_STARS_CLUBS,
 } from '../data/arabClubsData';
 import {
   ENGLAND_PREMIER_CLUBS,
@@ -25,13 +31,206 @@ import {
   GERMANY_BUNDESLIGA_CLUBS,
   FRANCE_LIGUE_1_CLUBS,
 } from '../data/europeanClubsData';
+import {
+  BRAZIL_SERIE_A_CLUBS,
+  ARGENTINA_PRIMERA_CLUBS,
+} from '../data/latamClubsData';
+
+// =========================================================================
+// 0. STRICT CONTINENT CLASSIFICATION & ISOLATION GUARDS
+// =========================================================================
+
+/**
+ * Resolves the canonical strict ContinentCode ('AFRICA' | 'ASIA' | 'EUROPE' | 'SOUTH_AMERICA' | 'NORTH_AMERICA')
+ * for any Club or LeagueDefinition. Never allows cross-continent ambiguity.
+ */
+export function resolveClubContinent(
+  club?: Partial<Club> | null,
+  league?: Partial<LeagueDefinition> | null
+): ContinentCode {
+  const rawContinent = String(club?.continent || league?.continent || league?.region || '')
+    .trim()
+    .toUpperCase();
+
+  if (rawContinent === 'ASIA') return 'ASIA';
+  if (rawContinent === 'EUROPE') return 'EUROPE';
+  if (rawContinent === 'SOUTH_AMERICA' || rawContinent === 'SOUTH AMERICA') return 'SOUTH_AMERICA';
+  if (rawContinent === 'NORTH_AMERICA' || rawContinent === 'NORTH AMERICA') return 'NORTH_AMERICA';
+  if (rawContinent === 'AFRICA') {
+    // Double-check against country/leagueId in case a legacy object had default 'africa' stamped on an Asian/European club
+    const verifiedByCountry = resolveCountryContinent(
+      club?.country || league?.country,
+      club?.countryCode,
+      club?.leagueId || league?.id,
+      club?.id
+    );
+    if (verifiedByCountry !== 'AFRICA') {
+      return verifiedByCountry;
+    }
+    return 'AFRICA';
+  }
+
+  return resolveCountryContinent(
+    club?.country || league?.country,
+    club?.countryCode,
+    club?.leagueId || league?.id,
+    club?.id
+  );
+}
+
+/**
+ * Maps any Continental Competition ID to its strict Target Continent.
+ * - 'ccl' | 'ccc' -> 'AFRICA' (CAF Champions League & CAF Confederation Cup)
+ * - 'acl' | 'acl2' -> 'ASIA' (AFC Champions League Elite & AFC Champions League Two)
+ * - 'ucl' | 'uel' -> 'EUROPE' (UEFA Champions League & UEFA Europa League)
+ */
+export function getTargetContinentForCompetition(
+  competitionId: 'ccl' | 'ccc' | 'ucl' | 'uel' | 'acl' | 'acl2' | string
+): ContinentCode {
+  const code = String(competitionId || '').toLowerCase();
+  if (code === 'acl' || code === 'acl2' || code.includes('afc') || code.includes('asia')) {
+    return 'ASIA';
+  }
+  if (code === 'ucl' || code === 'uel' || code.includes('uefa') || code.includes('euro')) {
+    return 'EUROPE';
+  }
+  return 'AFRICA';
+}
+
+/**
+ * Returns the pure club pool belonging strictly to `targetContinent`.
+ * Used exclusively to fill any vacant spots within the same continent — NEVER across continents.
+ */
+export function getContinentClubPool(targetContinent: ContinentCode): Club[] {
+  let rawPool: Club[] = [];
+  switch (targetContinent) {
+    case 'ASIA':
+      rawPool = [
+        ...(GLOBAL_LEAGUES['sau_tier_1']?.teams || SAUDI_PRO_CLUBS),
+        ...(GLOBAL_LEAGUES['uae_tier_1']?.teams || UAE_PRO_CLUBS),
+        ...(GLOBAL_LEAGUES['qat_tier_1']?.teams || QATAR_STARS_CLUBS),
+        ...(GLOBAL_LEAGUES['sau_tier_2']?.teams || SAUDI_TIER_2_CLUBS),
+      ];
+      break;
+    case 'EUROPE':
+      rawPool = [
+        ...(GLOBAL_LEAGUES['eng_tier_1']?.teams || ENGLAND_PREMIER_CLUBS),
+        ...(GLOBAL_LEAGUES['esp_tier_1']?.teams || SPAIN_LA_LIGA_CLUBS),
+        ...(GLOBAL_LEAGUES['ita_tier_1']?.teams || ITALY_SERIE_A_CLUBS),
+        ...(GLOBAL_LEAGUES['ger_tier_1']?.teams || GERMANY_BUNDESLIGA_CLUBS),
+        ...(GLOBAL_LEAGUES['fra_tier_1']?.teams || FRANCE_LIGUE_1_CLUBS),
+      ];
+      break;
+    case 'SOUTH_AMERICA':
+      rawPool = [
+        ...(GLOBAL_LEAGUES['bra_tier_1']?.teams || BRAZIL_SERIE_A_CLUBS),
+        ...(GLOBAL_LEAGUES['arg_tier_1']?.teams || ARGENTINA_PRIMERA_CLUBS),
+      ];
+      break;
+    case 'AFRICA':
+    default:
+      rawPool = [
+        ...(GLOBAL_LEAGUES['egy_tier_1']?.teams || EGYPT_PREMIER_CLUBS),
+        ...(GLOBAL_LEAGUES['mar_tier_1']?.teams || MOROCCO_BOTOLA_CLUBS),
+        ...(GLOBAL_LEAGUES['tun_tier_1']?.teams || TUNISIA_LIGUE_CLUBS),
+        ...(GLOBAL_LEAGUES['alg_tier_1']?.teams || ALGERIA_LIGUE_CLUBS),
+      ];
+      break;
+  }
+
+  const seen = new Set<string>();
+  const purePool: Club[] = [];
+  for (const club of rawPool) {
+    if (!club || !club.id || seen.has(club.id)) continue;
+    const clubContinent = resolveClubContinent(club);
+    if (clubContinent === targetContinent) {
+      seen.add(club.id);
+      purePool.push({ ...club, continent: targetContinent });
+    }
+  }
+  return purePool;
+}
+
+/**
+ * Safety Guard & Strict Continent Filter:
+ * - Filters `allTeams` so ONLY teams with `team.continent === targetContinent` are retained.
+ * - If any team from a foreign continent is detected, logs a clear warning, strips it immediately,
+ *   and replaces vacant slots strictly from the same continent's pool (`getContinentClubPool(targetContinent)`).
+ * - Throws an explicit assertion error if a foreign team ever remains after sanitization.
+ */
+export function assertAndSanitizeContinentTeams(
+  candidateTeams: Club[],
+  targetContinent: ContinentCode,
+  requiredCount: number = 16,
+  seasonNumber: number = 1,
+  excludedClubIds?: Set<string>
+): Club[] {
+  const excluded = excludedClubIds || new Set<string>();
+  const seenIds = new Set<string>();
+  const eligibleTeams: Club[] = [];
+
+  for (const team of Array.isArray(candidateTeams) ? candidateTeams : []) {
+    if (!team || !team.id) continue;
+    if (excluded.has(team.id) || seenIds.has(team.id)) continue;
+
+    const teamContinent = resolveClubContinent(team);
+    if (teamContinent !== targetContinent) {
+      console.warn(
+        `[ContinentalIsolationGuard] Rejected foreign club "${team.name}" (${team.id}, continent=${teamContinent}) from ${targetContinent} competition.`
+      );
+      continue;
+    }
+
+    seenIds.add(team.id);
+    eligibleTeams.push({ ...team, continent: targetContinent });
+  }
+
+  // Fill any vacant spots strictly from the SAME continent pool (ranked by seasonal coefficient)
+  if (eligibleTeams.length < requiredCount) {
+    const sameContinentPool = getContinentClubPool(targetContinent).filter(
+      c => !excluded.has(c.id) && !seenIds.has(c.id)
+    );
+    const rankedBackups = [...sameContinentPool].sort(
+      (a, b) => getClubSeasonalCoefficient(b, seasonNumber) - getClubSeasonalCoefficient(a, seasonNumber)
+    );
+
+    for (const backup of rankedBackups) {
+      if (eligibleTeams.length >= requiredCount) break;
+      seenIds.add(backup.id);
+      eligibleTeams.push({ ...backup, continent: targetContinent });
+    }
+
+    // If still fewer than requiredCount (e.g., heavily excluded), allow remaining teams from the same continent pool
+    if (eligibleTeams.length < requiredCount) {
+      for (const backup of getContinentClubPool(targetContinent)) {
+        if (eligibleTeams.length >= requiredCount) break;
+        if (!seenIds.has(backup.id)) {
+          seenIds.add(backup.id);
+          eligibleTeams.push({ ...backup, continent: targetContinent });
+        }
+      }
+    }
+  }
+
+  const finalSelection = eligibleTeams.slice(0, requiredCount);
+
+  // Hard Assertion: Verify 0 foreign-continent teams exist
+  const foreignTeam = finalSelection.find(t => resolveClubContinent(t) !== targetContinent);
+  if (foreignTeam) {
+    throw new Error(
+      `[ContinentalIsolationAssertionError] Foreign club ${foreignTeam.id} (${resolveClubContinent(foreignTeam)}) detected in ${targetContinent} tournament!`
+    );
+  }
+
+  return finalSelection;
+}
 
 // ----------------------------------------------------
 // HELPER: BUILD 4 GROUPS OF 4 + 6 MATCHDAYS (HOME & AWAY)
 // ----------------------------------------------------
 
 function buildGroupStageStructure(
-  competitionId: 'ccl' | 'ccc' | 'ucl' | 'uel' | 'acl',
+  competitionId: 'ccl' | 'ccc' | 'ucl' | 'uel' | 'acl' | 'acl2',
   seasonNumber: number,
   groupClubsMatrix: Club[][],
   groupNames: string[],
@@ -39,9 +238,11 @@ function buildGroupStageStructure(
 ): { groups: ContinentalGroup[]; matches: ContinentalMatch[] } {
   const groups: ContinentalGroup[] = [];
   const matches: ContinentalMatch[] = [];
+  const numGroups = Math.min(4, groupClubsMatrix.length);
 
-  for (let gIdx = 0; gIdx < 4; gIdx++) {
-    const groupClubs = groupClubsMatrix[gIdx];
+  for (let gIdx = 0; gIdx < numGroups; gIdx++) {
+    const groupClubs = groupClubsMatrix[gIdx] || [];
+    if (groupClubs.length < 4) continue;
     const groupTeamIds = groupClubs.map(c => c.id);
     const standings: ContinentalGroupStanding[] = groupClubs.map(c => ({
       teamId: c.id,
@@ -59,7 +260,7 @@ function buildGroupStageStructure(
     const groupId = `${competitionId}_group_${gIdx + 1}_s${seasonNumber}`;
     groups.push({
       id: groupId,
-      name: groupNames[gIdx],
+      name: groupNames[gIdx] || `المجموعة ${gIdx + 1}`,
       teamIds: groupTeamIds,
       standings,
     });
@@ -95,7 +296,7 @@ function buildGroupStageStructure(
 }
 
 // ----------------------------------------------------
-// 0. DYNAMIC QUALIFICATION & SEEDED GROUP DRAW (RE-SEEDING & SHUFFLE)
+// DYNAMIC QUALIFICATION & SEEDED GROUP DRAW (RE-SEEDING & SHUFFLE)
 // ----------------------------------------------------
 
 function createDrawRng(seasonNumber: number, competitionCode: string): () => number {
@@ -138,17 +339,22 @@ function getClubSeasonalCoefficient(club: Club, seasonNumber: number): number {
 }
 
 /**
- * Dynamically selects qualifiers from a league based on seasonal performance simulation
- * so that non-user domestic leagues also send varied qualifiers each season while respecting excludedClubIds.
+ * Dynamically selects qualifiers from a league based on seasonal performance simulation,
+ * strictly enforcing `team.continent === targetContinent` when `targetContinent` is provided.
  */
 export function selectDynamicForeignQualifiers(
   leagueClubs: Club[],
   count: number,
   seasonNumber: number,
-  excludedClubIds?: Set<string>
+  excludedClubIds?: Set<string>,
+  targetContinent?: ContinentCode
 ): Club[] {
   const eligible = (Array.isArray(leagueClubs) ? leagueClubs : []).filter(
-    c => c && c.id && !(excludedClubIds && excludedClubIds.has(c.id))
+    c =>
+      c &&
+      c.id &&
+      !(excludedClubIds && excludedClubIds.has(c.id)) &&
+      (!targetContinent || resolveClubContinent(c) === targetContinent)
   );
   if (eligible.length === 0) return [];
   const ranked = [...eligible].sort((a, b) => {
@@ -162,29 +368,32 @@ export function selectDynamicForeignQualifiers(
 
 /**
  * Conducts an official 4-Pot Seeded Group Draw (Re-seeding & Shuffle) for 16 clubs into 4 groups of 4.
- * Divides clubs into Pots 1-4 by seasonal coefficient, shuffles each pot, and minimizes same-country clashes.
+ * Enforces strict continent filtering and safety assertion before drawing pots.
  */
-export function conductSeededGroupDraw(
-  clubs16: Club[],
+export function drawGroupStage(
+  allTeams: Club[],
+  targetContinent: ContinentCode,
   seasonNumber: number,
-  competitionCode: string
+  competitionCode: string,
+  excludedClubIds?: Set<string>
 ): Club[][] {
+  // 1. Strict Continent Filter at entry point
+  const eligibleTeams = (Array.isArray(allTeams) ? allTeams : []).filter(
+    team => team && resolveClubContinent(team) === targetContinent
+  );
+
+  // 2. Safety Guard & Same-Continent Completion
+  const sanitized16 = assertAndSanitizeContinentTeams(
+    eligibleTeams,
+    targetContinent,
+    16,
+    seasonNumber,
+    excludedClubIds
+  );
+
   const rng = createDrawRng(seasonNumber, competitionCode);
 
-  const uniqueMap = new Map<string, Club>();
-  for (const c of clubs16) {
-    if (c && c.id && !uniqueMap.has(c.id)) {
-      uniqueMap.set(c.id, c);
-    }
-  }
-  const uniqueClubs = Array.from(uniqueMap.values());
-  while (uniqueClubs.length < 16 && clubs16.length > 0) {
-    const fallback = clubs16[uniqueClubs.length % clubs16.length];
-    if (fallback) uniqueClubs.push(fallback);
-    else break;
-  }
-
-  const sortedBySeed = [...uniqueClubs.slice(0, 16)].sort(
+  const sortedBySeed = [...sanitized16].sort(
     (a, b) => getClubSeasonalCoefficient(b, seasonNumber) - getClubSeasonalCoefficient(a, seasonNumber)
   );
 
@@ -223,14 +432,22 @@ export function conductSeededGroupDraw(
   return groups;
 }
 
+export function conductSeededGroupDraw(
+  clubs16: Club[],
+  seasonNumber: number,
+  competitionCode: string
+): Club[][] {
+  const targetContinent = getTargetContinentForCompetition(competitionCode);
+  return drawGroupStage(clubs16, targetContinent, seasonNumber, competitionCode);
+}
+
 // ----------------------------------------------------
-// 1. INITIALIZATION: AFRICAN CHAMPIONS LEAGUE (CAF CL)
+// 1. INITIALIZATION: AFRICAN CHAMPIONS LEAGUE (CAF CL) — STRICTLY AFRICA ONLY
 // ----------------------------------------------------
 
 /**
  * Initializes the African Champions League (CAF CL - دوري أبطال إفريقيا)
- * 16 Top clubs across Africa (Egypt, Morocco, Tunisia, Algeria)
- * 4 Groups of 4 teams, 6 matchdays (Home & Away), Top 2 advance to Quarterfinals.
+ * STRICT CONTINENT ISOLATION: Only clubs with `continent === 'AFRICA'` can qualify or be drawn.
  */
 export function initAfricanChampionsLeague(
   seasonNumber: number,
@@ -239,45 +456,54 @@ export function initAfricanChampionsLeague(
   qualifiedClubs?: Club[],
   excludedClubIds?: Set<string>
 ): ContinentalTournament {
+  const targetContinent: ContinentCode = 'AFRICA';
   const excluded = excludedClubIds || new Set<string>();
-  const egyptAll = selectDynamicForeignQualifiers(
+
+  // Strict Continent Filter on incoming teams & qualifiedClubs
+  const eligibleInputTeams = (Array.isArray(allTeams) ? allTeams : []).filter(
+    team => team && resolveClubContinent(team) === targetContinent
+  );
+  const eligibleQualified = (Array.isArray(qualifiedClubs) ? qualifiedClubs : []).filter(
+    team => team && resolveClubContinent(team) === targetContinent && !excluded.has(team.id)
+  );
+  const isUserAfrican = Boolean(userClub && resolveClubContinent(userClub) === targetContinent);
+
+  const egyptTeams = selectDynamicForeignQualifiers(
     GLOBAL_LEAGUES['egy_tier_1']?.teams || EGYPT_PREMIER_CLUBS,
     4,
     seasonNumber,
-    excluded
+    excluded,
+    targetContinent
   );
-  const moroccoAll = selectDynamicForeignQualifiers(
+  const moroccoTeams = selectDynamicForeignQualifiers(
     GLOBAL_LEAGUES['mar_tier_1']?.teams || MOROCCO_BOTOLA_CLUBS,
     4,
     seasonNumber,
-    excluded
+    excluded,
+    targetContinent
   );
-  const tunisiaAll = selectDynamicForeignQualifiers(
+  const tunisiaTeams = selectDynamicForeignQualifiers(
     GLOBAL_LEAGUES['tun_tier_1']?.teams || TUNISIA_LIGUE_CLUBS,
     4,
     seasonNumber,
-    excluded
+    excluded,
+    targetContinent
   );
-  const algeriaAll = selectDynamicForeignQualifiers(
+  const algeriaTeams = selectDynamicForeignQualifiers(
     GLOBAL_LEAGUES['alg_tier_1']?.teams || ALGERIA_LIGUE_CLUBS,
     4,
     seasonNumber,
-    excluded
+    excluded,
+    targetContinent
   );
 
-  const egyptTeams = [...egyptAll.slice(0, 4)];
-  const moroccoTeams = [...moroccoAll.slice(0, 4)];
-  const tunisiaTeams = [...tunisiaAll.slice(0, 4)];
-  const algeriaTeams = [...algeriaAll.slice(0, 4)];
-
-  if (qualifiedClubs && qualifiedClubs.length > 0) {
+  if (eligibleQualified.length > 0) {
     let egyIdx = 0;
     let marIdx = 0;
     let tunIdx = 0;
     let algIdx = 0;
-    qualifiedClubs.forEach(qc => {
-      if (!qc || excluded.has(qc.id)) return;
-      if ((qc.country === 'مصر' || !qc.country) && egyIdx < 4) {
+    eligibleQualified.forEach(qc => {
+      if (qc.country === 'مصر' && egyIdx < 4) {
         const existingIdx = egyptTeams.findIndex(t => t.id === qc.id);
         if (existingIdx !== -1 && existingIdx !== egyIdx) {
           const temp = egyptTeams[egyIdx];
@@ -297,39 +523,47 @@ export function initAfricanChampionsLeague(
     });
   }
 
-  // Only include userClub in CCL if it is NOT excluded (i.e. not assigned to CCC)
-  // and either qualified for CCL or is in the default CCL pool
-  const userInQualifiedList = !qualifiedClubs || qualifiedClubs.length === 0 || qualifiedClubs.some(q => q.id === userClub?.id);
-  if (userClub && !excluded.has(userClub.id) && userInQualifiedList) {
+  // Only include userClub in CAF Champions League if userClub is STRICTLY AFRICAN, not excluded, and qualified
+  const userInQualifiedList =
+    isUserAfrican &&
+    (!qualifiedClubs || qualifiedClubs.length === 0 || eligibleQualified.some(q => q.id === userClub?.id));
+
+  if (userClub && isUserAfrican && !excluded.has(userClub.id) && userInQualifiedList) {
     const c = userClub.country || 'مصر';
     if (c === 'مصر' || userClub.id === 'eg1_ahly') {
       const idx = egyptTeams.findIndex(t => t.id === userClub.id);
       if (idx !== -1) egyptTeams[idx] = userClub;
-      else if (!qualifiedClubs || qualifiedClubs.length === 0) egyptTeams[0] = userClub;
+      else if (eligibleQualified.some(q => q.id === userClub.id) || userClub.division === 1) egyptTeams[0] = userClub;
     } else if (c === 'المغرب') {
       const idx = moroccoTeams.findIndex(t => t.id === userClub.id);
       if (idx !== -1) moroccoTeams[idx] = userClub;
-      else if (!qualifiedClubs || qualifiedClubs.length === 0) moroccoTeams[0] = userClub;
+      else if (eligibleQualified.some(q => q.id === userClub.id) || userClub.division === 1) moroccoTeams[0] = userClub;
     } else if (c === 'تونس') {
       const idx = tunisiaTeams.findIndex(t => t.id === userClub.id);
       if (idx !== -1) tunisiaTeams[idx] = userClub;
-      else if (!qualifiedClubs || qualifiedClubs.length === 0) tunisiaTeams[0] = userClub;
+      else if (eligibleQualified.some(q => q.id === userClub.id) || userClub.division === 1) tunisiaTeams[0] = userClub;
     } else if (c === 'الجزائر') {
       const idx = algeriaTeams.findIndex(t => t.id === userClub.id);
       if (idx !== -1) algeriaTeams[idx] = userClub;
-      else if (!qualifiedClubs || qualifiedClubs.length === 0) algeriaTeams[0] = userClub;
+      else if (eligibleQualified.some(q => q.id === userClub.id) || userClub.division === 1) algeriaTeams[0] = userClub;
     }
   }
 
-  const all16Participants = [
+  const candidateParticipants = [
     ...egyptTeams,
     ...moroccoTeams,
     ...tunisiaTeams,
     ...algeriaTeams,
+    ...eligibleInputTeams.filter(t => t.division === 1),
   ].filter(Boolean);
 
-  // Conduct fresh 4-Pot Seeded Group Draw (Re-seeding & Shuffle)
-  const groupClubsMatrix = conductSeededGroupDraw(all16Participants, seasonNumber, 'ccl');
+  const groupClubsMatrix = drawGroupStage(
+    candidateParticipants,
+    targetContinent,
+    seasonNumber,
+    'ccl',
+    excluded
+  );
 
   const groupNames = [
     'المجموعة الأولى (A) - مجموعة القمة 🌟',
@@ -345,6 +579,7 @@ export function initAfricanChampionsLeague(
     competitionId: 'ccl',
     name: 'دوري أبطال إفريقيا',
     region: 'africa',
+    targetContinent: 'AFRICA',
     seasonNumber,
     trophyName: 'كأس دوري أبطال إفريقيا 🏆',
     prizeMoneyWinner: 15000000,
@@ -357,13 +592,12 @@ export function initAfricanChampionsLeague(
 }
 
 // ----------------------------------------------------
-// 2. INITIALIZATION: CAF CONFEDERATION CUP (CCC)
+// 2. INITIALIZATION: CAF CONFEDERATION CUP (CCC) — STRICTLY AFRICA ONLY
 // ----------------------------------------------------
 
 /**
  * Initializes the CAF Confederation Cup (كأس الكونفدرالية الإفريقية)
- * Enforces STRICT MUTUAL EXCLUSION: Any club participating in CAF Champions League (CCL)
- * is 100% excluded from CAF Confederation Cup (CCC), passing slots to the next teams in the table / Cup runner-up.
+ * Enforces STRICT CONTINENT ISOLATION (`continent === 'AFRICA'`) + STRICT MUTUAL EXCLUSION with CCL.
  */
 export function initCafConfederationCup(
   seasonNumber: number,
@@ -372,75 +606,79 @@ export function initCafConfederationCup(
   qualifiedClubs?: Club[],
   excludedClubIds?: Set<string>
 ): ContinentalTournament {
-  // 1. Build strict exclusion set from CAF Champions League (CCL) participants
+  const targetContinent: ContinentCode = 'AFRICA';
   const cclTeamIds = new Set<string>(excludedClubIds ? Array.from(excludedClubIds) : []);
   if (cclTeamIds.size === 0) {
     const cclReference = initAfricanChampionsLeague(seasonNumber, allTeams, userClub);
     cclReference.groups.forEach(g => g.teamIds.forEach(id => cclTeamIds.add(id)));
   }
 
+  const eligibleQualified = (Array.isArray(qualifiedClubs) ? qualifiedClubs : []).filter(
+    qc => qc && resolveClubContinent(qc) === targetContinent && !cclTeamIds.has(qc.id)
+  );
+  const isUserAfrican = Boolean(userClub && resolveClubContinent(userClub) === targetContinent);
+
   const egyptTeams = selectDynamicForeignQualifiers(
     GLOBAL_LEAGUES['egy_tier_1']?.teams || EGYPT_PREMIER_CLUBS,
     4,
     seasonNumber,
-    cclTeamIds
+    cclTeamIds,
+    targetContinent
   );
   const moroccoTeams = selectDynamicForeignQualifiers(
     GLOBAL_LEAGUES['mar_tier_1']?.teams || MOROCCO_BOTOLA_CLUBS,
     4,
     seasonNumber,
-    cclTeamIds
+    cclTeamIds,
+    targetContinent
   );
   const tunisiaTeams = selectDynamicForeignQualifiers(
     GLOBAL_LEAGUES['tun_tier_1']?.teams || TUNISIA_LIGUE_CLUBS,
     4,
     seasonNumber,
-    cclTeamIds
+    cclTeamIds,
+    targetContinent
   );
   const algeriaTeams = selectDynamicForeignQualifiers(
     GLOBAL_LEAGUES['alg_tier_1']?.teams || ALGERIA_LIGUE_CLUBS,
     4,
     seasonNumber,
-    cclTeamIds
+    cclTeamIds,
+    targetContinent
   );
 
-  // Apply qualifiedClubs ONLY if they are not in CCL (Mutual Exclusion)
-  if (qualifiedClubs && qualifiedClubs.length > 0) {
+  if (eligibleQualified.length > 0) {
     let egyIdx = 0;
     let marIdx = 0;
     let tunIdx = 0;
     let algIdx = 0;
-    qualifiedClubs
-      .filter(qc => qc && !cclTeamIds.has(qc.id))
-      .forEach(qc => {
-        if ((qc.country === 'مصر' || !qc.country) && egyIdx < 4) {
-          const existingIdx = egyptTeams.findIndex(t => t.id === qc.id);
-          if (existingIdx !== -1 && existingIdx !== egyIdx) {
-            const temp = egyptTeams[egyIdx];
-            egyptTeams[egyIdx] = qc;
-            egyptTeams[existingIdx] = temp;
-          } else {
-            egyptTeams[egyIdx] = qc;
-          }
-          egyIdx++;
-        } else if (qc.country === 'المغرب' && marIdx < 4) {
-          moroccoTeams[marIdx++] = qc;
-        } else if (qc.country === 'تونس' && tunIdx < 4) {
-          tunisiaTeams[tunIdx++] = qc;
-        } else if (qc.country === 'الجزائر' && algIdx < 4) {
-          algeriaTeams[algIdx++] = qc;
+    eligibleQualified.forEach(qc => {
+      if (qc.country === 'مصر' && egyIdx < 4) {
+        const existingIdx = egyptTeams.findIndex(t => t.id === qc.id);
+        if (existingIdx !== -1 && existingIdx !== egyIdx) {
+          const temp = egyptTeams[egyIdx];
+          egyptTeams[egyIdx] = qc;
+          egyptTeams[existingIdx] = temp;
+        } else {
+          egyptTeams[egyIdx] = qc;
         }
-      });
+        egyIdx++;
+      } else if (qc.country === 'المغرب' && marIdx < 4) {
+        moroccoTeams[marIdx++] = qc;
+      } else if (qc.country === 'تونس' && tunIdx < 4) {
+        tunisiaTeams[tunIdx++] = qc;
+      } else if (qc.country === 'الجزائر' && algIdx < 4) {
+        algeriaTeams[algIdx++] = qc;
+      }
+    });
   }
 
-  // Mutual Exclusion Check for userClub:
-  // NEVER add userClub to CAF Confederation Cup if userClub is already in CAF Champions League!
   const isUserInCcl = Boolean(userClub && cclTeamIds.has(userClub.id));
   const isUserExplicitlyQualifiedForCcc = Boolean(
-    userClub && qualifiedClubs && qualifiedClubs.some(qc => qc.id === userClub.id) && !isUserInCcl
+    userClub && isUserAfrican && eligibleQualified.some(qc => qc.id === userClub.id) && !isUserInCcl
   );
 
-  if (userClub && !isUserInCcl && isUserExplicitlyQualifiedForCcc) {
+  if (userClub && isUserAfrican && !isUserInCcl && isUserExplicitlyQualifiedForCcc) {
     const c = userClub.country || 'مصر';
     if (c === 'مصر') {
       const idx = egyptTeams.findIndex(t => t.id === userClub.id);
@@ -459,7 +697,7 @@ export function initCafConfederationCup(
       if (idx !== -1) algeriaTeams[idx] = userClub;
       else algeriaTeams[0] = userClub;
     }
-  } else if (userClub && !isUserInCcl) {
+  } else if (userClub && isUserAfrican && !isUserInCcl) {
     const idxEgy = egyptTeams.findIndex(t => t.id === userClub.id);
     if (idxEgy !== -1) egyptTeams[idxEgy] = userClub;
     const idxMar = moroccoTeams.findIndex(t => t.id === userClub.id);
@@ -470,15 +708,20 @@ export function initCafConfederationCup(
     if (idxAlg !== -1) algeriaTeams[idxAlg] = userClub;
   }
 
-  const all16Participants = [
+  const candidateParticipants = [
     ...egyptTeams,
     ...moroccoTeams,
     ...tunisiaTeams,
     ...algeriaTeams,
   ].filter(Boolean);
 
-  // Conduct fresh 4-Pot Seeded Group Draw (Re-seeding & Shuffle)
-  const groupClubsMatrix = conductSeededGroupDraw(all16Participants, seasonNumber, 'ccc');
+  const groupClubsMatrix = drawGroupStage(
+    candidateParticipants,
+    targetContinent,
+    seasonNumber,
+    'ccc',
+    cclTeamIds
+  );
 
   const groupNames = [
     'المجموعة الأولى (A) - الكونفدرالية 🌍',
@@ -494,6 +737,7 @@ export function initCafConfederationCup(
     competitionId: 'ccc',
     name: 'كأس الكونفدرالية الإفريقية',
     region: 'africa',
+    targetContinent: 'AFRICA',
     seasonNumber,
     trophyName: 'كأس الكونفدرالية الإفريقية 🌍',
     prizeMoneyWinner: 8000000,
@@ -506,13 +750,199 @@ export function initCafConfederationCup(
 }
 
 // ----------------------------------------------------
-// 3. INITIALIZATION: UEFA CHAMPIONS LEAGUE (UCL)
+// 3. INITIALIZATION: AFC CHAMPIONS LEAGUE ELITE (ACL) & AFC TWO (ACL2) — STRICTLY ASIA ONLY
+// ----------------------------------------------------
+
+/**
+ * Initializes the AFC Champions League Elite (دوري أبطال آسيا للنخبة - 'acl')
+ * STRICT CONTINENT ISOLATION: Only clubs with `continent === 'ASIA'` (Saudi Arabia, UAE, Qatar, etc.) can participate.
+ */
+export function initAfcChampionsLeagueElite(
+  seasonNumber: number,
+  allTeams: Club[],
+  userClub?: Club,
+  qualifiedClubs?: Club[],
+  excludedClubIds?: Set<string>
+): ContinentalTournament {
+  const targetContinent: ContinentCode = 'ASIA';
+  const excluded = excludedClubIds || new Set<string>();
+
+  const eligibleQualified = (Array.isArray(qualifiedClubs) ? qualifiedClubs : []).filter(
+    c => c && resolveClubContinent(c) === targetContinent && !excluded.has(c.id)
+  );
+  const isUserAsian = Boolean(userClub && resolveClubContinent(userClub) === targetContinent);
+
+  const saudiTeams = selectDynamicForeignQualifiers(
+    GLOBAL_LEAGUES['sau_tier_1']?.teams || SAUDI_PRO_CLUBS,
+    6,
+    seasonNumber,
+    excluded,
+    targetContinent
+  );
+  const uaeTeams = selectDynamicForeignQualifiers(
+    GLOBAL_LEAGUES['uae_tier_1']?.teams || UAE_PRO_CLUBS,
+    5,
+    seasonNumber,
+    excluded,
+    targetContinent
+  );
+  const qatarTeams = selectDynamicForeignQualifiers(
+    GLOBAL_LEAGUES['qat_tier_1']?.teams || QATAR_STARS_CLUBS,
+    5,
+    seasonNumber,
+    excluded,
+    targetContinent
+  );
+
+  const candidatePool: Club[] = [...eligibleQualified, ...saudiTeams, ...uaeTeams, ...qatarTeams];
+
+  if (
+    userClub &&
+    isUserAsian &&
+    !excluded.has(userClub.id) &&
+    (eligibleQualified.some(q => q.id === userClub.id) ||
+      (!qualifiedClubs && (userClub.division === 1 || candidatePool.some(c => c.id === userClub.id))))
+  ) {
+    const existingIdx = candidatePool.findIndex(c => c.id === userClub.id);
+    if (existingIdx !== -1) {
+      candidatePool[existingIdx] = userClub;
+    } else {
+      candidatePool.unshift(userClub);
+    }
+  }
+
+  const groupClubsMatrix = drawGroupStage(
+    candidatePool,
+    targetContinent,
+    seasonNumber,
+    'acl',
+    excluded
+  );
+
+  const groupNames = [
+    'المجموعة الأولى (A) - نخبة آسيا 👑',
+    'المجموعة الثانية (B) - نخبة آسيا 🔥',
+    'المجموعة الثالثة (C) - نخبة آسيا ⚔️',
+    'المجموعة الرابعة (D) - نخبة آسيا 🏆',
+  ];
+
+  const { groups, matches } = buildGroupStageStructure('acl', seasonNumber, groupClubsMatrix, groupNames);
+
+  return {
+    id: `acl_s${seasonNumber}`,
+    competitionId: 'acl',
+    name: 'دوري أبطال آسيا للنخبة',
+    region: 'asia',
+    targetContinent: 'ASIA',
+    seasonNumber,
+    trophyName: 'كأس دوري أبطال آسيا للنخبة 👑',
+    prizeMoneyWinner: 45000000,
+    prizeMoneyRunnerUp: 22000000,
+    groups,
+    matches,
+    isCompleted: false,
+    currentStage: 'group',
+  };
+}
+
+/**
+ * Initializes the AFC Champions League Two (دوري أبطال آسيا 2 - 'acl2')
+ * STRICT CONTINENT ISOLATION (`continent === 'ASIA'`) + STRICT MUTUAL EXCLUSION with ACL Elite.
+ */
+export function initAfcChampionsLeagueTwo(
+  seasonNumber: number,
+  allTeams: Club[],
+  userClub?: Club,
+  qualifiedClubs?: Club[],
+  excludedClubIds?: Set<string>
+): ContinentalTournament {
+  const targetContinent: ContinentCode = 'ASIA';
+  const aclTeamIds = new Set<string>(excludedClubIds ? Array.from(excludedClubIds) : []);
+  if (aclTeamIds.size === 0) {
+    const aclReference = initAfcChampionsLeagueElite(seasonNumber, allTeams, userClub);
+    aclReference.groups.forEach(g => g.teamIds.forEach(id => aclTeamIds.add(id)));
+  }
+
+  const eligibleQualified = (Array.isArray(qualifiedClubs) ? qualifiedClubs : []).filter(
+    c => c && resolveClubContinent(c) === targetContinent && !aclTeamIds.has(c.id)
+  );
+  const isUserAsian = Boolean(userClub && resolveClubContinent(userClub) === targetContinent);
+  const isUserInAcl = Boolean(userClub && aclTeamIds.has(userClub.id));
+
+  const saudiTeams = selectDynamicForeignQualifiers(
+    GLOBAL_LEAGUES['sau_tier_1']?.teams || SAUDI_PRO_CLUBS,
+    6,
+    seasonNumber,
+    aclTeamIds,
+    targetContinent
+  );
+  const uaeTeams = selectDynamicForeignQualifiers(
+    GLOBAL_LEAGUES['uae_tier_1']?.teams || UAE_PRO_CLUBS,
+    5,
+    seasonNumber,
+    aclTeamIds,
+    targetContinent
+  );
+  const qatarTeams = selectDynamicForeignQualifiers(
+    GLOBAL_LEAGUES['qat_tier_1']?.teams || QATAR_STARS_CLUBS,
+    5,
+    seasonNumber,
+    aclTeamIds,
+    targetContinent
+  );
+
+  const candidatePool: Club[] = [...eligibleQualified, ...saudiTeams, ...uaeTeams, ...qatarTeams];
+
+  if (userClub && isUserAsian && !isUserInAcl) {
+    const existingIdx = candidatePool.findIndex(c => c.id === userClub.id);
+    if (existingIdx !== -1) {
+      candidatePool[existingIdx] = userClub;
+    } else if (eligibleQualified.some(q => q.id === userClub.id)) {
+      candidatePool.unshift(userClub);
+    }
+  }
+
+  const groupClubsMatrix = drawGroupStage(
+    candidatePool,
+    targetContinent,
+    seasonNumber,
+    'acl2',
+    aclTeamIds
+  );
+
+  const groupNames = [
+    'المجموعة الأولى (A) - أبطال آسيا 2 🌏',
+    'المجموعة الثانية (B) - أبطال آسيا 2 🔥',
+    'المجموعة الثالثة (C) - أبطال آسيا 2 ⚔️',
+    'المجموعة الرابعة (D) - أبطال آسيا 2 🏆',
+  ];
+
+  const { groups, matches } = buildGroupStageStructure('acl2', seasonNumber, groupClubsMatrix, groupNames);
+
+  return {
+    id: `acl2_s${seasonNumber}`,
+    competitionId: 'acl2',
+    name: 'دوري أبطال آسيا 2',
+    region: 'asia',
+    targetContinent: 'ASIA',
+    seasonNumber,
+    trophyName: 'كأس دوري أبطال آسيا 2 🌏',
+    prizeMoneyWinner: 20000000,
+    prizeMoneyRunnerUp: 10000000,
+    groups,
+    matches,
+    isCompleted: false,
+    currentStage: 'group',
+  };
+}
+
+// ----------------------------------------------------
+// 4. INITIALIZATION: UEFA CHAMPIONS LEAGUE (UCL) — STRICTLY EUROPE ONLY
 // ----------------------------------------------------
 
 /**
  * Initializes the UEFA Champions League (UCL - دوري أبطال أوروبا)
- * 16 Top clubs across Europe (England, Spain, Italy, Germany, France)
- * 4 Groups of 4 teams, 6 matchdays (Home & Away), Top 2 advance to Quarterfinals.
+ * STRICT CONTINENT ISOLATION: Only clubs with `continent === 'EUROPE'` can qualify or be drawn.
  */
 export function initUefaChampionsLeague(
   seasonNumber: number,
@@ -521,98 +951,75 @@ export function initUefaChampionsLeague(
   qualifiedClubs?: Club[],
   excludedClubIds?: Set<string>
 ): ContinentalTournament {
+  const targetContinent: ContinentCode = 'EUROPE';
   const excluded = excludedClubIds || new Set<string>();
-  let participantPool: Club[] = [];
 
-  if (qualifiedClubs && qualifiedClubs.length >= 8) {
-    participantPool = qualifiedClubs.filter(c => c && !excluded.has(c.id));
-  } else {
-    const engTeams = selectDynamicForeignQualifiers(
-      GLOBAL_LEAGUES['eng_tier_1']?.teams || ENGLAND_PREMIER_CLUBS,
-      4,
-      seasonNumber,
-      excluded
-    );
-    const espTeams = selectDynamicForeignQualifiers(
-      GLOBAL_LEAGUES['esp_tier_1']?.teams || SPAIN_LA_LIGA_CLUBS,
-      4,
-      seasonNumber,
-      excluded
-    );
-    const itaTeams = selectDynamicForeignQualifiers(
-      GLOBAL_LEAGUES['ita_tier_1']?.teams || ITALY_SERIE_A_CLUBS,
-      3,
-      seasonNumber,
-      excluded
-    );
-    const gerTeams = selectDynamicForeignQualifiers(
-      GLOBAL_LEAGUES['ger_tier_1']?.teams || GERMANY_BUNDESLIGA_CLUBS,
-      3,
-      seasonNumber,
-      excluded
-    );
-    const fraTeams = selectDynamicForeignQualifiers(
-      GLOBAL_LEAGUES['fra_tier_1']?.teams || FRANCE_LIGUE_1_CLUBS,
-      2,
-      seasonNumber,
-      excluded
-    );
+  const eligibleQualified = (Array.isArray(qualifiedClubs) ? qualifiedClubs : []).filter(
+    c => c && resolveClubContinent(c) === targetContinent && !excluded.has(c.id)
+  );
+  const isUserEuropean = Boolean(userClub && resolveClubContinent(userClub) === targetContinent);
 
-    participantPool = [...engTeams, ...espTeams, ...itaTeams, ...gerTeams, ...fraTeams];
-  }
+  const engTeams = selectDynamicForeignQualifiers(
+    GLOBAL_LEAGUES['eng_tier_1']?.teams || ENGLAND_PREMIER_CLUBS,
+    4,
+    seasonNumber,
+    excluded,
+    targetContinent
+  );
+  const espTeams = selectDynamicForeignQualifiers(
+    GLOBAL_LEAGUES['esp_tier_1']?.teams || SPAIN_LA_LIGA_CLUBS,
+    4,
+    seasonNumber,
+    excluded,
+    targetContinent
+  );
+  const itaTeams = selectDynamicForeignQualifiers(
+    GLOBAL_LEAGUES['ita_tier_1']?.teams || ITALY_SERIE_A_CLUBS,
+    3,
+    seasonNumber,
+    excluded,
+    targetContinent
+  );
+  const gerTeams = selectDynamicForeignQualifiers(
+    GLOBAL_LEAGUES['ger_tier_1']?.teams || GERMANY_BUNDESLIGA_CLUBS,
+    3,
+    seasonNumber,
+    excluded,
+    targetContinent
+  );
+  const fraTeams = selectDynamicForeignQualifiers(
+    GLOBAL_LEAGUES['fra_tier_1']?.teams || FRANCE_LIGUE_1_CLUBS,
+    2,
+    seasonNumber,
+    excluded,
+    targetContinent
+  );
 
-  const uniquePool: Club[] = [];
-  const seenIds = new Set<string>();
-
-  if (qualifiedClubs && qualifiedClubs.length > 0 && qualifiedClubs.length < 8) {
-    qualifiedClubs.forEach(c => {
-      if (c && !excluded.has(c.id) && !seenIds.has(c.id)) {
-        seenIds.add(c.id);
-        uniquePool.push(c);
-      }
-    });
-  }
-
-  participantPool.forEach(c => {
-    if (c && !excluded.has(c.id) && !seenIds.has(c.id)) {
-      seenIds.add(c.id);
-      uniquePool.push(c);
-    }
-  });
-
-  if (userClub && seenIds.has(userClub.id)) {
-    const idx = uniquePool.findIndex(c => c.id === userClub.id);
-    if (idx !== -1) uniquePool[idx] = userClub;
-  } else if (
-    userClub &&
-    !excluded.has(userClub.id) &&
-    qualifiedClubs &&
-    qualifiedClubs.some(q => q.id === userClub.id) &&
-    !seenIds.has(userClub.id)
-  ) {
-    uniquePool.unshift(userClub);
-    seenIds.add(userClub.id);
-  }
-
-  const realEuropeanBackups = [
-    ...ENGLAND_PREMIER_CLUBS,
-    ...SPAIN_LA_LIGA_CLUBS,
-    ...ITALY_SERIE_A_CLUBS,
-    ...GERMANY_BUNDESLIGA_CLUBS,
-    ...FRANCE_LIGUE_1_CLUBS,
+  const candidatePool: Club[] = [
+    ...eligibleQualified,
+    ...engTeams,
+    ...espTeams,
+    ...itaTeams,
+    ...gerTeams,
+    ...fraTeams,
   ];
 
-  for (const backupClub of realEuropeanBackups) {
-    if (uniquePool.length >= 16) break;
-    if (backupClub && backupClub.id && !seenIds.has(backupClub.id) && !excluded.has(backupClub.id)) {
-      seenIds.add(backupClub.id);
-      uniquePool.push(backupClub);
+  if (userClub && isUserEuropean && !excluded.has(userClub.id)) {
+    const existingIdx = candidatePool.findIndex(c => c.id === userClub.id);
+    if (existingIdx !== -1) {
+      candidatePool[existingIdx] = userClub;
+    } else if (eligibleQualified.some(q => q.id === userClub.id)) {
+      candidatePool.unshift(userClub);
     }
   }
 
-  const selected16 = uniquePool.slice(0, 16);
-  // Conduct fresh 4-Pot Seeded Group Draw (Re-seeding & Shuffle)
-  const groupClubsMatrix = conductSeededGroupDraw(selected16, seasonNumber, 'ucl');
+  const groupClubsMatrix = drawGroupStage(
+    candidatePool,
+    targetContinent,
+    seasonNumber,
+    'ucl',
+    excluded
+  );
 
   const groupNames = [
     'المجموعة الأولى (A) - دوري الأبطال 🌟',
@@ -628,6 +1035,7 @@ export function initUefaChampionsLeague(
     competitionId: 'ucl',
     name: 'دوري أبطال أوروبا',
     region: 'europe',
+    targetContinent: 'EUROPE',
     seasonNumber,
     trophyName: 'كأس ذات الأذنين (دوري أبطال أوروبا) 🏆',
     prizeMoneyWinner: 85000000,
@@ -640,13 +1048,12 @@ export function initUefaChampionsLeague(
 }
 
 // ----------------------------------------------------
-// 4. INITIALIZATION: UEFA EUROPA LEAGUE (UEL)
+// 5. INITIALIZATION: UEFA EUROPA LEAGUE (UEL) — STRICTLY EUROPE ONLY
 // ----------------------------------------------------
 
 /**
  * Initializes the UEFA Europa League (UEL - الدوري الأوروبي)
- * Enforces STRICT MUTUAL EXCLUSION: Any club participating in UEFA Champions League (UCL)
- * is 100% excluded from UEFA Europa League (UEL), passing slots to the next teams in the table / Cup runner-up.
+ * STRICT CONTINENT ISOLATION (`continent === 'EUROPE'`) + STRICT MUTUAL EXCLUSION with UCL.
  */
 export function initUefaEuropaLeague(
   seasonNumber: number,
@@ -655,101 +1062,80 @@ export function initUefaEuropaLeague(
   qualifiedClubs?: Club[],
   excludedClubIds?: Set<string>
 ): ContinentalTournament {
-  // 1. Build strict exclusion set from UEFA Champions League (UCL) participants
+  const targetContinent: ContinentCode = 'EUROPE';
   const uclTeamIds = new Set<string>(excludedClubIds ? Array.from(excludedClubIds) : []);
   if (uclTeamIds.size === 0) {
     const uclReference = initUefaChampionsLeague(seasonNumber, allTeams, userClub);
     uclReference.groups.forEach(g => g.teamIds.forEach(id => uclTeamIds.add(id)));
   }
 
-  // 2. Dynamically select next clubs from European leagues that are NOT in UCL
+  const eligibleQualified = (Array.isArray(qualifiedClubs) ? qualifiedClubs : []).filter(
+    c => c && resolveClubContinent(c) === targetContinent && !uclTeamIds.has(c.id)
+  );
+  const isUserEuropean = Boolean(userClub && resolveClubContinent(userClub) === targetContinent);
+  const isUserInUcl = Boolean(userClub && uclTeamIds.has(userClub.id));
+
   const engTeams = selectDynamicForeignQualifiers(
     GLOBAL_LEAGUES['eng_tier_1']?.teams || ENGLAND_PREMIER_CLUBS,
     4,
     seasonNumber,
-    uclTeamIds
+    uclTeamIds,
+    targetContinent
   );
   const espTeams = selectDynamicForeignQualifiers(
     GLOBAL_LEAGUES['esp_tier_1']?.teams || SPAIN_LA_LIGA_CLUBS,
     4,
     seasonNumber,
-    uclTeamIds
+    uclTeamIds,
+    targetContinent
   );
   const itaTeams = selectDynamicForeignQualifiers(
     GLOBAL_LEAGUES['ita_tier_1']?.teams || ITALY_SERIE_A_CLUBS,
     3,
     seasonNumber,
-    uclTeamIds
+    uclTeamIds,
+    targetContinent
   );
   const gerTeams = selectDynamicForeignQualifiers(
     GLOBAL_LEAGUES['ger_tier_1']?.teams || GERMANY_BUNDESLIGA_CLUBS,
     3,
     seasonNumber,
-    uclTeamIds
+    uclTeamIds,
+    targetContinent
   );
   const fraTeams = selectDynamicForeignQualifiers(
     GLOBAL_LEAGUES['fra_tier_1']?.teams || FRANCE_LIGUE_1_CLUBS,
     2,
     seasonNumber,
-    uclTeamIds
+    uclTeamIds,
+    targetContinent
   );
 
-  const participantPool = [...engTeams, ...espTeams, ...itaTeams, ...gerTeams, ...fraTeams];
-  const uniquePool: Club[] = [];
-  const seenIds = new Set<string>();
-
-  if (qualifiedClubs && qualifiedClubs.length > 0) {
-    qualifiedClubs.forEach(c => {
-      if (c && !uclTeamIds.has(c.id) && !seenIds.has(c.id)) {
-        seenIds.add(c.id);
-        uniquePool.push(c);
-      }
-    });
-  }
-
-  participantPool.forEach(c => {
-    if (c && !uclTeamIds.has(c.id) && !seenIds.has(c.id)) {
-      seenIds.add(c.id);
-      uniquePool.push(c);
-    }
-  });
-
-  // Mutual Exclusion Check for userClub:
-  // NEVER add userClub to UEL if userClub is already in UCL!
-  const isUserInUcl = Boolean(userClub && uclTeamIds.has(userClub.id));
-  if (userClub && !isUserInUcl && seenIds.has(userClub.id)) {
-    const idx = uniquePool.findIndex(c => c.id === userClub.id);
-    if (idx !== -1) uniquePool[idx] = userClub;
-  } else if (
-    userClub &&
-    !isUserInUcl &&
-    qualifiedClubs &&
-    qualifiedClubs.some(q => q.id === userClub.id) &&
-    !seenIds.has(userClub.id)
-  ) {
-    uniquePool.unshift(userClub);
-    seenIds.add(userClub.id);
-  }
-
-  const realEuropeanBackups = [
-    ...ENGLAND_PREMIER_CLUBS,
-    ...SPAIN_LA_LIGA_CLUBS,
-    ...ITALY_SERIE_A_CLUBS,
-    ...GERMANY_BUNDESLIGA_CLUBS,
-    ...FRANCE_LIGUE_1_CLUBS,
+  const candidatePool: Club[] = [
+    ...eligibleQualified,
+    ...engTeams,
+    ...espTeams,
+    ...itaTeams,
+    ...gerTeams,
+    ...fraTeams,
   ];
 
-  for (const backupClub of realEuropeanBackups) {
-    if (uniquePool.length >= 16) break;
-    if (backupClub && backupClub.id && !seenIds.has(backupClub.id) && !uclTeamIds.has(backupClub.id)) {
-      seenIds.add(backupClub.id);
-      uniquePool.push(backupClub);
+  if (userClub && isUserEuropean && !isUserInUcl) {
+    const existingIdx = candidatePool.findIndex(c => c.id === userClub.id);
+    if (existingIdx !== -1) {
+      candidatePool[existingIdx] = userClub;
+    } else if (eligibleQualified.some(q => q.id === userClub.id)) {
+      candidatePool.unshift(userClub);
     }
   }
 
-  const selected16 = uniquePool.slice(0, 16);
-  // Conduct fresh 4-Pot Seeded Group Draw (Re-seeding & Shuffle)
-  const groupClubsMatrix = conductSeededGroupDraw(selected16, seasonNumber, 'uel');
+  const groupClubsMatrix = drawGroupStage(
+    candidatePool,
+    targetContinent,
+    seasonNumber,
+    'uel',
+    uclTeamIds
+  );
 
   const groupNames = [
     'المجموعة الأولى (A) - الدوري الأوروبي 🟠',
@@ -765,6 +1151,7 @@ export function initUefaEuropaLeague(
     competitionId: 'uel',
     name: 'الدوري الأوروبي',
     region: 'europe',
+    targetContinent: 'EUROPE',
     seasonNumber,
     trophyName: 'كأس الدوري الأوروبي (UEFA Europa League) 🏆',
     prizeMoneyWinner: 35000000,
@@ -778,73 +1165,160 @@ export function initUefaEuropaLeague(
 
 /**
  * Smart Dispatcher to initialize the appropriate Continental Tournament
- * by competitionId ('ccl' | 'ccc' | 'ucl' | 'uel') with strict Mutual Exclusion.
+ * by competitionId ('ccl' | 'ccc' | 'ucl' | 'uel' | 'acl' | 'acl2') with strict Continent Isolation & Mutual Exclusion.
  */
 export function initContinentalTournamentByCode(
-  competitionId: 'ccl' | 'ccc' | 'ucl' | 'uel',
+  competitionId: 'ccl' | 'ccc' | 'ucl' | 'uel' | 'acl' | 'acl2',
   seasonNumber: number,
   allTeams: Club[],
   userClub?: Club,
   qualifiedClubs?: Club[],
   excludedClubIds?: Set<string>
 ): ContinentalTournament {
+  const targetContinent = getTargetContinentForCompetition(competitionId);
+  const eligibleTeams = (Array.isArray(allTeams) ? allTeams : []).filter(
+    team => team && resolveClubContinent(team) === targetContinent
+  );
+  const eligibleQualified = qualifiedClubs
+    ? qualifiedClubs.filter(team => team && resolveClubContinent(team) === targetContinent)
+    : undefined;
+  const eligibleUserClub =
+    userClub && resolveClubContinent(userClub) === targetContinent ? userClub : undefined;
+
   switch (competitionId) {
     case 'ucl':
-      return initUefaChampionsLeague(seasonNumber, allTeams, userClub, qualifiedClubs, excludedClubIds);
+      return initUefaChampionsLeague(seasonNumber, eligibleTeams, eligibleUserClub, eligibleQualified, excludedClubIds);
     case 'uel':
-      return initUefaEuropaLeague(seasonNumber, allTeams, userClub, qualifiedClubs, excludedClubIds);
+      return initUefaEuropaLeague(seasonNumber, eligibleTeams, eligibleUserClub, eligibleQualified, excludedClubIds);
+    case 'acl':
+      return initAfcChampionsLeagueElite(seasonNumber, eligibleTeams, eligibleUserClub, eligibleQualified, excludedClubIds);
+    case 'acl2':
+      return initAfcChampionsLeagueTwo(seasonNumber, eligibleTeams, eligibleUserClub, eligibleQualified, excludedClubIds);
     case 'ccc':
-      return initCafConfederationCup(seasonNumber, allTeams, userClub, qualifiedClubs, excludedClubIds);
+      return initCafConfederationCup(seasonNumber, eligibleTeams, eligibleUserClub, eligibleQualified, excludedClubIds);
     case 'ccl':
     default:
-      return initAfricanChampionsLeague(seasonNumber, allTeams, userClub, qualifiedClubs, excludedClubIds);
+      return initAfricanChampionsLeague(seasonNumber, eligibleTeams, eligibleUserClub, eligibleQualified, excludedClubIds);
   }
 }
 
 /**
- * Resolves whether a country belongs to the European (UEFA) or African/Arab continental region.
+ * Alias for `initContinentalTournamentByCode` with explicit targetContinent enforcement.
  */
-export function isEuropeanCountry(country?: string): boolean {
-  if (!country) return false;
-  return ['إنجلترا', 'إسبانيا', 'إيطاليا', 'ألمانيا', 'فرنسا', 'ENG', 'ESP', 'ITA', 'GER', 'FRA'].some(c =>
-    country.includes(c)
+export function generateContinentalCup(params: {
+  competitionId: 'ccl' | 'ccc' | 'ucl' | 'uel' | 'acl' | 'acl2';
+  targetContinent?: ContinentCode;
+  seasonNumber: number;
+  allTeams: Club[];
+  userClub?: Club;
+  qualifiedClubs?: Club[];
+  excludedClubIds?: Set<string>;
+}): ContinentalTournament {
+  const targetContinent =
+    params.targetContinent || getTargetContinentForCompetition(params.competitionId);
+  const eligibleTeams = (Array.isArray(params.allTeams) ? params.allTeams : []).filter(
+    team => team && resolveClubContinent(team) === targetContinent
+  );
+  const eligibleQualified = params.qualifiedClubs
+    ? params.qualifiedClubs.filter(team => team && resolveClubContinent(team) === targetContinent)
+    : undefined;
+  const eligibleUserClub =
+    params.userClub && resolveClubContinent(params.userClub) === targetContinent
+      ? params.userClub
+      : undefined;
+
+  return initContinentalTournamentByCode(
+    params.competitionId,
+    params.seasonNumber,
+    eligibleTeams,
+    eligibleUserClub,
+    eligibleQualified,
+    params.excludedClubIds
   );
 }
 
 /**
- * Resolves the continental region ('africa' | 'europe') of the currently managed club or league.
- * Supports `currentManagedTeam.continent`, `league.region`, `club.country`, `club.countryCode`, and `league.id`.
+ * Resolves whether a country belongs to the European (UEFA) continental region.
+ */
+export function isEuropeanCountry(country?: string): boolean {
+  if (!country) return false;
+  return resolveCountryContinent(country) === 'EUROPE';
+}
+
+/**
+ * Resolves whether a country belongs to the Asian (AFC) continental region.
+ */
+export function isAsianCountry(country?: string): boolean {
+  if (!country) return false;
+  return resolveCountryContinent(country) === 'ASIA';
+}
+
+/**
+ * Resolves the continental region ('africa' | 'asia' | 'europe') of the currently managed club or league.
+ * Supports `club.continent`, `league.continent`, `league.region`, `club.country`, `club.countryCode`, and `league.id`.
  */
 export function resolveClubContinentRegion(
   club?: Club | null,
   league?: LeagueDefinition | null
-): 'africa' | 'europe' {
-  const explicitContinent = String(club?.continent || league?.region || '').toLowerCase();
-  if (explicitContinent === 'europe') return 'europe';
-  if (explicitContinent === 'africa') return 'africa';
-
-  if (
-    isEuropeanCountry(club?.country) ||
-    isEuropeanCountry(club?.countryCode) ||
-    isEuropeanCountry(league?.country) ||
-    /^(eng|esp|ita|ger|fra)_/i.test(String(league?.id || club?.leagueId || ''))
-  ) {
-    return 'europe';
-  }
-
+): 'africa' | 'asia' | 'europe' {
+  const continentCode = resolveClubContinent(club, league);
+  if (continentCode === 'EUROPE') return 'europe';
+  if (continentCode === 'ASIA') return 'asia';
   return 'africa';
+}
+
+/**
+ * Returns the primary and secondary continental competition codes for a given ContinentCode or region.
+ */
+export function getContinentalCodesForContinent(
+  continentOrRegion: ContinentCode | 'africa' | 'asia' | 'europe' | 'south_america'
+): {
+  primaryCode: 'ccl' | 'acl' | 'ucl';
+  secondaryCode: 'ccc' | 'acl2' | 'uel';
+  primaryName: string;
+  secondaryName: string;
+  targetContinent: ContinentCode;
+} {
+  const norm = String(continentOrRegion || '').toUpperCase();
+  if (norm === 'EUROPE') {
+    return {
+      primaryCode: 'ucl',
+      secondaryCode: 'uel',
+      primaryName: 'دوري أبطال أوروبا (UCL)',
+      secondaryName: 'الدوري الأوروبي (UEL)',
+      targetContinent: 'EUROPE',
+    };
+  }
+  if (norm === 'ASIA') {
+    return {
+      primaryCode: 'acl',
+      secondaryCode: 'acl2',
+      primaryName: 'دوري أبطال آسيا للنخبة (ACL Elite)',
+      secondaryName: 'دوري أبطال آسيا 2 (ACL Two)',
+      targetContinent: 'ASIA',
+    };
+  }
+  return {
+    primaryCode: 'ccl',
+    secondaryCode: 'ccc',
+    primaryName: 'دوري أبطال إفريقيا (CAF CL)',
+    secondaryName: 'كأس الكونفدرالية الإفريقية (CAF CC)',
+    targetContinent: 'AFRICA',
+  };
 }
 
 /**
  * Returns the allowed continental competition options for a given continent region.
  * - Africa -> ['ccl', 'ccc'] (دوري أبطال إفريقيا + كأس الكونفدرالية الإفريقية)
+ * - Asia   -> ['acl', 'acl2'] (دوري أبطال آسيا للنخبة + دوري أبطال آسيا 2)
  * - Europe -> ['ucl', 'uel'] (دوري أبطال أوروبا + الدوري الأوروبي)
  */
-export function getContinentalCompetitionsForRegion(region: 'africa' | 'europe'): Array<{
-  code: 'ccl' | 'ccc' | 'ucl' | 'uel';
+export function getContinentalCompetitionsForRegion(region: 'africa' | 'asia' | 'europe'): Array<{
+  code: 'ccl' | 'ccc' | 'ucl' | 'uel' | 'acl' | 'acl2';
   name: string;
   shortLabel: string;
-  region: 'africa' | 'europe';
+  region: 'africa' | 'asia' | 'europe';
+  targetContinent: ContinentCode;
   tier: 1 | 2;
 }> {
   if (region === 'europe') {
@@ -854,6 +1328,7 @@ export function getContinentalCompetitionsForRegion(region: 'africa' | 'europe')
         name: 'دوري أبطال أوروبا',
         shortLabel: '🏆 دوري أبطال أوروبا',
         region: 'europe',
+        targetContinent: 'EUROPE',
         tier: 1,
       },
       {
@@ -861,6 +1336,28 @@ export function getContinentalCompetitionsForRegion(region: 'africa' | 'europe')
         name: 'الدوري الأوروبي',
         shortLabel: '🟠 الدوري الأوروبي',
         region: 'europe',
+        targetContinent: 'EUROPE',
+        tier: 2,
+      },
+    ];
+  }
+
+  if (region === 'asia') {
+    return [
+      {
+        code: 'acl',
+        name: 'دوري أبطال آسيا للنخبة',
+        shortLabel: '👑 أبطال آسيا للنخبة',
+        region: 'asia',
+        targetContinent: 'ASIA',
+        tier: 1,
+      },
+      {
+        code: 'acl2',
+        name: 'دوري أبطال آسيا 2',
+        shortLabel: '🌏 أبطال آسيا 2',
+        region: 'asia',
+        targetContinent: 'ASIA',
         tier: 2,
       },
     ];
@@ -872,6 +1369,7 @@ export function getContinentalCompetitionsForRegion(region: 'africa' | 'europe')
       name: 'دوري أبطال إفريقيا',
       shortLabel: '🏆 أبطال إفريقيا',
       region: 'africa',
+      targetContinent: 'AFRICA',
       tier: 1,
     },
     {
@@ -879,6 +1377,7 @@ export function getContinentalCompetitionsForRegion(region: 'africa' | 'europe')
       name: 'كأس الكونفدرالية الإفريقية',
       shortLabel: '🌍 الكونفدرالية الإفريقية',
       region: 'africa',
+      targetContinent: 'AFRICA',
       tier: 2,
     },
   ];
@@ -1747,10 +2246,46 @@ export function repairContinentalTournamentIntegrity(
   const isPrematureKnockout = hasKnockoutMatches && currentRound < 14;
   const isPrematureSkip = userParticipates && hasKnockoutMatches && userContFixPlayedCount === 0;
 
-  if (isPrematureComplete || isPrematureKnockout || isPrematureSkip) {
-    // Reinitialize a clean, pristine group-stage tournament
-    const defaultCode = (tournament.competitionId as 'ccl' | 'ccc' | 'ucl' | 'uel') || 'ccl';
-    const fallbackClubs = GLOBAL_LEAGUES['egy_tier_1']?.teams || EGYPT_PREMIER_CLUBS;
+  // Check 1.5: Strict Continent Isolation Integrity
+  // If any club in groups or matches belongs to a foreign continent (e.g., Asian or European club inside CAF CL/CC),
+  // immediately reinitialize the tournament with strict continent isolation!
+  const targetContinent =
+    tournament.targetContinent || getTargetContinentForCompetition(tournament.competitionId);
+  const findClubRef = (clubId: string): Club | undefined => {
+    if (userClub && userClub.id === clubId) return userClub;
+    return allTeams.find(t => t.id === clubId) || findClubInWorld(clubId);
+  };
+  const hasForeignContinentClub =
+    (Array.isArray(tournament.groups) &&
+      tournament.groups.some(g =>
+        Array.isArray(g.teamIds) &&
+        g.teamIds.some(tid => {
+          const c = findClubRef(tid);
+          return c ? resolveClubContinent(c) !== targetContinent : false;
+        })
+      )) ||
+    matches.some(m => {
+      const h = findClubRef(m.homeTeamId);
+      const a = findClubRef(m.awayTeamId);
+      return (
+        (h ? resolveClubContinent(h) !== targetContinent : false) ||
+        (a ? resolveClubContinent(a) !== targetContinent : false)
+      );
+    });
+
+  if (isPrematureComplete || isPrematureKnockout || isPrematureSkip || hasForeignContinentClub) {
+    // Reinitialize a clean, pristine group-stage tournament strictly isolated to targetContinent
+    const userContinent = userClub ? resolveClubContinent(userClub) : targetContinent;
+    const defaultCodes = getContinentalCodesForContinent(userContinent);
+    const defaultCode =
+      resolveClubContinent(userClub) === targetContinent
+        ? ((tournament.competitionId as 'ccl' | 'ccc' | 'ucl' | 'uel' | 'acl' | 'acl2') || defaultCodes.primary)
+        : defaultCodes.primary;
+    const fallbackClubs = getContinentClubPool(
+      getTargetContinentForCompetition(defaultCode),
+      allTeams,
+      userClub || undefined
+    );
     const cleanTournament = initContinentalTournamentByCode(
       defaultCode,
       seasonNumber,
@@ -1758,12 +2293,12 @@ export function repairContinentalTournamentIntegrity(
       userClub || undefined
     );
 
-    // Remove any orphaned continental knockout fixtures from updatedFixtures
+    // Remove any orphaned continental knockout fixtures or foreign-continent fixtures from updatedFixtures
     updatedFixtures = updatedFixtures.filter(f => {
       const isThisCont =
         (f.competitionType === 'CONTINENTAL_CUP' || f.competitionType === 'continental') &&
         (!f.competitionId || f.competitionId === tournament.competitionId);
-      if (isThisCont && f.stage && f.stage !== 'group') {
+      if (isThisCont && (hasForeignContinentClub || (f.stage && f.stage !== 'group'))) {
         return false;
       }
       return true;
@@ -1791,6 +2326,7 @@ export function repairContinentalTournamentIntegrity(
     try {
       localStorage.removeItem('football_game_save_africanChampionsLeague');
       localStorage.removeItem(`football_game_save_contCache_s${seasonNumber}_${defaultCode}`);
+      localStorage.removeItem(`football_game_save_contCache_s${seasonNumber}_${tournament.competitionId}`);
     } catch {}
 
     return {
@@ -1822,8 +2358,8 @@ export function repairContinentalTournamentIntegrity(
     // 1. Resolve remaining AI QFs
     matches.forEach(m => {
       if (m.stage === 'quarter' && !m.isPlayed) {
-        const homeTeam = allTeams.find(t => t.id === m.homeTeamId) || findClubInWorld(m.homeTeamId) || ({ id: m.homeTeamId, name: 'فريق إفريقي' } as any);
-        const awayTeam = allTeams.find(t => t.id === m.awayTeamId) || findClubInWorld(m.awayTeamId) || ({ id: m.awayTeamId, name: 'فريق إفريقي' } as any);
+        const homeTeam = allTeams.find(t => t.id === m.homeTeamId) || findClubInWorld(m.homeTeamId) || ({ id: m.homeTeamId, name: 'فريق قاري', continent: targetContinent } as any);
+        const awayTeam = allTeams.find(t => t.id === m.awayTeamId) || findClubInWorld(m.awayTeamId) || ({ id: m.awayTeamId, name: 'فريق قاري', continent: targetContinent } as any);
         const res = simulateKnockoutMatch(homeTeam, awayTeam);
         m.homeScore = res.homeScore;
         m.awayScore = res.awayScore;
@@ -1893,8 +2429,8 @@ export function repairContinentalTournamentIntegrity(
     // 1. Resolve other SF match
     matches.forEach(m => {
       if (m.stage === 'semi' && !m.isPlayed) {
-        const homeTeam = allTeams.find(t => t.id === m.homeTeamId) || findClubInWorld(m.homeTeamId) || ({ id: m.homeTeamId, name: 'فريق إفريقي' } as any);
-        const awayTeam = allTeams.find(t => t.id === m.awayTeamId) || findClubInWorld(m.awayTeamId) || ({ id: m.awayTeamId, name: 'فريق إفريقي' } as any);
+        const homeTeam = allTeams.find(t => t.id === m.homeTeamId) || findClubInWorld(m.homeTeamId) || ({ id: m.homeTeamId, name: 'فريق قاري', continent: targetContinent } as any);
+        const awayTeam = allTeams.find(t => t.id === m.awayTeamId) || findClubInWorld(m.awayTeamId) || ({ id: m.awayTeamId, name: 'فريق قاري', continent: targetContinent } as any);
         const res = simulateKnockoutMatch(homeTeam, awayTeam);
         m.homeScore = res.homeScore;
         m.awayScore = res.awayScore;
@@ -1928,7 +2464,7 @@ export function repairContinentalTournamentIntegrity(
     }
   }
 
-    // Check 2: Sanitize any individual matches with phantom isPlayed without valid scores
+  // Check 2: Sanitize any individual matches with phantom isPlayed without valid scores
   matches.forEach(m => {
     if (m.isPlayed && (m.homeScore === undefined || m.awayScore === undefined)) {
       m.isPlayed = false;
@@ -1951,8 +2487,6 @@ export function repairContinentalTournamentIntegrity(
   });
 
   // Check 3: Strict Sequential Group Matchday Enforcement (Matchdays 1 -> 2 -> 3 -> 4 -> 5 -> 6)
-  // If user is in the group stage and has an unplayed match in matchday M, NO match in matchday > M
-  // is allowed to be marked played ahead of time, and user's match in matchday M must be synced in updatedFixtures.
   if (userParticipates && userClub) {
     const userGroupMatches = matches
       .filter(m => m.stage === 'group' && (m.homeTeamId === userClub.id || m.awayTeamId === userClub.id))
@@ -1960,7 +2494,6 @@ export function repairContinentalTournamentIntegrity(
 
     const earliestUnplayedUserMd = userGroupMatches.find(m => !m.isPlayed)?.matchday;
     if (earliestUnplayedUserMd !== undefined) {
-      // Any group match in matchday > earliestUnplayedUserMd must NOT be played yet!
       matches.forEach(m => {
         if (m.stage === 'group' && (m.matchday || 1) > earliestUnplayedUserMd && m.isPlayed) {
           m.isPlayed = false;
@@ -1998,7 +2531,7 @@ export function repairContinentalTournamentIntegrity(
 }
 
 // ----------------------------------------------------
-// 7. CONTINENTAL QUALIFICATION FOR NEXT SEASON
+// 7. CONTINENTAL QUALIFICATION FOR NEXT SEASON (STRICT CONTINENT ISOLATION)
 // ----------------------------------------------------
 
 export function determineQualifiedClubsForContinental(
@@ -2009,84 +2542,145 @@ export function determineQualifiedClubsForContinental(
 ): {
   africanClubs: Club[];
   cafConfederationClubs: Club[];
+  asianEliteClubs: Club[];
+  afcTwoClubs: Club[];
   uefaClubs: Club[];
   europaLeagueClubs: Club[];
 } {
   const africanClubs: Club[] = [];
+  const cafConfedList: Club[] = [];
+  const asianEliteClubs: Club[] = [];
+  const afcTwoClubs: Club[] = [];
   const uefaClubs: Club[] = [];
   const europaLeagueClubs: Club[] = [];
 
   const cclIds = new Set<string>();
   const cccIds = new Set<string>();
+  const aclIds = new Set<string>();
+  const acl2Ids = new Set<string>();
   const uclIds = new Set<string>();
   const uelIds = new Set<string>();
-  const cafConfedList: Club[] = [];
 
-  // 1. African Leagues:
+  // 1. African Leagues (Strict: team.continent === 'AFRICA'):
   // Primary (CCL): 1st & 2nd in League
-  // Secondary (CCC): 3rd in League + Cup Winner (or Cup Runner-Up / 4th / next in table if already in CCL/CCC)
+  // Secondary (CCC): 3rd in League + Cup Winner (or Cup Runner-Up / 4th in table if already in CCL/CCC)
   const africanLeagueIds = ['egy_tier_1', 'mar_tier_1', 'tun_tier_1', 'alg_tier_1'];
   africanLeagueIds.forEach(lgId => {
     const lg = allLeagues[lgId] || GLOBAL_LEAGUES[lgId];
     if (!lg) return;
     const std = standingsByLeague[lgId];
-    const orderedClubs: Club[] =
+    const rawOrderedClubs: Club[] =
       std && std.length >= 4
         ? (std.map(s => lg.teams.find(t => t.id === s.teamId)).filter(Boolean) as Club[])
         : [...lg.teams];
 
-    // Assign Primary Continental (CAF Champions League) spots (2 per league, or up to 4 for full 16-club grid)
+    // Strict Continent Isolation Filter: Only 'AFRICA' clubs allowed
+    const orderedClubs = rawOrderedClubs.filter(club => resolveClubContinent(club, lg) === 'AFRICA');
+
     let addedCcl = 0;
     for (const club of orderedClubs) {
       if (addedCcl >= 2) break;
       if (!cclIds.has(club.id)) {
         cclIds.add(club.id);
-        africanClubs.push(club);
+        africanClubs.push({ ...club, continent: 'AFRICA' });
         addedCcl++;
       }
     }
 
-    // Assign Secondary Continental (CAF Confederation Cup) spots with strict Mutual Exclusion (!cclIds.has(id))
     let addedCcc = 0;
     const cupWinnerId = cupWinnersByCountry?.[lg.country];
     const cupRunnerUpId = cupRunnersUpByCountry?.[lg.country];
 
-    // Slot 1: Highest league team NOT in CCL (usually 3rd place)
     for (const club of orderedClubs) {
       if (!cclIds.has(club.id) && !cccIds.has(club.id)) {
         cccIds.add(club.id);
-        cafConfedList.push(club);
+        cafConfedList.push({ ...club, continent: 'AFRICA' });
         addedCcc++;
         break;
       }
     }
 
-    // Slot 2: Cup Winner -> else Cup Runner-Up -> else next in League table (4th / 5th) NOT in CCL or CCC
-    const cupWinnerClub = cupWinnerId ? lg.teams.find(t => t.id === cupWinnerId) : undefined;
-    const cupRunnerUpClub = cupRunnerUpId ? lg.teams.find(t => t.id === cupRunnerUpId) : undefined;
+    const cupWinnerClub = cupWinnerId ? orderedClubs.find(t => t.id === cupWinnerId) : undefined;
+    const cupRunnerUpClub = cupRunnerUpId ? orderedClubs.find(t => t.id === cupRunnerUpId) : undefined;
 
     if (cupWinnerClub && !cclIds.has(cupWinnerClub.id) && !cccIds.has(cupWinnerClub.id)) {
       cccIds.add(cupWinnerClub.id);
-      cafConfedList.push(cupWinnerClub);
+      cafConfedList.push({ ...cupWinnerClub, continent: 'AFRICA' });
       addedCcc++;
     } else if (cupRunnerUpClub && !cclIds.has(cupRunnerUpClub.id) && !cccIds.has(cupRunnerUpClub.id)) {
       cccIds.add(cupRunnerUpClub.id);
-      cafConfedList.push(cupRunnerUpClub);
+      cafConfedList.push({ ...cupRunnerUpClub, continent: 'AFRICA' });
       addedCcc++;
     }
 
-    // Fill any remaining CCC spots for this country from the next teams in the league standings
     for (const club of orderedClubs) {
       if (addedCcc >= 2) break;
       if (!cclIds.has(club.id) && !cccIds.has(club.id)) {
         cccIds.add(club.id);
-        cafConfedList.push(club);
+        cafConfedList.push({ ...club, continent: 'AFRICA' });
         addedCcc++;
       }
     }
   });
 
-  // 2. European Leagues:
+  // 2. Asian Leagues (Strict: team.continent === 'ASIA'):
+  // Primary (ACL Elite): Top spots in Saudi, UAE, Qatar leagues
+  // Secondary (AFC Champions League Two): Cup Winner + next in League NOT in ACL Elite
+  const asianLeaguesConfig = [
+    { id: 'sau_tier_1', aclSpots: 3, acl2Spots: 2 },
+    { id: 'uae_tier_1', aclSpots: 2, acl2Spots: 2 },
+    { id: 'qat_tier_1', aclSpots: 2, acl2Spots: 2 },
+  ];
+
+  asianLeaguesConfig.forEach(cfg => {
+    const lg = allLeagues[cfg.id] || GLOBAL_LEAGUES[cfg.id];
+    if (!lg) return;
+    const std = standingsByLeague[cfg.id];
+    const rawOrderedClubs: Club[] =
+      std && std.length >= cfg.aclSpots + cfg.acl2Spots
+        ? (std.map(s => lg.teams.find(t => t.id === s.teamId)).filter(Boolean) as Club[])
+        : [...lg.teams];
+
+    // Strict Continent Isolation Filter: Only 'ASIA' clubs allowed
+    const orderedClubs = rawOrderedClubs.filter(club => resolveClubContinent(club, lg) === 'ASIA');
+
+    let addedAcl = 0;
+    for (const club of orderedClubs) {
+      if (addedAcl >= cfg.aclSpots) break;
+      if (!aclIds.has(club.id)) {
+        aclIds.add(club.id);
+        asianEliteClubs.push({ ...club, continent: 'ASIA' });
+        addedAcl++;
+      }
+    }
+
+    let addedAcl2 = 0;
+    const cupWinnerId = cupWinnersByCountry?.[lg.country];
+    const cupRunnerUpId = cupRunnersUpByCountry?.[lg.country];
+    const cupWinnerClub = cupWinnerId ? orderedClubs.find(t => t.id === cupWinnerId) : undefined;
+    const cupRunnerUpClub = cupRunnerUpId ? orderedClubs.find(t => t.id === cupRunnerUpId) : undefined;
+
+    if (cupWinnerClub && !aclIds.has(cupWinnerClub.id) && !acl2Ids.has(cupWinnerClub.id)) {
+      acl2Ids.add(cupWinnerClub.id);
+      afcTwoClubs.push({ ...cupWinnerClub, continent: 'ASIA' });
+      addedAcl2++;
+    } else if (cupRunnerUpClub && !aclIds.has(cupRunnerUpClub.id) && !acl2Ids.has(cupRunnerUpClub.id)) {
+      acl2Ids.add(cupRunnerUpClub.id);
+      afcTwoClubs.push({ ...cupRunnerUpClub, continent: 'ASIA' });
+      addedAcl2++;
+    }
+
+    for (const club of orderedClubs) {
+      if (addedAcl2 >= cfg.acl2Spots) break;
+      if (!aclIds.has(club.id) && !acl2Ids.has(club.id)) {
+        acl2Ids.add(club.id);
+        afcTwoClubs.push({ ...club, continent: 'ASIA' });
+        addedAcl2++;
+      }
+    }
+  });
+
+  // 3. European Leagues (Strict: team.continent === 'EUROPE'):
   // Primary (UCL): Top uclSpots in League
   // Secondary (UEL): Cup Winner (or Cup Runner-Up) + next teams in League NOT in UCL
   const uefaLeaguesConfig = [
@@ -2101,36 +2695,37 @@ export function determineQualifiedClubsForContinental(
     const lg = allLeagues[cfg.id] || GLOBAL_LEAGUES[cfg.id];
     if (!lg) return;
     const std = standingsByLeague[cfg.id];
-    const orderedClubs: Club[] =
+    const rawOrderedClubs: Club[] =
       std && std.length >= cfg.uclSpots + cfg.uelSpots
         ? (std.map(s => lg.teams.find(t => t.id === s.teamId)).filter(Boolean) as Club[])
         : [...lg.teams];
 
-    // Primary (UCL) spots
+    // Strict Continent Isolation Filter: Only 'EUROPE' clubs allowed
+    const orderedClubs = rawOrderedClubs.filter(club => resolveClubContinent(club, lg) === 'EUROPE');
+
     let addedUcl = 0;
     for (const club of orderedClubs) {
       if (addedUcl >= cfg.uclSpots) break;
       if (!uclIds.has(club.id)) {
         uclIds.add(club.id);
-        uefaClubs.push(club);
+        uefaClubs.push({ ...club, continent: 'EUROPE' });
         addedUcl++;
       }
     }
 
-    // Secondary (UEL) spots with strict Mutual Exclusion (!uclIds.has(id))
     let addedUel = 0;
     const cupWinnerId = cupWinnersByCountry?.[lg.country];
     const cupRunnerUpId = cupRunnersUpByCountry?.[lg.country];
-    const cupWinnerClub = cupWinnerId ? lg.teams.find(t => t.id === cupWinnerId) : undefined;
-    const cupRunnerUpClub = cupRunnerUpId ? lg.teams.find(t => t.id === cupRunnerUpId) : undefined;
+    const cupWinnerClub = cupWinnerId ? orderedClubs.find(t => t.id === cupWinnerId) : undefined;
+    const cupRunnerUpClub = cupRunnerUpId ? orderedClubs.find(t => t.id === cupRunnerUpId) : undefined;
 
     if (cupWinnerClub && !uclIds.has(cupWinnerClub.id) && !uelIds.has(cupWinnerClub.id)) {
       uelIds.add(cupWinnerClub.id);
-      europaLeagueClubs.push(cupWinnerClub);
+      europaLeagueClubs.push({ ...cupWinnerClub, continent: 'EUROPE' });
       addedUel++;
     } else if (cupRunnerUpClub && !uclIds.has(cupRunnerUpClub.id) && !uelIds.has(cupRunnerUpClub.id)) {
       uelIds.add(cupRunnerUpClub.id);
-      europaLeagueClubs.push(cupRunnerUpClub);
+      europaLeagueClubs.push({ ...cupRunnerUpClub, continent: 'EUROPE' });
       addedUel++;
     }
 
@@ -2138,7 +2733,7 @@ export function determineQualifiedClubsForContinental(
       if (addedUel >= cfg.uelSpots) break;
       if (!uclIds.has(club.id) && !uelIds.has(club.id)) {
         uelIds.add(club.id);
-        europaLeagueClubs.push(club);
+        europaLeagueClubs.push({ ...club, continent: 'EUROPE' });
         addedUel++;
       }
     }
@@ -2147,7 +2742,12 @@ export function determineQualifiedClubsForContinental(
   return {
     africanClubs,
     cafConfederationClubs: cafConfedList,
+    asianEliteClubs,
+    afcTwoClubs,
     uefaClubs,
     europaLeagueClubs,
   };
 }
+
+export const qualifyTeamsToContinentalCompetitions = determineQualifiedClubsForContinental;
+

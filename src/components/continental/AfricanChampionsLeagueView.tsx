@@ -42,13 +42,17 @@ export const AfricanChampionsLeagueView: React.FC<AfricanChampionsLeagueViewProp
     return recalculateContinentalGroupStandings(africanChampionsLeague, fixtures);
   }, [africanChampionsLeague, fixtures]);
 
-  // Resolve current managed club's continent ('africa' | 'europe') based on userClub.continent / activeLeague.region / country
+  // Resolve current managed club's continent ('africa' | 'asia' | 'europe') based on userClub.continent / activeLeague.continent / country
   const managedRegion = resolveClubContinentRegion(userClub, activeLeague);
   const availableContinentalButtons = getContinentalCompetitionsForRegion(managedRegion).filter(
     comp => comp.region === managedRegion
   );
   const regionConfederationLabel =
-    managedRegion === 'europe' ? 'الاتحاد الأوروبي (UEFA)' : 'الاتحاد الإفريقي (CAF)';
+    managedRegion === 'europe'
+      ? 'الاتحاد الأوروبي (UEFA)'
+      : managedRegion === 'asia'
+      ? 'الاتحاد الآسيوي (AFC)'
+      : 'الاتحاد الإفريقي (CAF)';
 
   if (!liveTournament) {
     return (
@@ -92,7 +96,7 @@ export const AfricanChampionsLeagueView: React.FC<AfricanChampionsLeagueViewProp
   }
 
   const { groups, matches, currentStage, name, prizeMoneyWinner, competitionId } = liveTournament;
-  const isThursdayComp = competitionId === 'ccc' || competitionId === 'uel';
+  const isThursdayComp = competitionId === 'ccc' || competitionId === 'uel' || competitionId === 'acl2';
   const isUserParticipantInThisComp = Boolean(
     userClub && groups.some(g => g.teamIds.includes(userClub.id))
   );
@@ -101,6 +105,10 @@ export const AfricanChampionsLeagueView: React.FC<AfricanChampionsLeagueViewProp
       ? 'UEFA Champions League 🏆'
       : competitionId === 'uel'
       ? 'UEFA Europa League 🟠'
+      : competitionId === 'acl'
+      ? 'AFC Champions League Elite 👑'
+      : competitionId === 'acl2'
+      ? 'AFC Champions League Two 🌏'
       : competitionId === 'ccc'
       ? 'CAF Confederation Cup 🌍'
       : 'CAF Champions League 🌍';
@@ -141,9 +149,9 @@ export const AfricanChampionsLeagueView: React.FC<AfricanChampionsLeagueViewProp
             {availableContinentalButtons.map(comp => {
               const isSelected = competitionId === comp.code;
               const activeClass =
-                comp.code === 'ccl'
+                comp.code === 'ccl' || comp.code === 'acl'
                   ? 'bg-amber-500 text-slate-950 font-black shadow'
-                  : comp.code === 'ccc'
+                  : comp.code === 'ccc' || comp.code === 'acl2'
                   ? 'bg-emerald-500 text-slate-950 font-black shadow'
                   : comp.code === 'ucl'
                   ? 'bg-blue-500 text-white font-black shadow'

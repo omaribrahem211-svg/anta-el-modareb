@@ -12,7 +12,15 @@ import {
   RetiredPlayer,
   SeasonInfo,
 } from '../types/game';
-import { resolveFullPlayerObject, evaluateAiBuyerCounter, isArabOrAfricanClub, isEuropeanEliteClub, isTopEuropeanLeague } from './transferEngine';
+import {
+  resolveFullPlayerObject,
+  evaluateAiBuyerCounter,
+  isArabOrAfricanClub,
+  isEuropeanEliteClub,
+  isTopEuropeanLeague,
+  calculateContractDurationTransferFee,
+  syncPlayerMarketValueWithRating,
+} from './transferEngine';
 import { generateInitialBoardSystem as generateInitialBoardSystemFromBoardEngine } from './boardEngine';
 
 export { generateInitialBoardSystemFromBoardEngine as generateInitialBoardSystem };
@@ -35,11 +43,11 @@ export const ARABIC_MONTHS = [
 ];
 
 const INJURY_TYPES = [
-  { name: 'إجهاد عضلي في الفخذ', minDays: 3, maxDays: 7, severity: 'mild' as const },
-  { name: 'التواء خفيف في الكاحل', minDays: 6, maxDays: 12, severity: 'mild' as const },
-  { name: 'تمزق عضلي في العضلة الخلفية', minDays: 14, maxDays: 24, severity: 'moderate' as const },
-  { name: 'كدمة قوية في مفصل الركبة', minDays: 8, maxDays: 16, severity: 'moderate' as const },
-  { name: 'كسر في إصبع القدم', minDays: 25, maxDays: 45, severity: 'severe' as const },
+  { name: 'إجهاد عضلي خفيف في الفخذ', minDays: 2, maxDays: 4, severity: 'mild' as const },
+  { name: 'التواء بسيط في الكاحل', minDays: 3, maxDays: 5, severity: 'mild' as const },
+  { name: 'شد عضلي في العضلة الخلفية', minDays: 4, maxDays: 7, severity: 'moderate' as const },
+  { name: 'كدمة في مفصل الركبة', minDays: 3, maxDays: 6, severity: 'mild' as const },
+  { name: 'إجهاد في عضلة السمانة', minDays: 5, maxDays: 9, severity: 'moderate' as const },
 ];
 
 /**
@@ -218,50 +226,85 @@ export function simulateDailySquadTraining(
   const trainingReports: { playerId: string; playerName: string; changeText: string; type: 'growth' | 'fatigue' | 'boost' }[] = [];
   const injuryUpdates: { playerId: string; playerName: string; text: string; recovered?: boolean }[] = [];
 
+  let activeInjuredCount = players.filter(p => Boolean(p && (p.isInjured || (p.injury && p.injury.daysRemaining > 0)))).length;
+  let newInjuriesToday = 0;
+
   const updatedPlayers = players.map(player => {
     let updatedPlayer = { ...player };
 
-    // 1. Injury Progression
-    if (updatedPlayer.injury) {
-      const remaining = updatedPlayer.injury.daysRemaining - 1;
+    // 1. Unified Injury Progression & Guaranteed Recovery
+    const hasActiveInjury = Boolean(
+      updatedPlayer.isInjured || (updatedPlayer.injury && updatedPlayer.injury.daysRemaining > 0)
+    );
+    if (hasActiveInjury) {
+      const currentDays =
+        updatedPlayer.injury?.daysRemaining ??
+        Math.max(1, (updatedPlayer.injuryWeeks || 1) * 3);
+      const dailyHealPoints =
+        1 + (trainingFacilityLevel >= 3 ? 1 : 0) + (intensity === 'recovery' ? 1 : 0);
+      const remaining = currentDays - dailyHealPoints;
+      const injuryName = updatedPlayer.injury?.type || updatedPlayer.injuryType || 'إصابة عضلية';
+
       if (remaining <= 0) {
-        // Player fully recovered!
+        // Player fully recovered! Clear all injury flags strictly
         injuryUpdates.push({
           playerId: updatedPlayer.id,
           playerName: updatedPlayer.name,
-          text: `تعافى اللاعب ${updatedPlayer.name} تماماً من ${updatedPlayer.injury.type} وأصبح جاهزاً للمشاركة!`,
+          text: `✅ تعافى اللاعب ${updatedPlayer.name} تماماً من (${injuryName}) بعد انتهاء مدة العلاج وأصبح جاهزاً للمشاركة!`,
           recovered: true,
         });
         updatedPlayer.injury = null;
-        updatedPlayer.fitness = Math.min(95, Math.max(80, updatedPlayer.fitness + 15));
+        updatedPlayer.isInjured = false;
+        updatedPlayer.injuryType = undefined;
+        updatedPlayer.injuryWeeks = undefined;
+        updatedPlayer.injuryMatches = undefined;
+        updatedPlayer.fitness = Math.min(98, Math.max(88, (updatedPlayer.fitness || 75) + 20));
+        activeInjuredCount = Math.max(0, activeInjuredCount - 1);
       } else {
+        updatedPlayer.isInjured = true;
+        updatedPlayer.injuryType = injuryName;
+        updatedPlayer.injuryWeeks = Math.max(1, Math.ceil(remaining / 5));
         updatedPlayer.injury = {
-          ...updatedPlayer.injury,
+          type: injuryName,
           daysRemaining: remaining,
+          severity: updatedPlayer.injury?.severity || 'mild',
+          description: updatedPlayer.injury?.description || `يخضع لبرنامج التأهيل الطبي (متبقي ${remaining} أيام).`,
+          treatmentType: updatedPlayer.injury?.treatmentType,
+          recoveryPercentage: updatedPlayer.injury?.recoveryPercentage,
         };
-        // Slowly regain slight fitness during rehab
-        updatedPlayer.fitness = Math.min(80, updatedPlayer.fitness + 1);
+        // Regain fitness steadily during rehab
+        updatedPlayer.fitness = Math.min(86, (updatedPlayer.fitness || 70) + 4);
       }
       return updatedPlayer;
     }
 
-    // 2. Chance of fresh training injury (very low, increased on high intensity)
-    const injuryChance = intensity === 'high' ? 0.008 : intensity === 'normal' ? 0.003 : 0.0005;
-    if (Math.random() < injuryChance) {
+    // 2. Chance of fresh training injury (strictly capped: max 2 injured in squad, max 1 per day, realistic low probability)
+    const injuryChance = intensity === 'high' ? 0.0018 : intensity === 'normal' ? 0.0004 : 0;
+    if (
+      injuryChance > 0 &&
+      activeInjuredCount < 2 &&
+      newInjuriesToday < 1 &&
+      Math.random() < injuryChance
+    ) {
       const selectedInjury = INJURY_TYPES[Math.floor(Math.random() * INJURY_TYPES.length)];
       const days = Math.floor(Math.random() * (selectedInjury.maxDays - selectedInjury.minDays + 1)) + selectedInjury.minDays;
       const injuryObj: PlayerInjury = {
         type: selectedInjury.name,
         daysRemaining: days,
         severity: selectedInjury.severity,
-        description: `تعرض لإصابة (${selectedInjury.name}) خلال الحصة التدريبية وتستدعي غيابه لمدة ${days} أيام.`,
+        description: `تعرض لإصابة (${selectedInjury.name}) خلال الحصة التدريبية وتستدعي غيابه لمدة ${days} أيام فقط.`,
       };
       updatedPlayer.injury = injuryObj;
-      updatedPlayer.fitness = Math.max(30, updatedPlayer.fitness - 25);
+      updatedPlayer.isInjured = true;
+      updatedPlayer.injuryType = selectedInjury.name;
+      updatedPlayer.injuryWeeks = Math.max(1, Math.ceil(days / 5));
+      updatedPlayer.fitness = Math.max(55, (updatedPlayer.fitness || 85) - 15);
+      activeInjuredCount += 1;
+      newInjuriesToday += 1;
       injuryUpdates.push({
         playerId: updatedPlayer.id,
         playerName: updatedPlayer.name,
-        text: `أصيب ${updatedPlayer.name} بـ (${selectedInjury.name}) - فترة الغياب المتوقعة: ${days} يوم.`,
+        text: `أصيب ${updatedPlayer.name} بـ (${selectedInjury.name}) - فترة العلاج والغياب: ${days} أيام.`,
         recovered: false,
       });
       return updatedPlayer;
@@ -386,14 +429,16 @@ export function simulateDailySquadTraining(
     // Overall upgrade only when 100 threshold reached
     if (currentProgress >= 100) {
       if (updatedPlayer.overallRating < potential) {
+        const previousOvr = updatedPlayer.overallRating;
         updatedPlayer.overallRating += 1;
         updatedPlayer.trainingProgress = Math.round((currentProgress - 100) * 10) / 10;
+        updatedPlayer.marketValue = syncPlayerMarketValueWithRating(updatedPlayer, previousOvr);
 
         const focusLabel = updatedPlayer.trainingFocus || 'العام';
         trainingReports.push({
           playerId: updatedPlayer.id,
           playerName: updatedPlayer.name,
-          changeText: `تطور مستوى اللاعب ${updatedPlayer.name} بمقدار (+1) ليصل تقييمه إلى ${updatedPlayer.overallRating} بفضل التدريب ${focusLabel}!`,
+          changeText: `تطور مستوى اللاعب ${updatedPlayer.name} بمقدار (+1) ليصل تقييمه إلى ${updatedPlayer.overallRating} بفضل التدريب ${focusLabel}، وارتفعت قيمته السوقية إلى ${updatedPlayer.marketValue.toLocaleString()} ج.م!`,
           type: 'growth',
         });
       } else {
@@ -515,7 +560,15 @@ export function simulateDailyNegotiations(
         // AI Club evaluates bid
         const targetClub = allTeams.find(t => t && t.id === current.playerClubId);
         const targetPlayer = (targetClub?.players || []).find(p => p && p.id === current.playerId);
-        const playerVal = targetPlayer?.marketValue || current.bidFee;
+        const baseThreeSeasonVal = targetPlayer
+          ? Math.max(25000, syncPlayerMarketValueWithRating(targetPlayer))
+          : Math.max(25000, current.bidFee);
+        const contractDurationYears = Math.max(1, Math.min(5, current.contractYears || 3));
+        const requiredContractFee = calculateContractDurationTransferFee(
+          baseThreeSeasonVal,
+          contractDurationYears,
+          false
+        );
 
         // User intent: European stars will not leave European giants for Arab clubs
         const isTargetEuropean = isEuropeanEliteClub(targetClub) || isTopEuropeanLeague(targetClub?.leagueId) || (targetPlayer && targetPlayer.overallRating >= 80);
@@ -537,35 +590,35 @@ export function simulateDailyNegotiations(
           }
         }
 
-        // Fixed non-negotiable transfer price check
-        if (current.bidFee >= playerVal * 0.98) {
+        // Pro-rated transfer price check based on contract duration (1 season = 1/3, 2 seasons = 2/3, 3 seasons = full)
+        if (current.bidFee >= requiredContractFee * 0.98) {
           current.stage = 'player_terms';
           current.daysRemainingInStage = 1;
-          current.statusMessage = `وافق نادي ${current.playerClubName} على السعر الثابت للصفقة (${current.bidFee.toLocaleString()} ج.م). يتم الآن مراجعة الراتب الشهري (${(current.offeredSalary || 0).toLocaleString()} ج.م) ومدة العقد (${current.contractYears || 3} سنوات) مع اللاعب.`;
+          current.statusMessage = `وافق نادي ${current.playerClubName} على سعر شراء عقد اللاعب لمدة ${contractDurationYears} ${contractDurationYears === 1 ? 'موسم' : contractDurationYears === 2 ? 'موسمين' : 'مواسم'} (${current.bidFee.toLocaleString()} ج.م). يتم الآن مراجعة الراتب الشهري (${(current.offeredSalary || 0).toLocaleString()} ج.م) مع اللاعب.`;
           current.history.push({
             dateStr: new Date().toISOString().slice(0, 10),
-            message: `وافق نادي ${current.playerClubName} على السعر الثابت للصفقة.`,
+            message: `وافق نادي ${current.playerClubName} على مقابل شراء العقد لمدة ${contractDurationYears} مواسم.`,
             from: 'club',
           });
           negotiationReports.push({
             negotiationId: current.id,
             playerName: current.playerName,
-            text: `نادي ${current.playerClubName} يقبل السعر الثابت لشراء ${current.playerName}! جاري توقيع عقد براتب ${(current.offeredSalary || 0).toLocaleString()} ج.م شهرياً لمدة ${current.contractYears || 3} سنوات.`,
+            text: `نادي ${current.playerClubName} يقبل عرض شراء ${current.playerName} لمدة ${contractDurationYears} ${contractDurationYears === 1 ? 'موسم' : contractDurationYears === 2 ? 'موسمين' : 'مواسم'}! جاري توقيع العقد الرسمي.`,
             stage: 'player_terms',
             actionRequired: false,
           });
         } else {
           current.stage = 'rejected';
-          current.statusMessage = `رفض نادي ${current.playerClubName} العرض لأن سعر اللاعب ثابت وغير قابل للتفاوض (${playerVal.toLocaleString()} ج.م).`;
+          current.statusMessage = `رفض نادي ${current.playerClubName} العرض لأن سعر اللاعب لمدة ${contractDurationYears} ${contractDurationYears === 1 ? 'موسم' : contractDurationYears === 2 ? 'موسمين' : 'مواسم'} هو (${requiredContractFee.toLocaleString()} ج.م).`;
           current.history.push({
             dateStr: new Date().toISOString().slice(0, 10),
-            message: 'رفض النادي العرض لأن السعر ثابت وغير قابل للتفاوض.',
+            message: 'رفض النادي العرض لعدم مطابقة السعر المحدد لمدة العقد.',
             from: 'club',
           });
           negotiationReports.push({
             negotiationId: current.id,
             playerName: current.playerName,
-            text: `رفض نادي ${current.playerClubName} عرض ضم اللاعب ${current.playerName} لعدم مطابقة السعر الثابت.`,
+            text: `رفض نادي ${current.playerClubName} عرض ضم اللاعب ${current.playerName} لعدم مطابقة سعر مدة العقد (${requiredContractFee.toLocaleString()} ج.م).`,
             stage: 'rejected',
             actionRequired: false,
           });

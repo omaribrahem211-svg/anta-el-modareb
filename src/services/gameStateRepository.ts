@@ -1,19 +1,28 @@
 /**
- * Game State Repository (Local-First Architecture)
- * 
- * Provides an asynchronous high-performance storage layer using IndexedDB
- * with transparent synchronous-fallback to localStorage.
- * 
- * Ensures all everyday gameplay mutations (tactics, squad, transfers, matches,
- * training, facilities, messages, and manager career) happen locally and instantly
- * without touching Cloud Firestore.
+ * Game State Repository (IndexedDB Primary + In-Memory Fallback Architecture)
+ *
+ * Provides an asynchronous high-performance storage layer using IndexedDB (and idb-keyval)
+ * with automatic Data Pruning and an In-Memory Map fallback.
+ *
+ * Heavy collections (teams, fixtures, cupTournament, africanChampionsLeague, transferMarket,
+ * transferHistory, seasonArchives, retiredPlayers) are stored EXCLUSIVELY in IndexedDB / Memory
+ * and evicted from localStorage to prevent QuotaExceededError and synchronous JSON serialization lag.
  */
 
+import { get as idbKeyvalGet, set as idbKeyvalSet, del as idbKeyvalDel } from 'idb-keyval';
 import { normalizeCalendarDate } from '../utils/calendarEngine';
+import {
+  evictHeavyLocalStorageKeys,
+  pruneContinentalForStorage,
+  pruneCupTournamentForStorage,
+  pruneFixturesForStorage,
+  safeLocalStorageSet,
+} from '../utils/storage/indexedDbStorage';
 
 const DB_NAME = 'AntaElModareb_DB_v2';
 const DB_VERSION = 2;
 const STORE_NAME = 'game_state_store';
+const IDB_KEYVAL_SAVE_KEY = 'anta_el_modareb_idb_current_save_v2';
 export const LEGACY_STORAGE_PREFIX = 'anta_el_modareb_save_v1';
 
 export interface LocalGameSavePayload {
@@ -51,6 +60,7 @@ export interface LocalGameSavePayload {
 
 let dbInstance: IDBDatabase | null = null;
 let isIndexedDBAvailable: boolean | null = null;
+let inMemorySaveCache: LocalGameSavePayload | null = null;
 
 /**
  * Initializes and caches the IndexedDB connection with error resilience.
@@ -82,7 +92,7 @@ async function getIDB(): Promise<IDBDatabase | null> {
       };
 
       request.onerror = (event: Event) => {
-        console.warn('[GameStateRepo] IndexedDB open error, falling back to localStorage:', (event.target as any)?.error);
+        console.warn('[GameStateRepo] IndexedDB open error, using idb-keyval / In-Memory fallback:', (event.target as any)?.error);
         isIndexedDBAvailable = false;
         resolve(null);
       };
@@ -95,9 +105,18 @@ async function getIDB(): Promise<IDBDatabase | null> {
 }
 
 /**
- * Low-level key-value getter in IndexedDB
+ * Low-level key-value getter in IndexedDB with idb-keyval fallback
  */
 async function idbGet<T>(key: string): Promise<T | null> {
+  try {
+    const kvVal = await idbKeyvalGet<T>(`${IDB_KEYVAL_SAVE_KEY}_${key}`);
+    if (kvVal !== undefined && kvVal !== null) {
+      return kvVal;
+    }
+  } catch {
+    // continue to custom IDB store
+  }
+
   const db = await getIDB();
   if (!db) return null;
 
@@ -121,11 +140,19 @@ async function idbGet<T>(key: string): Promise<T | null> {
 }
 
 /**
- * Low-level key-value setter in IndexedDB
+ * Low-level key-value setter in IndexedDB with idb-keyval backup
  */
 async function idbSet<T>(key: string, value: T): Promise<boolean> {
+  let savedToKv = false;
+  try {
+    await idbKeyvalSet(`${IDB_KEYVAL_SAVE_KEY}_${key}`, value);
+    savedToKv = true;
+  } catch {
+    // continue to custom IDB store
+  }
+
   const db = await getIDB();
-  if (!db) return false;
+  if (!db) return savedToKv;
 
   return new Promise((resolve) => {
     try {
@@ -134,9 +161,9 @@ async function idbSet<T>(key: string, value: T): Promise<boolean> {
       const request = store.put(value, key);
 
       request.onsuccess = () => resolve(true);
-      request.onerror = () => resolve(false);
+      request.onerror = () => resolve(savedToKv);
     } catch {
-      resolve(false);
+      resolve(savedToKv);
     }
   });
 }
@@ -144,69 +171,83 @@ async function idbSet<T>(key: string, value: T): Promise<boolean> {
 let isSavingToStorage = false;
 let pendingSavePayload: LocalGameSavePayload | null = null;
 let saveResolveQueue: Array<() => void> = [];
+let hasEvictedLegacyHeavyKeys = false;
+
+/**
+ * Prunes verbose timeline commentary, old round events, and oversized arrays before persisting.
+ */
+function pruneSavePayload(payload: LocalGameSavePayload): LocalGameSavePayload {
+  const currentRound = typeof payload.currentRound === 'number' ? payload.currentRound : 1;
+  return {
+    ...payload,
+    fixtures: pruneFixturesForStorage(payload.fixtures, currentRound),
+    cupTournament: pruneCupTournamentForStorage(payload.cupTournament),
+    africanChampionsLeague: pruneContinentalForStorage(payload.africanChampionsLeague),
+    transferHistory: Array.isArray(payload.transferHistory)
+      ? payload.transferHistory.slice(0, 100)
+      : [],
+    dailyNews: Array.isArray(payload.dailyNews)
+      ? payload.dailyNews.slice(0, 30)
+      : [],
+    inbox: Array.isArray(payload.inbox)
+      ? payload.inbox.slice(0, 60)
+      : [],
+    retiredPlayers: Array.isArray(payload.retiredPlayers)
+      ? payload.retiredPlayers.slice(0, 80)
+      : [],
+  };
+}
 
 async function executeSave(payload: LocalGameSavePayload): Promise<void> {
+  const pruned = pruneSavePayload(payload);
   const timestampedPayload: LocalGameSavePayload = {
-    ...payload,
-    schemaVersion: payload.schemaVersion || 2,
-    saveVersion: (payload.saveVersion || 0) + 1,
+    ...pruned,
+    schemaVersion: pruned.schemaVersion || 2,
+    saveVersion: (pruned.saveVersion || 0) + 1,
     lastLocalSaveAt: Date.now(),
   };
 
-  // 1. Asynchronous write to IndexedDB (off main thread)
+  // 1. Always keep in-memory cache updated immediately (zero-latency fallback)
+  inMemorySaveCache = timestampedPayload;
+
+  // 2. Proactively evict legacy heavy keys from localStorage once per session
+  if (!hasEvictedLegacyHeavyKeys) {
+    hasEvictedLegacyHeavyKeys = true;
+    evictHeavyLocalStorageKeys(LEGACY_STORAGE_PREFIX);
+  }
+
+  // 3. Asynchronous write to IndexedDB (off main thread, no 5MB quota restriction)
   try {
     await idbSet('current_save', timestampedPayload);
   } catch (err) {
-    console.warn('[GameStateRepo] Error writing to IndexedDB:', err);
+    console.warn('[GameStateRepo] Notice writing to IndexedDB (state safely held in memory cache):', err);
   }
 
-  // 2. Non-blocking safety-mirror to localStorage (deferred so it never blocks React UI or frame rendering)
+  // 4. Lightweight header-only metadata sync to localStorage (never write heavy teams/fixtures/market arrays!)
   setTimeout(() => {
     try {
-      const safeSetLS = (key: string, val: string) => {
-        try {
-          localStorage.setItem(key, val);
-        } catch (e) {
-          // Safe catch for storage limits
-        }
-      };
-
-      // Save critical lightweight metadata and core entities first
-      safeSetLS(`${LEGACY_STORAGE_PREFIX}_meta_save_version`, String(timestampedPayload.saveVersion));
-      safeSetLS(`${LEGACY_STORAGE_PREFIX}_meta_save_time`, String(timestampedPayload.lastLocalSaveAt));
-      safeSetLS(`${LEGACY_STORAGE_PREFIX}_manager`, JSON.stringify(timestampedPayload.manager));
-      safeSetLS(`${LEGACY_STORAGE_PREFIX}_season`, JSON.stringify(timestampedPayload.season));
-      safeSetLS(`${LEGACY_STORAGE_PREFIX}_activeLeague`, JSON.stringify(timestampedPayload.activeLeague));
-      safeSetLS(`${LEGACY_STORAGE_PREFIX}_currentRound`, JSON.stringify(timestampedPayload.currentRound));
-      safeSetLS(`${LEGACY_STORAGE_PREFIX}_calendarDate`, JSON.stringify(timestampedPayload.calendarDate));
-      safeSetLS(`${LEGACY_STORAGE_PREFIX}_clubEconomy`, JSON.stringify(timestampedPayload.clubEconomy));
-      safeSetLS(`${LEGACY_STORAGE_PREFIX}_standings`, JSON.stringify(timestampedPayload.standings));
-      safeSetLS(`${LEGACY_STORAGE_PREFIX}_boardSystem`, JSON.stringify(timestampedPayload.boardSystem));
-      safeSetLS(`${LEGACY_STORAGE_PREFIX}_cupTournament`, JSON.stringify(timestampedPayload.cupTournament));
-
-      // Secondary items
-      safeSetLS(`${LEGACY_STORAGE_PREFIX}_teams`, JSON.stringify(timestampedPayload.teams));
-      safeSetLS(`${LEGACY_STORAGE_PREFIX}_fixtures`, JSON.stringify(timestampedPayload.fixtures));
-      safeSetLS(`${LEGACY_STORAGE_PREFIX}_inbox`, JSON.stringify(timestampedPayload.inbox));
-      safeSetLS(`${LEGACY_STORAGE_PREFIX}_transferHistory`, JSON.stringify(timestampedPayload.transferHistory));
-      safeSetLS(`${LEGACY_STORAGE_PREFIX}_jobOffers`, JSON.stringify(timestampedPayload.jobOffers));
-      safeSetLS(`${LEGACY_STORAGE_PREFIX}_transferMarket`, JSON.stringify(timestampedPayload.transferMarket));
-      safeSetLS(`${LEGACY_STORAGE_PREFIX}_incomingBids`, JSON.stringify(timestampedPayload.incomingBids));
-      safeSetLS(`${LEGACY_STORAGE_PREFIX}_seasonEndSummary`, JSON.stringify(timestampedPayload.seasonEndSummary));
-      safeSetLS(`${LEGACY_STORAGE_PREFIX}_activeNegotiations`, JSON.stringify(timestampedPayload.activeNegotiations));
-      safeSetLS(`${LEGACY_STORAGE_PREFIX}_dailyNews`, JSON.stringify(timestampedPayload.dailyNews));
-      safeSetLS(`${LEGACY_STORAGE_PREFIX}_retiredPlayers`, JSON.stringify(timestampedPayload.retiredPlayers));
-      safeSetLS(`${LEGACY_STORAGE_PREFIX}_worldRankings`, JSON.stringify(timestampedPayload.worldRankings));
-      safeSetLS(`${LEGACY_STORAGE_PREFIX}_scoutedOpponents`, JSON.stringify(timestampedPayload.scoutedOpponents));
-      if (timestampedPayload.africanChampionsLeague !== undefined) {
-        safeSetLS(`${LEGACY_STORAGE_PREFIX}_africanChampionsLeague`, JSON.stringify(timestampedPayload.africanChampionsLeague));
+      safeLocalStorageSet(`${LEGACY_STORAGE_PREFIX}_meta_save_version`, String(timestampedPayload.saveVersion));
+      safeLocalStorageSet(`${LEGACY_STORAGE_PREFIX}_meta_save_time`, String(timestampedPayload.lastLocalSaveAt));
+      if (timestampedPayload.manager) {
+        safeLocalStorageSet(`${LEGACY_STORAGE_PREFIX}_manager`, JSON.stringify(timestampedPayload.manager));
       }
-      if (timestampedPayload.seasonArchives !== undefined) {
-        safeSetLS(`${LEGACY_STORAGE_PREFIX}_seasonArchives`, JSON.stringify(timestampedPayload.seasonArchives));
+      if (timestampedPayload.season) {
+        safeLocalStorageSet(`${LEGACY_STORAGE_PREFIX}_season`, JSON.stringify(timestampedPayload.season));
       }
-      safeSetLS(`${LEGACY_STORAGE_PREFIX}_deletedMessageIds`, JSON.stringify(timestampedPayload.deletedMessageIds || []));
+      if (timestampedPayload.currentRound !== undefined) {
+        safeLocalStorageSet(`${LEGACY_STORAGE_PREFIX}_currentRound`, JSON.stringify(timestampedPayload.currentRound));
+      }
+      if (timestampedPayload.calendarDate) {
+        safeLocalStorageSet(`${LEGACY_STORAGE_PREFIX}_calendarDate`, JSON.stringify(timestampedPayload.calendarDate));
+      }
+      if (timestampedPayload.clubEconomy) {
+        safeLocalStorageSet(`${LEGACY_STORAGE_PREFIX}_clubEconomy`, JSON.stringify(timestampedPayload.clubEconomy));
+      }
+      if (timestampedPayload.standings) {
+        safeLocalStorageSet(`${LEGACY_STORAGE_PREFIX}_standings`, JSON.stringify(timestampedPayload.standings));
+      }
     } catch (mirrorErr) {
-      console.warn('[GameStateRepo] Deferred localStorage mirror notice:', mirrorErr);
+      console.warn('[GameStateRepo] Deferred header metadata sync notice:', mirrorErr);
     }
   }, 50);
 }
@@ -222,7 +263,6 @@ export const gameStateRepository = {
       saveResolveQueue.push(resolve);
 
       if (isSavingToStorage) {
-        // Coalesce: A save is already running, this payload will be picked up next
         return;
       }
 
@@ -243,7 +283,7 @@ export const gameStateRepository = {
         isSavingToStorage = false;
         const resolvers = saveResolveQueue;
         saveResolveQueue = [];
-        resolvers.forEach(r => r());
+        resolvers.forEach((r) => r());
       };
 
       processQueue();
@@ -251,20 +291,27 @@ export const gameStateRepository = {
   },
 
   /**
-   * Load local game state, prioritizing IndexedDB with transparent fallback to localStorage
+   * Load local game state, prioritizing IndexedDB, then In-Memory Cache, then legacy localStorage migration
    */
   async loadLocalGameState(): Promise<LocalGameSavePayload | null> {
     // 1. Try loading from IndexedDB first
     try {
       const idbSave = await idbGet<LocalGameSavePayload>('current_save');
       if (idbSave && idbSave.manager && idbSave.teams) {
+        inMemorySaveCache = idbSave;
+        evictHeavyLocalStorageKeys(LEGACY_STORAGE_PREFIX);
         return idbSave;
       }
     } catch (err) {
       console.warn('[GameStateRepo] Error reading from IndexedDB:', err);
     }
 
-    // 2. Fallback to reading legacy localStorage
+    // 2. Try in-memory cache
+    if (inMemorySaveCache && inMemorySaveCache.manager && inMemorySaveCache.teams) {
+      return inMemorySaveCache;
+    }
+
+    // 3. Fallback to migrating legacy localStorage save into IndexedDB
     try {
       const managerRaw = localStorage.getItem(`${LEGACY_STORAGE_PREFIX}_manager`);
       if (!managerRaw) return null;
@@ -278,7 +325,7 @@ export const gameStateRepository = {
         }
       };
 
-      const legacySave: LocalGameSavePayload = {
+      const legacySave: LocalGameSavePayload = pruneSavePayload({
         schemaVersion: 2,
         saveVersion: parseInt(localStorage.getItem(`${LEGACY_STORAGE_PREFIX}_meta_save_version`) || '1', 10),
         lastLocalSaveAt: parseInt(localStorage.getItem(`${LEGACY_STORAGE_PREFIX}_meta_save_time`) || String(Date.now()), 10),
@@ -315,9 +362,29 @@ export const gameStateRepository = {
         africanChampionsLeague: safeParse('africanChampionsLeague', null),
         seasonArchives: safeParse('seasonArchives', []),
         deletedMessageIds: safeParse('deletedMessageIds', []),
-      };
+      });
 
+      inMemorySaveCache = legacySave;
+      await idbSet('current_save', legacySave);
+      evictHeavyLocalStorageKeys(LEGACY_STORAGE_PREFIX);
       return legacySave;
+    } catch {
+      return null;
+    }
+  },
+
+  /**
+   * Save or load season archive snapshot in IndexedDB (instead of bloating localStorage)
+   */
+  async saveSeasonSnapshot(seasonNum: number, snapshot: any): Promise<void> {
+    try {
+      await idbSet(`season_${seasonNum}_snapshot`, snapshot);
+    } catch {}
+  },
+
+  async loadSeasonSnapshot(seasonNum: number): Promise<any | null> {
+    try {
+      return await idbGet(`season_${seasonNum}_snapshot`);
     } catch {
       return null;
     }
@@ -327,6 +394,11 @@ export const gameStateRepository = {
    * Reset local storage completely
    */
   async clearLocalGameState(): Promise<void> {
+    inMemorySaveCache = null;
+    try {
+      await idbKeyvalDel(`${IDB_KEYVAL_SAVE_KEY}_current_save`);
+    } catch {}
+
     try {
       const db = await getIDB();
       if (db) {
@@ -339,11 +411,11 @@ export const gameStateRepository = {
 
     try {
       const keys = Object.keys(localStorage);
-      keys.forEach(k => {
+      keys.forEach((k) => {
         if (k.startsWith(LEGACY_STORAGE_PREFIX)) {
           localStorage.removeItem(k);
         }
       });
     } catch {}
-  }
+  },
 };

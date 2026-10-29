@@ -94,7 +94,122 @@ export function isEuropeanEliteClub(club?: Club): boolean {
 }
 
 /**
- * Calculates realistic player market valuation and wage recommendation.
+ * Calculates the transfer purchase fee proportional to the chosen contract duration.
+ * Baseline player price (100% / 3-season value, e.g., 90M) corresponds to a 3-season contract:
+ * - 1 season: 1/3 of the 3-season price (e.g., 30M for a 90M player)
+ * - 2 seasons: 2/3 of the 3-season price (e.g., 60M for a 90M player)
+ * - 3 seasons: 3/3 (100%) of the 3-season price (e.g., 90M)
+ * - 4 seasons: 4/3 of the 3-season price (e.g., 120M)
+ * - 5 seasons: 5/3 of the 3-season price (e.g., 150M)
+ */
+export function calculateContractDurationTransferFee(
+  threeSeasonBasePrice: number,
+  contractYears: number,
+  isFreeAgent: boolean = false
+): number {
+  if (isFreeAgent || threeSeasonBasePrice <= 0) return 0;
+  const safeYears = Math.max(1, Math.min(5, Math.round(contractYears || 3)));
+  const proRated = Math.round((threeSeasonBasePrice * safeYears) / 3);
+  return Math.max(8000, proRated);
+}
+
+/**
+ * Synchronizes and increases a player's marketValue to match their current overallRating
+ * whenever the player is trained or upgraded.
+ */
+export function syncPlayerMarketValueWithRating(
+  player: Player,
+  previousOverallRating?: number
+): number {
+  const ovr = Math.max(40, Math.min(99, Math.round(player?.overallRating || 60)));
+  const prevOvr = previousOverallRating !== undefined ? Math.round(previousOverallRating) : ovr;
+  const ovrDelta = Math.max(0, ovr - prevOvr);
+  const pot = Math.max(ovr, Math.round(player?.potentialRating || ovr));
+  const age = Math.max(16, Math.min(45, Math.round(player?.age || 24)));
+
+  // Smooth exponential benchmark curve for every single OVR point (40..99)
+  let tierFloor = 15000;
+  let tierCeiling = 35000;
+  let tierProgress = 0;
+
+  if (ovr >= 90) {
+    tierFloor = 90000000;
+    tierCeiling = 180000000;
+    tierProgress = Math.min(1, (ovr - 90) / 9);
+  } else if (ovr >= 85) {
+    tierFloor = 45000000;
+    tierCeiling = 90000000;
+    tierProgress = (ovr - 85) / 5;
+  } else if (ovr >= 80) {
+    tierFloor = 20000000;
+    tierCeiling = 45000000;
+    tierProgress = (ovr - 80) / 5;
+  } else if (ovr >= 75) {
+    tierFloor = 6000000;
+    tierCeiling = 20000000;
+    tierProgress = (ovr - 75) / 5;
+  } else if (ovr >= 70) {
+    tierFloor = 2200000;
+    tierCeiling = 6000000;
+    tierProgress = (ovr - 70) / 5;
+  } else if (ovr >= 65) {
+    tierFloor = 750000;
+    tierCeiling = 2200000;
+    tierProgress = (ovr - 65) / 5;
+  } else if (ovr >= 60) {
+    tierFloor = 250000;
+    tierCeiling = 750000;
+    tierProgress = (ovr - 60) / 5;
+  } else if (ovr >= 55) {
+    tierFloor = 85000;
+    tierCeiling = 250000;
+    tierProgress = (ovr - 55) / 5;
+  } else if (ovr >= 50) {
+    tierFloor = 35000;
+    tierCeiling = 85000;
+    tierProgress = (ovr - 50) / 5;
+  } else {
+    tierFloor = 15000;
+    tierCeiling = 35000;
+    tierProgress = Math.max(0, (ovr - 40) / 10);
+  }
+
+  const interpolatedBase = tierFloor + (tierCeiling - tierFloor) * tierProgress;
+
+  let ageMultiplier = 1.0;
+  if (age <= 21) {
+    const potDiff = Math.max(0, pot - ovr);
+    ageMultiplier = 1.2 + potDiff * 0.04;
+  } else if (age <= 25) {
+    ageMultiplier = 1.12;
+  } else if (age <= 29) {
+    ageMultiplier = 1.0;
+  } else if (age <= 33) {
+    ageMultiplier = 0.8;
+  } else {
+    ageMultiplier = 0.55;
+  }
+
+  const benchmarkValue = Math.max(25000, Math.round((interpolatedBase * ageMultiplier) / 1000) * 1000);
+  const existingMv = Math.max(0, Math.round(player?.marketValue || 0));
+
+  if (ovrDelta > 0 && existingMv > 0) {
+    // Each +1 OVR boosts market value by at least +18% compounded OR jumps to the new rating benchmark
+    const compoundedBoost = Math.round((existingMv * Math.pow(1.18, ovrDelta)) / 1000) * 1000;
+    return Math.max(benchmarkValue, compoundedBoost, existingMv + ovrDelta * 15000);
+  }
+
+  if (previousOverallRating !== undefined && ovrDelta === 0 && existingMv > 0) {
+    // Sub-attribute upgrade before crossing next OVR integer still adds +4% value
+    const attrBoost = Math.round((existingMv * 1.04) / 1000) * 1000;
+    return Math.max(benchmarkValue, attrBoost, existingMv + 5000);
+  }
+
+  return Math.max(benchmarkValue, existingMv);
+}
+
+/**
+ * Calculates realistic player market valuation (3-season baseline) and wage recommendation.
  */
 export function calculatePlayerFairValue(
   player: Player,
@@ -106,48 +221,11 @@ export function calculatePlayerFairValue(
   valuationTier: 'low' | 'medium' | 'high' | 'world_class';
 } {
   const ovr = (player && typeof player.overallRating === 'number' && !isNaN(player.overallRating)) ? player.overallRating : 60;
-  const pot = (player && typeof player.potentialRating === 'number' && !isNaN(player.potentialRating)) ? player.potentialRating : ovr;
-  const age = (player && typeof player.age === 'number' && !isNaN(player.age)) ? player.age : 25;
-
-  // Base value scale exponential by rating
-  let baseValue = 10000;
-  if (ovr >= 90) baseValue = 90000000;
-  else if (ovr >= 85) baseValue = 45000000;
-  else if (ovr >= 80) baseValue = 20000000;
-  else if (ovr >= 75) baseValue = 6000000;
-  else if (ovr >= 70) baseValue = 2200000;
-  else if (ovr >= 65) baseValue = 750000;
-  else if (ovr >= 60) baseValue = 250000;
-  else if (ovr >= 55) baseValue = 85000;
-  else if (ovr >= 50) baseValue = 35000;
-  else baseValue = 15000;
-
-  // Age & Potential multiplier
-  let ageMultiplier = 1.0;
-  if (age <= 21) {
-    const potDiff = Math.max(0, pot - ovr);
-    ageMultiplier = 1.25 + (potDiff * 0.05); // High potential young talent premium
-  } else if (age <= 25) {
-    ageMultiplier = 1.15;
-  } else if (age <= 29) {
-    ageMultiplier = 1.0;
-  } else if (age <= 33) {
-    ageMultiplier = 0.75;
-  } else {
-    ageMultiplier = 0.45; // Veterans discount
-  }
-
-  // Contract duration multiplier
-  const contractYears = (player && typeof player.contractYears === 'number' && !isNaN(player.contractYears)) ? player.contractYears : 2;
-  let contractMultiplier = 1.0;
-  if (contractYears === 0) contractMultiplier = 0.0; // Free agent (no transfer fee to club)
-  else if (contractYears === 1) contractMultiplier = 0.8;
-  else if (contractYears >= 3) contractMultiplier = 1.15;
-
-  const rawFairFee = Math.max(25000, Math.round(baseValue * ageMultiplier * (contractYears === 0 ? 0.75 : contractMultiplier)));
+  const syncedValue = syncPlayerMarketValueWithRating(player);
   const mv = (player && typeof player.marketValue === 'number' && !isNaN(player.marketValue) && player.marketValue > 0) ? player.marketValue : 0;
-  // Fixed, non-negotiable price: strictly equals the player's marketValue
-  const fairMarketValue = Math.max(25000, mv > 0 ? mv : rawFairFee);
+
+  // Baseline 3-season price: always reflects at least the synced rating benchmark so trained players' price matches their current rating
+  const fairMarketValue = Math.max(25000, mv, syncedValue);
   const minimumAcceptableFee = fairMarketValue;
 
   // Recommended monthly salary
@@ -156,7 +234,7 @@ export function calculatePlayerFairValue(
     clubReputation: club?.reputation || 50,
   });
   const curSal = (player && typeof player.salary === 'number' && !isNaN(player.salary) && player.salary > 0) ? player.salary : 0;
-  const recommendedMonthlyWage = curSal > 0 ? curSal : Math.max(1500, realisticWage);
+  const recommendedMonthlyWage = Math.max(1500, curSal, realisticWage);
 
   let valuationTier: 'low' | 'medium' | 'high' | 'world_class' = 'low';
   if (ovr >= 85) valuationTier = 'world_class';
@@ -183,13 +261,32 @@ export function evaluateTransferOffer(
 ): NegotiationResult {
   const isFreeAgent = !sellingClub || !player.currentClubId || player.contractYears === 0;
 
-  // 1. STRICT FINANCIAL VALIDATION: Check User Club Available Transfer Budget & Wage Limits
-  if (!isFreeAgent && userClub.budget < proposal.transferFee) {
+  // Contract duration sanity check
+  if (proposal.contractYears < 1 || proposal.contractYears > 5) {
     return {
       decision: 'reject',
       clubApproved: false,
       playerApproved: false,
-      message: `عفواً، ميزانية ناديك الحالية (${((userClub.budget || 0)).toLocaleString()} ج.م) أقل من قيمة عرض الشراء المقترح (${((proposal.transferFee || 0)).toLocaleString()} ج.م)! يجب توفير سعر اللاعب أولاً.`,
+      message: 'مدة العقد يجب أن تكون بين سنة واحدة و 5 سنوات.',
+    };
+  }
+
+  const { fairMarketValue, recommendedMonthlyWage } = calculatePlayerFairValue(player, sellingClub);
+  const isContractExpiredFreeAgent = isFreeAgent || (player.contractYears !== undefined && player.contractYears <= 0);
+  const validYears = Math.max(1, Math.min(5, proposal.contractYears || 3));
+  const proRatedTransferPrice = calculateContractDurationTransferFee(
+    fairMarketValue,
+    validYears,
+    isContractExpiredFreeAgent
+  );
+
+  // 1. STRICT FINANCIAL VALIDATION: Check User Club Available Transfer Budget & Wage Limits
+  if (!isContractExpiredFreeAgent && userClub.budget < proRatedTransferPrice) {
+    return {
+      decision: 'reject',
+      clubApproved: false,
+      playerApproved: false,
+      message: `عفواً، ميزانية ناديك الحالية (${((userClub.budget || 0)).toLocaleString()} ج.م) أقل من قيمة شراء اللاعب لعقد مدته ${validYears} ${validYears === 1 ? 'موسم' : 'مواسم'} (${proRatedTransferPrice.toLocaleString()} ج.م)! يجب توفير المبلغ أولاً.`,
     };
   }
 
@@ -205,18 +302,6 @@ export function evaluateTransferOffer(
       message: `لا يمكن تقديم هذا العرض! الراتب المقترح (${((proposal.monthlySalary || 0)).toLocaleString()} ج.م) سيتجاوز سقف الدخل الشهري للنادي (${((monthlyClubIncome || 0)).toLocaleString()} ج.م). إجمالي رواتب الفريق الحالي: ${((currentClubWages || 0)).toLocaleString()} ج.م، والمتبقي لسقف الرواتب هو ${((remainingWageBudget || 0)).toLocaleString()} ج.م فقط!`,
     };
   }
-
-  // Contract duration sanity check
-  if (proposal.contractYears < 1 || proposal.contractYears > 5) {
-    return {
-      decision: 'reject',
-      clubApproved: false,
-      playerApproved: false,
-      message: 'مدة العقد يجب أن تكون بين سنة واحدة و 5 سنوات.',
-    };
-  }
-
-  const { fairMarketValue, minimumAcceptableFee, recommendedMonthlyWage } = calculatePlayerFairValue(player, sellingClub);
 
   // 2. REALISTIC DIVISION & REPUTATION COMPATIBILITY CHECKS
   const userDiv = userClub.division || 4;
@@ -295,12 +380,10 @@ export function evaluateTransferOffer(
   }
 
   // G. CRITICAL USER RULE: European Stars will NEVER leave top European clubs for Arab/African leagues
-  // "مينفعش لاعب مشهور و قوى يسيب فريق كبيرر فى اوربا عشان يروح نادى عربى"
   const isSellerEuropean = isEuropeanEliteClub(sellingClub) || isTopEuropeanLeague(sellingClub?.leagueId) || (sellingClub?.country && ['إنجلترا', 'إسبانيا', 'إيطاليا', 'ألمانيا', 'فرنسا'].includes(sellingClub.country));
   const isBuyerArabOrAfrican = isArabOrAfricanClub(userClub);
 
   if (isSellerEuropean && isBuyerArabOrAfrican) {
-    // 1. Prime / Star players (Rating >= 78, or young talents with potential >= 80, or players under 33 with rating >= 75)
     if (ovr >= 78 || (age <= 32 && ovr >= 75) || (age <= 23 && pot >= 80)) {
       return {
         decision: 'reject',
@@ -310,7 +393,6 @@ export function evaluateTransferOffer(
       };
     }
 
-    // 2. Late career veterans (Age >= 33): Only top Saudi tier 1 clubs can even negotiate marquee deals
     if (age >= 33) {
       if (userClub.leagueId !== 'sau_tier_1') {
         return {
@@ -320,7 +402,6 @@ export function evaluateTransferOffer(
           message: `يرى اللاعب ${player.name} (تقييم ${ovr}) أن الانتقال للدوري الحالي لا يناسب مكانته وتاريخه الكروي في الملاعب الأوروبية.`,
         };
       }
-      // For Saudi tier 1, fixed price still applies
     }
   }
 
@@ -329,7 +410,6 @@ export function evaluateTransferOffer(
     const isSellerGiant = isEuropeanEliteClub(sellingClub) && (sellingClub?.reputation || 0) >= 88;
     const isBuyerGiant = (userClub.reputation || 0) >= 85;
 
-    // Superstars (85+) at European Giants will refuse downgrading to mid-table clubs
     if (isSellerGiant && ovr >= 85 && !isBuyerGiant) {
       return {
         decision: 'reject',
@@ -340,36 +420,23 @@ export function evaluateTransferOffer(
     }
   }
 
-  // 3. FIXED NON-NEGOTIABLE TRANSFER PRICE CHECK
-  const isContractExpiredFreeAgent = isFreeAgent || (player.contractYears !== undefined && player.contractYears <= 0);
-  const fixedTransferPrice = isContractExpiredFreeAgent ? 0 : fairMarketValue;
-
-  if (userClub && userClub.budget < fixedTransferPrice) {
-    return {
-      decision: 'reject',
-      clubApproved: false,
-      playerApproved: false,
-      message: `ميزانية ناديك الحالية (${userClub.budget.toLocaleString()} ج.م) لا تكفي لدفع السعر الثابت لشراء اللاعب (${fixedTransferPrice.toLocaleString()} ج.م)!`,
-    };
-  }
-
+  // 3. PRO-RATED CONTRACT DURATION TRANSFER PRICE CHECK
   const clubApproved = true;
-
-  // 4. FIXED NON-NEGOTIABLE MONTHLY SALARY & CONTRACT DURATION (1 to 5 Years)
-  const validYears = Math.max(1, Math.min(5, proposal.contractYears || 3));
   const fixedSalary = Math.max(1000, Number(player.salary) || recommendedMonthlyWage || 2500);
-
   const playerApproved = validYears >= 1 && validYears <= 5;
 
-  // 5. FINAL SYNTHESIS (Both Price & Salary are Fixed and Non-Negotiable)
   if (clubApproved && playerApproved) {
+    const expiryWarning =
+      validYears <= 2
+        ? ` ⚠️ تنبيه هام: العقد لمدة ${validYears === 1 ? 'موسم واحد فقط' : 'موسمين'}؛ يجب تجديد عقد اللاعب قبل انتهاء مدته وإلا سيغادر فريقك وينتقل إلى نادٍ آخر فور انتهاء العقد!`
+        : '';
     return {
       decision: 'accept',
       clubApproved: true,
       playerApproved: true,
       message: isContractExpiredFreeAgent
-        ? `تمت الموافقة الرسمية! وقع اللاعب الحر ${player.name} على عقد انضمام لناديك لمدة ${validYears} سنوات بالراتب الشهري الثابت (${fixedSalary.toLocaleString()} ج.م) في صفقة انتقال حر.`
-        : `تمت الموافقة الرسمية على الصفقة! انتقل ${player.name} بالسعر الثابت (${fixedTransferPrice.toLocaleString()} ج.م) وبالراتب الشهري الثابت (${fixedSalary.toLocaleString()} ج.م) وعقد يمتد لـ ${validYears} سنوات.`,
+        ? `تمت الموافقة الرسمية! وقع اللاعب الحر ${player.name} على عقد انضمام لناديك لمدة ${validYears} ${validYears === 1 ? 'موسم' : 'مواسم'} بالراتب الشهري (${fixedSalary.toLocaleString()} ج.م) في صفقة انتقال حر.${expiryWarning}`
+        : `تمت الموافقة الرسمية على الصفقة! انتقل ${player.name} بعقد لمدة ${validYears} ${validYears === 1 ? 'موسم' : 'مواسم'} بقيمة (${proRatedTransferPrice.toLocaleString()} ج.م) وراتب شهري (${fixedSalary.toLocaleString()} ج.م).${expiryWarning}`,
     };
   }
 
@@ -635,13 +702,19 @@ export function executeAtomicTransfer(params: {
     goalkeeping: player.position === 'GK' ? (player.overallRating || 70) : 20,
   };
 
+  const safeContractYears = Math.max(1, Math.min(5, contractYears || 3));
+  const preservedThreeSeasonMarketValue = Math.max(
+    25000,
+    Number(player.marketValue) || Math.round((transferFee * 3) / safeContractYears) || 50000
+  );
+
   const transferredPlayer: Player = {
     ...player,
     currentClubId: buyingClub?.id || buyingClubId || 'external_club',
     currentLeagueId: buyingClub?.leagueId || '',
     salary: Math.max(1000, Number(salary) || player.salary || 2500),
-    marketValue: Math.max(10000, Number(player.marketValue) || transferFee || 50000),
-    contractYears: Math.max(1, contractYears || 2),
+    marketValue: preservedThreeSeasonMarketValue,
+    contractYears: safeContractYears,
     isListedForTransfer: false,
     morale: Math.min(100, (player.morale || 80) + 15),
     fitness: 100,
@@ -1918,7 +1991,7 @@ export function processFreeAgentsAndAiTransfers(
           },
           formerClubId: club.id,
           formerClubName: club.name,
-          wasUserClub: Boolean(club.isUserClub),
+          wasUserClub: Boolean(club.isUserClub || (_userClubId && club.id === _userClubId)),
         });
       } else {
         remainingPlayers.push(p);
@@ -1958,8 +2031,10 @@ export function processFreeAgentsAndAiTransfers(
         : 'MID'
     );
 
-    // Candidate AI clubs (excluding the player's former club so they always move to a DIFFERENT club)
-    const otherAiClubs = safeTeams.filter(c => c && !c.isUserClub && c.id !== item.formerClubId);
+    // Candidate AI clubs (excluding the player's former club and user club so they always move to a DIFFERENT AI club)
+    const otherAiClubs = safeTeams.filter(
+      c => c && !c.isUserClub && (!(_userClubId && c.id === _userClubId)) && c.id !== item.formerClubId
+    );
     if (otherAiClubs.length === 0) continue;
 
     // Prefer clubs that need this position or have smaller squads, sorted by closeness in rating/reputation

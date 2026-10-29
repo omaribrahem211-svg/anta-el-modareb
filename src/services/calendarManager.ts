@@ -75,7 +75,7 @@ export class CalendarManager {
    * Returns competition metadata (name & badge) for a given continental competition ID.
    */
   static getContinentalMeta(competitionId?: string, fallbackName?: string): {
-    compCode: 'ccl' | 'ccc' | 'ucl' | 'uel' | 'acl';
+    compCode: 'ccl' | 'ccc' | 'ucl' | 'uel' | 'acl' | 'acl2';
     name: string;
     badge: string;
     isThursdaySlot: boolean;
@@ -105,11 +105,19 @@ export class CalendarManager {
         isThursdaySlot: true,
       };
     }
+    if (raw.includes('acl2') || raw.includes('afc_two') || raw.includes('asia_two')) {
+      return {
+        compCode: 'acl2',
+        name: fallbackName || 'دوري أبطال آسيا 2',
+        badge: '🌏 دوري أبطال آسيا 2',
+        isThursdaySlot: true,
+      };
+    }
     if (raw.includes('acl') || raw.includes('asia')) {
       return {
         compCode: 'acl',
         name: fallbackName || 'دوري أبطال آسيا للنخبة',
-        badge: '👑 دوري أبطال آسيا',
+        badge: '👑 دوري أبطال آسيا للنخبة',
         isThursdaySlot: false,
       };
     }

@@ -65,12 +65,12 @@ export function checkExpiringContracts(
     const isUrgent = isExpired || player.overallRating >= 70;
 
     const title = isExpired
-      ? `🚨 خطر رحيل مجاني: عقد ${player.name} (${player.position}) منتهٍ ويحق له التوقيع لأي نادٍ!`
-      : `⏳ تنبيه شؤون اللاعبين: اقتراب نهاية عقد ${player.name} (${player.position} - تقييم ${player.overallRating})`;
+      ? `🚨 رحيل وشيك ومؤكد: عقد ${player.name} (${player.position}) انتهى وسينتقل لنادٍ آخر فوراً!`
+      : `⏳ تحذير أخير للتجديد: عقد ${player.name} (${player.position} - تقييم ${player.overallRating}) ينتهي بنهاية الموسم!`;
 
     const content = isExpired
-      ? `تحذير عاجل من لجنة التعاقدات: انتهت المدة الرسمية لعقد اللاعب ${player.name} (${player.position} - تقييم ${player.overallRating}) مع الفريق، وأصبح حراً قانونياً في التوقيع مجاناً لأي نادٍ منافس دون أي عائد مالي للنادي!\n\nنوصي بفتح مفاوضات التجديد فوراً أو حسم موقفه لحماية استقرار التشكيلة.`
-      : `إشعار إداري وفني: يتبقى للاعب ${player.name} (${player.position} - تقييم ${player.overallRating} - العمر ${player.age}) سنة واحدة فقط في عقده الحالي (ينتهي بنهاية الموسم).\n\nالقيمة السوقية الحالية: ${(player.marketValue || 0).toLocaleString()} ج.م | الراتب الحالي: ${(player.salary || 2500).toLocaleString()} ج.م شهرياً.\n\nلتفادي دخول اللاعب في الفترة الحرة أو رحيله دون مقابل، يُنصح بتجديد العقد الآن أو عرضه للبيع للاستفادة من قيمته السوقية.`;
+      ? `تحذير عاجل وحاسم من لجنة التعاقدات: انتهت المدة القانونية لعقد اللاعب ${player.name} (${player.position} - تقييم ${player.overallRating}) مع الفريق، وفي حال عدم التجديد الفوري سيغادر النادي رسمياً ويوقع لنادٍ منافس مجاناً!\n\nبادر بتجديد عقده الآن من هذه الرسالة إذا كنت ترغب في بقائه ضمن التشكيلة.`
+      : `إشعار إداري وفني هام: يتبقى للاعب ${player.name} (${player.position} - تقييم ${player.overallRating} - العمر ${player.age}) موسم واحد فقط في عقده الحالي.\n\nالقيمة السوقية (لـ 3 مواسم): ${(player.marketValue || 0).toLocaleString()} ج.م | الراتب الحالي: ${(player.salary || 2500).toLocaleString()} ج.م شهرياً.\n\n⚠️ تنبيه مشدد: عند انتهاء هذا الموسم دون تجديد عقده، سيغادر اللاعب صفوف فريقك فوراً وينتقل إلى فريق آخر مجاناً. جدد عقده الآن أو اعرضه للبيع للاستفادة من قيمته المالية.`;
 
     alerts.push({
       id: `msg_contract_${player.id}_${Date.now()}_${Math.floor(Math.random() * 1000)}`,

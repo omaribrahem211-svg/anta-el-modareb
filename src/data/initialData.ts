@@ -441,13 +441,14 @@ export const INITIAL_USER_PLAYERS: Player[] = RAW_USER_PLAYERS.map(p => ({
   stats: sanitizePlayerStats(p.stats),
 }));
 
-export const INITIAL_TEAMS: Club[] = [
+const RAW_INITIAL_TEAMS: Club[] = [
   {
     id: 'team_user',
     name: 'نادي نجم ميت عقبة',
     shortName: 'ميت عقبة',
     city: 'الجيزة',
     country: 'مصر',
+    continent: 'AFRICA',
     countryId: 'EGY',
     countryCode: 'EGY',
     leagueId: 'egy_tier_4',
@@ -1036,6 +1037,11 @@ export const INITIAL_TEAMS: Club[] = [
     players: generateClubSquad('team_20', 'EGY', 'egy_tier_4', 21, 51),
   },
 ];
+
+export const INITIAL_TEAMS: Club[] = RAW_INITIAL_TEAMS.map(t => ({
+  ...t,
+  continent: 'AFRICA',
+}));
 
 const RAW_TRANSFER_MARKET: Player[] = [
   {

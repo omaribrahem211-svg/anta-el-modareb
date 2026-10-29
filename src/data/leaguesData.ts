@@ -53,6 +53,8 @@ export const EGYPT_TIER_4_LEAGUE: LeagueDefinition = {
   name: 'دوري الدرجة الرابعة المصري',
   shortName: 'الدرجة الرابعة',
   country: 'مصر',
+  continent: 'AFRICA',
+  region: 'africa',
   tier: 4,
   reputation: 15,
   promotionSpots: 2,
@@ -141,54 +143,54 @@ export const ARGENTINA_TIER_1_TEAMS = ARGENTINA_PRIMERA_CLUBS;
 // ----------------------------------------------------
 
 export const GLOBAL_LEAGUES: Record<string, LeagueDefinition> = {
-  // Egypt (4 tiers)
+  // Egypt (4 tiers) - AFRICA
   'egy_tier_4': EGYPT_TIER_4_LEAGUE,
-  'egy_tier_3': { id: 'egy_tier_3', name: 'دوري الدرجة الثالثة المصري', shortName: 'الدرجة الثالثة', country: 'مصر', tier: 3, reputation: 35, promotionSpots: 2, relegationSpots: 2, playoffSpots: 0, teams: EGYPT_TIER_3_TEAMS },
-  'egy_tier_2': { id: 'egy_tier_2', name: 'دوري المحترفين المصري (الدرجة الثانية)', shortName: 'المحترفين (ب)', country: 'مصر', tier: 2, reputation: 55, promotionSpots: 2, relegationSpots: 2, playoffSpots: 0, teams: EGYPT_TIER_2_TEAMS },
-  'egy_tier_1': { id: 'egy_tier_1', name: 'الدوري المصري الممتاز', shortName: 'الممتاز المصري', country: 'مصر', tier: 1, reputation: 80, promotionSpots: 0, relegationSpots: 2, playoffSpots: 0, teams: EGYPT_TIER_1_TEAMS },
+  'egy_tier_3': { id: 'egy_tier_3', name: 'دوري الدرجة الثالثة المصري', shortName: 'الدرجة الثالثة', country: 'مصر', continent: 'AFRICA', region: 'africa', tier: 3, reputation: 35, promotionSpots: 2, relegationSpots: 2, playoffSpots: 0, teams: EGYPT_TIER_3_TEAMS },
+  'egy_tier_2': { id: 'egy_tier_2', name: 'دوري المحترفين المصري (الدرجة الثانية)', shortName: 'المحترفين (ب)', country: 'مصر', continent: 'AFRICA', region: 'africa', tier: 2, reputation: 55, promotionSpots: 2, relegationSpots: 2, playoffSpots: 0, teams: EGYPT_TIER_2_TEAMS },
+  'egy_tier_1': { id: 'egy_tier_1', name: 'الدوري المصري الممتاز', shortName: 'الممتاز المصري', country: 'مصر', continent: 'AFRICA', region: 'africa', tier: 1, reputation: 80, promotionSpots: 0, relegationSpots: 2, playoffSpots: 0, teams: EGYPT_TIER_1_TEAMS },
 
-  // Saudi Arabia (4 tiers)
-  'sau_tier_1': { id: 'sau_tier_1', name: 'دوري روشن السعودي للمحترفين', shortName: 'دوري روشن', country: 'المملكة العربية السعودية', tier: 1, reputation: 88, promotionSpots: 0, relegationSpots: 2, playoffSpots: 0, teams: SAUDI_TIER_1_TEAMS },
-  'sau_tier_2': { id: 'sau_tier_2', name: 'دوري يلو السعودي للدرجة الأولى', shortName: 'دوري يلو', country: 'المملكة العربية السعودية', tier: 2, reputation: 65, promotionSpots: 2, relegationSpots: 2, playoffSpots: 0, teams: SAUDI_TIER_2_TEAMS },
-  'sau_tier_3': { id: 'sau_tier_3', name: 'دوري الدرجة الثانية السعودي', shortName: 'الدرجة الثانية', country: 'المملكة العربية السعودية', tier: 3, reputation: 50, promotionSpots: 2, relegationSpots: 2, playoffSpots: 0, teams: SAUDI_TIER_3_TEAMS },
-  'sau_tier_4': { id: 'sau_tier_4', name: 'دوري الدرجة الثالثة السعودي', shortName: 'الدرجة الثالثة', country: 'المملكة العربية السعودية', tier: 4, reputation: 38, promotionSpots: 2, relegationSpots: 0, playoffSpots: 0, teams: SAUDI_TIER_4_TEAMS },
+  // Saudi Arabia (4 tiers) - ASIA
+  'sau_tier_1': { id: 'sau_tier_1', name: 'دوري روشن السعودي للمحترفين', shortName: 'دوري روشن', country: 'المملكة العربية السعودية', continent: 'ASIA', region: 'asia', tier: 1, reputation: 88, promotionSpots: 0, relegationSpots: 2, playoffSpots: 0, teams: SAUDI_TIER_1_TEAMS },
+  'sau_tier_2': { id: 'sau_tier_2', name: 'دوري يلو السعودي للدرجة الأولى', shortName: 'دوري يلو', country: 'المملكة العربية السعودية', continent: 'ASIA', region: 'asia', tier: 2, reputation: 65, promotionSpots: 2, relegationSpots: 2, playoffSpots: 0, teams: SAUDI_TIER_2_TEAMS },
+  'sau_tier_3': { id: 'sau_tier_3', name: 'دوري الدرجة الثانية السعودي', shortName: 'الدرجة الثانية', country: 'المملكة العربية السعودية', continent: 'ASIA', region: 'asia', tier: 3, reputation: 50, promotionSpots: 2, relegationSpots: 2, playoffSpots: 0, teams: SAUDI_TIER_3_TEAMS },
+  'sau_tier_4': { id: 'sau_tier_4', name: 'دوري الدرجة الثالثة السعودي', shortName: 'الدرجة الثالثة', country: 'المملكة العربية السعودية', continent: 'ASIA', region: 'asia', tier: 4, reputation: 38, promotionSpots: 2, relegationSpots: 0, playoffSpots: 0, teams: SAUDI_TIER_4_TEAMS },
 
-  // UAE & Qatar
-  'uae_tier_1': { id: 'uae_tier_1', name: 'دوري أدنوك للمحترفين الإماراتي', shortName: 'دوري أدنوك', country: 'الإمارات العربية المتحدة', tier: 1, reputation: 82, promotionSpots: 0, relegationSpots: 1, playoffSpots: 0, teams: UAE_TIER_1_TEAMS },
-  'qat_tier_1': { id: 'qat_tier_1', name: 'دوري نجوم قطر (إكسبو)', shortName: 'دوري نجوم قطر', country: 'قطر', tier: 1, reputation: 83, promotionSpots: 0, relegationSpots: 1, playoffSpots: 0, teams: QATAR_TIER_1_TEAMS },
+  // UAE & Qatar - ASIA
+  'uae_tier_1': { id: 'uae_tier_1', name: 'دوري أدنوك للمحترفين الإماراتي', shortName: 'دوري أدنوك', country: 'الإمارات العربية المتحدة', continent: 'ASIA', region: 'asia', tier: 1, reputation: 82, promotionSpots: 0, relegationSpots: 1, playoffSpots: 0, teams: UAE_TIER_1_TEAMS },
+  'qat_tier_1': { id: 'qat_tier_1', name: 'دوري نجوم قطر (إكسبو)', shortName: 'دوري نجوم قطر', country: 'قطر', continent: 'ASIA', region: 'asia', tier: 1, reputation: 83, promotionSpots: 0, relegationSpots: 1, playoffSpots: 0, teams: QATAR_TIER_1_TEAMS },
 
-  // North Africa
-  'mar_tier_1': { id: 'mar_tier_1', name: 'البطولة الوطنية المغربية الاحترافية (إنوي)', shortName: 'البطولة المغربية', country: 'المغرب', tier: 1, reputation: 84, promotionSpots: 0, relegationSpots: 1, playoffSpots: 0, teams: MOROCCO_TIER_1_TEAMS },
-  'tun_tier_1': { id: 'tun_tier_1', name: 'الرابطة المحترفة التونسية الأولى لكرة القدم', shortName: 'الرابطة الأولى', country: 'تونس', tier: 1, reputation: 81, promotionSpots: 0, relegationSpots: 1, playoffSpots: 0, teams: TUNISIA_TIER_1_TEAMS },
-  'alg_tier_1': { id: 'alg_tier_1', name: 'الرابطة الجزائرية المحترفة الأولى موبيليس', shortName: 'الرابطة الجزائرية', country: 'الجزائر', tier: 1, reputation: 82, promotionSpots: 0, relegationSpots: 1, playoffSpots: 0, teams: ALGERIA_TIER_1_TEAMS },
+  // North Africa - AFRICA
+  'mar_tier_1': { id: 'mar_tier_1', name: 'البطولة الوطنية المغربية الاحترافية (إنوي)', shortName: 'البطولة المغربية', country: 'المغرب', continent: 'AFRICA', region: 'africa', tier: 1, reputation: 84, promotionSpots: 0, relegationSpots: 1, playoffSpots: 0, teams: MOROCCO_TIER_1_TEAMS },
+  'tun_tier_1': { id: 'tun_tier_1', name: 'الرابطة المحترفة التونسية الأولى لكرة القدم', shortName: 'الرابطة الأولى', country: 'تونس', continent: 'AFRICA', region: 'africa', tier: 1, reputation: 81, promotionSpots: 0, relegationSpots: 1, playoffSpots: 0, teams: TUNISIA_TIER_1_TEAMS },
+  'alg_tier_1': { id: 'alg_tier_1', name: 'الرابطة الجزائرية المحترفة الأولى موبيليس', shortName: 'الرابطة الجزائرية', country: 'الجزائر', continent: 'AFRICA', region: 'africa', tier: 1, reputation: 82, promotionSpots: 0, relegationSpots: 1, playoffSpots: 0, teams: ALGERIA_TIER_1_TEAMS },
 
-  // England (4 tiers)
-  'eng_tier_1': { id: 'eng_tier_1', name: 'الدوري الإنجليزي الممتاز (البريميرليغ)', shortName: 'البريميرليغ', country: 'إنجلترا', tier: 1, reputation: 97, promotionSpots: 0, relegationSpots: 2, playoffSpots: 0, teams: ENGLAND_TIER_1_TEAMS },
-  'eng_tier_2': { id: 'eng_tier_2', name: 'دوري البطولة الإنجليزية (التشامبيونشيب)', shortName: 'التشامبيونشيب', country: 'إنجلترا', tier: 2, reputation: 78, promotionSpots: 2, relegationSpots: 2, playoffSpots: 0, teams: ENGLAND_TIER_2_TEAMS },
-  'eng_tier_3': { id: 'eng_tier_3', name: 'دوري الدرجة الأولى الإنجليزي (ليغ ون)', shortName: 'ليغ ون', country: 'إنجلترا', tier: 3, reputation: 65, promotionSpots: 2, relegationSpots: 2, playoffSpots: 0, teams: ENGLAND_TIER_3_TEAMS },
-  'eng_tier_4': { id: 'eng_tier_4', name: 'دوري الدرجة الثانية الإنجليزي (ليغ تو)', shortName: 'ليغ تو', country: 'إنجلترا', tier: 4, reputation: 52, promotionSpots: 2, relegationSpots: 0, playoffSpots: 0, teams: ENGLAND_TIER_4_TEAMS },
+  // England (4 tiers) - EUROPE
+  'eng_tier_1': { id: 'eng_tier_1', name: 'الدوري الإنجليزي الممتاز (البريميرليغ)', shortName: 'البريميرليغ', country: 'إنجلترا', continent: 'EUROPE', region: 'europe', tier: 1, reputation: 97, promotionSpots: 0, relegationSpots: 2, playoffSpots: 0, teams: ENGLAND_TIER_1_TEAMS },
+  'eng_tier_2': { id: 'eng_tier_2', name: 'دوري البطولة الإنجليزية (التشامبيونشيب)', shortName: 'التشامبيونشيب', country: 'إنجلترا', continent: 'EUROPE', region: 'europe', tier: 2, reputation: 78, promotionSpots: 2, relegationSpots: 2, playoffSpots: 0, teams: ENGLAND_TIER_2_TEAMS },
+  'eng_tier_3': { id: 'eng_tier_3', name: 'دوري الدرجة الأولى الإنجليزي (ليغ ون)', shortName: 'ليغ ون', country: 'إنجلترا', continent: 'EUROPE', region: 'europe', tier: 3, reputation: 65, promotionSpots: 2, relegationSpots: 2, playoffSpots: 0, teams: ENGLAND_TIER_3_TEAMS },
+  'eng_tier_4': { id: 'eng_tier_4', name: 'دوري الدرجة الثانية الإنجليزي (ليغ تو)', shortName: 'ليغ تو', country: 'إنجلترا', continent: 'EUROPE', region: 'europe', tier: 4, reputation: 52, promotionSpots: 2, relegationSpots: 0, playoffSpots: 0, teams: ENGLAND_TIER_4_TEAMS },
 
-  // Spain (4 tiers)
-  'esp_tier_1': { id: 'esp_tier_1', name: 'الدوري الإسباني الدرجة الأولى (لا ليغا)', shortName: 'لا ليغا', country: 'إسبانيا', tier: 1, reputation: 95, promotionSpots: 0, relegationSpots: 2, playoffSpots: 0, teams: SPAIN_TIER_1_TEAMS },
-  'esp_tier_2': { id: 'esp_tier_2', name: 'الدوري الإسباني الدرجة الثانية (لا ليغا هايبرموشن)', shortName: 'لا ليغا 2', country: 'إسبانيا', tier: 2, reputation: 75, promotionSpots: 2, relegationSpots: 2, playoffSpots: 0, teams: SPAIN_TIER_2_TEAMS },
-  'esp_tier_3': { id: 'esp_tier_3', name: 'الدوري الإسباني الدرجة الثالثة (بريميرا فيديراليون)', shortName: 'بريميرا فيديراليون', country: 'إسبانيا', tier: 3, reputation: 64, promotionSpots: 2, relegationSpots: 2, playoffSpots: 0, teams: SPAIN_TIER_3_TEAMS },
-  'esp_tier_4': { id: 'esp_tier_4', name: 'الدوري الإسباني الدرجة الرابعة (سيغوندا فيديراليون)', shortName: 'سيغوندا فيديراليون', country: 'إسبانيا', tier: 4, reputation: 50, promotionSpots: 2, relegationSpots: 0, playoffSpots: 0, teams: SPAIN_TIER_4_TEAMS },
+  // Spain (4 tiers) - EUROPE
+  'esp_tier_1': { id: 'esp_tier_1', name: 'الدوري الإسباني الدرجة الأولى (لا ليغا)', shortName: 'لا ليغا', country: 'إسبانيا', continent: 'EUROPE', region: 'europe', tier: 1, reputation: 95, promotionSpots: 0, relegationSpots: 2, playoffSpots: 0, teams: SPAIN_TIER_1_TEAMS },
+  'esp_tier_2': { id: 'esp_tier_2', name: 'الدوري الإسباني الدرجة الثانية (لا ليغا هايبرموشن)', shortName: 'لا ليغا 2', country: 'إسبانيا', continent: 'EUROPE', region: 'europe', tier: 2, reputation: 75, promotionSpots: 2, relegationSpots: 2, playoffSpots: 0, teams: SPAIN_TIER_2_TEAMS },
+  'esp_tier_3': { id: 'esp_tier_3', name: 'الدوري الإسباني الدرجة الثالثة (بريميرا فيديراليون)', shortName: 'بريميرا فيديراليون', country: 'إسبانيا', continent: 'EUROPE', region: 'europe', tier: 3, reputation: 64, promotionSpots: 2, relegationSpots: 2, playoffSpots: 0, teams: SPAIN_TIER_3_TEAMS },
+  'esp_tier_4': { id: 'esp_tier_4', name: 'الدوري الإسباني الدرجة الرابعة (سيغوندا فيديراليون)', shortName: 'سيغوندا فيديراليون', country: 'إسبانيا', continent: 'EUROPE', region: 'europe', tier: 4, reputation: 50, promotionSpots: 2, relegationSpots: 0, playoffSpots: 0, teams: SPAIN_TIER_4_TEAMS },
 
-  // Germany (2 tiers)
-  'ger_tier_1': { id: 'ger_tier_1', name: 'الدوري الألماني الدرجة الأولى (البوندسليغا)', shortName: 'البوندسليغا', country: 'ألمانيا', tier: 1, reputation: 93, promotionSpots: 0, relegationSpots: 2, playoffSpots: 0, teams: GERMANY_TIER_1_TEAMS },
-  'ger_tier_2': { id: 'ger_tier_2', name: 'الدوري الألماني الدرجة الثانية (بوندسليغا 2)', shortName: 'بوندسليغا 2', country: 'ألمانيا', tier: 2, reputation: 78, promotionSpots: 2, relegationSpots: 0, playoffSpots: 0, teams: GERMANY_TIER_2_TEAMS },
+  // Germany (2 tiers) - EUROPE
+  'ger_tier_1': { id: 'ger_tier_1', name: 'الدوري الألماني الدرجة الأولى (البوندسليغا)', shortName: 'البوندسليغا', country: 'ألمانيا', continent: 'EUROPE', region: 'europe', tier: 1, reputation: 93, promotionSpots: 0, relegationSpots: 2, playoffSpots: 0, teams: GERMANY_TIER_1_TEAMS },
+  'ger_tier_2': { id: 'ger_tier_2', name: 'الدوري الألماني الدرجة الثانية (بوندسليغا 2)', shortName: 'بوندسليغا 2', country: 'ألمانيا', continent: 'EUROPE', region: 'europe', tier: 2, reputation: 78, promotionSpots: 2, relegationSpots: 0, playoffSpots: 0, teams: GERMANY_TIER_2_TEAMS },
 
-  // Italy (2 tiers)
-  'ita_tier_1': { id: 'ita_tier_1', name: 'الدوري الإيطالي الدرجة الأولى (سيريا أ)', shortName: 'سيريا أ', country: 'إيطاليا', tier: 1, reputation: 92, promotionSpots: 0, relegationSpots: 2, playoffSpots: 0, teams: ITALY_TIER_1_TEAMS },
-  'ita_tier_2': { id: 'ita_tier_2', name: 'الدوري الإيطالي الدرجة الثانية (سيريا ب)', shortName: 'سيريا ب', country: 'إيطاليا', tier: 2, reputation: 77, promotionSpots: 2, relegationSpots: 0, playoffSpots: 0, teams: ITALY_TIER_2_TEAMS },
+  // Italy (2 tiers) - EUROPE
+  'ita_tier_1': { id: 'ita_tier_1', name: 'الدوري الإيطالي الدرجة الأولى (سيريا أ)', shortName: 'سيريا أ', country: 'إيطاليا', continent: 'EUROPE', region: 'europe', tier: 1, reputation: 92, promotionSpots: 0, relegationSpots: 2, playoffSpots: 0, teams: ITALY_TIER_1_TEAMS },
+  'ita_tier_2': { id: 'ita_tier_2', name: 'الدوري الإيطالي الدرجة الثانية (سيريا ب)', shortName: 'سيريا ب', country: 'إيطاليا', continent: 'EUROPE', region: 'europe', tier: 2, reputation: 77, promotionSpots: 2, relegationSpots: 0, playoffSpots: 0, teams: ITALY_TIER_2_TEAMS },
 
-  // France (2 tiers)
-  'fra_tier_1': { id: 'fra_tier_1', name: 'الدوري الفرنسي الدرجة الأولى (ليغ 1 ماكدونالدز)', shortName: 'ليغ 1', country: 'فرنسا', tier: 1, reputation: 89, promotionSpots: 0, relegationSpots: 2, playoffSpots: 0, teams: FRANCE_TIER_1_TEAMS },
-  'fra_tier_2': { id: 'fra_tier_2', name: 'الدوري الفرنسي الدرجة الثانية (ليغ 2)', shortName: 'ليغ 2', country: 'فرنسا', tier: 2, reputation: 75, promotionSpots: 2, relegationSpots: 0, playoffSpots: 0, teams: FRANCE_TIER_2_TEAMS },
+  // France (2 tiers) - EUROPE
+  'fra_tier_1': { id: 'fra_tier_1', name: 'الدوري الفرنسي الدرجة الأولى (ليغ 1 ماكدونالدز)', shortName: 'ليغ 1', country: 'فرنسا', continent: 'EUROPE', region: 'europe', tier: 1, reputation: 89, promotionSpots: 0, relegationSpots: 2, playoffSpots: 0, teams: FRANCE_TIER_1_TEAMS },
+  'fra_tier_2': { id: 'fra_tier_2', name: 'الدوري الفرنسي الدرجة الثانية (ليغ 2)', shortName: 'ليغ 2', country: 'فرنسا', continent: 'EUROPE', region: 'europe', tier: 2, reputation: 75, promotionSpots: 2, relegationSpots: 0, playoffSpots: 0, teams: FRANCE_TIER_2_TEAMS },
 
-  // South America
-  'bra_tier_1': { id: 'bra_tier_1', name: 'الدوري البرازيلي الدرجة الأولى (البرازيليرو)', shortName: 'البرازيليرو', country: 'البرازيل', tier: 1, reputation: 85, promotionSpots: 0, relegationSpots: 1, playoffSpots: 0, teams: BRAZIL_TIER_1_TEAMS },
-  'arg_tier_1': { id: 'arg_tier_1', name: 'الدوري الأرجنتيني الممتاز (بريميرا ديفيزيون)', shortName: 'الدوري الأرجنتيني', country: 'الأرجنتين', tier: 1, reputation: 84, promotionSpots: 0, relegationSpots: 1, playoffSpots: 0, teams: ARGENTINA_TIER_1_TEAMS },
+  // South America - SOUTH_AMERICA
+  'bra_tier_1': { id: 'bra_tier_1', name: 'الدوري البرازيلي الدرجة الأولى (البرازيليرو)', shortName: 'البرازيليرو', country: 'البرازيل', continent: 'SOUTH_AMERICA', region: 'south_america', tier: 1, reputation: 85, promotionSpots: 0, relegationSpots: 1, playoffSpots: 0, teams: BRAZIL_TIER_1_TEAMS },
+  'arg_tier_1': { id: 'arg_tier_1', name: 'الدوري الأرجنتيني الممتاز (بريميرا ديفيزيون)', shortName: 'الدوري الأرجنتيني', country: 'الأرجنتين', continent: 'SOUTH_AMERICA', region: 'south_america', tier: 1, reputation: 84, promotionSpots: 0, relegationSpots: 1, playoffSpots: 0, teams: ARGENTINA_TIER_1_TEAMS },
 };
 
 export const LEAGUES_STORAGE_KEY = 'antaelmodareb_persistent_leagues_v1';
@@ -243,6 +245,7 @@ function pruneClubForStorage(c: any) {
     city: c.city,
     country: c.country,
     countryCode: c.countryCode,
+    continent: c.continent,
     division: c.division,
     leagueId: c.leagueId,
     reputation: c.reputation,
@@ -266,6 +269,8 @@ function pruneLeagueForStorage(l: any) {
     name: l.name,
     shortName: l.shortName,
     country: l.country,
+    continent: l.continent,
+    region: l.region,
     tier: l.tier,
     reputation: l.reputation,
     promotionSpots: l.promotionSpots,
@@ -294,7 +299,21 @@ export function getCustomLeagues(): Record<string, LeagueDefinition> {
       const merged: Record<string, LeagueDefinition> = { ...GLOBAL_LEAGUES };
       for (const [id, customLeague] of Object.entries(parsed)) {
         if (customLeague && typeof customLeague === 'object') {
-          merged[id] = customLeague as LeagueDefinition;
+          const baseLg = GLOBAL_LEAGUES[id];
+          const typedLg = customLeague as LeagueDefinition;
+          const resolvedContinent = typedLg.continent || baseLg?.continent || 'AFRICA';
+          const resolvedRegion = typedLg.region || baseLg?.region || 'africa';
+          merged[id] = {
+            ...typedLg,
+            continent: resolvedContinent,
+            region: resolvedRegion,
+            teams: Array.isArray(typedLg.teams)
+              ? typedLg.teams.map(t => ({
+                  ...t,
+                  continent: t.continent || resolvedContinent,
+                }))
+              : baseLg?.teams || [],
+          };
           modifiedLeagueIds.add(id);
         }
       }

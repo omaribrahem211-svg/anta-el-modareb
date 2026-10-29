@@ -5,7 +5,9 @@ export type Position = 'GK' | 'CB' | 'RB' | 'LB' | 'CDM' | 'CM' | 'CAM' | 'RW' |
 
 export type PositionCategory = 'GK' | 'DEF' | 'MID' | 'FWD';
 
-export type Continent = 'Africa' | 'Europe' | 'South America' | 'Asia' | 'North America';
+export type ContinentCode = 'AFRICA' | 'ASIA' | 'EUROPE' | 'SOUTH_AMERICA' | 'NORTH_AMERICA';
+
+export type Continent = ContinentCode | 'Africa' | 'Europe' | 'South America' | 'Asia' | 'North America';
 
 export type PreferredFoot = 'right' | 'left' | 'both';
 
@@ -131,6 +133,8 @@ export interface Player {
   unhappyMatchesCount?: number;
   disgruntled?: boolean;
   injuryWeeks?: number;
+  injuryMatches?: number;
+  lastContractDecrementedSeason?: number;
   transferRequestSubmitted?: boolean;
   isGuestStar?: boolean; // هل اللاعب معار لمباراة واحدة فقط مقابل إعلان
   guestMatchesRemaining?: number; // عدد المباريات المتبقية (عادة 1)
@@ -377,7 +381,7 @@ export interface Club {
   country?: string;
   countryId?: string;
   countryCode?: string;
-  continent?: Continent | 'africa' | 'europe' | 'asia' | 'south_america';
+  continent?: ContinentCode | Continent | 'africa' | 'europe' | 'asia' | 'south_america' | 'north_america';
   division: number; // 1 = Premier, 2 = Second, 3 = Third, 4 = Fourth
   leagueId?: string;
   reputation: number; // 1 - 100
@@ -495,7 +499,7 @@ export interface Fixture {
   matchRevenue?: any;
   date?: string; // "YYYY-MM-DD"
   timestamp?: number; // ms timestamp
-  tournamentId?: 'league' | 'cup' | 'ccl' | 'ccc' | 'ucl' | 'uel' | 'acl' | 'caf_cl';
+  tournamentId?: 'league' | 'cup' | 'ccl' | 'ccc' | 'ucl' | 'uel' | 'acl' | 'acl2' | 'caf_cl';
   tournamentBadge?: string;
 }
 
@@ -610,7 +614,8 @@ export interface LeagueDefinition {
   name: string;
   shortName: string;
   country: string;
-  region?: 'africa' | 'europe' | 'asia' | 'south_america';
+  continent?: ContinentCode;
+  region?: 'africa' | 'europe' | 'asia' | 'south_america' | 'north_america';
   tier: number; // 1 = Premier, 2 = Second, 3 = Third, 4 = Fourth
   divisionTier?: number; // alias for tier
   reputation: number; // 1 - 100
@@ -775,9 +780,10 @@ export interface ContinentalMatch {
 
 export interface ContinentalTournament {
   id: string;
-  competitionId: 'ccl' | 'ccc' | 'ucl' | 'uel' | 'acl';
+  competitionId: 'ccl' | 'ccc' | 'ucl' | 'uel' | 'acl' | 'acl2';
   name: string;
   region: 'africa' | 'europe' | 'asia' | 'south_america';
+  targetContinent?: ContinentCode;
   seasonNumber: number;
   trophyName: string;
   prizeMoneyWinner: number;
