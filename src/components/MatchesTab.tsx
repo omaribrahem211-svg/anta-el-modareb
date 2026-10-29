@@ -178,9 +178,12 @@ export const MatchesTab: React.FC = () => {
     }
   }, [liveMatch?.fixture?.id, liveMatch?.currentMinute]);
 
-  const celebratedMatchIdRef = useRef<string | null>(null);
+  // Initialize with any finished match already existing on initial mount so restored matches never trigger celebration
+  const celebratedMatchIdRef = useRef<string | null>(
+    liveMatch && liveMatch.isFinished && liveMatch.fixture?.id ? liveMatch.fixture.id : null
+  );
 
-  // Trigger celebration on match win (championship / cup final / key match)
+  // Trigger celebration on match win (championship only for cup final, cup_win for other cup matches)
   useEffect(() => {
     if (liveMatch && liveMatch.isFinished && liveMatch.fixture?.id) {
       if (celebratedMatchIdRef.current !== liveMatch.fixture.id) {
@@ -194,15 +197,26 @@ export const MatchesTab: React.FC = () => {
         const won = hasPenalties ? (userPenalties! > oppPenalties!) : userGoals > oppGoals;
 
         if (won) {
-          const isCupFinal =
-            liveMatch.fixture.cupStage === 'final' ||
-            liveMatch.fixture.stage === 'final' ||
-            liveMatch.fixture.round === totalRounds;
-          fireLightweightCelebration(isCupFinal ? 'championship' : 'cup_win');
+          const isCupMatch = Boolean(
+            liveMatch.fixture.competitionType === 'cup' ||
+            liveMatch.fixture.competitionType === 'DOMESTIC_COP' ||
+            liveMatch.fixture.competitionType === 'DOMESTIC_CUP' ||
+            liveMatch.fixture.tournamentId === 'cup' ||
+            liveMatch.fixture.cupStage ||
+            liveMatch.fixture.competitionType === 'continental' ||
+            liveMatch.fixture.competitionType === 'CONTINENTAL_CUP'
+          );
+
+          if (isCupMatch) {
+            const isCupFinal =
+              liveMatch.fixture.cupStage === 'final' ||
+              liveMatch.fixture.stage === 'final';
+            fireLightweightCelebration(isCupFinal ? 'championship' : 'cup_win');
+          }
         }
       }
     }
-  }, [liveMatch?.isFinished, liveMatch?.fixture?.id, userClub?.id, totalRounds]);
+  }, [liveMatch?.isFinished, liveMatch?.fixture?.id, userClub?.id]);
 
   // Compute live smart tactical advisory alert
   const activeTacticalAlert = useMemo(() => {

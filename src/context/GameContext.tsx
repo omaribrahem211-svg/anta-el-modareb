@@ -296,7 +296,7 @@ interface GameContextType {
   fireClubStaff: (role: StaffRole) => void;
 
   // Transfers & Contracts
-  buyPlayer: (player: Player) => { success: boolean; message: string };
+  buyPlayer: (player: Player, customFee?: number) => { success: boolean; message: string };
   negotiatePlayerTransfer: (proposal: TransferNegotiationProposal) => { success: boolean; result: NegotiationResult };
   startPlayerNegotiation: (proposal: {
     playerId: string;
@@ -922,11 +922,53 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
   }, [activeLeague?.id, activeLeague?.country, season?.seasonNumber, season?.currentRound]);
 
-  const cupRepairGuardRef = useRef<{ signature: string; count: number }>({ signature: '', count: 0 });
+  const cupRepairGuardRef = useRef<{
+    signature: string;
+    cupId: string;
+    seasonNum: number;
+    playedMatchesCount: number;
+    consecutiveRepairsCount: number;
+    warned: boolean;
+  }>({
+    signature: '',
+    cupId: '',
+    seasonNum: 0,
+    playedMatchesCount: -1,
+    consecutiveRepairsCount: 0,
+    warned: false,
+  });
 
   // Self-heal and guarantee cup progression integrity (ensure user advances to next stage upon winning)
   useEffect(() => {
     if (!cupTournament || !Array.isArray(cupTournament.matches) || cupTournament.matches.length === 0 || !userClub?.id) return;
+
+    const currentSeasonNum = season?.seasonNumber || cupTournament.seasonNumber || 1;
+    const currentPlayedCupMatchesCount = cupTournament.matches.filter(m => m.isPlayed).length;
+    const currentCupId = cupTournament.id || 'default_cup';
+
+    // Reset consecutive repair counter if finished cup matches count or season number (or cup id) changed
+    if (
+      cupRepairGuardRef.current.cupId !== currentCupId ||
+      cupRepairGuardRef.current.seasonNum !== currentSeasonNum ||
+      cupRepairGuardRef.current.playedMatchesCount !== currentPlayedCupMatchesCount
+    ) {
+      cupRepairGuardRef.current.cupId = currentCupId;
+      cupRepairGuardRef.current.seasonNum = currentSeasonNum;
+      cupRepairGuardRef.current.playedMatchesCount = currentPlayedCupMatchesCount;
+      cupRepairGuardRef.current.consecutiveRepairsCount = 0;
+      cupRepairGuardRef.current.warned = false;
+    }
+
+    // Stop repair if 5 consecutive repairs reached for this cup & season
+    if (cupRepairGuardRef.current.consecutiveRepairsCount >= 5) {
+      if (!cupRepairGuardRef.current.warned) {
+        cupRepairGuardRef.current.warned = true;
+        console.warn(
+          `[GameContext] Max consecutive cup repair limit (5) reached for cup ${currentCupId} season ${currentSeasonNum}. Halting repair.`
+        );
+      }
+      return;
+    }
 
     // Calculate cup fixtures count
     const cupFixturesCount = (fixtures || []).filter(
@@ -937,31 +979,28 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         f.tournamentId === 'cup'
     ).length;
 
-    // Signature: cupTournament.matches ids + isPlayed + winnerTeamId + cup fixtures count
+    // Comprehensive Signature: matches ids + homeTeamId + awayTeamId + isPlayed + homeScore + awayScore + winnerTeamId + cup fixtures count
     const matchesSignature = cupTournament.matches
-      .map(m => `${m.id}:${m.isPlayed ? 1 : 0}:${m.winnerTeamId || ''}`)
+      .map(
+        m =>
+          `${m.id}:${m.homeTeamId}:${m.awayTeamId}:${m.isPlayed ? 1 : 0}:${m.homeScore ?? ''}:${m.awayScore ?? ''}:${m.winnerTeamId || ''}`
+      )
       .join('|');
     const signature = `${matchesSignature}__#cupFix:${cupFixturesCount}`;
 
-    // If signature is identical to the last repaired signature, do not set state
+    // If signature is identical to the last repaired signature, do not set state again
     if (cupRepairGuardRef.current.signature === signature) {
-      cupRepairGuardRef.current.count += 1;
-      if (cupRepairGuardRef.current.count >= 5) {
-        console.warn('[GameContext] Max cup repair attempts (5) reached for signature, halting repair loop:', signature);
-      }
       return;
     }
 
     const rep = repairCupProgressionIntegrity(cupTournament, fixtures, userClub.id);
     if (rep.repaired) {
-      cupRepairGuardRef.current = {
-        signature,
-        count: 1,
-      };
+      cupRepairGuardRef.current.signature = signature;
+      cupRepairGuardRef.current.consecutiveRepairsCount += 1;
 
       setCupTournament(rep.updatedCup);
 
-      // Compare fixtures ids and isPlayed / homeTeamId / awayTeamId
+      // Compare fixtures ids, isPlayed, homeTeamId, awayTeamId, winnerTeamId, homeScore, awayScore, penalties
       const fixturesActuallyChanged = (prev: Fixture[], next: Fixture[]): boolean => {
         if (prev.length !== next.length) return true;
         for (let i = 0; i < prev.length; i++) {
@@ -971,7 +1010,12 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             p.id !== n.id ||
             p.isPlayed !== n.isPlayed ||
             p.homeTeamId !== n.homeTeamId ||
-            p.awayTeamId !== n.awayTeamId
+            p.awayTeamId !== n.awayTeamId ||
+            p.winnerTeamId !== n.winnerTeamId ||
+            p.homeScore !== n.homeScore ||
+            p.awayScore !== n.awayScore ||
+            p.homePenalties !== n.homePenalties ||
+            p.awayPenalties !== n.awayPenalties
           ) {
             return true;
           }
@@ -1429,11 +1473,17 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   }, []);
 
   const hasWarnedStorageQuotaThisSessionRef = useRef<boolean>(false);
+  const lastSavedMinuteRef = useRef<number>(-1);
+  const liveMatchRef = useRef<LiveMatchState | null>(liveMatch);
 
   useEffect(() => {
+    liveMatchRef.current = liveMatch;
+  }, [liveMatch]);
+
+  const saveLiveMatchToStorage = useCallback((matchToSave: LiveMatchState | null) => {
     try {
-      if (liveMatch) {
-        localStorage.setItem(`${STORAGE_KEY}_active_live_match`, JSON.stringify(liveMatch));
+      if (matchToSave) {
+        localStorage.setItem(`${STORAGE_KEY}_active_live_match`, JSON.stringify(matchToSave));
       } else {
         localStorage.removeItem(`${STORAGE_KEY}_active_live_match`);
       }
@@ -1455,7 +1505,44 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         }
       }
     }
-  }, [liveMatch]);
+  }, []);
+
+  // Save liveMatch only when paused, at minutes 45 and 90, every 10 match minutes, or when match is discarded
+  useEffect(() => {
+    if (!liveMatch) {
+      lastSavedMinuteRef.current = -1;
+      saveLiveMatchToStorage(null);
+      return;
+    }
+
+    const min = liveMatch.currentMinute;
+    const shouldSaveMinute = min === 45 || min === 90 || (min > 0 && min % 10 === 0);
+    const isMinuteTrigger = shouldSaveMinute && lastSavedMinuteRef.current !== min;
+    const isPausedTrigger = !liveMatch.isPlaying;
+
+    if (isPausedTrigger || isMinuteTrigger) {
+      lastSavedMinuteRef.current = min;
+      saveLiveMatchToStorage(liveMatch);
+    }
+  }, [liveMatch, saveLiveMatchToStorage]);
+
+  // Save liveMatch when app is closed, backgrounded or page unloaded
+  useEffect(() => {
+    const handleAppUnloadOrHide = () => {
+      if (liveMatchRef.current) {
+        saveLiveMatchToStorage(liveMatchRef.current);
+      }
+    };
+
+    if (typeof window !== 'undefined') {
+      window.addEventListener('visibilitychange', handleAppUnloadOrHide);
+      window.addEventListener('pagehide', handleAppUnloadOrHide);
+      return () => {
+        window.removeEventListener('visibilitychange', handleAppUnloadOrHide);
+        window.removeEventListener('pagehide', handleAppUnloadOrHide);
+      };
+    }
+  }, [saveLiveMatchToStorage]);
 
   // 7. Transfer History & Club Economy Summary
   const [transferHistory, setTransferHistory] = useState<TransferHistoryEntry[]>(() => {
@@ -5827,7 +5914,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   // TRANSFERS & CONTRACT MANAGEMENT
   // ----------------------------------------------------
 
-  const buyPlayer = (player: Player): { success: boolean; message: string } => {
+  const buyPlayer = (player: Player, customFee?: number): { success: boolean; message: string } => {
     if (!userClub) {
       return { success: false, message: 'يجب أن تتولى تدريب نادٍ أولاً لإجراء التعاقدات!' };
     }
@@ -5842,7 +5929,10 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       }
 
       const { fairMarketValue, recommendedMonthlyWage } = calculatePlayerFairValue(player, userClub);
-      const transferFee = Math.max(25000, Number(player.marketValue) || fairMarketValue || 50000);
+      const transferFee =
+        customFee !== undefined && customFee > 0
+          ? customFee
+          : Math.max(25000, Number(player.marketValue) || fairMarketValue || 50000);
       const salary = Math.max(2500, Number(player.salary) || recommendedMonthlyWage || 2500);
 
       const transferResult = executeAtomicTransfer({

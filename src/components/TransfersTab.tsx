@@ -553,10 +553,11 @@ export const TransfersTab: React.FC<TransfersTabProps> = ({
     rejectSellNegotiation,
     acceptIncomingBid,
     rejectIncomingBid,
+    incomingBids,
     calendarDate,
   } = useGame();
 
-  const currentDate = calendarDate?.currentDate || calendarDate?.formattedArabic || '2026-08-01';
+  const currentDate = calendarDate?.rawDateStr || '2026-08-01';
 
   const [activeTabMode, setActiveTabMode] = useState<'buy' | 'rumors' | 'negotiations' | 'sell'>('buy');
   const [scoutingPreset, setScoutingPreset] = useState<ScoutingPreset>('all');
@@ -977,10 +978,15 @@ export const TransfersTab: React.FC<TransfersTabProps> = ({
   }, []);
 
   const handleBuy = useCallback(
-    (player: Player) => {
+    (player: Player, customAskingPrice?: number) => {
       try {
         if (!player) return;
-        const result = onBuyPlayer ? onBuyPlayer(player) : buyPlayer(player);
+        const item = dbItemByIdMap.get(player.id);
+        const fee =
+          customAskingPrice !== undefined && customAskingPrice > 0
+            ? customAskingPrice
+            : item?.askingPrice;
+        const result = onBuyPlayer ? onBuyPlayer(player) : buyPlayer(player, fee);
         const msg = (result as any)?.message || 'تمت صفقة الشراء بنجاح!';
         const succ = (result as any)?.success !== false;
         setNotification({ text: msg, type: succ ? 'success' : 'error' });
@@ -991,7 +997,7 @@ export const TransfersTab: React.FC<TransfersTabProps> = ({
         setTimeout(() => setNotification(null), 3500);
       }
     },
-    [onBuyPlayer, buyPlayer]
+    [dbItemByIdMap, onBuyPlayer, buyPlayer]
   );
 
   const handleStartNegotiation = useCallback(
@@ -1017,7 +1023,7 @@ export const TransfersTab: React.FC<TransfersTabProps> = ({
     (neg: ActiveNegotiation) => {
       if (!neg) return;
       const foundItem = dbItemByIdMap.get(neg.playerId);
-      const fallbackPlayer: Player = foundItem?.player || {
+      const fallbackPlayer: Player = (foundItem?.player || {
         id: neg.playerId || `fallback_${Date.now()}`,
         name: neg.playerName || 'لاعب محترف',
         age: 24,
@@ -1029,8 +1035,8 @@ export const TransfersTab: React.FC<TransfersTabProps> = ({
         marketValue: neg.demandedFee || neg.bidFee || 100000,
         salary: neg.demandedSalary || neg.offeredSalary || 5000,
         number: 10,
-        preferredFoot: 'Right',
-        condition: 100,
+        preferredFoot: 'right',
+        fitness: 100,
         morale: 80,
         contractYears: 3,
         attributes: {
@@ -1041,7 +1047,7 @@ export const TransfersTab: React.FC<TransfersTabProps> = ({
           defending: 65,
           physical: 68,
         },
-      };
+      }) as unknown as Player;
 
       setNegotiatingPlayer(fallbackPlayer);
       setSelectedNegotiation(neg);
@@ -1059,8 +1065,6 @@ export const TransfersTab: React.FC<TransfersTabProps> = ({
     },
     [sellPlayer]
   );
-
-  const incomingBids = (transferOfferNotifications || []).filter(n => n.status === 'pending');
 
   return (
     <div className="space-y-3 pb-6" dir="rtl">

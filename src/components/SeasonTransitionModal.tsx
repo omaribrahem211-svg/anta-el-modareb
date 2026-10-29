@@ -49,6 +49,14 @@ export const SeasonTransitionModal: React.FC = () => {
   const [selectedLeagueId, setSelectedLeagueId] = useState<string | null>(null);
   const [hideLockedLeagues, setHideLockedLeagues] = useState<boolean>(false);
 
+  useEffect(() => {
+    if (!showSeasonTransitionModal || !seasonEndSummary) return;
+    const st = seasonEndSummary.resultStatus;
+    if (st === 'champion' || st === 'promoted') {
+      fireLightweightCelebration(st === 'champion' ? 'championship' : 'cup_win');
+    }
+  }, [showSeasonTransitionModal, seasonEndSummary?.resultStatus]);
+
   if (!showSeasonTransitionModal || !seasonEndSummary) return null;
 
   const safeJobOffers = Array.isArray(jobOffers) ? jobOffers : [];
@@ -64,12 +72,6 @@ export const SeasonTransitionModal: React.FC = () => {
   const isChampion = seasonEndSummary.resultStatus === 'champion';
   const isPromoted = seasonEndSummary.resultStatus === 'promoted';
   const isRelegated = seasonEndSummary.resultStatus === 'relegated';
-
-  useEffect(() => {
-    if (showSeasonTransitionModal && (isChampion || isPromoted)) {
-      fireLightweightCelebration(isChampion ? 'championship' : 'cup_win');
-    }
-  }, [showSeasonTransitionModal, isChampion, isPromoted]);
 
   const leagueList = Array.isArray(allLeagues) ? allLeagues : Object.values(allLeagues || {});
   const evaluatedLeagues = leagueList.map(lg =>
