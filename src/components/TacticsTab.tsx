@@ -821,20 +821,33 @@ export const TacticsTab: React.FC<TacticsTabProps> = ({ onSelectPlayer }) => {
                     )}
                   </div>
 
-                  {/* Player Name Pill */}
-                  <div className={`px-2 py-0.5 rounded-md text-[10px] font-bold -mt-0.5 truncate max-w-[86px] shadow-md text-center ${
+                  {/* Player Name & Overall Rating Pill */}
+                  <div className={`px-2 py-0.5 rounded-lg text-[10px] font-bold -mt-0.5 shadow-md text-center flex items-center justify-center gap-1 ${
                     isSelected
                       ? 'bg-amber-500 text-slate-950 font-black border border-amber-300'
                       : isPlayerIneligible
                       ? 'bg-red-950 text-red-200 border border-red-600 font-bold'
-                      : 'bg-slate-950/90 text-white border border-slate-700/80'
+                      : 'bg-slate-950/95 text-white border border-slate-700/80'
                   }`}>
-                    {player ? player.name.split(' ')[0] : 'شاغر'}
+                    <span className="truncate max-w-[62px]">{player ? player.name.split(' ')[0] : 'شاغر'}</span>
+                    {player && (
+                      <span className={`px-1 py-0.2 rounded text-[9px] font-mono font-black ${
+                        player.overallRating >= 80
+                          ? 'bg-amber-400 text-slate-950'
+                          : player.overallRating >= 70
+                          ? 'bg-emerald-500 text-slate-950'
+                          : 'bg-slate-700 text-slate-200'
+                      }`} title={`طاقة اللاعب: ${player.overallRating}`}>
+                        {player.overallRating}
+                      </span>
+                    )}
                   </div>
 
-                  {/* Fitness Battery Dot */}
+                  {/* Position Badge & Fitness Battery Dot */}
                   {player && (
-                    <div className="flex items-center gap-0.5 mt-0.5 bg-slate-950/75 px-1.5 py-0.2 rounded-full border border-white/10">
+                    <div className="flex items-center gap-1 mt-0.5 bg-slate-950/80 px-1.5 py-0.5 rounded-full border border-white/10 shadow-sm">
+                      <span className="text-[8px] font-bold text-amber-300 font-mono">{slot.pos}</span>
+                      <span className="text-[8px] text-slate-500">•</span>
                       <span className={`w-1.5 h-1.5 rounded-full ${isPlayerIneligible ? 'bg-red-500' : player.fitness > 80 ? 'bg-emerald-400' : 'bg-amber-400'}`} />
                       <span className="text-[8px] text-white/90 font-mono">{player.fitness}%</span>
                     </div>
@@ -943,16 +956,23 @@ export const TacticsTab: React.FC<TacticsTabProps> = ({ onSelectPlayer }) => {
                       onClick={() => handlePlayerSwapSelection(p, role)}
                       className="flex items-center gap-2.5 cursor-pointer flex-1 min-w-0"
                     >
-                      <div className={`w-9 h-9 rounded-xl flex items-center justify-center font-black font-mono border shrink-0 ${
-                        isSelected
-                          ? 'bg-amber-500 text-slate-950 border-amber-300'
-                          : isPlayerInjured || isPlayerSuspended
-                          ? 'bg-red-950 border-red-700 text-red-300'
-                          : isBench
-                          ? 'bg-blue-900/80 border-blue-600 text-blue-200'
-                          : 'bg-slate-800 border-slate-700 text-slate-300'
-                      }`}>
-                        {p.overallRating}
+                      <div className="flex flex-col items-center justify-center shrink-0">
+                        <span className="text-[8px] text-slate-400 font-bold leading-none mb-0.5">طاقة</span>
+                        <div className={`w-9 h-8 rounded-xl flex items-center justify-center font-black font-mono text-xs border ${
+                          isSelected
+                            ? 'bg-amber-500 text-slate-950 border-amber-300'
+                            : isPlayerInjured || isPlayerSuspended
+                            ? 'bg-red-950 border-red-700 text-red-300'
+                            : p.overallRating >= 80
+                            ? 'bg-amber-500/20 border-amber-400 text-amber-300'
+                            : p.overallRating >= 70
+                            ? 'bg-emerald-950/80 border-emerald-500 text-emerald-300'
+                            : isBench
+                            ? 'bg-blue-900/80 border-blue-600 text-blue-200'
+                            : 'bg-slate-800 border-slate-700 text-slate-300'
+                        }`} title={`طاقة اللاعب: ${p.overallRating}`}>
+                          {p.overallRating}
+                        </div>
                       </div>
 
                       <div className="min-w-0">

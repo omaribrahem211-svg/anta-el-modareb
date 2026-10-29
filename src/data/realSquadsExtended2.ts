@@ -1258,7 +1258,7 @@ export const AL_AHLI_SAUDI_SQUAD: RealPlayerTemplate[] = [
   },
   {
     id: 'ahli_sau_al_johani',
-    name: 'زياد الجهني الموهبة الصاعدة',
+    name: 'زياد الجهني',
     firstName: 'زياد',
     lastName: 'الجهني',
     nationality: 'المملكة العربية السعودية',

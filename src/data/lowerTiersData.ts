@@ -540,7 +540,7 @@ export const SPAIN_TIER_3_CLUBS: Club[] = [
     createLowerTierPlayer('esp3_mal_1', 'ألفونسو هيريرو', 'GK', 30, 73, 1100000, 32000, 1, 'إسبانيا', 'ESP', 'esp3_malaga', 'esp_tier_3'),
     createLowerTierPlayer('esp3_mal_2', 'نيلسون مونتي', 'CB', 29, 72, 1000000, 30000, 20, 'البرتغال', 'POR', 'esp3_malaga', 'esp_tier_3'),
     createLowerTierPlayer('esp3_mal_3', 'كيفين ميدينا', 'LW', 24, 73, 1800000, 35000, 11, 'إسبانيا', 'ESP', 'esp3_malaga', 'esp_tier_3'),
-    createLowerTierPlayer('esp3_mal_4', 'أنطونيو كورديرو الصاعد', 'RW', 18, 73, 3000000, 30000, 26, 'إسبانيا', 'ESP', 'esp3_malaga', 'esp_tier_3'),
+    createLowerTierPlayer('esp3_mal_4', 'أنطونيو كورديرو', 'RW', 18, 73, 3000000, 30000, 26, 'إسبانيا', 'ESP', 'esp3_malaga', 'esp_tier_3'),
     createLowerTierPlayer('esp3_mal_5', 'داني سيبولفيدا', 'ST', 26, 72, 1400000, 32000, 9, 'إسبانيا', 'ESP', 'esp3_malaga', 'esp_tier_3'),
   ]),
 

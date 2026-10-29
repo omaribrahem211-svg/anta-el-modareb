@@ -277,16 +277,28 @@ export const SquadTab: React.FC<SquadTabProps> = ({ onSelectPlayer }) => {
             >
               {/* Left: 3D Kit Figurine & Info */}
               <div className="flex items-center gap-3 min-w-0">
-                <PlayerKit3DModel
-                  number={player.number || 10}
-                  position={player.position}
-                  overall={player.overallRating}
-                  primaryColor={userClub.primaryColor || '#10b981'}
-                  secondaryColor={userClub.secondaryColor || '#ffffff'}
-                  isGK={player.position === 'GK'}
-                  isCaptain={userClub.tactics?.captainId === player.id}
-                  size="sm"
-                />
+                <div className="flex items-center gap-2 shrink-0">
+                  <PlayerKit3DModel
+                    number={player.number || 10}
+                    position={player.position}
+                    overall={player.overallRating}
+                    primaryColor={userClub.primaryColor || '#10b981'}
+                    secondaryColor={userClub.secondaryColor || '#ffffff'}
+                    isGK={player.position === 'GK'}
+                    isCaptain={userClub.tactics?.captainId === player.id}
+                    size="sm"
+                  />
+                  <div className={`w-8 h-8 rounded-xl flex flex-col items-center justify-center font-black font-mono border text-xs shadow-sm ${
+                    player.overallRating >= 80
+                      ? 'bg-amber-400 text-slate-950 border-amber-300'
+                      : player.overallRating >= 70
+                      ? 'bg-emerald-500 text-slate-950 border-emerald-300'
+                      : 'bg-slate-800 text-slate-200 border-slate-700'
+                  }`} title={`طاقة اللاعب: ${player.overallRating}`}>
+                    <span className="text-[7px] font-bold leading-none -mb-0.5">طاقة</span>
+                    <span>{player.overallRating}</span>
+                  </div>
+                </div>
 
                 {/* Name & Role */}
                 <div className="min-w-0">

@@ -20,6 +20,7 @@ import {
   PositionCategory,
 } from '../types/game';
 import { getLeagueByCountryAndTier, getLeagueById, GLOBAL_LEAGUES, updateLeagueRosterInWorld, getCustomLeagues, getAllClubsForCountry, findClubInWorld, createClub } from '../data/leaguesData';
+import { GLOBAL_COUNTRIES } from '../data/countriesData';
 import { generateLeagueSchedule, generateInitialStandings } from '../data/initialData';
 import { simulateMatch } from './engine';
 import { simulateKnockoutMatch } from './continentalEngine';
@@ -2389,9 +2390,18 @@ export function processNewSeasonAdvancement(
       const cat: PositionCategory = pos === 'GK' ? 'GK' : ['CB', 'LB', 'RB'].includes(pos) ? 'DEF' : ['CM', 'CDM', 'CAM'].includes(pos) ? 'MID' : 'FWD';
       const baseRating = Math.max(58, Math.min(82, (team.reputation ? Math.round(team.reputation * 0.85) : 68) + Math.floor(Math.random() * 5 - 2)));
 
+      const countryCode = team.countryCode || 'EGY';
+      const countryData = GLOBAL_COUNTRIES[countryCode] || GLOBAL_COUNTRIES['EGY'];
+      const namePool = countryData?.playerNamePool || GLOBAL_COUNTRIES['EGY'].playerNamePool;
+      const firstName = namePool.firstNames[Math.floor(Math.random() * namePool.firstNames.length)] || 'محمد';
+      const lastName = namePool.lastNames[Math.floor(Math.random() * namePool.lastNames.length)] || 'علي';
+      const realisticName = `${firstName} ${lastName}`;
+
       const freshYouth: Player = {
         id: `youth_replenish_${team.id}_s${currentSeason.seasonNumber + 1}_${Date.now()}_${replenishIdx++}`,
-        name: `صاعد جديد (${pos} #${replenishIdx})`,
+        name: realisticName,
+        firstName,
+        lastName,
         age: Math.floor(Math.random() * 4 + 17),
         position: pos,
         positionCategory: cat,

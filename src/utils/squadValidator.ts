@@ -133,77 +133,89 @@ export function autoFixSquadLineup(club: Club): {
   };
 
   const currentStarters = [...currentTactics.startingPlayerIds];
-  const newStarters: string[] = [];
+  const targetSlotsCount = Math.min(11, squad.length);
+  const fixedStarters: (string | null)[] = new Array(targetSlotsCount).fill(null);
   const replacements: { outPlayerName: string; inPlayerName: string; reason: string }[] = [];
   const usedPlayerIds = new Set<string>();
 
-  // Pass 1: Keep valid starters
-  currentStarters.forEach((id) => {
-    const p = squad.find(player => player && player.id === id);
-    if (p && isEligible(p) && !usedPlayerIds.has(p.id)) {
-      newStarters.push(p.id);
-      usedPlayerIds.add(p.id);
+  const getDefaultCategoryForSlot = (idx: number): PositionCategory => {
+    if (idx === 0) return 'GK';
+    if (idx <= 4) return 'DEF';
+    if (idx <= 8) return 'MID';
+    return 'FWD';
+  };
+
+  // Step 1: Retain valid, eligible starters at their EXACT slot indices!
+  for (let i = 0; i < targetSlotsCount; i++) {
+    const originalId = currentStarters[i];
+    if (!originalId) continue;
+    const player = squad.find(p => p && p.id === originalId);
+    if (player && isEligible(player) && !usedPlayerIds.has(player.id)) {
+      fixedStarters[i] = player.id;
+      usedPlayerIds.add(player.id);
     }
-  });
-
-  // Pass 2: For slots that were invalid or missing, find best fit replacements
-  currentStarters.forEach((id, index) => {
-    const p = squad.find(player => player && player.id === id);
-    const needsReplacement = !p || !isEligible(p);
-
-    if (needsReplacement && newStarters.length < 11) {
-      const targetCategory: PositionCategory = p?.positionCategory || (index === 0 ? 'GK' : index <= 4 ? 'DEF' : index <= 8 ? 'MID' : 'FWD');
-      
-      // Find eligible squad members not yet in starting XI
-      const candidates = squad
-        .filter(cand => cand && cand.id && !usedPlayerIds.has(cand.id) && isEligible(cand))
-        .sort((a, b) => {
-          // Category match boost
-          const aMatch = a.positionCategory === targetCategory ? 50 : 0;
-          const bMatch = b.positionCategory === targetCategory ? 50 : 0;
-          // Rating + fitness weight
-          const aScore = aMatch + a.overallRating + (a.fitness * 0.1);
-          const bScore = bMatch + b.overallRating + (b.fitness * 0.1);
-          return bScore - aScore;
-        });
-
-      if (candidates.length > 0) {
-        const replacement = candidates[0];
-        newStarters.push(replacement.id);
-        usedPlayerIds.add(replacement.id);
-
-        const reason = p?.injury?.daysRemaining ? 'تعويض إصابة' : p?.isSuspended ? 'تعويض إيقاف' : 'إكمال التشكيل';
-        replacements.push({
-          outPlayerName: p?.name || 'شاغر',
-          inPlayerName: replacement.name,
-          reason,
-        });
-      }
-    }
-  });
-
-  // Pass 3: Fill up to 11 if squad has >= 11 players
-  while (newStarters.length < 11 && newStarters.length < squad.length) {
-    const nextBest = squad
-      .filter(cand => !usedPlayerIds.has(cand.id) && isEligible(cand))
-      .sort((a, b) => b.overallRating - a.overallRating)[0];
-
-    if (!nextBest) break;
-    newStarters.push(nextBest.id);
-    usedPlayerIds.add(nextBest.id);
   }
 
-  // Bench: Pick next 7 available players (or all remaining)
-  const newBench = squad
+  // Step 2: For any slot that was injured/suspended/missing, replace ONLY that slot with best matching position candidate
+  for (let i = 0; i < targetSlotsCount; i++) {
+    if (fixedStarters[i] !== null) continue;
+
+    const originalId = currentStarters[i];
+    const originalPlayer = originalId ? squad.find(p => p && p.id === originalId) : null;
+    const targetCategory: PositionCategory = originalPlayer?.positionCategory || getDefaultCategoryForSlot(i);
+
+    const candidates = squad
+      .filter(cand => cand && cand.id && !usedPlayerIds.has(cand.id) && isEligible(cand))
+      .sort((a, b) => {
+        const aCatMatch = a.positionCategory === targetCategory ? 100 : (targetCategory === 'GK' ? -100 : 0);
+        const bCatMatch = b.positionCategory === targetCategory ? 100 : (targetCategory === 'GK' ? -100 : 0);
+        const aScore = aCatMatch + a.overallRating + (a.fitness * 0.1);
+        const bScore = bCatMatch + b.overallRating + (b.fitness * 0.1);
+        return bScore - aScore;
+      });
+
+    if (candidates.length > 0) {
+      const bestFit = candidates[0];
+      fixedStarters[i] = bestFit.id;
+      usedPlayerIds.add(bestFit.id);
+
+      const reason = originalPlayer?.injury?.daysRemaining ? 'تعويض إصابة' : originalPlayer?.isSuspended ? 'تعويض إيقاف' : 'إكمال التشكيل';
+      replacements.push({
+        outPlayerName: originalPlayer?.name || `مركز #${i + 1}`,
+        inPlayerName: bestFit.name,
+        reason,
+      });
+    }
+  }
+
+  const newStarters = fixedStarters.filter(Boolean) as string[];
+
+  // Bench: Maintain existing bench players if eligible and not promoted to starters, then backfill
+  const newBench: string[] = [];
+  const currentBench = currentTactics.benchPlayerIds || [];
+  currentBench.forEach(bId => {
+    if (!bId || usedPlayerIds.has(bId)) return;
+    const bp = squad.find(p => p && p.id === bId);
+    if (bp && isEligible(bp)) {
+      newBench.push(bp.id);
+      usedPlayerIds.add(bp.id);
+    }
+  });
+
+  // Backfill remaining bench slots up to 7
+  squad
     .filter(p => p && p.id && !usedPlayerIds.has(p.id))
     .sort((a, b) => {
       const aElig = isEligible(a) ? 20 : 0;
       const bElig = isEligible(b) ? 20 : 0;
       return (bElig + (b?.overallRating || 50)) - (aElig + (a?.overallRating || 50));
     })
-    .slice(0, 7)
-    .map(p => p?.id)
-    .filter(Boolean) as string[];
+    .forEach(p => {
+      if (newBench.length < 7) {
+        newBench.push(p.id);
+        usedPlayerIds.add(p.id);
+      }
+    });
 
   return {
     updatedStartingPlayerIds: newStarters,

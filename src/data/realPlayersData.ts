@@ -1022,7 +1022,7 @@ export const BARCELONA_SQUAD: RealPlayerTemplate[] = [
   },
   {
     id: 'barca_pau_victor',
-    name: 'باو فيكتور الهداف الصاعد',
+    name: 'باو فيكتور',
     firstName: 'باو',
     lastName: 'فيكتور',
     nationality: 'إسبانيا',
@@ -2460,7 +2460,7 @@ export const AL_HILAL_SQUAD: RealPlayerTemplate[] = [
   },
   {
     id: 'hilal_musab_al_juwayr',
-    name: 'مصعب الجوير الموهبة الصاعدة',
+    name: 'مصعب الجوير',
     firstName: 'مصعب',
     lastName: 'الجوير',
     nationality: 'المملكة العربية السعودية',

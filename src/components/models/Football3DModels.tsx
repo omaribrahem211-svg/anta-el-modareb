@@ -132,10 +132,10 @@ export const PlayerKit3DModel: React.FC<{
       </svg>
 
       {/* Overall Rating Mini Crest (Bottom Right) */}
-      {typeof rating === 'number' && (
+      {typeof effectiveRating === 'number' && (
         <span
-          className={`absolute -bottom-1 -right-1 px-1 py-0.2 rounded-md text-[9px] font-mono font-black leading-none border shadow ${
-            rating >= 80
+          className={`absolute -bottom-1 -right-1 px-1 py-0.5 rounded-md text-[9px] font-mono font-black leading-none border shadow z-20 ${
+            effectiveRating >= 80
               ? 'bg-amber-400 text-slate-950 border-white'
               : effectiveRating >= 70
               ? 'bg-emerald-500 text-slate-950 border-emerald-200'

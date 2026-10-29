@@ -446,7 +446,7 @@ export const ARSENAL_SQUAD: RealPlayerTemplate[] = [
   },
   {
     id: "ars_setford",
-    name: "تومي سيتفورد الحارس الصاعد",
+    name: "تومي سيتفورد",
     firstName: "تومي",
     lastName: "سيتفورد",
     nationality: "إنجلترا",
@@ -466,7 +466,7 @@ export const ARSENAL_SQUAD: RealPlayerTemplate[] = [
   },
   {
     id: 'ars_nwaneri',
-    name: 'إيثان نوانيري الجوهرة الصاعدة',
+    name: 'إيثان نوانيري',
     firstName: 'إيثان',
     lastName: 'نوانيري',
     nationality: 'إنجلترا',
@@ -1644,7 +1644,7 @@ export const AL_ITTIHAD_SQUAD: RealPlayerTemplate[] = [
   },
   {
     id: 'itt_al_shanqiti',
-    name: 'حامد الشنقيطي الحارس الصاعد',
+    name: 'حامد الشنقيطي',
     firstName: 'حامد',
     lastName: 'الشنقيطي',
     nationality: 'المملكة العربية السعودية',
@@ -2190,7 +2190,7 @@ export const ZAMALEK_SQUAD: RealPlayerTemplate[] = [
   },
   {
     id: 'zam_mahmoud_el_shenawy',
-    name: 'محمود الشناوي الحارس الصاعد',
+    name: 'محمود الشناوي',
     firstName: 'محمود',
     lastName: 'الشناوي',
     nationality: 'مصر',
@@ -2856,7 +2856,7 @@ export const PSG_SQUAD: RealPlayerTemplate[] = [
   },
   {
     id: 'psg_senny_mayulu',
-    name: 'سيني مايولو الموهبة الصاعدة',
+    name: 'سيني مايولو',
     firstName: 'سيني',
     lastName: 'مايولو',
     nationality: 'فرنسا',
