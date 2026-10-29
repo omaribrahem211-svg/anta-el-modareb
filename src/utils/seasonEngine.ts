@@ -1812,8 +1812,43 @@ export function repairCupProgressionIntegrity(
         }
       }
 
-      // If user won this match, they CANNOT be eliminated in this stage or any prior stages
-      if (eliminatedStage) {
+      // Only clear userEliminatedStage if the player has NOT lost any cup match played with a final result
+      const hasLostAnyPlayedCupMatch =
+        matches.some(m => {
+          if (!m.isPlayed || m.homeScore === undefined || m.awayScore === undefined) return false;
+          if (m.homeTeamId !== userClubId && m.awayTeamId !== userClubId) return false;
+          const isHome = m.homeTeamId === userClubId;
+          const hs = m.homeScore ?? 0;
+          const as = m.awayScore ?? 0;
+          const myPen = isHome ? m.homePenalties : m.awayPenalties;
+          const oppPen = isHome ? m.awayPenalties : m.homePenalties;
+          const myGoals = isHome ? hs : as;
+          const oppGoals = isHome ? as : hs;
+          if (m.winnerTeamId) return m.winnerTeamId !== userClubId;
+          if (myPen !== undefined && oppPen !== undefined) return myPen < oppPen;
+          return myGoals < oppGoals;
+        }) ||
+        updatedFixtures.some(f => {
+          const isCup =
+            f.competitionType === 'cup' ||
+            f.competitionType === 'DOMESTIC_CUP' ||
+            f.competitionType === 'DOMESTIC_COP' ||
+            f.tournamentId === 'cup';
+          if (!isCup || !f.isPlayed || f.homeScore === undefined || f.awayScore === undefined) return false;
+          if (f.homeTeamId !== userClubId && f.awayTeamId !== userClubId) return false;
+          const isHome = f.homeTeamId === userClubId;
+          const hs = f.homeScore ?? 0;
+          const as = f.awayScore ?? 0;
+          const myPen = isHome ? f.homePenalties : f.awayPenalties;
+          const oppPen = isHome ? f.awayPenalties : f.homePenalties;
+          const myGoals = isHome ? hs : as;
+          const oppGoals = isHome ? as : hs;
+          if (f.winnerTeamId) return f.winnerTeamId !== userClubId;
+          if (myPen !== undefined && oppPen !== undefined) return myPen < oppPen;
+          return myGoals < oppGoals;
+        });
+
+      if (eliminatedStage && !hasLostAnyPlayedCupMatch) {
         eliminatedStage = undefined;
         repaired = true;
       }

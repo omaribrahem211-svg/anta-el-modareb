@@ -36,6 +36,7 @@ import {
   ClipboardPaste,
   ChevronDown,
   ChevronUp,
+  Trash2,
 } from 'lucide-react';
 import { ModalPortal } from './common/ModalPortal';
 
@@ -76,6 +77,8 @@ export const SettingsBackupModal: React.FC<SettingsBackupModalProps> = ({
     daysUntilNextMatch,
     scoutedOpponents,
     deletedMessageIds,
+    liveMatch,
+    discardSavedLiveMatch,
     applyLoadedSave,
     exportCurrentSavePayload
   } = useGame();
@@ -545,6 +548,45 @@ export const SettingsBackupModal: React.FC<SettingsBackupModalProps> = ({
               </button>
             </div>
           </div>
+
+          {/* Active Live Match Discard / Recovery */}
+          {liveMatch && (
+            <div className="bg-amber-950/25 border border-amber-600/40 rounded-2xl p-3.5 space-y-2 text-right">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <AlertTriangle className="w-4 h-4 text-amber-400" />
+                  <span className="text-xs font-bold text-amber-200">مباراة جارية محفوظة في الذاكرة</span>
+                </div>
+                <span className="text-[10px] bg-amber-500/20 text-amber-300 border border-amber-500/30 px-2 py-0.5 rounded-full font-bold font-mono">
+                  الدقيقة {liveMatch.currentMinute || 0}'
+                </span>
+              </div>
+              <p className="text-[11px] text-slate-300 leading-relaxed">
+                توجد مباراة مباشرة محفوظة محلياً. إذا كانت الشاشة تتجمد أو الأزرار لا تستجيب، يمكنك إلغاؤها بأمان لاستئناف اللعب.
+              </p>
+              <div className="bg-slate-950/70 p-2 rounded-xl text-[11px] text-emerald-400 font-semibold border border-emerald-900/40">
+                🛡️ لن يتم حذف مسيرتك أو أي بيانات أخرى
+              </div>
+              <button
+                type="button"
+                id="btn_discard_saved_live_match"
+                onClick={() => {
+                  if (window.confirm('هل أنت متأكد من إلغاء المباراة المحفوظة؟ لن يتم حذف مسيرتك أو أي بيانات أخرى.')) {
+                    discardSavedLiveMatch();
+                    setFeedback({
+                      type: 'success',
+                      title: 'تم إلغاء المباراة المحفوظة بنجاح',
+                      message: 'تم مسح المباراة الجارية بأمان دون حذف مسيرتك أو أي بيانات أخرى.',
+                    });
+                  }
+                }}
+                className="w-full py-2.5 px-3 bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-1.5 shadow active:scale-[0.98] cursor-pointer"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>إلغاء المباراة المحفوظة</span>
+              </button>
+            </div>
+          )}
 
           {/* Reset & Season Operations */}
           <div className="pt-2 border-t border-slate-800 space-y-2">

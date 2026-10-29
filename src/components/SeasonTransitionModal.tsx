@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useGame } from '../context/GameContext';
 import { JobOfferCard } from './JobOfferCard';
 import { RetroLeagueSelectionScreen } from './RetroLeagueSelectionScreen';
@@ -28,6 +28,7 @@ import {
   Eye,
   EyeOff,
 } from 'lucide-react';
+import { fireLightweightCelebration } from '../utils/confetti';
 
 export const SeasonTransitionModal: React.FC = () => {
   const {
@@ -64,7 +65,14 @@ export const SeasonTransitionModal: React.FC = () => {
   const isPromoted = seasonEndSummary.resultStatus === 'promoted';
   const isRelegated = seasonEndSummary.resultStatus === 'relegated';
 
-  const evaluatedLeagues = (allLeagues || []).map(lg =>
+  useEffect(() => {
+    if (showSeasonTransitionModal && (isChampion || isPromoted)) {
+      fireLightweightCelebration(isChampion ? 'championship' : 'cup_win');
+    }
+  }, [showSeasonTransitionModal, isChampion, isPromoted]);
+
+  const leagueList = Array.isArray(allLeagues) ? allLeagues : Object.values(allLeagues || {});
+  const evaluatedLeagues = leagueList.map(lg =>
     evaluateLeagueEligibilityForManager(lg, activeLicense)
   );
   const displayedLeagues = hideLockedLeagues

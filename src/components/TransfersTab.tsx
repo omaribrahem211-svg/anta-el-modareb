@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
-import { Player, Club } from '../types';
+import { Player, Club, ActiveNegotiation } from '../types/game';
 import {
   DollarSign,
   UserPlus,
@@ -24,7 +24,7 @@ import {
   Tag,
   Globe2,
 } from 'lucide-react';
-import { useGame, ActiveNegotiation } from '../context/GameContext';
+import { useGame } from '../context/GameContext';
 import { NegotiationModal } from './NegotiationModal';
 import { GLOBAL_LEAGUES } from '../data/leaguesData';
 import { calibrateRealisticPlayerRating } from '../utils/playerGenerator';
@@ -149,9 +149,9 @@ function generateTransferRumors(teams: Club[], currentDate: string, seedOffset =
 }
 
 interface TransfersTabProps {
-  players: Player[];
-  budget: number;
-  onBuyPlayer: (player: Player) => void;
+  players?: Player[];
+  budget?: number;
+  onBuyPlayer?: (player: Player) => void;
   onSelectPlayer: (player: Player) => void;
 }
 
@@ -372,21 +372,22 @@ const MarketPlayerCard = React.memo<MarketPlayerCardProps>(
           </div>
 
           {/* Player Identity & Club Info */}
-          <div className="min-w-0">
-            <div className="flex items-center gap-1.5 min-w-0">
+          <div className="min-w-0 pr-1 flex-1">
+            <div className="flex items-center gap-1.5 min-w-0 flex-wrap">
               <button
                 type="button"
                 onClick={() => onSelectPlayer(player)}
-                className="font-black text-xs sm:text-sm text-white hover:text-emerald-400 truncate text-right cursor-pointer"
+                className="font-black text-xs sm:text-sm text-white hover:text-emerald-400 text-right cursor-pointer leading-tight break-words"
+                title={`عرض بطاقة اللاعب الكاملة: ${player.name}`}
               >
                 {player.name}
               </button>
-              <span className="text-[10px] text-slate-300 bg-slate-950/90 px-1.5 py-0.5 rounded-md border border-white/[0.06] shrink-0">
+              <span className="text-[10px] text-slate-300 bg-slate-950/90 px-1.5 py-0.5 rounded-md border border-white/[0.06] shrink-0 font-medium">
                 {flag} {player.nationality || 'مصر'}
               </span>
               {item.statusType !== 'contract' && (
                 <span
-                  className={`text-[9px] font-bold px-1.5 py-0.5 rounded-md shrink-0 hidden sm:inline-block ${
+                  className={`text-[9px] font-bold px-1.5 py-0.5 rounded-md shrink-0 ${
                     item.statusType === 'listed'
                       ? 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30'
                       : item.statusType === 'free'
@@ -401,9 +402,11 @@ const MarketPlayerCard = React.memo<MarketPlayerCardProps>(
               )}
             </div>
 
-            <div className="flex items-center gap-1.5 text-[11px] text-slate-400 mt-1 min-w-0">
-              <Building2 className="w-3 h-3 text-cyan-400 shrink-0" />
-              <span className="text-slate-200 font-semibold truncate">{safeClubName}</span>
+            <div className="flex items-center gap-1.5 text-[11px] text-slate-400 mt-1 min-w-0 flex-wrap">
+              <span className="flex items-center gap-1 text-slate-200 font-semibold truncate">
+                <Building2 className="w-3 h-3 text-cyan-400 shrink-0" />
+                {safeClubName}
+              </span>
               <span className="text-slate-600 shrink-0">•</span>
               <span className="text-slate-400 truncate hidden xs:inline">{item.leagueName}</span>
               <span className="text-slate-600 shrink-0 hidden xs:inline">•</span>
@@ -411,13 +414,14 @@ const MarketPlayerCard = React.memo<MarketPlayerCardProps>(
             </div>
           </div>
 
-          {/* Asking Price & Wage Box */}
-          <div className="bg-slate-950/90 border border-white/[0.06] rounded-xl px-2.5 py-1.5 text-left shrink-0">
-            <div className="text-xs font-black text-emerald-400 font-mono tabular-nums leading-none">
+          {/* Asking Price & Valuation Box */}
+          <div className="bg-slate-950/90 border border-white/[0.08] rounded-xl px-2.5 py-1.5 text-left shrink-0 shadow-sm flex flex-col justify-center min-w-[85px]">
+            <div className="text-[9px] text-slate-400 font-semibold leading-none">السعر المطلوب:</div>
+            <div className="text-xs sm:text-sm font-black text-emerald-400 font-mono tabular-nums leading-tight mt-0.5">
               {item.askingPrice > 0 ? formatCompactCurrency(item.askingPrice) : 'انتقال حر'}
             </div>
             <div className="text-[10px] text-slate-400 font-mono tabular-nums mt-1 leading-none">
-              الراتب: <span className="text-cyan-300 font-bold">{formatCompactCurrency(effectiveSalary, false)}</span>/ش
+              الراتب: <span className="text-cyan-300 font-bold">{formatCompactCurrency(effectiveSalary, false)}</span>
             </div>
           </div>
         </div>
@@ -539,7 +543,7 @@ export const TransfersTab: React.FC<TransfersTabProps> = ({
     userClub,
     teams,
     sellPlayer,
-    buyPlayerFromMarket,
+    buyPlayer,
     activeNegotiations,
     startPlayerNegotiation,
     respondToNegotiationOffer,
@@ -547,11 +551,12 @@ export const TransfersTab: React.FC<TransfersTabProps> = ({
     listPlayerForTransfer,
     acceptSellNegotiation,
     rejectSellNegotiation,
-    transferOfferNotifications,
     acceptIncomingBid,
     rejectIncomingBid,
-    currentDate,
+    calendarDate,
   } = useGame();
+
+  const currentDate = calendarDate?.currentDate || calendarDate?.formattedArabic || '2026-08-01';
 
   const [activeTabMode, setActiveTabMode] = useState<'buy' | 'rumors' | 'negotiations' | 'sell'>('buy');
   const [scoutingPreset, setScoutingPreset] = useState<ScoutingPreset>('all');
@@ -639,10 +644,10 @@ export const TransfersTab: React.FC<TransfersTabProps> = ({
   const currentWageBill = userClub
     ? (userClub.players || []).reduce((acc, p) => acc + (p?.salary || 0), 0)
     : 0;
-  const wageBudget = userClub?.wageBudget || 500000;
+  const wageBudget = (userClub as any)?.wageBudget || 500000;
   const remainingWageBudget = Math.max(0, wageBudget - currentWageBill);
   const wageUsagePercent = Math.min(100, Math.round((currentWageBill / Math.max(1, wageBudget)) * 100));
-  const clubTransferBudget = userClub ? userClub.budget : budget;
+  const clubTransferBudget = userClub ? userClub.budget : (budget || 500000);
 
   // Build unified comprehensive player database with realistic rating calibration
   const allDbPlayers = useMemo<MarketPlayerItem[]>(() => {
@@ -719,7 +724,7 @@ export const TransfersTab: React.FC<TransfersTabProps> = ({
         list.push({
           player: p,
           club: null,
-          clubName: p.clubName || 'لاعب حر',
+          clubName: (p as any).clubName || 'لاعب حر',
           leagueId: 'free_agents',
           leagueName: 'سوق اللاعبين الأحرار',
           isUserClubPlayer: false,
@@ -828,9 +833,11 @@ export const TransfersTab: React.FC<TransfersTabProps> = ({
         const p = item.player;
         if (!p) return false;
 
+        // Never display the user club's own players in the transfer market search list
+        if (item.isUserClubPlayer) return false;
+
         // 1-Tap Smart Scouting Lens Filter
         if (scoutingPreset === 'affordable') {
-          if (item.isUserClubPlayer) return false;
           if (item.askingPrice > clubTransferBudget) return false;
           if ((p.salary || 2500) > remainingWageBudget) return false;
         } else if (scoutingPreset === 'arab_players') {
@@ -970,13 +977,13 @@ export const TransfersTab: React.FC<TransfersTabProps> = ({
   }, []);
 
   const handleBuy = useCallback(
-    (player: Player, customAskingPrice?: number) => {
+    (player: Player) => {
       try {
         if (!player) return;
-        const item = dbItemByIdMap.get(player.id);
-        const effectiveFee = customAskingPrice !== undefined ? customAskingPrice : item?.askingPrice;
-        const result = buyPlayerFromMarket(player, effectiveFee);
-        setNotification({ text: result.message, type: result.success ? 'success' : 'error' });
+        const result = onBuyPlayer ? onBuyPlayer(player) : buyPlayer(player);
+        const msg = (result as any)?.message || 'تمت صفقة الشراء بنجاح!';
+        const succ = (result as any)?.success !== false;
+        setNotification({ text: msg, type: succ ? 'success' : 'error' });
         setTimeout(() => setNotification(null), 3500);
       } catch (err: any) {
         console.error('[TransfersTab] handleBuy exception:', err);
@@ -984,7 +991,7 @@ export const TransfersTab: React.FC<TransfersTabProps> = ({
         setTimeout(() => setNotification(null), 3500);
       }
     },
-    [dbItemByIdMap, buyPlayerFromMarket]
+    [onBuyPlayer, buyPlayer]
   );
 
   const handleStartNegotiation = useCallback(

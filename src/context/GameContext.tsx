@@ -218,6 +218,7 @@ interface GameContextType {
   inbox: InboxMessage[];
   unreadMessagesCount: number;
   liveMatch: LiveMatchState | null;
+  discardSavedLiveMatch: () => void;
   seasonFinished: boolean;
   isSimulationRunning: boolean;
 
@@ -921,13 +922,64 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
   }, [activeLeague?.id, activeLeague?.country, season?.seasonNumber, season?.currentRound]);
 
+  const cupRepairGuardRef = useRef<{ signature: string; count: number }>({ signature: '', count: 0 });
+
   // Self-heal and guarantee cup progression integrity (ensure user advances to next stage upon winning)
   useEffect(() => {
     if (!cupTournament || !Array.isArray(cupTournament.matches) || cupTournament.matches.length === 0 || !userClub?.id) return;
+
+    // Calculate cup fixtures count
+    const cupFixturesCount = (fixtures || []).filter(
+      f =>
+        f.competitionType === 'cup' ||
+        f.competitionType === 'DOMESTIC_COP' ||
+        f.competitionType === 'DOMESTIC_CUP' ||
+        f.tournamentId === 'cup'
+    ).length;
+
+    // Signature: cupTournament.matches ids + isPlayed + winnerTeamId + cup fixtures count
+    const matchesSignature = cupTournament.matches
+      .map(m => `${m.id}:${m.isPlayed ? 1 : 0}:${m.winnerTeamId || ''}`)
+      .join('|');
+    const signature = `${matchesSignature}__#cupFix:${cupFixturesCount}`;
+
+    // If signature is identical to the last repaired signature, do not set state
+    if (cupRepairGuardRef.current.signature === signature) {
+      cupRepairGuardRef.current.count += 1;
+      if (cupRepairGuardRef.current.count >= 5) {
+        console.warn('[GameContext] Max cup repair attempts (5) reached for signature, halting repair loop:', signature);
+      }
+      return;
+    }
+
     const rep = repairCupProgressionIntegrity(cupTournament, fixtures, userClub.id);
     if (rep.repaired) {
+      cupRepairGuardRef.current = {
+        signature,
+        count: 1,
+      };
+
       setCupTournament(rep.updatedCup);
-      if (rep.updatedFixtures !== fixtures) {
+
+      // Compare fixtures ids and isPlayed / homeTeamId / awayTeamId
+      const fixturesActuallyChanged = (prev: Fixture[], next: Fixture[]): boolean => {
+        if (prev.length !== next.length) return true;
+        for (let i = 0; i < prev.length; i++) {
+          const p = prev[i];
+          const n = next[i];
+          if (
+            p.id !== n.id ||
+            p.isPlayed !== n.isPlayed ||
+            p.homeTeamId !== n.homeTeamId ||
+            p.awayTeamId !== n.awayTeamId
+          ) {
+            return true;
+          }
+        }
+        return false;
+      };
+
+      if (fixturesActuallyChanged(fixtures, rep.updatedFixtures)) {
         setFixtures(rep.updatedFixtures);
       }
     }
@@ -1334,19 +1386,49 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const [showSeasonTransitionModal, setShowSeasonTransitionModal] = useState<boolean>(false);
   const [liveMatch, setLiveMatch] = useState<LiveMatchState | null>(() => {
     try {
-      const saved = localStorage.getItem(`${STORAGE_KEY}_active_live_match`);
+      const matchKey = `${STORAGE_KEY}_active_live_match`;
+      const saved = localStorage.getItem(matchKey);
       if (saved) {
         const parsed = JSON.parse(saved);
-        if (parsed && parsed.fixture) {
-          // When restoring an in-progress match from storage, start paused so player can resume when ready
-          return { ...parsed, isPlaying: false };
+        const isValid =
+          Boolean(parsed) &&
+          Boolean(parsed.fixture) &&
+          typeof parsed.homeTeam === 'object' && parsed.homeTeam !== null &&
+          typeof parsed.awayTeam === 'object' && parsed.awayTeam !== null &&
+          Array.isArray(parsed.events) &&
+          typeof parsed.stats === 'object' && parsed.stats !== null &&
+          typeof parsed.currentMinute === 'number' &&
+          parsed.currentMinute >= 0 &&
+          parsed.currentMinute <= 90 &&
+          parsed.fixture.isPlayed !== true;
+
+        if (!isValid) {
+          localStorage.removeItem(matchKey);
+          return null;
         }
+
+        // When restoring an in-progress match from storage, start paused so player can resume when ready
+        return { ...parsed, isPlaying: false };
       }
     } catch (e) {
       console.warn('[GameContext] Failed to restore active live match from storage:', e);
+      try {
+        localStorage.removeItem(`${STORAGE_KEY}_active_live_match`);
+      } catch {}
     }
     return null;
   });
+
+  const discardSavedLiveMatch = useCallback(() => {
+    setLiveMatch(null);
+    try {
+      localStorage.removeItem(`${STORAGE_KEY}_active_live_match`);
+    } catch (e) {
+      console.warn('[GameContext] Failed to remove active live match:', e);
+    }
+  }, []);
+
+  const hasWarnedStorageQuotaThisSessionRef = useRef<boolean>(false);
 
   useEffect(() => {
     try {
@@ -1355,8 +1437,23 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       } else {
         localStorage.removeItem(`${STORAGE_KEY}_active_live_match`);
       }
-    } catch (e) {
+    } catch (e: any) {
       console.warn('[GameContext] Failed to save active live match to storage:', e);
+      const isQuotaError =
+        e &&
+        (e.name === 'QuotaExceededError' ||
+          e.name === 'NS_ERROR_DOM_QUOTA_REACHED' ||
+          e.code === 22 ||
+          e.code === 1014 ||
+          (typeof e.message === 'string' && e.message.toLowerCase().includes('quota')));
+      if (isQuotaError && !hasWarnedStorageQuotaThisSessionRef.current) {
+        hasWarnedStorageQuotaThisSessionRef.current = true;
+        if (typeof window !== 'undefined') {
+          try {
+            window.alert('تنبيه: مساحة التخزين في المتصفح ممتلئة (QuotaExceededError)، تعذر حفظ حالة المباراة مؤقتاً.');
+          } catch {}
+        }
+      }
     }
   }, [liveMatch]);
 
@@ -11144,6 +11241,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         inbox,
         unreadMessagesCount,
         liveMatch,
+        discardSavedLiveMatch,
         seasonFinished,
         isSimulationRunning,
         season,

@@ -13,6 +13,7 @@ import { TacticalMatchReportCard } from './TacticalMatchReportCard';
 import { RestartSeasonModal } from './RestartSeasonModal';
 import { WorldStarLoanModal } from './modals/WorldStarLoanModal';
 import { ClubCrest3DShield } from './models/Football3DModels';
+import { fireLightweightCelebration } from '../utils/confetti';
 import {
   analyzeLiveMatchSituation,
   isTacticalAdviceApplied,
@@ -176,6 +177,32 @@ export const MatchesTab: React.FC = () => {
       setSnoozedTacticalAlerts({});
     }
   }, [liveMatch?.fixture?.id, liveMatch?.currentMinute]);
+
+  const celebratedMatchIdRef = useRef<string | null>(null);
+
+  // Trigger celebration on match win (championship / cup final / key match)
+  useEffect(() => {
+    if (liveMatch && liveMatch.isFinished && liveMatch.fixture?.id) {
+      if (celebratedMatchIdRef.current !== liveMatch.fixture.id) {
+        celebratedMatchIdRef.current = liveMatch.fixture.id;
+        const isUserHome = userClub ? liveMatch.homeTeam?.id === userClub.id : false;
+        const userGoals = isUserHome ? liveMatch.homeScore : liveMatch.awayScore;
+        const oppGoals = isUserHome ? liveMatch.awayScore : liveMatch.homeScore;
+        const hasPenalties = liveMatch.homePenalties !== undefined && liveMatch.awayPenalties !== undefined;
+        const userPenalties = isUserHome ? liveMatch.homePenalties : liveMatch.awayPenalties;
+        const oppPenalties = isUserHome ? liveMatch.awayPenalties : liveMatch.homePenalties;
+        const won = hasPenalties ? (userPenalties! > oppPenalties!) : userGoals > oppGoals;
+
+        if (won) {
+          const isCupFinal =
+            liveMatch.fixture.cupStage === 'final' ||
+            liveMatch.fixture.stage === 'final' ||
+            liveMatch.fixture.round === totalRounds;
+          fireLightweightCelebration(isCupFinal ? 'championship' : 'cup_win');
+        }
+      }
+    }
+  }, [liveMatch?.isFinished, liveMatch?.fixture?.id, userClub?.id, totalRounds]);
 
   // Compute live smart tactical advisory alert
   const activeTacticalAlert = useMemo(() => {
