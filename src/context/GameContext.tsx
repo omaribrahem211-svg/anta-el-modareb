@@ -6154,15 +6154,24 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       const { fairMarketValue, recommendedMonthlyWage } = calculatePlayerFairValue(player, userClub);
       const baseThreeYearPrice = Math.max(25000, Number(player.marketValue) || fairMarketValue || 50000);
       const defaultContractYears = 3;
-      const transferFee =
-        customFee !== undefined && customFee > 0
+      const isInTransferMarket =
+        Array.isArray(transferMarket) && transferMarket.some(p => p && p.id === player.id);
+      const isFreeAgent =
+        (!player.currentClubId && !(player as any).clubId) ||
+        player.currentLeagueId === 'free_agents' ||
+        player.isFreeAgent === true ||
+        isInTransferMarket;
+
+      const transferFee = isFreeAgent
+        ? 0
+        : customFee !== undefined && customFee > 0
           ? customFee
           : calculateContractDurationTransferFee(baseThreeYearPrice, defaultContractYears, false);
       const salary = Math.max(2500, Number(player.salary) || recommendedMonthlyWage || 2500);
 
-      // Robust selling club resolution for cross-league transfers
-      let sellingClubId = player.currentClubId || (player as any).clubId;
-      if (!sellingClubId) {
+      // Robust selling club resolution for cross-league transfers (skip for free agents)
+      let sellingClubId = isFreeAgent ? '' : (player.currentClubId || (player as any).clubId || '');
+      if (!isFreeAgent && !sellingClubId) {
         const localSelling = teams.find(t => (t.players || []).some(p => p && p.id === player.id));
         if (localSelling) {
           sellingClubId = localSelling.id;
@@ -6190,8 +6199,8 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       }
 
       const transferResult = executeAtomicTransfer({
-        player: { ...player, currentClubId: sellingClubId },
-        sellingClubId,
+        player: { ...player, currentClubId: isFreeAgent ? '' : sellingClubId, isFreeAgent },
+        sellingClubId: isFreeAgent ? '' : sellingClubId,
         buyingClubId: userClub.id,
         allTeams: teams,
         transferFee,

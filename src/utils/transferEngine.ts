@@ -594,10 +594,10 @@ export function executeAtomicTransfer(params: {
     };
   }
 
-  // Financial safety check: strictly applied for both user and AI buying clubs
+  // Financial safety check: strictly applied for both user and AI buying clubs when transferFee > 0
   if (buyingClub) {
     const clubBudget = buyingClub.budget || 0;
-    if (clubBudget < transferFee) {
+    if (transferFee > 0 && clubBudget < transferFee) {
       const errorPrefix = buyingClub.isUserClub ? 'ميزانية ناديك' : `ميزانية النادي المشتري (${buyingClub.name})`;
       return {
         success: false,
@@ -625,7 +625,7 @@ export function executeAtomicTransfer(params: {
     let leagueModified = false;
     league.teams.forEach(c => {
       // 1. External Selling Club: remove player and credit fee
-      if (c.id === sellingClubId && (!sellingClub || c.id !== sellingClub.id)) {
+      if (sellingClubId && c.id === sellingClubId && (!sellingClub || c.id !== sellingClub.id)) {
         c.budget = (c.budget || 0) + transferFee;
         c.players = (c.players || []).filter(p => p && p.id !== player.id);
         if (c.tactics) {
@@ -712,6 +712,7 @@ export function executeAtomicTransfer(params: {
     ...player,
     currentClubId: buyingClub?.id || buyingClubId || 'external_club',
     currentLeagueId: buyingClub?.leagueId || '',
+    isFreeAgent: false,
     salary: Math.max(1000, Number(salary) || player.salary || 2500),
     marketValue: preservedThreeSeasonMarketValue,
     contractYears: safeContractYears,
@@ -725,8 +726,14 @@ export function executeAtomicTransfer(params: {
   // Update teams atomically
   const updatedTeams = (Array.isArray(allTeams) ? allTeams : []).map(t => {
     if (!t) return t;
-    const isThisSellingClub = (sellingClub && t.id === sellingClub.id) || (sellingClubId && t.id === sellingClubId) || (sellingClub?.isUserClub && t.isUserClub);
-    const isThisBuyingClub = (buyingClub && t.id === buyingClub.id) || (buyingClubId && t.id === buyingClubId);
+    const isThisSellingClub = Boolean(
+      (sellingClub && t.id === sellingClub.id) ||
+        (sellingClubId && t.id === sellingClubId) ||
+        (sellingClub?.isUserClub && t.isUserClub)
+    );
+    const isThisBuyingClub = Boolean(
+      (buyingClub && t.id === buyingClub.id) || (buyingClubId && t.id === buyingClubId)
+    );
 
     // 1. Selling Club: remove player, remove from tactics lineup/bench/special roles, add transfer fee
     if (isThisSellingClub && !isThisBuyingClub) {
@@ -749,13 +756,13 @@ export function executeAtomicTransfer(params: {
       });
     }
 
-    // 2. Buying Club: add player, subtract transfer fee, and integrate into starting lineup if AI club
+    // 2. Buying Club: add player, subtract transfer fee (only if > 0), and integrate into starting lineup if AI club
     if (isThisBuyingClub) {
       toClubName = t.name;
       const filteredExisting = (t.players || []).filter(p => p && p.id && p.id !== player.id);
       return syncClubLineupAfterTransfer({
         ...t,
-        budget: Math.max(0, (t.budget || 0) - transferFee),
+        budget: transferFee > 0 ? Math.max(0, (t.budget || 0) - transferFee) : (t.budget || 0),
         players: [...filteredExisting, transferredPlayer],
       }, transferredPlayer.id);
     }

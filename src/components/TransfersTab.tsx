@@ -26,7 +26,7 @@ import {
 } from 'lucide-react';
 import { useGame } from '../context/GameContext';
 import { NegotiationModal } from './NegotiationModal';
-import { GLOBAL_LEAGUES, getCustomLeagues } from '../data/leaguesData';
+import { GLOBAL_LEAGUES, getCustomLeagues, findClubInWorld } from '../data/leaguesData';
 import { calibrateRealisticPlayerRating } from '../utils/playerGenerator';
 
 export interface TransferRumor {
@@ -692,8 +692,10 @@ export const TransfersTab: React.FC<TransfersTabProps> = ({
   const wageUsagePercent = Math.min(100, Math.round((currentWageBill / Math.max(1, wageBudget)) * 100));
   const clubTransferBudget = userClub ? userClub.budget : (budget || 500000);
 
-  // Stable cache key: rebuild ONLY on mount, player bought/sold, or new season
+  // Stable cache key for local league + free agents
   const refreshKey = `${userClub?.id || ''}_${userClub?.players?.length || 0}_${season?.seasonNumber || 1}_${transferCounter}_${(teams || []).length}_${(transferMarket || []).length}`;
+  // Separate key for external world clubs so buying/selling does not reload the entire world from scratch
+  const worldLoadKey = `${userClub?.id || ''}_${season?.seasonNumber || 1}_${(teams || []).length}`;
 
   const leagueNameMap = useMemo(() => {
     const map: Record<string, string> = {};
@@ -801,9 +803,22 @@ export const TransfersTab: React.FC<TransfersTabProps> = ({
     setIsLoadingWorld(true);
 
     const localClubIdSet = new Set((teams || []).map(c => c && c.id).filter(Boolean));
-    const localPlayerIdSet = new Set(localDbPlayers.map(item => item.player?.id).filter(Boolean));
+    const seenIds = new Set<string>();
+    (teams || []).forEach(c => {
+      (c?.players || []).forEach(p => {
+        if (p?.id) seenIds.add(p.id);
+      });
+    });
+    if (userClub?.players) {
+      userClub.players.forEach(p => {
+        if (p?.id) seenIds.add(p.id);
+      });
+    }
+    localDbPlayers.forEach(item => {
+      if (item.player?.id) seenIds.add(item.player.id);
+    });
 
-    // Priority ordering of world clubs:
+    // Priority ordering of world clubs using findClubInWorld(clubId) with fallback to static club:
     // 1. teams (already in localDbPlayers)
     // 2. getCustomLeagues() (custom saved rosters)
     // 3. GLOBAL_LEAGUES (static world leagues)
@@ -816,10 +831,11 @@ export const TransfersTab: React.FC<TransfersTabProps> = ({
         (league?.teams || []).forEach(c => {
           if (c && c.id && !seenClubIds.has(c.id)) {
             seenClubIds.add(c.id);
+            const liveClub = findClubInWorld(c.id) || c;
             externalClubEntries.push({
-              club: c,
-              leagueId: league.id || c.leagueId || 'other',
-              leagueName: league.name || leagueNameMap[league.id] || 'دوري عالمي',
+              club: liveClub,
+              leagueId: liveClub.leagueId || league.id || c.leagueId || 'other',
+              leagueName: leagueNameMap[liveClub.leagueId || league.id] || league.name || 'دوري عالمي',
             });
           }
         });
@@ -830,10 +846,11 @@ export const TransfersTab: React.FC<TransfersTabProps> = ({
       (league?.teams || []).forEach(c => {
         if (c && c.id && !seenClubIds.has(c.id)) {
           seenClubIds.add(c.id);
+          const liveClub = findClubInWorld(c.id) || c;
           externalClubEntries.push({
-            club: c,
-            leagueId: league.id || c.leagueId || 'other',
-            leagueName: league.name || leagueNameMap[league.id] || 'دوري عالمي',
+            club: liveClub,
+            leagueId: liveClub.leagueId || league.id || c.leagueId || 'other',
+            leagueName: leagueNameMap[liveClub.leagueId || league.id] || league.name || 'دوري عالمي',
           });
         }
       });
@@ -841,12 +858,11 @@ export const TransfersTab: React.FC<TransfersTabProps> = ({
 
     // Flatten raw player entries for progressive chunking
     const rawQueue: { rawP: Player; club: Club; leagueId: string; leagueName: string }[] = [];
-    const seenPlayerIds = new Set<string>(localPlayerIdSet as Set<string>);
 
     externalClubEntries.forEach(({ club, leagueId, leagueName }) => {
       (club.players || []).forEach(rawP => {
-        if (rawP && rawP.id && !seenPlayerIds.has(rawP.id)) {
-          seenPlayerIds.add(rawP.id);
+        if (rawP && rawP.id && !seenIds.has(rawP.id)) {
+          seenIds.add(rawP.id);
           rawQueue.push({ rawP, club, leagueId, leagueName });
         }
       });
@@ -860,6 +876,7 @@ export const TransfersTab: React.FC<TransfersTabProps> = ({
 
     const CHUNK_SIZE = 500;
     let currentIndex = 0;
+    let chunkCount = 0;
     const accumulated: MarketPlayerItem[] = [];
 
     const processNextChunk = () => {
@@ -908,10 +925,15 @@ export const TransfersTab: React.FC<TransfersTabProps> = ({
       }
 
       currentIndex = end;
-      // Progressive streaming: publish chunk
-      setExternalDbPlayers([...accumulated]);
+      chunkCount++;
+      const isLastChunk = currentIndex >= rawQueue.length;
 
-      if (currentIndex < rawQueue.length) {
+      // Update state every 2 chunks (and on the final chunk) to reduce re-filtering and re-sorting
+      if (chunkCount % 2 === 0 || isLastChunk) {
+        setExternalDbPlayers([...accumulated]);
+      }
+
+      if (!isLastChunk) {
         if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
           (window as any).requestIdleCallback(processNextChunk);
         } else {
@@ -934,7 +956,26 @@ export const TransfersTab: React.FC<TransfersTabProps> = ({
       isCancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [refreshKey]);
+  }, [worldLoadKey]);
+
+  // Locally prune any player from externalDbPlayers who moved into userClub or local teams without reloading the world
+  useEffect(() => {
+    if (localDbPlayers.length === 0) return;
+    const localIds = new Set<string>();
+    localDbPlayers.forEach(item => {
+      if (item.player?.id) localIds.add(item.player.id);
+    });
+    if (userClub?.players) {
+      userClub.players.forEach(p => {
+        if (p?.id) localIds.add(p.id);
+      });
+    }
+    setExternalDbPlayers(prev => {
+      if (prev.length === 0) return prev;
+      const hasOverlap = prev.some(item => item.player?.id && localIds.has(item.player.id));
+      return hasOverlap ? prev.filter(item => !item.player?.id || !localIds.has(item.player.id)) : prev;
+    });
+  }, [transferCounter, localDbPlayers, userClub?.players]);
 
   // Combined full player database
   const allDbPlayers = useMemo<MarketPlayerItem[]>(() => {
@@ -1197,18 +1238,33 @@ export const TransfersTab: React.FC<TransfersTabProps> = ({
       try {
         if (!player) return;
         const item = dbItemByIdMap.get(player.id);
-        const fee =
-          customAskingPrice !== undefined && customAskingPrice > 0
+        const isFreeItem =
+          item?.statusType === 'free' ||
+          player.isFreeAgent === true ||
+          player.currentLeagueId === 'free_agents' ||
+          (!item?.club?.id && !player.currentClubId && !(player as any).clubId);
+        const fee = isFreeItem
+          ? 0
+          : customAskingPrice !== undefined && customAskingPrice > 0
             ? customAskingPrice
             : item?.askingPrice;
-        const playerWithClub: Player = {
-          ...player,
-          currentClubId: item?.club?.id || player.currentClubId,
-        };
+        const playerWithClub: Player = isFreeItem
+          ? {
+              ...player,
+              currentClubId: '',
+              currentLeagueId: 'free_agents',
+              isFreeAgent: true,
+            }
+          : {
+              ...player,
+              currentClubId: item?.club?.id || player.currentClubId,
+              isFreeAgent: false,
+            };
         const result = onBuyPlayer ? onBuyPlayer(playerWithClub) : buyPlayer(playerWithClub, fee);
         const msg = (result as any)?.message || 'تمت صفقة الشراء بنجاح!';
         const succ = (result as any)?.success !== false;
         if (succ) {
+          setExternalDbPlayers(prev => prev.filter(entry => entry.player?.id !== player.id));
           setTransferCounter(c => c + 1);
         }
         setNotification({ text: msg, type: succ ? 'success' : 'error' });
