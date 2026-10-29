@@ -114,6 +114,8 @@ import {
   resolveClubContinent,
   resolveClubContinentRegion,
   getTargetContinentForCompetition,
+  getContinentalCodesForContinent,
+  isClubEligibleForContinentalQualification,
   advanceContinentalTournament,
   recalculateContinentalGroupStandings,
   repairContinentalTournamentIntegrity,
@@ -1212,9 +1214,9 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       return;
     }
 
-    // 1. Enforce Strict Continent Isolation:
+    // 1. Enforce Strict Continent Isolation & Promoted/Lower-Tier Club Exclusion:
     // A) If managed club's continent doesn't match the active tournament's region, switch to the continent's primary tournament
-    // B) If any club inside the active tournament's groups belongs to a foreign continent, rebuild cleanly
+    // B) If any club inside the active tournament's groups belongs to a foreign continent OR is newly promoted / lower division, rebuild cleanly
     const currentCompRegion: 'africa' | 'asia' | 'europe' =
       africanChampionsLeague.competitionId === 'ucl' || africanChampionsLeague.competitionId === 'uel'
         ? 'europe'
@@ -1222,22 +1224,26 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         ? 'asia'
         : 'africa';
     const expectedTargetContinent = getTargetContinentForCompetition(africanChampionsLeague.competitionId);
-    const hasForeignClubInGroups =
+    const hasForeignOrIneligibleClubInGroups =
       Array.isArray(africanChampionsLeague.groups) &&
       africanChampionsLeague.groups.some(g =>
         Array.isArray(g.teamIds) &&
         g.teamIds.some(tid => {
           const c = (userClub && userClub.id === tid ? userClub : undefined) || teams.find(t => t.id === tid) || findClubInWorld(tid);
-          return c ? resolveClubContinent(c) !== expectedTargetContinent : false;
+          if (!c) return false;
+          return (
+            resolveClubContinent(c) !== expectedTargetContinent ||
+            !isClubEligibleForContinentalQualification(c)
+          );
         })
       );
 
-    if (currentCompRegion !== managedRegion || hasForeignClubInGroups) {
+    if (currentCompRegion !== managedRegion || hasForeignOrIneligibleClubInGroups) {
       const targetCodeToInit =
         currentCompRegion === managedRegion
           ? (africanChampionsLeague.competitionId as 'ccl' | 'ccc' | 'ucl' | 'uel' | 'acl' | 'acl2')
           : defaultCode;
-      const rebuildKey = `rebuild_${seasonNum}_${targetCodeToInit}_${managedRegion}_${userClub?.id || ''}`;
+      const rebuildKey = `rebuild_${seasonNum}_${targetCodeToInit}_${managedRegion}_${userClub?.id || ''}_${userClub?.isNewlyPromoted ? 'prom' : 'std'}`;
       if (continentalInitGuardRef.current.key === rebuildKey && continentalInitGuardRef.current.attempts >= 3) {
         return;
       }
@@ -1246,18 +1252,21 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         attempts: continentalInitGuardRef.current.key === rebuildKey ? continentalInitGuardRef.current.attempts + 1 : 1,
       };
 
-      if (!hasForeignClubInGroups) {
+      if (!hasForeignOrIneligibleClubInGroups) {
         const cachedRaw = localStorage.getItem(`${STORAGE_KEY}_contCache_s${seasonNum}_${targetCodeToInit}`);
         if (cachedRaw) {
           try {
             const parsed = JSON.parse(cachedRaw);
-            const hasForeignCached = Array.isArray(parsed?.groups) && parsed.groups.some((g: any) =>
+            const hasInvalidCached = Array.isArray(parsed?.groups) && parsed.groups.some((g: any) =>
               Array.isArray(g.teamIds) && g.teamIds.some((tid: string) => {
-                const c = teams.find(t => t.id === tid) || findClubInWorld(tid);
-                return c ? resolveClubContinent(c) !== getTargetContinentForCompetition(targetCodeToInit) : false;
+                const c = (userClub && userClub.id === tid ? userClub : undefined) || teams.find(t => t.id === tid) || findClubInWorld(tid);
+                return c
+                  ? resolveClubContinent(c) !== getTargetContinentForCompetition(targetCodeToInit) ||
+                      !isClubEligibleForContinentalQualification(c)
+                  : false;
               })
             );
-            if (!hasForeignCached) {
+            if (!hasInvalidCached) {
               setAfricanChampionsLeague(parsed);
               return;
             }
@@ -1268,13 +1277,29 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           localStorage.removeItem(`${STORAGE_KEY}_contCache_s${seasonNum}_${targetCodeToInit}`);
         } catch {}
       }
+      const eligibleUserForRebuild =
+        userClub && isClubEligibleForContinentalQualification(userClub) && activeLeague?.tier === 1
+          ? userClub
+          : undefined;
       const initializedCont = initContinentalTournamentByCode(
         targetCodeToInit,
         seasonNum,
         teams,
-        userClub || undefined
+        eligibleUserForRebuild
       );
       setAfricanChampionsLeague(initializedCont);
+      // If userClub was removed because it was newly promoted or lower-tier, strip its continental fixtures from master schedule
+      if (userClub && !eligibleUserForRebuild) {
+        setFixtures(prev =>
+          (Array.isArray(prev) ? prev : []).filter(
+            f =>
+              !(
+                (f.competitionType === 'CONTINENTAL_CUP' || f.competitionType === 'continental') &&
+                (f.homeTeamId === userClub.id || f.awayTeamId === userClub.id)
+              )
+          )
+        );
+      }
       return;
     }
 
@@ -8348,40 +8373,121 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       setTransferMarket(updatedMarketAfterWindow);
       setTransferHistory(nextTransferHistory);
 
-      // 2. Dynamic Continental Qualification & Group Re-seeding/Shuffle based on finished season standings & Cup Winner
-      const nextUserClubObj = finalNextTeams.find(t => t.id === targetUserClubId) || finalNextTeams.find(t => t.isUserClub) || finalNextTeams[0];
+      // 2. Dynamic Continental Qualification & Group Re-seeding/Shuffle based strictly on finished Tier 1 season standings & Cup Winner
+      // STRICT RULE: Promoted clubs (`isNewlyPromoted === true`) or clubs from Tier > 1 NEVER qualify for continental tournaments!
+      const nextUserClubObj =
+        finalNextTeams.find(t => t.id === targetUserClubId) ||
+        finalNextTeams.find(t => t.isUserClub) ||
+        finalNextTeams[0];
+      const completedLeagueTier = activeLeague?.tier || season?.divisionTier || 1;
+
       const quals = SeasonTransitionManager.evaluateContinentalQualifications(
         standings,
         cupTournament,
         result.nextActiveLeague.country || nextUserClubObj?.country || 'مصر',
         nextUserClubObj,
-        result.nextActiveLeague
+        result.nextActiveLeague,
+        completedLeagueTier
       );
 
-      const cclClubs = finalNextTeams.filter(t => quals.cclQualifiedClubIds.includes(t.id));
-      const cccClubs = finalNextTeams.filter(t => quals.cccQualifiedClubIds.includes(t.id));
+      const resolveQualifiedClubObjects = (clubIds: string[]): Club[] => {
+        return clubIds
+          .map(
+            id =>
+              finalNextTeams.find(t => t.id === id) ||
+              teams.find(t => t.id === id) ||
+              findClubInWorld(id)
+          )
+          .filter((c): c is Club => Boolean(c && isClubEligibleForContinentalQualification(c)));
+      };
+
+      const cclClubs = resolveQualifiedClubObjects(quals.cclQualifiedClubIds);
+      const cccClubs = resolveQualifiedClubObjects(quals.cccQualifiedClubIds);
+
+      const isUserEligibleForCont =
+        Boolean(nextUserClubObj) &&
+        result.nextActiveLeague.tier === 1 &&
+        isClubEligibleForContinentalQualification(nextUserClubObj);
+      const userQualifiedPrimary = Boolean(
+        isUserEligibleForCont &&
+          nextUserClubObj &&
+          quals.cclQualifiedClubIds.includes(nextUserClubObj.id)
+      );
+      const userQualifiedSecondary = Boolean(
+        isUserEligibleForCont &&
+          nextUserClubObj &&
+          quals.cccQualifiedClubIds.includes(nextUserClubObj.id) &&
+          !userQualifiedPrimary
+      );
+
+      const primaryExcludedIds = new Set<string>();
+      if (nextUserClubObj && !userQualifiedPrimary) {
+        primaryExcludedIds.add(nextUserClubObj.id);
+      }
 
       const nextPrimaryCont = initContinentalTournamentByCode(
         quals.primaryContinentalCode,
         result.nextSeason.seasonNumber,
         finalNextTeams,
-        nextUserClubObj || undefined,
-        cclClubs
+        userQualifiedPrimary ? nextUserClubObj : undefined,
+        cclClubs,
+        primaryExcludedIds
       );
-      const primaryParticipantIds = new Set<string>(nextPrimaryCont.groups.flatMap(g => g.teamIds));
+
+      const primaryParticipantIds = new Set<string>(
+        nextPrimaryCont.groups.flatMap(g => g.teamIds)
+      );
+      if (nextUserClubObj && !userQualifiedSecondary) {
+        primaryParticipantIds.add(nextUserClubObj.id);
+      }
+
       const nextSecondaryCont = initContinentalTournamentByCode(
         quals.secondaryContinentalCode,
         result.nextSeason.seasonNumber,
         finalNextTeams,
-        nextUserClubObj || undefined,
+        userQualifiedSecondary ? nextUserClubObj : undefined,
         cccClubs,
         primaryParticipantIds
       );
 
-      const userInSecondary = Boolean(nextUserClubObj && nextSecondaryCont.groups.some(g => g.teamIds.includes(nextUserClubObj.id)));
+      const userInSecondary = Boolean(
+        userQualifiedSecondary &&
+          nextUserClubObj &&
+          nextSecondaryCont.groups.some(g => g.teamIds.includes(nextUserClubObj.id))
+      );
       const activeNextContinental = userInSecondary ? nextSecondaryCont : nextPrimaryCont;
 
+      // Reset repair/init guards and save fresh continental states to IndexedDB & localStorage
+      cupRepairGuardRef.current = {
+        signature: '',
+        cupId: '',
+        seasonNum: result.nextSeason.seasonNumber,
+        playedMatchesCount: 0,
+        consecutiveRepairsCount: 0,
+        warned: false,
+      };
+      continentalRepairGuardRef.current = {
+        signature: '',
+        compId: activeNextContinental.competitionId,
+        seasonNum: result.nextSeason.seasonNumber,
+        round: 1,
+        playedMatchesCount: 0,
+        consecutiveUpdatesCount: 0,
+      };
+      continentalInitGuardRef.current = { key: '', attempts: 0 };
+      continentalOverlapGuardRef.current = '';
+
       try {
+        saveContinentalCacheToDb(
+          result.nextSeason.seasonNumber,
+          quals.primaryContinentalCode,
+          nextPrimaryCont
+        );
+        saveContinentalCacheToDb(
+          result.nextSeason.seasonNumber,
+          quals.secondaryContinentalCode,
+          nextSecondaryCont
+        );
         localStorage.setItem(
           `${STORAGE_KEY}_contCache_s${result.nextSeason.seasonNumber}_${quals.primaryContinentalCode}`,
           JSON.stringify(nextPrimaryCont)
@@ -8390,48 +8496,19 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           `${STORAGE_KEY}_contCache_s${result.nextSeason.seasonNumber}_${quals.secondaryContinentalCode}`,
           JSON.stringify(nextSecondaryCont)
         );
-        localStorage.setItem(
-          `${STORAGE_KEY}_africanChampionsLeague`,
-          JSON.stringify(activeNextContinental)
-        );
       } catch (_) {}
 
       setAfricanChampionsLeague(activeNextContinental);
 
-      // Merge user's new continental group fixtures into the season's fixture list
-      const continentalGroupDates: Record<number, string> = {
-        1: `${2025 + result.nextSeason.seasonNumber}-09-18`,
-        2: `${2025 + result.nextSeason.seasonNumber}-10-02`,
-        3: `${2025 + result.nextSeason.seasonNumber}-10-23`,
-        4: `${2025 + result.nextSeason.seasonNumber}-11-06`,
-        5: `${2025 + result.nextSeason.seasonNumber}-11-27`,
-        6: `${2025 + result.nextSeason.seasonNumber}-12-11`,
-      };
-      const userContMatches = (activeNextContinental.matches || []).filter(
-        m => nextUserClubObj && (m.homeTeamId === nextUserClubObj.id || m.awayTeamId === nextUserClubObj.id)
+      // Build unified Master Schedule (League + Domestic Cup + Continental Tournament) cleanly from scratch
+      const nextFixturesWithContinental = generateMasterSeasonAgenda(
+        result.nextSeason.seasonNumber,
+        result.nextActiveLeague,
+        finalNextTeams,
+        result.nextCup,
+        activeNextContinental,
+        nextUserClubObj
       );
-      const nonContFixtures = result.nextFixtures.filter(
-        f => f.competitionType !== 'continental' && f.competitionType !== 'CONTINENTAL_CUP'
-      );
-      const mappedContFixtures: Fixture[] = userContMatches.map(cm => ({
-        id: cm.id,
-        round: cm.roundTrigger || 4,
-        homeTeamId: cm.homeTeamId,
-        awayTeamId: cm.awayTeamId,
-        homeScore: cm.homeScore,
-        awayScore: cm.awayScore,
-        isPlayed: cm.isPlayed,
-        events: cm.events || [],
-        date: continentalGroupDates[cm.matchday || 1] || `${2025 + result.nextSeason.seasonNumber}-09-18`,
-        competitionType: 'continental',
-        tournamentId: activeNextContinental.competitionId,
-        stageName: `${activeNextContinental.name} - الجولة ${cm.matchday || 1}`,
-        tournamentBadge: activeNextContinental.trophyName || activeNextContinental.name,
-        stage: cm.stage,
-        groupId: cm.groupId,
-        matchday: cm.matchday,
-      }));
-      const nextFixturesWithContinental = [...nonContFixtures, ...mappedContFixtures];
 
       // 3. Archive finished season history locally
       let updatedSeasonArchives: any[] = [];
@@ -8888,23 +8965,113 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
       const restoredUserClub = restoredTeams.find(t => t.isUserClub || t.id === userClub.id) || restoredTeams[0];
 
-      // 4. Fresh unplayed fixtures for the current season and league
+      // 4. ATOMIC MULTI-TOURNAMENT RESET (League + Domestic Cup + Continental Tournaments + Master Schedule)
+      // 4A. Reset League Standings (0 played, 0 points, 0 goals, empty form for all teams)
+      const freshStandings = generateInitialStandings(restoredTeams);
+
+      // 4B. Reset Domestic Cup from scratch (purge Quarter/Semi/Final stages, redraw Round of 64 / Round of 32)
+      const totalLeagueRoundsCount = Math.max(18, (restoredTeams.length - 1) * 2);
+      const freshCup = initNationalCupTournament(
+        currentSeasonNum,
+        activeLeague.country || restoredUserClub.country || 'مصر',
+        restoredTeams,
+        restoredUserClub,
+        totalLeagueRoundsCount
+      );
+
+      // 4C. Reset Continental Tournaments from scratch (purge old groups & knockouts, redraw groups strictly for eligible Tier 1 qualifiers)
+      const managedContinent = resolveClubContinent(restoredUserClub, activeLeague);
+      const contCodes = getContinentalCodesForContinent(managedContinent);
+      const isUserEligibleForContOnRestart =
+        activeLeague.tier === 1 && isClubEligibleForContinentalQualification(restoredUserClub);
+
+      let restartPrimaryQualClubs: Club[] | undefined = undefined;
+      let restartSecondaryQualClubs: Club[] | undefined = undefined;
+      let userQualPrimaryOnRestart = false;
+      let userQualSecondaryOnRestart = false;
+
+      if (currentSeasonNum > 1) {
+        try {
+          const rawArchives = localStorage.getItem(`${STORAGE_KEY}_season_archives`);
+          const parsedArchives = rawArchives ? JSON.parse(rawArchives) : [];
+          const prevArchive = Array.isArray(parsedArchives)
+            ? parsedArchives.find((a: any) => a && a.seasonNumber === currentSeasonNum - 1)
+            : null;
+          if (prevArchive) {
+            const pIds: string[] = Array.isArray(prevArchive.qualifiedPrimaryClubIds)
+              ? prevArchive.qualifiedPrimaryClubIds
+              : [];
+            const sIds: string[] = Array.isArray(prevArchive.qualifiedSecondaryClubIds)
+              ? prevArchive.qualifiedSecondaryClubIds
+              : [];
+            restartPrimaryQualClubs = pIds
+              .map(id => restoredTeams.find(t => t.id === id) || findClubInWorld(id))
+              .filter((c): c is Club => Boolean(c && isClubEligibleForContinentalQualification(c)));
+            restartSecondaryQualClubs = sIds
+              .map(id => restoredTeams.find(t => t.id === id) || findClubInWorld(id))
+              .filter((c): c is Club => Boolean(c && isClubEligibleForContinentalQualification(c)));
+            userQualPrimaryOnRestart = Boolean(
+              isUserEligibleForContOnRestart && pIds.includes(restoredUserClub.id)
+            );
+            userQualSecondaryOnRestart = Boolean(
+              isUserEligibleForContOnRestart &&
+                sIds.includes(restoredUserClub.id) &&
+                !userQualPrimaryOnRestart
+            );
+          }
+        } catch {}
+      } else {
+        userQualPrimaryOnRestart = isUserEligibleForContOnRestart;
+      }
+
+      const primaryRestartExcluded = new Set<string>();
+      if (!isUserEligibleForContOnRestart || (currentSeasonNum > 1 && !userQualPrimaryOnRestart)) {
+        primaryRestartExcluded.add(restoredUserClub.id);
+      }
+
+      const freshPrimaryCont = initContinentalTournamentByCode(
+        contCodes.primaryCode,
+        currentSeasonNum,
+        restoredTeams,
+        userQualPrimaryOnRestart ? restoredUserClub : undefined,
+        restartPrimaryQualClubs,
+        primaryRestartExcluded
+      );
+
+      const secondaryRestartExcluded = new Set<string>(
+        freshPrimaryCont.groups.flatMap(g => g.teamIds)
+      );
+      if (!isUserEligibleForContOnRestart || !userQualSecondaryOnRestart) {
+        secondaryRestartExcluded.add(restoredUserClub.id);
+      }
+
+      const freshSecondaryCont = initContinentalTournamentByCode(
+        contCodes.secondaryCode,
+        currentSeasonNum,
+        restoredTeams,
+        userQualSecondaryOnRestart ? restoredUserClub : undefined,
+        restartSecondaryQualClubs,
+        secondaryRestartExcluded
+      );
+
+      const activeFreshContinental = userQualSecondaryOnRestart
+        ? freshSecondaryCont
+        : freshPrimaryCont;
+
+      // 4D. Purge old fixtures queue and rebuild unified Master Schedule (League + Domestic Cup + Continental)
       const freshFixtures = generateMasterSeasonAgenda(
         currentSeasonNum,
         activeLeague,
         restoredTeams,
-        undefined,
-        undefined,
+        freshCup,
+        activeFreshContinental,
         restoredUserClub
       );
 
-      // 5. Fresh pristine standings (0 played, 0 points for all teams)
-      const freshStandings = generateInitialStandings(restoredTeams);
-
-      // 6. Reset Calendar Date to Season Start
+      // 5. Reset Calendar Date to Season Start
       const initialSeasonDate = getInitialSeasonDate(currentSeasonNum);
 
-      // 7. Reset Economy for the Season
+      // 6. Reset Economy for the Season
       const resetEconomy: ClubEconomySummary = {
         clubBudget: restoredBudget,
         transferSpendingTotal: 0,
@@ -8916,7 +9083,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         currentSeasonNetProfit: 0,
       };
 
-      // 8. Reset Board System
+      // 7. Reset Board System
       const freshBoard = generateInitialBoardSystem(
         restoredUserClub,
         activeLeague.tier,
@@ -8925,58 +9092,121 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         restoredUserClub.isNewlyPromoted
       );
 
-      // 9. Clean up transfer history entries for this season
+      // 8. Clean up transfer history entries for this season
       const remainingTransferHistory = (transferHistory || []).filter(t => t.seasonNumber !== currentSeasonNum);
 
-      // 10. Clean up current season match/transfer inbox messages and prepend restart announcement
+      // 9. Clean up current season match/transfer inbox messages and prepend restart announcement
+      const userParticipatesInFreshCont = activeFreshContinental.groups.some(g =>
+        g.teamIds.includes(restoredUserClub.id)
+      );
+      const activeCompetitionsSummary = userParticipatesInFreshCont
+        ? `${activeLeague.name} + ${freshCup.name} + ${activeFreshContinental.name}`
+        : `${activeLeague.name} + ${freshCup.name} (الدوري والكأس المحلي فقط)`;
+
       const announcementMsg: InboxMessage = {
         id: `msg_season_restart_${currentSeasonNum}_${Date.now()}`,
-        title: `🔄 إعادة انطلاق الموسم ${currentSeasonNum}: العودة للجولة الأولى!`,
+        title: `🔄 إعادة انطلاق الموسم ${currentSeasonNum}: تصفير شامل لجميع البطولات والعودة للجولة الأولى!`,
         sender: 'مجلس إدارة النادي والرابطة',
         date: 'الجولة الأولى',
         type: 'board',
         read: false,
-        content: `بناءً على طلبك، تم تصفير كافة نتائج الجولات السابقة والتعاقدات وإيرادات المباريات وإعادة بدء الموسم ${currentSeasonNum} رسمياً من الجولة الأولى.\n\n` +
+        content:
+          `بناءً على طلبك، تم إجراء تصفير ذري وشامل (Atomic Reset) لجميع البطولات (الدوري المحلي، الكأس المحلي، والبطولات القارية) والتعاقدات وإيرادات المباريات وإعادة بدء الموسم ${currentSeasonNum} رسمياً من الجولة الأولى.\n\n` +
           `• النادي: ${restoredUserClub.name}\n` +
-          `• المسابقة: ${activeLeague.name}\n` +
+          `• المسابقات النشطة للنادي: ${activeCompetitionsSummary}\n` +
           `• الميزانية المستردة: ${restoredBudget.toLocaleString()} ج.م\n` +
           `• اللياقة البدنية: 100% لجميع اللاعبين دون إصابات أو إيقافات.\n` +
-          `جدول المواجهات جاهز بالكامل ونتمنى لك كل التوفيق والانتصارات! 🚀`,
+          `تم سحب قرعة جديدة للكأس والمجموعات القارية وإعداد الجدول الزمني الموحد بالكامل! 🚀`,
       };
 
       const filteredInbox = (inbox || []).filter(m => {
         if (!m || !m.id) return false;
-        if (m.id.startsWith('msg_match_rev_') || m.id.startsWith('msg_trans_') || m.id.startsWith('msg_cup_') || m.id.startsWith('msg_batch_sim_')) {
+        if (
+          m.id.startsWith('msg_match_rev_') ||
+          m.id.startsWith('msg_trans_') ||
+          m.id.startsWith('msg_cup_') ||
+          m.id.startsWith('msg_cont_') ||
+          m.id.startsWith('msg_batch_sim_')
+        ) {
           return false;
         }
         return true;
       });
       const newInbox = [announcementMsg, ...filteredInbox];
 
-      // Clear transient live matches and temporary states
+      // 10. Reset all repair/init guard refs and clear transient storage caches
+      cupRepairGuardRef.current = {
+        signature: '',
+        cupId: freshCup.id,
+        seasonNum: currentSeasonNum,
+        playedMatchesCount: 0,
+        consecutiveRepairsCount: 0,
+        warned: false,
+      };
+      continentalRepairGuardRef.current = {
+        signature: '',
+        compId: activeFreshContinental.competitionId,
+        seasonNum: currentSeasonNum,
+        round: 1,
+        playedMatchesCount: 0,
+        consecutiveUpdatesCount: 0,
+      };
+      continentalInitGuardRef.current = { key: '', attempts: 0 };
+      continentalOverlapGuardRef.current = '';
+
       setLiveMatch(null);
+      clearActiveLiveMatchFromDb().catch(() => {});
+
       try {
         localStorage.removeItem(`${STORAGE_KEY}_active_live_match`);
-        localStorage.removeItem(`${STORAGE_KEY}_cupTournament`);
         localStorage.removeItem(`${STORAGE_KEY}_seasonEndSummary`);
+        localStorage.removeItem(`${STORAGE_KEY}_africanChampionsLeague`);
+        const allCodes: Array<'ccl' | 'ccc' | 'ucl' | 'uel' | 'acl' | 'acl2'> = [
+          'ccl',
+          'ccc',
+          'ucl',
+          'uel',
+          'acl',
+          'acl2',
+        ];
+        allCodes.forEach(code => {
+          localStorage.removeItem(`${STORAGE_KEY}_contCache_s${currentSeasonNum}_${code}`);
+        });
+        localStorage.setItem(
+          `${STORAGE_KEY}_contCache_s${currentSeasonNum}_${contCodes.primaryCode}`,
+          JSON.stringify(freshPrimaryCont)
+        );
+        localStorage.setItem(
+          `${STORAGE_KEY}_contCache_s${currentSeasonNum}_${contCodes.secondaryCode}`,
+          JSON.stringify(freshSecondaryCont)
+        );
+        saveContinentalCacheToDb(currentSeasonNum, contCodes.primaryCode, freshPrimaryCont);
+        saveContinentalCacheToDb(currentSeasonNum, contCodes.secondaryCode, freshSecondaryCont);
       } catch {}
 
-      const totalRoundsCount = freshFixtures.length > 0
-        ? Math.max(...freshFixtures.map(f => f.round || 0))
-        : (restoredTeams.length - 1) * 2;
+      const leagueFixturesOnly = freshFixtures.filter(
+        f => f.competitionType === 'LEAGUE' || f.competitionType === 'league'
+      );
+      const totalRoundsCount =
+        leagueFixturesOnly.length > 0
+          ? Math.max(...leagueFixturesOnly.map(f => f.round || 0))
+          : (restoredTeams.length - 1) * 2;
 
-      // Commit all restored states synchronously
-      setTeams(restoredTeams);
-      setStandings(freshStandings);
-      setFixtures(freshFixtures);
-      setCurrentRound(1);
-      setSeason(prev => ({
-        ...prev,
+      const updatedSeasonObj: SeasonInfo = {
+        ...season,
         currentRound: 1,
         totalRounds: totalRoundsCount,
         status: 'active',
-        isCompleted: false,
-      }));
+      };
+
+      // Commit all restored states synchronously before UI re-render
+      setTeams(restoredTeams);
+      setStandings(freshStandings);
+      setCupTournament(freshCup);
+      setAfricanChampionsLeague(activeFreshContinental);
+      setFixtures(freshFixtures);
+      setCurrentRound(1);
+      setSeason(updatedSeasonObj);
       setCalendarDate(initialSeasonDate);
       setClubEconomy(resetEconomy);
       setBoardSystem(freshBoard);
@@ -8985,25 +9215,19 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       setManager(restoredManager);
       setActiveNegotiations([]);
       setIncomingBids([]);
-      setCupTournament(null);
       setSeasonEndSummary(null);
+      setDayAdvanceSummary(null);
       setJobOffers([]);
       setShowSeasonTransitionModal(false);
       setInbox(newInbox);
 
-      // Persist state to local repository
+      // Persist state to local repository & IndexedDB simultaneously
       try {
         gameStateRepository.saveLocalGameState({
           schemaVersion: 2,
           saveVersion: 1,
           lastLocalSaveAt: Date.now(),
-          season: {
-            ...season,
-            currentRound: 1,
-            totalRounds: totalRoundsCount,
-            status: 'active',
-            isCompleted: false,
-          },
+          season: updatedSeasonObj,
           activeLeague,
           teams: restoredTeams,
           standings: freshStandings,
@@ -9013,7 +9237,8 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           transferMarket: restoredMarket,
           incomingBids: [],
           inbox: newInbox,
-          cupTournament: null,
+          cupTournament: freshCup,
+          africanChampionsLeague: activeFreshContinental,
           jobOffers: [],
           seasonEndSummary: null,
           transferHistory: remainingTransferHistory,
@@ -9028,25 +9253,13 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           deletedMessageIds,
         } as any);
 
-        localStorage.setItem(`${STORAGE_KEY}_teams`, JSON.stringify(restoredTeams));
-        localStorage.setItem(`${STORAGE_KEY}_standings`, JSON.stringify(freshStandings));
-        localStorage.setItem(`${STORAGE_KEY}_fixtures`, JSON.stringify(freshFixtures));
-        localStorage.setItem(`${STORAGE_KEY}_currentRound`, '1');
-        localStorage.setItem(`${STORAGE_KEY}_season`, JSON.stringify({
-          ...season,
-          currentRound: 1,
-          totalRounds: totalRoundsCount,
-          status: 'active',
-          isCompleted: false,
-        }));
-        localStorage.setItem(`${STORAGE_KEY}_calendarDate`, JSON.stringify(initialSeasonDate));
-        localStorage.setItem(`${STORAGE_KEY}_clubEconomy`, JSON.stringify(resetEconomy));
-        localStorage.setItem(`${STORAGE_KEY}_manager`, JSON.stringify(restoredManager));
-        localStorage.setItem(`${STORAGE_KEY}_transferMarket`, JSON.stringify(restoredMarket));
-        localStorage.setItem(`${STORAGE_KEY}_transferHistory`, JSON.stringify(remainingTransferHistory));
-        localStorage.setItem(`${STORAGE_KEY}_inbox`, JSON.stringify(newInbox));
-        localStorage.setItem(`${STORAGE_KEY}_activeNegotiations`, '[]');
-        localStorage.setItem(`${STORAGE_KEY}_incomingBids`, '[]');
+        safeLocalStorageSet(`${STORAGE_KEY}_currentRound`, '1');
+        safeLocalStorageSet(`${STORAGE_KEY}_season`, JSON.stringify(updatedSeasonObj));
+        safeLocalStorageSet(`${STORAGE_KEY}_calendarDate`, JSON.stringify(initialSeasonDate));
+        safeLocalStorageSet(`${STORAGE_KEY}_clubEconomy`, JSON.stringify(resetEconomy));
+        safeLocalStorageSet(`${STORAGE_KEY}_manager`, JSON.stringify(restoredManager));
+        safeLocalStorageSet(`${STORAGE_KEY}_activeNegotiations`, '[]');
+        safeLocalStorageSet(`${STORAGE_KEY}_incomingBids`, '[]');
       } catch (err) {
         console.warn('[RestartSeason] Error saving game state on restart:', err);
       }
@@ -9060,7 +9273,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
       return {
         success: true,
-        message: `تمت إعادة بداية الموسم ${currentSeasonNum} بنجاح! تم تصفير النتائج والتعاقدات والعودة للجولة الأولى 🚀`,
+        message: `تمت إعادة بداية الموسم ${currentSeasonNum} بنجاح! تم تصفير الدوري والكأس والبطولات القارية والعودة للجولة الأولى 🚀`,
       };
     } catch (error: any) {
       console.error('[RestartSeason] Failed to restart current season:', error);

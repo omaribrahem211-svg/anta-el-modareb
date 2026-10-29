@@ -2110,14 +2110,16 @@ export function processNewSeasonAdvancement(
         nextUserClub = promotedClubData;
       }
     } else {
-      // User stayed in current league
+      // User stayed in current league: completed a full season in this tier, so clear isNewlyPromoted
       const updatedUserClub: Club = {
-        ...(userClub || {} as Club),
+        ...(userClub || ({} as Club)),
         division: targetTier,
         country: currentCountry,
         leagueId: nextActiveLeague.id,
         isUserClub: !acceptedJobOffer,
         budget: summary.finalBudget,
+        isNewlyPromoted: false,
+        previousDivision: oldDivisionTier,
       };
 
       if (!acceptedJobOffer) {
