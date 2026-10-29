@@ -1188,11 +1188,73 @@ export function recalculateContinentalGroupStandings(
     }
   }
 
+  // Check if anything actually changed compared to the input tournament to preserve reference stability
+  const origMatches = tournament.matches || [];
+  let matchesChanged = syncedMatches.length !== origMatches.length;
+  if (!matchesChanged) {
+    for (let i = 0; i < syncedMatches.length; i++) {
+      const prevM = origMatches[i];
+      const nextM = syncedMatches[i];
+      if (
+        !prevM ||
+        prevM.id !== nextM.id ||
+        Boolean(prevM.isPlayed) !== Boolean(nextM.isPlayed) ||
+        prevM.homeScore !== nextM.homeScore ||
+        prevM.awayScore !== nextM.awayScore ||
+        prevM.homePenalties !== nextM.homePenalties ||
+        prevM.awayPenalties !== nextM.awayPenalties ||
+        prevM.winnerTeamId !== nextM.winnerTeamId ||
+        prevM.homeTeamId !== nextM.homeTeamId ||
+        prevM.awayTeamId !== nextM.awayTeamId
+      ) {
+        matchesChanged = true;
+        break;
+      }
+    }
+  }
+
+  const origGroups = tournament.groups || [];
+  let groupsChanged = updatedGroups.length !== origGroups.length;
+  if (!groupsChanged) {
+    for (let gIdx = 0; gIdx < updatedGroups.length; gIdx++) {
+      const prevG = origGroups[gIdx];
+      const nextG = updatedGroups[gIdx];
+      if (!prevG || (prevG.standings || []).length !== nextG.standings.length) {
+        groupsChanged = true;
+        break;
+      }
+      for (let sIdx = 0; sIdx < nextG.standings.length; sIdx++) {
+        const prevS = prevG.standings[sIdx];
+        const nextS = nextG.standings[sIdx];
+        if (
+          !prevS ||
+          prevS.teamId !== nextS.teamId ||
+          prevS.played !== nextS.played ||
+          prevS.won !== nextS.won ||
+          prevS.drawn !== nextS.drawn ||
+          prevS.lost !== nextS.lost ||
+          prevS.goalsFor !== nextS.goalsFor ||
+          prevS.goalsAgainst !== nextS.goalsAgainst ||
+          prevS.goalDifference !== nextS.goalDifference ||
+          prevS.points !== nextS.points
+        ) {
+          groupsChanged = true;
+          break;
+        }
+      }
+      if (groupsChanged) break;
+    }
+  }
+
+  if (!matchesChanged && !groupsChanged && nextStage === tournament.currentStage) {
+    return tournament;
+  }
+
   return {
     ...tournament,
     currentStage: nextStage,
-    groups: updatedGroups,
-    matches: syncedMatches,
+    groups: groupsChanged ? updatedGroups : tournament.groups,
+    matches: matchesChanged ? syncedMatches : tournament.matches,
   };
 }
 
@@ -1215,6 +1277,7 @@ export function advanceContinentalTournament(
   // First sync any already-played fixtures and recalculate current standings immutably
   let baseTournament = recalculateContinentalGroupStandings(tournament, options?.externalFixtures);
   let matches = baseTournament.matches.map(m => ({ ...m }));
+  let didMutateKnockout = false;
   let userMatchThisRound: ContinentalMatch | undefined = undefined;
   let newsMessage: string | undefined = undefined;
 
@@ -1283,6 +1346,7 @@ export function advanceContinentalTournament(
 
     // C. User has played their match for this matchday (or isn't in tournament):
     // Simulate ONLY the remaining unplayed AI matches of THIS active matchday (leave future matchdays untouched!)
+    let groupSimulatedCount = 0;
     matches = matches.map(m => {
       if (m.stage !== 'group' || m.isPlayed || (m.matchday || 1) !== currentMatchday) {
         return m;
@@ -1294,6 +1358,7 @@ export function advanceContinentalTournament(
         return m;
       }
 
+      groupSimulatedCount += 1;
       const homeTeam = findClub(m.homeTeamId);
       const awayTeam = findClub(m.awayTeamId);
       const res = simulateMatch(homeTeam, awayTeam, homeTeam.tactics, awayTeam.tactics);
@@ -1313,6 +1378,10 @@ export function advanceContinentalTournament(
         stats: res.stats,
       };
     });
+
+    if (groupSimulatedCount === 0) {
+      return { updatedTournament: baseTournament, userMatchThisRound };
+    }
 
     newsMessage = `انتهت مباريات الجولة ${currentMatchday} من دور المجموعات لـ ${tournament.name}!`;
 
@@ -1380,6 +1449,7 @@ export function advanceContinentalTournament(
         );
         if (isUserInvolved && !shouldSimUser) return m;
 
+        didMutateKnockout = true;
         const homeTeam = findClub(m.homeTeamId);
         const awayTeam = findClub(m.awayTeamId);
         const res = simulateKnockoutMatch(homeTeam, awayTeam);
@@ -1401,6 +1471,7 @@ export function advanceContinentalTournament(
     const allQFs = matches.filter(m => m.stage === 'quarter');
     const hasSFs = matches.some(m => m.stage === 'semi');
     if (allQFs.length >= 4 && allQFs.every(m => m.isPlayed) && !hasSFs) {
+      didMutateKnockout = true;
       const sfWinners = allQFs.map(m => m.winnerTeamId || m.homeTeamId);
       updatedTournament.currentStage = 'semi';
       const sfTrigger = Math.max(22, currentRound + 2);
@@ -1447,7 +1518,7 @@ export function advanceContinentalTournament(
         userMatchThisRound = userSfMatch;
       }
       return {
-        updatedTournament: { ...baseTournament, matches },
+        updatedTournament: didMutateKnockout ? { ...updatedTournament, matches } : baseTournament,
         userMatchThisRound,
       };
     }
@@ -1460,6 +1531,7 @@ export function advanceContinentalTournament(
         );
         if (isUserInvolved && !shouldSimUser) return m;
 
+        didMutateKnockout = true;
         const homeTeam = findClub(m.homeTeamId);
         const awayTeam = findClub(m.awayTeamId);
         const res = simulateKnockoutMatch(homeTeam, awayTeam);
@@ -1481,6 +1553,7 @@ export function advanceContinentalTournament(
     const allSFs = matches.filter(m => m.stage === 'semi');
     const hasFinal = matches.some(m => m.stage === 'final');
     if (allSFs.length >= 2 && allSFs.every(m => m.isPlayed) && !hasFinal) {
+      didMutateKnockout = true;
       const finalWinners = allSFs.map(m => m.winnerTeamId || m.homeTeamId);
       updatedTournament.currentStage = 'final';
       const finalTrigger = Math.max(28, currentRound + 3);
@@ -1508,7 +1581,9 @@ export function advanceContinentalTournament(
     if (!existingFinalMatch.isPlayed) {
       const finalTrigger = existingFinalMatch.roundTrigger || 28;
       if (currentRound < finalTrigger) {
-        return { updatedTournament: { ...baseTournament, matches } };
+        return {
+          updatedTournament: didMutateKnockout ? { ...updatedTournament, matches } : baseTournament,
+        };
       }
 
       const isUserInvolved = Boolean(
@@ -1517,7 +1592,7 @@ export function advanceContinentalTournament(
 
       if (isUserInvolved && !shouldSimUser) {
         return {
-          updatedTournament: { ...baseTournament, matches },
+          updatedTournament: didMutateKnockout ? { ...updatedTournament, matches } : baseTournament,
           userMatchThisRound: existingFinalMatch,
         };
       }
@@ -1574,6 +1649,19 @@ export function advanceContinentalTournament(
           ? existingFinalMatch.awayTeamId
           : existingFinalMatch.homeTeamId;
 
+      if (
+        !didMutateKnockout &&
+        baseTournament.isCompleted &&
+        baseTournament.currentStage === 'completed' &&
+        baseTournament.winnerClubId === resolvedWinner &&
+        baseTournament.runnerUpClubId === runnerUpId
+      ) {
+        return {
+          updatedTournament: baseTournament,
+          userMatchThisRound,
+        };
+      }
+
       return {
         updatedTournament: {
           ...updatedTournament,
@@ -1587,6 +1675,14 @@ export function advanceContinentalTournament(
         newsMessage,
       };
     }
+  }
+
+  if (!didMutateKnockout) {
+    return {
+      updatedTournament: baseTournament,
+      userMatchThisRound,
+      newsMessage,
+    };
   }
 
   return {
@@ -1626,10 +1722,11 @@ export function repairContinentalTournamentIntegrity(
   );
 
   // Check 1: Premature completion or phantom knockout rounds
-  // - If tournament is marked isCompleted, but currentRound < 26
+  // - If tournament is marked isCompleted without a played final while currentRound < 14
   // - OR if knockout matches exist while currentRound < 14 (group stage triggers run up to round 16)
-  // - OR if user is in tournament and has 0 played continental fixtures, but knockout stages were already generated
+  // - OR if user is in tournament and has 0 played continental matches/fixtures, but knockout stages were already generated
   const hasKnockoutMatches = matches.some(m => m.stage && m.stage !== 'group');
+  const hasPlayedFinal = matches.some(m => m.stage === 'final' && m.isPlayed);
   const userContFixPlayedCount = userParticipates
     ? updatedFixtures.filter(
         f =>
@@ -1637,10 +1734,16 @@ export function repairContinentalTournamentIntegrity(
           f.isPlayed &&
           userClub &&
           (f.homeTeamId === userClub.id || f.awayTeamId === userClub.id)
+      ).length +
+      matches.filter(
+        m =>
+          m.isPlayed &&
+          userClub &&
+          (m.homeTeamId === userClub.id || m.awayTeamId === userClub.id)
       ).length
     : 0;
 
-  const isPrematureComplete = tournament.isCompleted && currentRound < 26;
+  const isPrematureComplete = tournament.isCompleted && currentRound < 14 && !hasPlayedFinal;
   const isPrematureKnockout = hasKnockoutMatches && currentRound < 14;
   const isPrematureSkip = userParticipates && hasKnockoutMatches && userContFixPlayedCount === 0;
 

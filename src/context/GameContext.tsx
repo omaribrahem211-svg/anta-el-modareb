@@ -889,10 +889,14 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     if (!activeLeague || !Array.isArray(teams) || teams.length === 0) return;
     const seasonNum = season?.seasonNumber || 1;
     const country = activeLeague.country || userClub?.country || 'مصر';
+    const hasPlayedCupFinal = Boolean(
+      cupTournament?.matches?.some(m => m.stage === 'final' && m.isPlayed)
+    );
     const isPrematurelyCompleted = Boolean(
       cupTournament?.isCompleted &&
+      !hasPlayedCupFinal &&
       season?.currentRound &&
-      season.currentRound < Math.max(16, (season.totalRounds || 34) - 5)
+      season.currentRound < 12
     );
 
     if (
@@ -1127,6 +1131,8 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     } catch {}
   }, [africanChampionsLeague, season?.seasonNumber]);
 
+  const continentalOverlapGuardRef = useRef<string>('');
+
   // Auto-initialize Continental Tournament if null, if region changed, or if secondary tournament has duplicate primary clubs
   useEffect(() => {
     if (!activeLeague || !Array.isArray(teams) || teams.length === 0) return;
@@ -1139,7 +1145,10 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       if (cachedRaw) {
         try {
           const parsed = JSON.parse(cachedRaw);
-          const isPremature = parsed.isCompleted && (season?.currentRound || 1) < 26;
+          const hasPlayedFinal = Boolean(
+            parsed?.matches?.some((m: ContinentalMatch) => m.stage === 'final' && m.isPlayed)
+          );
+          const isPremature = parsed.isCompleted && (season?.currentRound || 1) < 14 && !hasPlayedFinal;
           if (!isPremature) {
             setAfricanChampionsLeague(parsed);
             return;
@@ -1181,6 +1190,9 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     // 2. Enforce Mutual Exclusion on existing saved Secondary Continental Tournaments (CCC / UEL)
     if (africanChampionsLeague.competitionId === 'ccc' || africanChampionsLeague.competitionId === 'uel') {
+      const overlapKey = `${seasonNum}_${africanChampionsLeague.competitionId}_${userClub?.id || ''}`;
+      if (continentalOverlapGuardRef.current === overlapKey) return;
+
       const primaryCode: 'ccl' | 'ucl' = africanChampionsLeague.competitionId === 'uel' ? 'ucl' : 'ccl';
       let primaryTournament: ContinentalTournament | null = null;
       try {
@@ -1191,11 +1203,16 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         primaryTournament = initContinentalTournamentByCode(primaryCode, seasonNum, teams, userClub || undefined);
       }
       const primaryTeamIds = new Set<string>();
-      primaryTournament.groups.forEach(g => g.teamIds.forEach(id => primaryTeamIds.add(id)));
+      primaryTournament.groups.forEach(g =>
+        g.teamIds.forEach(id => {
+          if (id !== userClub?.id) primaryTeamIds.add(id);
+        })
+      );
 
       const hasOverlap = africanChampionsLeague.groups.some(g =>
-        g.teamIds.some(id => primaryTeamIds.has(id))
+        g.teamIds.some(id => id !== userClub?.id && primaryTeamIds.has(id))
       );
+      continentalOverlapGuardRef.current = overlapKey;
       if (hasOverlap) {
         const cleanSecondary = initContinentalTournamentByCode(
           africanChampionsLeague.competitionId,
@@ -1310,6 +1327,22 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     });
   }, [africanChampionsLeague, season?.seasonNumber, userClub?.id]);
 
+  const continentalRepairGuardRef = useRef<{
+    signature: string;
+    compId: string;
+    seasonNum: number;
+    round: number;
+    playedMatchesCount: number;
+    consecutiveUpdatesCount: number;
+  }>({
+    signature: '',
+    compId: '',
+    seasonNum: 0,
+    round: -1,
+    playedMatchesCount: -1,
+    consecutiveUpdatesCount: 0,
+  });
+
   // Self-Healing & Progression Sync Effect for Continental Tournaments:
   // 1) Auto-detects and repairs any corrupted/prematurely simulated continental saves (e.g. unplayed phantom knockouts).
   // 2) Synchronizes group standings with played fixtures.
@@ -1317,23 +1350,133 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   useEffect(() => {
     if (!africanChampionsLeague || !Array.isArray(africanChampionsLeague.groups)) return;
 
+    const currentSeasonNum = season?.seasonNumber || africanChampionsLeague.seasonNumber || 1;
+    const currentCompId = africanChampionsLeague.competitionId || 'ccl';
+    const currentPlayedContCount = (africanChampionsLeague.matches || []).filter(m => m && m.isPlayed).length;
+
+    if (
+      continentalRepairGuardRef.current.compId !== currentCompId ||
+      continentalRepairGuardRef.current.seasonNum !== currentSeasonNum ||
+      continentalRepairGuardRef.current.round !== currentRound ||
+      continentalRepairGuardRef.current.playedMatchesCount !== currentPlayedContCount
+    ) {
+      continentalRepairGuardRef.current.compId = currentCompId;
+      continentalRepairGuardRef.current.seasonNum = currentSeasonNum;
+      continentalRepairGuardRef.current.round = currentRound;
+      continentalRepairGuardRef.current.playedMatchesCount = currentPlayedContCount;
+      continentalRepairGuardRef.current.consecutiveUpdatesCount = 0;
+    }
+
+    if (continentalRepairGuardRef.current.consecutiveUpdatesCount >= 5) {
+      return;
+    }
+
+    const hasContinentalTournamentChanged = (
+      prev: ContinentalTournament,
+      next: ContinentalTournament
+    ): boolean => {
+      if (prev === next) return false;
+      if (
+        Boolean(prev.isCompleted) !== Boolean(next.isCompleted) ||
+        prev.currentStage !== next.currentStage ||
+        prev.winnerClubId !== next.winnerClubId ||
+        prev.runnerUpClubId !== next.runnerUpClubId
+      ) {
+        return true;
+      }
+      const prevMatches = prev.matches || [];
+      const nextMatches = next.matches || [];
+      if (prevMatches.length !== nextMatches.length) return true;
+      for (let i = 0; i < prevMatches.length; i++) {
+        const pm = prevMatches[i];
+        const nm = nextMatches[i];
+        if (
+          !pm ||
+          !nm ||
+          pm.id !== nm.id ||
+          Boolean(pm.isPlayed) !== Boolean(nm.isPlayed) ||
+          pm.homeScore !== nm.homeScore ||
+          pm.awayScore !== nm.awayScore ||
+          pm.homePenalties !== nm.homePenalties ||
+          pm.awayPenalties !== nm.awayPenalties ||
+          pm.winnerTeamId !== nm.winnerTeamId ||
+          pm.homeTeamId !== nm.homeTeamId ||
+          pm.awayTeamId !== nm.awayTeamId
+        ) {
+          return true;
+        }
+      }
+      const prevGroups = prev.groups || [];
+      const nextGroups = next.groups || [];
+      if (prevGroups.length !== nextGroups.length) return true;
+      for (let gIdx = 0; gIdx < prevGroups.length; gIdx++) {
+        const pg = prevGroups[gIdx];
+        const ng = nextGroups[gIdx];
+        if (!pg || !ng || (pg.standings || []).length !== (ng.standings || []).length) return true;
+        for (let sIdx = 0; sIdx < ng.standings.length; sIdx++) {
+          const ps = pg.standings[sIdx];
+          const ns = ng.standings[sIdx];
+          if (
+            !ps ||
+            !ns ||
+            ps.teamId !== ns.teamId ||
+            ps.played !== ns.played ||
+            ps.points !== ns.points ||
+            ps.goalDifference !== ns.goalDifference ||
+            ps.goalsFor !== ns.goalsFor
+          ) {
+            return true;
+          }
+        }
+      }
+      return false;
+    };
+
+    const fixturesActuallyChanged = (prev: Fixture[], next: Fixture[]): boolean => {
+      if (prev.length !== next.length) return true;
+      for (let i = 0; i < prev.length; i++) {
+        const p = prev[i];
+        const n = next[i];
+        if (
+          p.id !== n.id ||
+          p.isPlayed !== n.isPlayed ||
+          p.homeTeamId !== n.homeTeamId ||
+          p.awayTeamId !== n.awayTeamId ||
+          p.winnerTeamId !== n.winnerTeamId ||
+          p.homeScore !== n.homeScore ||
+          p.awayScore !== n.awayScore ||
+          p.homePenalties !== n.homePenalties ||
+          p.awayPenalties !== n.awayPenalties
+        ) {
+          return true;
+        }
+      }
+      return false;
+    };
+
     // A. Integrity Repair Check: Heals any phantom completions or premature knockouts from corrupt localStorage
     const rep = repairContinentalTournamentIntegrity(
       africanChampionsLeague,
       fixtures,
       userClub,
       currentRound,
-      season?.seasonNumber || 1,
+      currentSeasonNum,
       teams
     );
     if (rep.repaired) {
-      if (rep.updatedTournament) {
+      let didUpdate = false;
+      if (rep.updatedTournament && hasContinentalTournamentChanged(africanChampionsLeague, rep.updatedTournament)) {
+        didUpdate = true;
         setAfricanChampionsLeague(rep.updatedTournament);
       }
-      if (rep.updatedFixtures !== fixtures) {
+      if (fixturesActuallyChanged(fixtures, rep.updatedFixtures)) {
+        didUpdate = true;
         setFixtures(rep.updatedFixtures);
       }
-      return;
+      if (didUpdate) {
+        continentalRepairGuardRef.current.consecutiveUpdatesCount += 1;
+        return;
+      }
     }
 
     // B. Check for active unplayed group matches or knockout stages
@@ -1341,7 +1484,8 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     if (unplayedMatches.length === 0) {
       // Recompute standings if needed
       const recalced = recalculateContinentalGroupStandings(africanChampionsLeague, fixtures);
-      if (recalced !== africanChampionsLeague) {
+      if (hasContinentalTournamentChanged(africanChampionsLeague, recalced)) {
+        continentalRepairGuardRef.current.consecutiveUpdatesCount += 1;
         setAfricanChampionsLeague(recalced);
       }
       return;
@@ -1368,21 +1512,6 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     // Standings sync
     const recalced = recalculateContinentalGroupStandings(africanChampionsLeague, fixtures);
-    const standingsOutOfSync = recalced.groups.some((g, gIdx) => {
-      const origGroup = africanChampionsLeague.groups[gIdx];
-      if (!origGroup || origGroup.standings.length !== g.standings.length) return true;
-      return g.standings.some((s, sIdx) => {
-        const origS = origGroup.standings[sIdx];
-        return (
-          !origS ||
-          origS.teamId !== s.teamId ||
-          origS.played !== s.played ||
-          origS.points !== s.points ||
-          origS.goalDifference !== s.goalDifference ||
-          origS.goalsFor !== s.goalsFor
-        );
-      });
-    });
 
     const allTeamsMap = new Map<string, Club>();
     Object.values(GLOBAL_LEAGUES).forEach(lg => {
@@ -1401,9 +1530,11 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       }
     );
 
-    if (updatedTournament !== africanChampionsLeague) {
+    if (hasContinentalTournamentChanged(africanChampionsLeague, updatedTournament)) {
+      continentalRepairGuardRef.current.consecutiveUpdatesCount += 1;
       setAfricanChampionsLeague(updatedTournament);
-    } else if (standingsOutOfSync || recalced.currentStage !== africanChampionsLeague.currentStage) {
+    } else if (hasContinentalTournamentChanged(africanChampionsLeague, recalced)) {
+      continentalRepairGuardRef.current.consecutiveUpdatesCount += 1;
       setAfricanChampionsLeague(recalced);
     }
   }, [currentRound, fixtures, africanChampionsLeague, teams, userClub?.id]);
