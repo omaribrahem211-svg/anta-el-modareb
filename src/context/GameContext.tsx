@@ -133,7 +133,7 @@ import {
 } from '../utils/calendarEngine';
 import { generateImmersiveNewsBatch, getInitialFootballNews } from '../services/footballNewsEngine';
 import { evaluateMatchImpactOnConfidence, updateDailyBoardConfidence, getClubLeagueTarget } from '../utils/boardEngine';
-import { EGYPT_TIER_4_LEAGUE, getLeagueById, GLOBAL_LEAGUES, findClubInWorld, getClubDisplayName, updateLeagueRosterInWorld } from '../data/leaguesData';
+import { EGYPT_TIER_4_LEAGUE, getLeagueById, GLOBAL_LEAGUES, findClubInWorld, getClubDisplayName, updateLeagueRosterInWorld, getCustomLeagues } from '../data/leaguesData';
 import { calculateMatchRevenue, MatchRevenueBreakdown, getBenchmarkTicketPrice } from '../utils/matchRevenue';
 import { AdManager } from '../services/adManager';
 import { ADMOB_CONFIG } from '../config/admobConfig';
@@ -5935,9 +5935,38 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           : Math.max(25000, Number(player.marketValue) || fairMarketValue || 50000);
       const salary = Math.max(2500, Number(player.salary) || recommendedMonthlyWage || 2500);
 
+      // Robust selling club resolution for cross-league transfers
+      let sellingClubId = player.currentClubId || (player as any).clubId;
+      if (!sellingClubId) {
+        const localSelling = teams.find(t => (t.players || []).some(p => p && p.id === player.id));
+        if (localSelling) {
+          sellingClubId = localSelling.id;
+        } else {
+          try {
+            const custom = getCustomLeagues();
+            for (const league of Object.values(custom)) {
+              const found = (league.teams || []).find(c => (c.players || []).some(p => p && p.id === player.id));
+              if (found) {
+                sellingClubId = found.id;
+                break;
+              }
+            }
+            if (!sellingClubId) {
+              for (const league of Object.values(GLOBAL_LEAGUES)) {
+                const found = (league.teams || []).find(c => (c.players || []).some(p => p && p.id === player.id));
+                if (found) {
+                  sellingClubId = found.id;
+                  break;
+                }
+              }
+            }
+          } catch {}
+        }
+      }
+
       const transferResult = executeAtomicTransfer({
-        player,
-        sellingClubId: player.currentClubId,
+        player: { ...player, currentClubId: sellingClubId },
+        sellingClubId,
         buyingClubId: userClub.id,
         allTeams: teams,
         transferFee,

@@ -26,7 +26,7 @@ import {
 } from 'lucide-react';
 import { useGame } from '../context/GameContext';
 import { NegotiationModal } from './NegotiationModal';
-import { GLOBAL_LEAGUES } from '../data/leaguesData';
+import { GLOBAL_LEAGUES, getCustomLeagues } from '../data/leaguesData';
 import { calibrateRealisticPlayerRating } from '../utils/playerGenerator';
 
 export interface TransferRumor {
@@ -258,6 +258,9 @@ interface MarketPlayerCardProps {
   onDirectBuy: (player: Player, price: number) => void;
 }
 
+// Lazy realistic rating calibration cache (Map keyed by player.id) to prevent freezing low-end mobile CPUs
+const playerCalibrationCache = new Map<string, Player>();
+
 /**
  * Redesigned Scouting Dossier Player Card
  * - Color-coded realistic OVR tier shield (Gold 80+, Emerald 72-79, Cyan 65-71, Bronze <65)
@@ -274,7 +277,23 @@ const MarketPlayerCard = React.memo<MarketPlayerCardProps>(
     onStartNegotiation,
     onDirectBuy,
   }) => {
-    const { player, isUserClubPlayer } = item;
+    const { isUserClubPlayer } = item;
+
+    // Lazily calibrate rating ONLY for visible cards in the virtual viewport
+    const player = useMemo(() => {
+      const raw = item.player;
+      if (!raw || !raw.id) return raw;
+      if (playerCalibrationCache.has(raw.id)) {
+        return playerCalibrationCache.get(raw.id)!;
+      }
+      const calibrated =
+        item.statusType === 'free'
+          ? calibrateRealisticPlayerRating(raw, '', 'free_agents', 50)
+          : calibrateRealisticPlayerRating(raw, item.club?.id || '', item.leagueId, item.club?.reputation || 65);
+      playerCalibrationCache.set(raw.id, calibrated);
+      return calibrated;
+    }, [item.player, item.club?.id, item.leagueId, item.club?.reputation, item.statusType]);
+
     const safeClubName = item.clubName || 'وكيل حر';
     const effectiveAskingPrice = item.askingPrice || player.marketValue || 50000;
     const effectiveSalary = player.salary || 2500;
@@ -542,6 +561,8 @@ export const TransfersTab: React.FC<TransfersTabProps> = ({
   const {
     userClub,
     teams,
+    transferMarket,
+    season,
     sellPlayer,
     buyPlayer,
     activeNegotiations,
@@ -564,15 +585,20 @@ export const TransfersTab: React.FC<TransfersTabProps> = ({
   const [rumorFeedSeed, setRumorFeedSeed] = useState<number>(0);
   const [notification, setNotification] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
 
+  // Progressive background loading state for world clubs
+  const [externalDbPlayers, setExternalDbPlayers] = useState<MarketPlayerItem[]>([]);
+  const [isLoadingWorld, setIsLoadingWorld] = useState<boolean>(false);
+  const [transferCounter, setTransferCounter] = useState<number>(0);
+
   // Negotiation Modal State
   const [negotiatingPlayer, setNegotiatingPlayer] = useState<Player | null>(null);
   const [selectedNegotiation, setSelectedNegotiation] = useState<ActiveNegotiation | null>(null);
   const [isNegotiationModalOpen, setIsNegotiationModalOpen] = useState(false);
 
-  // Filter States
+  // Filter States: Default to user's league if available, otherwise 'ALL'
   const [searchQuery, setSearchQuery] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
-  const [selectedLeague, setSelectedLeague] = useState<string>('ALL');
+  const [selectedLeague, setSelectedLeague] = useState<string>(() => userClub?.leagueId || 'ALL');
   const [selectedClub, setSelectedClub] = useState<string>('ALL');
   const [selectedCategory, setSelectedCategory] = useState<PositionCategory | 'ALL'>('ALL');
   const [selectedExactPos, setSelectedExactPos] = useState<string>('ALL');
@@ -650,96 +676,254 @@ export const TransfersTab: React.FC<TransfersTabProps> = ({
   const wageUsagePercent = Math.min(100, Math.round((currentWageBill / Math.max(1, wageBudget)) * 100));
   const clubTransferBudget = userClub ? userClub.budget : (budget || 500000);
 
-  // Build unified comprehensive player database with realistic rating calibration
-  const allDbPlayers = useMemo<MarketPlayerItem[]>(() => {
+  // Stable cache key: rebuild ONLY on mount, player bought/sold, or new season
+  const refreshKey = `${userClub?.id || ''}_${userClub?.players?.length || 0}_${season?.seasonNumber || 1}_${transferCounter}_${(teams || []).length}_${(transferMarket || []).length}`;
+
+  const leagueNameMap = useMemo(() => {
+    const map: Record<string, string> = {};
+    Object.values(GLOBAL_LEAGUES).forEach(comp => {
+      map[comp.id] = comp.name;
+    });
+    try {
+      const custom = getCustomLeagues();
+      Object.values(custom).forEach(comp => {
+        if (comp && comp.id && comp.name) {
+          map[comp.id] = comp.name;
+        }
+      });
+    } catch {}
+    return map;
+  }, []);
+
+  // 1. Initial immediate batch: Local active teams + Free agents (transferMarket + players prop)
+  const localDbPlayers = useMemo<MarketPlayerItem[]>(() => {
     const list: MarketPlayerItem[] = [];
     const seenIds = new Set<string>();
-
-    const leagueNameMap: Record<string, string> = {};
-    Object.values(GLOBAL_LEAGUES).forEach(comp => {
-      leagueNameMap[comp.id] = comp.name;
-    });
 
     (teams || []).forEach(club => {
       if (!club || !Array.isArray(club.players)) return;
       const isUserClub = Boolean(userClub && club.id === userClub.id);
-      const lId = club.leagueId || 'other';
-      const lName = leagueNameMap[lId] || 'دوري عالمي';
+      const lId = club.leagueId || userClub?.leagueId || 'other';
+      const lName = leagueNameMap[lId] || 'دوري محلي';
 
       club.players.forEach(rawP => {
-        if (!rawP || !rawP.id) return;
-        if (!seenIds.has(rawP.id)) {
-          seenIds.add(rawP.id);
-          // Ensure every player (especially Arab players & clubs) has calibrated realistic ratings
-          const p = calibrateRealisticPlayerRating(rawP, club.id, lId, club.reputation || 65);
-          const posCat = POSITION_CATEGORY_MAP[p.position] || 'MID';
-          const isArab =
-            ARAB_NAT_CODES.has(String(p.nationalityCode || '').toUpperCase()) ||
-            /^(egy|sau|mar|tun|alg|uae|qat)_/.test(lId);
+        if (!rawP || !rawP.id || seenIds.has(rawP.id)) return;
+        seenIds.add(rawP.id);
 
-          let priceMultiplier = 1.0;
-          let statusLabel = 'تحت العقد';
-          let statusType: MarketPlayerItem['statusType'] = 'contract';
+        const posCat = POSITION_CATEGORY_MAP[rawP.position] || 'MID';
+        const isArab =
+          ARAB_NAT_CODES.has(String(rawP.nationalityCode || '').toUpperCase()) ||
+          /^(egy|sau|mar|tun|alg|uae|qat)_/.test(lId);
 
-          if (p.isListedForTransfer) {
-            priceMultiplier = 0.85;
-            statusLabel = 'معروض للبيع';
-            statusType = 'listed';
-          } else if ((p.contractYears || 2) <= 1) {
-            priceMultiplier = 0.75;
-            statusLabel = 'عقد ينتهي';
-            statusType = 'expiring';
-          } else if (p.overallRating >= 78) {
-            priceMultiplier = 1.2;
-            statusLabel = 'نجم بارز';
-            statusType = 'star';
+        let priceMultiplier = 1.0;
+        let statusLabel = 'تحت العقد';
+        let statusType: MarketPlayerItem['statusType'] = 'contract';
+
+        if (rawP.isListedForTransfer) {
+          priceMultiplier = 0.85;
+          statusLabel = 'معروض للبيع';
+          statusType = 'listed';
+        } else if ((rawP.contractYears || 2) <= 1) {
+          priceMultiplier = 0.75;
+          statusLabel = 'عقد ينتهي';
+          statusType = 'expiring';
+        } else if ((rawP.overallRating || (rawP as any).rating || 65) >= 78) {
+          priceMultiplier = 1.2;
+          statusLabel = 'نجم بارز';
+          statusType = 'star';
+        }
+
+        const askingPrice = Math.round((rawP.marketValue || 50000) * priceMultiplier);
+
+        list.push({
+          player: rawP,
+          club,
+          clubName: club.name,
+          leagueId: lId,
+          leagueName: lName,
+          isUserClubPlayer: isUserClub,
+          isArabPlayer: isArab,
+          posCategory: posCat,
+          askingPrice,
+          statusLabel,
+          statusType,
+        });
+      });
+    });
+
+    // Free agents: transferMarket from useGame() + players prop (deduplicated by id)
+    const freePool = [...(transferMarket || []), ...(players || [])];
+    freePool.forEach(rawP => {
+      if (!rawP || !rawP.id || seenIds.has(rawP.id)) return;
+      seenIds.add(rawP.id);
+
+      const posCat = POSITION_CATEGORY_MAP[rawP.position] || 'MID';
+      const isArab = ARAB_NAT_CODES.has(String(rawP.nationalityCode || '').toUpperCase());
+
+      list.push({
+        player: rawP,
+        club: null,
+        clubName: (rawP as any).clubName || 'لاعب حر',
+        leagueId: 'free_agents',
+        leagueName: 'سوق اللاعبين الأحرار',
+        isUserClubPlayer: false,
+        isArabPlayer: isArab,
+        posCategory: posCat,
+        askingPrice: 0,
+        statusLabel: 'وكيل حر',
+        statusType: 'free',
+      });
+    });
+
+    return list;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [refreshKey]);
+
+  // 2. Background progressive batch loading for world clubs (500 players / chunk)
+  useEffect(() => {
+    let isCancelled = false;
+    setIsLoadingWorld(true);
+
+    const localClubIdSet = new Set((teams || []).map(c => c && c.id).filter(Boolean));
+    const localPlayerIdSet = new Set(localDbPlayers.map(item => item.player?.id).filter(Boolean));
+
+    // Priority ordering of world clubs:
+    // 1. teams (already in localDbPlayers)
+    // 2. getCustomLeagues() (custom saved rosters)
+    // 3. GLOBAL_LEAGUES (static world leagues)
+    const seenClubIds = new Set<string>(localClubIdSet as Set<string>);
+    const externalClubEntries: { club: Club; leagueId: string; leagueName: string }[] = [];
+
+    try {
+      const custom = getCustomLeagues();
+      Object.values(custom).forEach(league => {
+        (league?.teams || []).forEach(c => {
+          if (c && c.id && !seenClubIds.has(c.id)) {
+            seenClubIds.add(c.id);
+            externalClubEntries.push({
+              club: c,
+              leagueId: league.id || c.leagueId || 'other',
+              leagueName: league.name || leagueNameMap[league.id] || 'دوري عالمي',
+            });
           }
+        });
+      });
+    } catch {}
 
-          const askingPrice = Math.round((p.marketValue || 50000) * priceMultiplier);
-
-          list.push({
-            player: p,
-            club,
-            clubName: club.name,
-            leagueId: lId,
-            leagueName: lName,
-            isUserClubPlayer: isUserClub,
-            isArabPlayer: isArab,
-            posCategory: posCat,
-            askingPrice,
-            statusLabel,
-            statusType,
+    Object.values(GLOBAL_LEAGUES).forEach(league => {
+      (league?.teams || []).forEach(c => {
+        if (c && c.id && !seenClubIds.has(c.id)) {
+          seenClubIds.add(c.id);
+          externalClubEntries.push({
+            club: c,
+            leagueId: league.id || c.leagueId || 'other',
+            leagueName: league.name || leagueNameMap[league.id] || 'دوري عالمي',
           });
         }
       });
     });
 
-    // Include free agents
-    (players || []).forEach(rawP => {
-      if (!rawP || !rawP.id) return;
-      if (!seenIds.has(rawP.id)) {
-        seenIds.add(rawP.id);
-        const p = calibrateRealisticPlayerRating(rawP, '', 'free_agents', 50);
-        const posCat = POSITION_CATEGORY_MAP[p.position] || 'MID';
-        const isArab = ARAB_NAT_CODES.has(String(p.nationalityCode || '').toUpperCase());
-        list.push({
-          player: p,
-          club: null,
-          clubName: (p as any).clubName || 'لاعب حر',
-          leagueId: 'free_agents',
-          leagueName: 'سوق اللاعبين الأحرار',
+    // Flatten raw player entries for progressive chunking
+    const rawQueue: { rawP: Player; club: Club; leagueId: string; leagueName: string }[] = [];
+    const seenPlayerIds = new Set<string>(localPlayerIdSet as Set<string>);
+
+    externalClubEntries.forEach(({ club, leagueId, leagueName }) => {
+      (club.players || []).forEach(rawP => {
+        if (rawP && rawP.id && !seenPlayerIds.has(rawP.id)) {
+          seenPlayerIds.add(rawP.id);
+          rawQueue.push({ rawP, club, leagueId, leagueName });
+        }
+      });
+    });
+
+    if (rawQueue.length === 0) {
+      setExternalDbPlayers([]);
+      setIsLoadingWorld(false);
+      return;
+    }
+
+    const CHUNK_SIZE = 500;
+    let currentIndex = 0;
+    const accumulated: MarketPlayerItem[] = [];
+
+    const processNextChunk = () => {
+      if (isCancelled) return;
+      const end = Math.min(currentIndex + CHUNK_SIZE, rawQueue.length);
+      for (let i = currentIndex; i < end; i++) {
+        const { rawP, club, leagueId, leagueName } = rawQueue[i];
+        const posCat = POSITION_CATEGORY_MAP[rawP.position] || 'MID';
+        const isArab =
+          ARAB_NAT_CODES.has(String(rawP.nationalityCode || '').toUpperCase()) ||
+          /^(egy|sau|mar|tun|alg|uae|qat)_/.test(leagueId);
+
+        let priceMultiplier = 1.0;
+        let statusLabel = 'تحت العقد';
+        let statusType: MarketPlayerItem['statusType'] = 'contract';
+
+        if (rawP.isListedForTransfer) {
+          priceMultiplier = 0.85;
+          statusLabel = 'معروض للبيع';
+          statusType = 'listed';
+        } else if ((rawP.contractYears || 2) <= 1) {
+          priceMultiplier = 0.75;
+          statusLabel = 'عقد ينتهي';
+          statusType = 'expiring';
+        } else if ((rawP.overallRating || (rawP as any).rating || 65) >= 78) {
+          priceMultiplier = 1.2;
+          statusLabel = 'نجم بارز';
+          statusType = 'star';
+        }
+
+        const askingPrice = Math.round((rawP.marketValue || 50000) * priceMultiplier);
+
+        accumulated.push({
+          player: rawP,
+          club,
+          clubName: club.name,
+          leagueId,
+          leagueName,
           isUserClubPlayer: false,
           isArabPlayer: isArab,
           posCategory: posCat,
-          askingPrice: 0,
-          statusLabel: 'وكيل حر',
-          statusType: 'free',
+          askingPrice,
+          statusLabel,
+          statusType,
         });
       }
-    });
 
-    return list;
-  }, [teams, players, userClub]);
+      currentIndex = end;
+      // Progressive streaming: publish chunk
+      setExternalDbPlayers([...accumulated]);
+
+      if (currentIndex < rawQueue.length) {
+        if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
+          (window as any).requestIdleCallback(processNextChunk);
+        } else {
+          setTimeout(processNextChunk, 16);
+        }
+      } else {
+        if (!isCancelled) {
+          setIsLoadingWorld(false);
+        }
+      }
+    };
+
+    if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
+      (window as any).requestIdleCallback(processNextChunk);
+    } else {
+      setTimeout(processNextChunk, 16);
+    }
+
+    return () => {
+      isCancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [refreshKey]);
+
+  // Combined full player database
+  const allDbPlayers = useMemo<MarketPlayerItem[]>(() => {
+    return [...localDbPlayers, ...externalDbPlayers];
+  }, [localDbPlayers, externalDbPlayers]);
 
   const dbItemByIdMap = useMemo(() => {
     const map = new Map<string, MarketPlayerItem>();
@@ -788,15 +972,30 @@ export const TransfersTab: React.FC<TransfersTabProps> = ({
     return () => window.removeEventListener('open-player-negotiation', handleOpenNeg);
   }, [activeNegotiations]);
 
+  // Comprehensive league list with official Arabic names from GLOBAL_LEAGUES + custom leagues
   const availableLeagues = useMemo(() => {
-    const map = new Map<string, string>();
-    allDbPlayers.forEach(item => {
-      if (!map.has(item.leagueId)) {
-        map.set(item.leagueId, item.leagueName);
+    const list: { id: string; name: string }[] = [];
+    const seen = new Set<string>();
+
+    Object.values(GLOBAL_LEAGUES).forEach(comp => {
+      if (!seen.has(comp.id)) {
+        seen.add(comp.id);
+        list.push({ id: comp.id, name: comp.name });
       }
     });
-    return Array.from(map.entries()).map(([id, name]) => ({ id, name }));
-  }, [allDbPlayers]);
+
+    try {
+      const custom = getCustomLeagues();
+      Object.values(custom).forEach(comp => {
+        if (comp && comp.id && comp.name && !seen.has(comp.id)) {
+          seen.add(comp.id);
+          list.push({ id: comp.id, name: comp.name });
+        }
+      });
+    } catch {}
+
+    return list;
+  }, []);
 
   const availableClubs = useMemo(() => {
     const set = new Set<string>();
@@ -964,7 +1163,7 @@ export const TransfersTab: React.FC<TransfersTabProps> = ({
     setScoutingPreset('all');
     setSearchQuery('');
     setDebouncedSearch('');
-    setSelectedLeague('ALL');
+    setSelectedLeague(userClub?.leagueId || 'ALL');
     setSelectedClub('ALL');
     setSelectedCategory('ALL');
     setSelectedExactPos('ALL');
@@ -975,7 +1174,7 @@ export const TransfersTab: React.FC<TransfersTabProps> = ({
     setMaxOverall(99);
     setSortBy('overall');
     setSortOrder('desc');
-  }, []);
+  }, [userClub?.leagueId]);
 
   const handleBuy = useCallback(
     (player: Player, customAskingPrice?: number) => {
@@ -986,9 +1185,16 @@ export const TransfersTab: React.FC<TransfersTabProps> = ({
           customAskingPrice !== undefined && customAskingPrice > 0
             ? customAskingPrice
             : item?.askingPrice;
-        const result = onBuyPlayer ? onBuyPlayer(player) : buyPlayer(player, fee);
+        const playerWithClub: Player = {
+          ...player,
+          currentClubId: item?.club?.id || player.currentClubId,
+        };
+        const result = onBuyPlayer ? onBuyPlayer(playerWithClub) : buyPlayer(playerWithClub, fee);
         const msg = (result as any)?.message || 'تمت صفقة الشراء بنجاح!';
         const succ = (result as any)?.success !== false;
+        if (succ) {
+          setTransferCounter(c => c + 1);
+        }
         setNotification({ text: msg, type: succ ? 'success' : 'error' });
         setTimeout(() => setNotification(null), 3500);
       } catch (err: any) {
@@ -1060,6 +1266,9 @@ export const TransfersTab: React.FC<TransfersTabProps> = ({
     (player: Player) => {
       if (!player || !player.id) return;
       const res = sellPlayer(player.id);
+      if (res.success) {
+        setTransferCounter(c => c + 1);
+      }
       setNotification({ text: res.message, type: res.success ? 'success' : 'error' });
       setTimeout(() => setNotification(null), 3500);
     },
@@ -1389,13 +1598,21 @@ export const TransfersTab: React.FC<TransfersTabProps> = ({
 
           {/* Results Count & Active Sort Summary Bar */}
           <div className="flex items-center justify-between text-[11px] px-1.5 text-slate-400">
-            <span>
-              نتائج الرصد:{' '}
-              <strong className="text-emerald-400 font-mono tabular-nums">
-                {filteredPlayers.length.toLocaleString()}
-              </strong>{' '}
-              لاعب متاح
-            </span>
+            <div className="flex items-center gap-2 flex-wrap">
+              <span>
+                نتائج الرصد:{' '}
+                <strong className="text-emerald-400 font-mono tabular-nums">
+                  {filteredPlayers.length.toLocaleString()}
+                </strong>{' '}
+                لاعب متاح
+              </span>
+              {isLoadingWorld && (
+                <span className="flex items-center gap-1.5 text-[10px] text-cyan-300 bg-cyan-950/70 border border-cyan-500/30 px-2 py-0.5 rounded-full animate-pulse">
+                  <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-ping" />
+                  جاري تحميل لاعبي العالم...
+                </span>
+              )}
+            </div>
 
             <button
               type="button"
@@ -1534,9 +1751,9 @@ export const TransfersTab: React.FC<TransfersTabProps> = ({
                   }}
                   className="w-full bg-slate-950 border border-white/[0.08] rounded-xl px-3 py-2 text-slate-200 text-xs focus:outline-none focus:border-emerald-500"
                 >
-                  <option value="ALL">جميع الدوريات ({availableLeagues.length})</option>
+                  <option value="ALL">جميع دوريات العالم ({availableLeagues.length})</option>
                   <option value="free_agents">سوق اللاعبين الأحرار فقط</option>
-                  {availableLeagues.map(l => (
+                  {availableLeagues.filter(l => l.id !== 'free_agents').map(l => (
                     <option key={l.id} value={l.id}>
                       {l.name}
                     </option>
