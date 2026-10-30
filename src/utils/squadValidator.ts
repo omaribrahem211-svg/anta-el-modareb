@@ -1,4 +1,5 @@
 import { Club, Fixture, Player, PositionCategory, SquadValidationResult, TeamTactics } from '../types/game';
+import { getEffectiveLineup, isPlayerInjured, isPlayerSuspended } from './squadHelpers';
 
 /**
  * Validates the starting XI for a club to ensure no injured, suspended, or missing players are in the lineup.
@@ -15,7 +16,7 @@ export function validateSquadLineup(club: Club | null): SquadValidationResult {
   }
 
   const squad = (Array.isArray(club.players) ? club.players : []).filter(Boolean);
-  const starterIds = club.tactics.startingPlayerIds || [];
+  const { startingIds: starterIds } = getEffectiveLineup(club);
   const invalidStarters: { player: Player; reason: 'injured' | 'suspended' | 'missing'; description: string }[] = [];
 
   let hasInjured = false;
@@ -55,16 +56,16 @@ export function validateSquadLineup(club: Club | null): SquadValidationResult {
     }
 
     // Check Injury
-    if (player.injury && player.injury.daysRemaining > 0) {
+    if (isPlayerInjured(player)) {
       hasInjured = true;
       invalidStarters.push({
         player,
         reason: 'injured',
-        description: `🚑 مصاب (${player.injury.type || 'إصابة بدنية'}) - باقي ${player.injury.daysRemaining} أيام على التعافي`,
+        description: `🚑 مصاب (${player.injury?.type || player.injuryType || 'إصابة بدنية'}) - باقي ${player.injury?.daysRemaining || 3} أيام على التعافي`,
       });
     }
     // Check Suspension
-    else if (player.isSuspended || (player.suspensionMatches && player.suspensionMatches > 0)) {
+    else if (isPlayerSuspended(player)) {
       hasSuspended = true;
       const matchesRemaining = player.suspensionMatches || 1;
       invalidStarters.push({
@@ -111,14 +112,15 @@ export function autoFixSquadLineup(club: Club): {
     };
   }
 
+  const { startingIds: effStarting, benchIds: effBench } = getEffectiveLineup(club);
   const currentTactics = club.tactics || {
     formation: '4-3-3',
     mentality: 'balanced',
     passingStyle: 'short',
     pressingIntensity: 'balanced',
     tempo: 'balanced',
-    startingPlayerIds: squad.slice(0, 11).map(p => p?.id).filter(Boolean) as string[],
-    benchPlayerIds: squad.slice(11, 18).map(p => p?.id).filter(Boolean) as string[],
+    startingPlayerIds: effStarting,
+    benchPlayerIds: effBench,
     captainId: squad[0]?.id || '',
     penaltyTakerId: squad[0]?.id || '',
     freeKickTakerId: squad[0]?.id || '',
@@ -127,9 +129,7 @@ export function autoFixSquadLineup(club: Club): {
 
   const isEligible = (p: Player) => {
     if (!p) return false;
-    const isInjured = p.injury && p.injury.daysRemaining > 0;
-    const isSusp = p.isSuspended || (p.suspensionMatches && p.suspensionMatches > 0);
-    return !isInjured && !isSusp;
+    return !isPlayerInjured(p) && !isPlayerSuspended(p);
   };
 
   const currentStarters = [...currentTactics.startingPlayerIds];

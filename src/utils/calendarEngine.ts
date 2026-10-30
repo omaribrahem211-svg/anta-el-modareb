@@ -43,11 +43,11 @@ export const ARABIC_MONTHS = [
 ];
 
 const INJURY_TYPES = [
+  { name: 'كدمة خفيفة في الكاحل', minDays: 1, maxDays: 3, severity: 'mild' as const },
   { name: 'إجهاد عضلي خفيف في الفخذ', minDays: 2, maxDays: 4, severity: 'mild' as const },
-  { name: 'التواء بسيط في الكاحل', minDays: 3, maxDays: 5, severity: 'mild' as const },
-  { name: 'شد عضلي في العضلة الخلفية', minDays: 4, maxDays: 7, severity: 'moderate' as const },
-  { name: 'كدمة في مفصل الركبة', minDays: 3, maxDays: 6, severity: 'mild' as const },
-  { name: 'إجهاد في عضلة السمانة', minDays: 5, maxDays: 9, severity: 'moderate' as const },
+  { name: 'التواء بسيط في الكاحل', minDays: 2, maxDays: 4, severity: 'mild' as const },
+  { name: 'كدمة بسيطة في الساق', minDays: 1, maxDays: 3, severity: 'mild' as const },
+  { name: 'شد عضلي خفيف في العضلة الخلفية', minDays: 3, maxDays: 6, severity: 'moderate' as const },
 ];
 
 /**
@@ -278,11 +278,11 @@ export function simulateDailySquadTraining(
       return updatedPlayer;
     }
 
-    // 2. Chance of fresh training injury (strictly capped: max 2 injured in squad, max 1 per day, realistic low probability)
-    const injuryChance = intensity === 'high' ? 0.0018 : intensity === 'normal' ? 0.0004 : 0;
+    // 2. Chance of fresh training injury (strictly capped: max 1 injured in squad, max 1 per day, very low probability)
+    const injuryChance = intensity === 'high' ? 0.0007 : intensity === 'normal' ? 0.00015 : 0;
     if (
       injuryChance > 0 &&
-      activeInjuredCount < 2 &&
+      activeInjuredCount < 1 &&
       newInjuriesToday < 1 &&
       Math.random() < injuryChance
     ) {

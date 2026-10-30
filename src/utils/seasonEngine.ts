@@ -2370,42 +2370,95 @@ export function processNewSeasonAdvancement(
           motm: 0,
         };
 
-        // Slight natural attribute growth for young players or decay for older players
+        // Realistic annual growth & age decline (strictly capped at -1 to -3 max for veterans, never resetting attributes)
+        const currentOvr = Number.isFinite(Number(p.overallRating ?? (p as any).rating)) && Number(p.overallRating ?? (p as any).rating) > 0
+          ? Number(p.overallRating ?? (p as any).rating)
+          : 65;
+        const currentPot = Math.max(
+          currentOvr,
+          Number.isFinite(Number(p.potentialRating ?? (p as any).potential))
+            ? Number(p.potentialRating ?? (p as any).potential)
+            : currentOvr + (newAge <= 23 ? 5 : 2)
+        );
+        const isGK = p.position === 'GK' || p.positionCategory === 'GK';
+
         let overallDelta = 0;
-        if (p.age < 23 && p.overallRating < p.potentialRating) {
-          overallDelta = Math.floor(Math.random() * 3 + 1);
-        } else if (p.age > 32) {
-          overallDelta = -Math.floor(Math.random() * 2);
+        if (newAge <= 23 && currentOvr < currentPot) {
+          const rawGrowth = Math.floor(Math.random() * 3) + 1; // +1 to +3
+          overallDelta = Math.min(currentPot - currentOvr, rawGrowth);
+        } else if (newAge <= 27 && currentOvr < currentPot) {
+          const rawGrowth = Math.floor(Math.random() * 2) + (Math.random() < 0.65 ? 1 : 0); // 0 to +2
+          overallDelta = Math.min(currentPot - currentOvr, rawGrowth);
+        } else if (newAge <= 30) {
+          overallDelta = currentOvr < currentPot && Math.random() < 0.35 ? 1 : 0;
+        } else if (newAge <= 32) {
+          // 31-32: GKs hold steady; outfielders 0 to -1 max
+          overallDelta = isGK ? 0 : (Math.random() < 0.5 ? -1 : 0);
+        } else if (newAge <= 34) {
+          // 33-34: GKs 0 to -1; outfielders -1 to -2 max
+          overallDelta = isGK ? (Math.random() < 0.5 ? -1 : 0) : -(Math.floor(Math.random() * 2) + 1);
+        } else {
+          // 35+: -1 to -3 max per season
+          overallDelta = isGK ? -(Math.floor(Math.random() * 2) + 1) : -(Math.floor(Math.random() * 3) + 1);
         }
 
-        const newOverall = Math.min(99, Math.max(35, p.overallRating + overallDelta));
+        // Enforce strict -3 max annual decline and hard protection floor (never collapse to 50/54)
+        overallDelta = Math.max(-3, Math.min(3, overallDelta));
+        const safeFloor = Math.min(currentOvr, 58);
+        const newOverall = Math.min(99, Math.max(safeFloor, currentOvr + overallDelta));
+        const actualDelta = newOverall - currentOvr;
+
+        // Preserve existing attributes and scale smoothly by actualDelta without ever resetting to defaults
+        const prevAttrs = p.attributes && typeof p.attributes === 'object' ? p.attributes : null;
+        const adjustAttr = (val: any, fallbackOffset: number, weight = 1.0, minAttr = 38): number => {
+          const base = Number.isFinite(Number(val)) && Number(val) > 0 ? Number(val) : currentOvr + fallbackOffset;
+          const adjusted = Math.round(base + actualDelta * weight);
+          return Math.min(99, Math.max(minAttr, adjusted));
+        };
+
+        const updatedAttributes = {
+          pace: adjustAttr(prevAttrs?.pace, 1, actualDelta < 0 ? 1.15 : 0.9, 38),
+          shooting: adjustAttr(prevAttrs?.shooting, p.positionCategory === 'FWD' ? 3 : -4, actualDelta < 0 ? 0.65 : 1.0, 28),
+          passing: adjustAttr(prevAttrs?.passing, p.positionCategory === 'MID' ? 3 : -1, actualDelta < 0 ? 0.55 : 1.0, 32),
+          dribbling: adjustAttr(prevAttrs?.dribbling, 0, actualDelta < 0 ? 0.85 : 1.0, 32),
+          defending: adjustAttr(prevAttrs?.defending, p.positionCategory === 'DEF' ? 4 : -5, actualDelta < 0 ? 0.70 : 1.0, 28),
+          physical: adjustAttr(prevAttrs?.physical, 1, actualDelta < 0 ? 1.1 : 0.9, 40),
+          goalkeeping:
+            prevAttrs?.goalkeeping !== undefined || isGK
+              ? adjustAttr(prevAttrs?.goalkeeping, isGK ? 2 : -20, actualDelta < 0 ? 0.6 : 1.0, isGK ? 45 : 15)
+              : undefined,
+        };
+
         const updatedPlayerObj: Player = {
           ...p,
           age: newAge,
           contractYears: newContractYears,
           overallRating: newOverall,
+          potentialRating: Math.max(newOverall, currentPot),
+          attributes: updatedAttributes,
           fitness: 100,
           isInjured: false,
           injury: null,
           injuryType: undefined,
           injuryWeeks: undefined,
           injuryMatches: undefined,
-          morale: Math.min(100, Math.max(70, p.morale + 10)),
+          morale: Math.min(100, Math.max(70, (p.morale || 75) + 10)),
           stats: resetStats,
           unhappyMatchesCount: 0,
           transferRequestSubmitted: false,
-        };
-        if (newOverall > p.overallRating) {
-          updatedPlayerObj.marketValue = syncPlayerMarketValueWithRating(updatedPlayerObj, p.overallRating);
+          _realisticCalibratedV2: true,
+        } as any;
+        if (actualDelta !== 0) {
+          updatedPlayerObj.marketValue = syncPlayerMarketValueWithRating(updatedPlayerObj, currentOvr);
         }
 
         survivingPlayers.push(updatedPlayerObj);
       }
     });
 
-    // Ensure squad maintains healthy competitive depth (at least 20 players across all positions)
+    // Ensure squad maintains healthy competitive depth (at least 20-22 players across all positions)
     let replenishIdx = 1;
-    while (survivingPlayers.length < 20) {
+    while (survivingPlayers.length < 21) {
       const gks = survivingPlayers.filter(p => p.positionCategory === 'GK').length;
       const defs = survivingPlayers.filter(p => p.positionCategory === 'DEF').length;
       const mids = survivingPlayers.filter(p => p.positionCategory === 'MID').length;
@@ -2413,8 +2466,8 @@ export function processNewSeasonAdvancement(
 
       let pos: Position = 'CM';
       if (gks < 2) pos = 'GK';
-      else if (defs < 5) pos = defs % 2 === 0 ? 'CB' : (defs % 3 === 0 ? 'LB' : 'RB');
-      else if (mids < 5) pos = mids % 2 === 0 ? 'CM' : 'CDM';
+      else if (defs < 6) pos = defs % 2 === 0 ? 'CB' : (defs % 3 === 0 ? 'LB' : 'RB');
+      else if (mids < 6) pos = mids % 2 === 0 ? 'CM' : 'CDM';
       else if (fwds < 4) pos = fwds % 2 === 0 ? 'ST' : 'RW';
       else {
         const fallbackPositions: Position[] = ['ST', 'CM', 'CB', 'LB', 'RB', 'GK'];
@@ -2422,7 +2475,7 @@ export function processNewSeasonAdvancement(
       }
 
       const cat: PositionCategory = pos === 'GK' ? 'GK' : ['CB', 'LB', 'RB'].includes(pos) ? 'DEF' : ['CM', 'CDM', 'CAM'].includes(pos) ? 'MID' : 'FWD';
-      const baseRating = Math.max(58, Math.min(82, (team.reputation ? Math.round(team.reputation * 0.85) : 68) + Math.floor(Math.random() * 5 - 2)));
+      const baseRating = Math.max(60, Math.min(82, (team.reputation ? Math.round(team.reputation * 0.88) : 68) + Math.floor(Math.random() * 5 - 2)));
 
       const countryCode = team.countryCode || 'EGY';
       const countryData = GLOBAL_COUNTRIES[countryCode] || GLOBAL_COUNTRIES['EGY'];
@@ -2442,24 +2495,28 @@ export function processNewSeasonAdvancement(
         overallRating: baseRating,
         potentialRating: Math.min(92, baseRating + Math.floor(Math.random() * 10 + 6)),
         attributes: {
-          pace: Math.floor(Math.random() * 15 + 65),
-          shooting: cat === 'FWD' ? baseRating + 2 : 55,
-          passing: cat === 'MID' ? baseRating + 2 : 60,
-          dribbling: cat === 'FWD' || cat === 'MID' ? baseRating : 58,
-          defending: cat === 'DEF' ? baseRating + 2 : (pos === 'GK' ? 20 : 48),
-          physical: Math.floor(Math.random() * 12 + 64),
+          pace: Math.floor(Math.random() * 12 + Math.max(62, baseRating)),
+          shooting: cat === 'FWD' ? baseRating + 3 : Math.max(52, baseRating - 6),
+          passing: cat === 'MID' ? baseRating + 3 : Math.max(56, baseRating - 2),
+          dribbling: cat === 'FWD' || cat === 'MID' ? baseRating + 2 : Math.max(55, baseRating - 4),
+          defending: cat === 'DEF' ? baseRating + 3 : (pos === 'GK' ? 25 : Math.max(45, baseRating - 10)),
+          physical: Math.floor(Math.random() * 10 + Math.max(60, baseRating - 2)),
           goalkeeping: pos === 'GK' ? baseRating + 3 : 20,
         },
         nationality: team.country || 'مصر',
-        marketValue: Math.round(baseRating * 12000),
-        salary: Math.round(baseRating * 50),
+        nationalityCode: countryCode,
+        currentClubId: team.id,
+        currentLeagueId: team.leagueId,
+        marketValue: Math.round(baseRating * 15000),
+        salary: Math.round(baseRating * 65),
         contractYears: 3,
         fitness: 100,
         morale: 90,
         form: 7,
         number: Math.floor(Math.random() * 50 + 40),
         stats: { appearances: 0, starts: 0, minutes: 0, goals: 0, assists: 0, cleanSheets: 0, yellowCards: 0, redCards: 0, shots: 0, shotsOnTarget: 0, passes: 0, tackles: 0, saves: 0, averageRating: 7.0, motm: 0 },
-      };
+        _realisticCalibratedV2: true,
+      } as any;
       survivingPlayers.push(freshYouth);
     }
 

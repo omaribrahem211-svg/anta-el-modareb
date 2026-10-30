@@ -4,6 +4,7 @@ export interface UseLazyListOptions {
   initialBatchSize?: number;
   batchStep?: number;
   rootMargin?: string;
+  resetKey?: string | number;
 }
 
 /**
@@ -28,15 +29,16 @@ export function useLazyList<T>(
     initialBatchSize = 16,
     batchStep = 12,
     rootMargin = '250px',
+    resetKey,
   } = options;
 
   const [visibleCount, setVisibleCount] = useState<number>(initialBatchSize);
   const observerRef = useRef<IntersectionObserver | null>(null);
 
-  // Reset visibleCount whenever the source items array changes (e.g. user filtered or searched)
+  // إعادة ضبط العدد المرئي فقط عند تغير طول المصفوفة أو مفتاح الفلترة لتجنب مسح "عرض المزيد" مع كل رندرة
   useEffect(() => {
     setVisibleCount(initialBatchSize);
-  }, [items, initialBatchSize]);
+  }, [items.length, initialBatchSize, resetKey]);
 
   const loadMore = useCallback(() => {
     setVisibleCount(prev => Math.min(items.length, prev + batchStep));

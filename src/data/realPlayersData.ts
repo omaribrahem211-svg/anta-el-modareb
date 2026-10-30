@@ -3073,6 +3073,7 @@ import {
   LEVERKUSEN_SQUAD,
   AL_SHABAB_SQUAD,
   AL_MASRY_SQUAD,
+  AL_ITTIHAD_ALEX_SQUAD,
 } from './realSquadsExtended4';
 
 // =========================================================================
@@ -3182,6 +3183,10 @@ export const REAL_SQUADS_BY_CLUB_ID: Record<string, RealPlayerTemplate[]> = {
   // Al Masry (Egypt)
   'al_masry': AL_MASRY_SQUAD,
   'eg1_masry': AL_MASRY_SQUAD,
+
+  // Al Ittihad Alexandria (Egypt)
+  'al_ittihad_alex': AL_ITTIHAD_ALEX_SQUAD,
+  'eg1_ittihad': AL_ITTIHAD_ALEX_SQUAD,
 };
 
 /**

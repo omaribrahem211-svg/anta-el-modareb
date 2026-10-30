@@ -141,22 +141,23 @@ export function processPostMatchPlayerUpdates(
       let injuryObj: Player['injury'] = null;
 
       if (
-        (p.fitness ?? 90) < 45 &&
-        activeInjuredCount < 2 &&
+        (p.fitness ?? 90) < 42 &&
+        activeInjuredCount < 1 &&
         newInjuriesThisMatch < 1
       ) {
-        const injuryChance = 0.035 * (1 - staffBonuses.injuryRiskReduction);
+        const injuryChance = 0.012 * (1 - staffBonuses.injuryRiskReduction);
         if (Math.random() < injuryChance) {
-          const durationDays = Math.floor(Math.random() * 4) + 3; // 3 to 6 days (1 to 2 matches max)
+          const isMinorKnock = Math.random() < 0.85;
+          const durationDays = isMinorKnock ? Math.floor(Math.random() * 2) + 2 : Math.floor(Math.random() * 3) + 4; // 85% minor knock (2-3 days)
           isInjured = true;
-          injuryType = 'إجهاد عضلي خفيف نتيجة الإرهاق';
+          injuryType = isMinorKnock ? 'كدمة خفيفة وإجهاد بسيط' : 'شد عضلي خفيف نتيجة الإرهاق';
           injuryWeeks = 1;
           injuryObj = {
             type: injuryType,
             severity: 'mild',
             durationDays,
             daysRemaining: durationDays,
-            description: 'إجهاد عضلي بسيط يحتاج لراحة قصيرة وعلاج طبيعي',
+            description: 'كدمة بسيطة تحتاج لراحة قصيرة وعلاج طبيعي سريع',
             treatmentType: 'natural',
           };
           activeInjuredCount += 1;
@@ -165,12 +166,12 @@ export function processPostMatchPlayerUpdates(
           if (isUserClub) {
             transferMessages.push({
               id: `injury_fatigue_${p.id}_${Date.now()}`,
-              title: `تقرير طبي: إجهاد عضلي خفيف للاعب ${p.name} 🏥`,
+              title: `تقرير طبي: ${injuryType} للاعب ${p.name} 🏥`,
               sender: 'الجهاز الطبي للفريق',
               date: 'تقرير ما بعد المباراة',
               type: 'news',
               read: false,
-              content: `تعرض اللاعب ${p.name} لـ (${injuryType}) بسبب مشاركته بطاقة بدنية منخفضة جداً. مدة الغياب والعلاج المقررة: ${durationDays} أيام فقط ويعود بعدها مباشرة للتشكيلة.`,
+              content: `تعرض اللاعب ${p.name} لـ (${injuryType}) بسبب مشاركته بمخزون بدني منخفض. مدة الراحة المقررة: ${durationDays} أيام فقط ويعود بعدها فوراً للتشكيلة.`,
             });
           }
         }

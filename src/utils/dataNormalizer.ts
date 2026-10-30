@@ -1,35 +1,80 @@
 import { Club, LeagueStanding, ManagerProfile } from '../types/game';
 import { INITIAL_MANAGER } from '../data/initialData';
 import { generateTrainerId } from '../services/trainerProfileService';
-import { calibrateRealisticPlayerRating } from './playerGenerator';
+import { calibrateRealisticPlayerRating, ensureClubSquadIntegrity } from './playerGenerator';
+import { isRealClub, loadRealClubSquad } from '../data/realPlayersData';
 
 export function normalizeClub(t: any): Club {
   if (!t || typeof t !== 'object') {
     return {} as Club;
   }
 
-  const rawPlayers = Array.isArray(t.players) ? t.players : [];
-  const players = rawPlayers
+  let rawPlayers = Array.isArray(t.players) ? t.players : [];
+  if (rawPlayers.length === 0 && t.id && isRealClub(t.id)) {
+    try {
+      rawPlayers = loadRealClubSquad(t.id);
+    } catch {
+      rawPlayers = [];
+    }
+  }
+
+  let players = rawPlayers
     .filter((p: any) => p && typeof p === 'object' && p.id)
     .map((p: any) => {
+      const safeOvr = Number.isFinite(Number(p.overallRating ?? p.rating)) && Number(p.overallRating ?? p.rating) > 0
+        ? Number(p.overallRating ?? p.rating)
+        : 65;
+      const safePot = Number.isFinite(Number(p.potentialRating ?? p.potential)) && Number(p.potentialRating ?? p.potential) >= safeOvr
+        ? Number(p.potentialRating ?? p.potential)
+        : safeOvr;
       const baseP = {
         ...p,
         name: p.name || 'لاعب',
         position: p.position || 'CM',
         positionCategory: p.positionCategory || 'MID',
-        overallRating: Number.isFinite(p.overallRating) ? p.overallRating : 60,
+        overallRating: safeOvr,
+        potentialRating: safePot,
         isGuestStar: Boolean(p.isGuestStar),
         nationality: p.nationality || t.country || 'مصر',
         nationalityCode: p.nationalityCode || t.countryCode || 'EGY',
         currentClubId: p.currentClubId || t.id,
         currentLeagueId: p.currentLeagueId || t.leagueId || '',
         stats: p.stats || { appearances: 0, goals: 0, assists: 0, yellowCards: 0, redCards: 0, cleanSheets: 0, averageRating: 6.5 },
-        attributes: p.attributes || { pace: 60, shooting: 60, passing: 60, dribbling: 60, defending: 60, physical: 60 },
+        attributes: p.attributes && typeof p.attributes === 'object'
+          ? {
+              pace: Number.isFinite(Number(p.attributes.pace)) ? Number(p.attributes.pace) : safeOvr,
+              shooting: Number.isFinite(Number(p.attributes.shooting)) ? Number(p.attributes.shooting) : Math.max(35, safeOvr - 3),
+              passing: Number.isFinite(Number(p.attributes.passing)) ? Number(p.attributes.passing) : safeOvr,
+              dribbling: Number.isFinite(Number(p.attributes.dribbling)) ? Number(p.attributes.dribbling) : safeOvr,
+              defending: Number.isFinite(Number(p.attributes.defending)) ? Number(p.attributes.defending) : Math.max(35, safeOvr - 4),
+              physical: Number.isFinite(Number(p.attributes.physical)) ? Number(p.attributes.physical) : safeOvr,
+              goalkeeping: p.attributes.goalkeeping !== undefined ? Number(p.attributes.goalkeeping) : (p.position === 'GK' ? safeOvr : undefined),
+            }
+          : {
+              pace: safeOvr,
+              shooting: Math.max(35, safeOvr - 3),
+              passing: safeOvr,
+              dribbling: safeOvr,
+              defending: Math.max(35, safeOvr - 4),
+              physical: safeOvr,
+              goalkeeping: p.position === 'GK' ? safeOvr : undefined,
+            },
         savings: p.savings !== undefined ? p.savings : 0,
         totalBonusesReceived: p.totalBonusesReceived ?? 0,
       };
       return calibrateRealisticPlayerRating(baseP, t.id, t.leagueId, t.reputation || 65);
     });
+
+  // Fallback: If any club has fewer than 20 players, auto-generate balanced fallback players up to 22
+  if (t.id && players.length < 20) {
+    const integrityResult = ensureClubSquadIntegrity({
+      ...t,
+      players,
+    });
+    if (Array.isArray(integrityResult?.players) && integrityResult.players.length >= players.length) {
+      players = integrityResult.players;
+    }
+  }
 
   const playerIds = new Set(players.map((p: any) => p.id));
   const rawStarting = Array.isArray(t.tactics?.startingPlayerIds) ? t.tactics.startingPlayerIds : [];
@@ -40,10 +85,24 @@ export function normalizeClub(t: any): Club {
 
   // If starting lineup has fewer than 11 and squad has players, backfill from available
   if (startingPlayerIds.length < 11 && players.length > 0) {
+    const hasGk = startingPlayerIds.some((id: string) => players.find((p: any) => p.id === id)?.positionCategory === 'GK');
+    if (!hasGk) {
+      const gk = players.find((p: any) => p.positionCategory === 'GK' && !startingPlayerIds.includes(p.id));
+      if (gk) startingPlayerIds.unshift(gk.id);
+    }
     for (const p of players) {
       if (startingPlayerIds.length >= 11) break;
       if (!startingPlayerIds.includes(p.id) && !benchPlayerIds.includes(p.id)) {
         startingPlayerIds.push(p.id);
+      }
+    }
+  }
+
+  if (benchPlayerIds.length < 7 && players.length > 11) {
+    for (const p of players) {
+      if (benchPlayerIds.length >= 7) break;
+      if (!startingPlayerIds.includes(p.id) && !benchPlayerIds.includes(p.id)) {
+        benchPlayerIds.push(p.id);
       }
     }
   }
@@ -69,7 +128,7 @@ export function normalizeClub(t: any): Club {
       return b;
     })(),
     players,
-    sponsors: [],
+    sponsors: Array.isArray(t.sponsors) ? t.sponsors : [],
     facilities: t.facilities || {
       stadiumName: `${t.name || 'ملعب الفريق'}`,
       stadiumCapacity: 5000,
@@ -85,8 +144,8 @@ export function normalizeClub(t: any): Club {
       passingStyle: t.tactics?.passingStyle || 'short',
       pressingIntensity: t.tactics?.pressingIntensity || 'balanced',
       tempo: t.tactics?.tempo || 'balanced',
-      startingPlayerIds,
-      benchPlayerIds,
+      startingPlayerIds: startingPlayerIds.slice(0, 11),
+      benchPlayerIds: benchPlayerIds.slice(0, 7),
       captainId: (playerIds.has(t.tactics?.captainId) ? t.tactics.captainId : null) || players[0]?.id || '',
       penaltyTakerId: (playerIds.has(t.tactics?.penaltyTakerId) ? t.tactics.penaltyTakerId : null) || players[0]?.id || '',
       freeKickTakerId: (playerIds.has(t.tactics?.freeKickTakerId) ? t.tactics.freeKickTakerId : null) || players[0]?.id || '',

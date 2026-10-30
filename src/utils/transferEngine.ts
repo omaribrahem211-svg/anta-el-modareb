@@ -2008,24 +2008,20 @@ export function processFreeAgentsAndAiTransfers(
     club.players = remainingPlayers;
   }
 
-  // Also check any free agents in transferMarket whose contractYears <= 0
-  const remainingMarket: Player[] = [];
-  for (const mp of safeMarket) {
-    if (!mp || !mp.id) continue;
-    if ((mp.contractYears !== undefined && mp.contractYears <= 0) || !mp.currentClubId) {
-      expiredContractPool.push({
-        player: { ...mp, contractYears: 0, currentClubId: '' },
-        formerClubId: '',
-        formerClubName: 'صفقة انتقال حر',
-        wasUserClub: false,
-      });
-    } else {
-      remainingMarket.push(mp);
-    }
-  }
-  safeMarket = remainingMarket;
+  // Normalize any existing free agents in transferMarket so they remain available as Free Agents
+  safeMarket = safeMarket
+    .filter(mp => Boolean(mp && mp.id))
+    .map(mp => ({
+      ...mp,
+      currentClubId: '',
+      currentLeagueId: 'free_agents',
+      isFreeAgent: true,
+      contractYears: 0,
+    }));
 
-  // 2. Guarantee EVERY expired-contract player transfers to another club and plays in its active lineup!
+  // 2. Process expired contracts:
+  // - Any player from the user's club whose contract reached 0 without renewal is automatically converted to a Free Agent (isFreeAgent: true) and added to transferMarket.
+  // - AI club expired players either enter the Free Agents market or join another AI club in need of players.
   for (const item of expiredContractPool) {
     const fa = item.player;
     const posCat = fa.positionCategory || (
@@ -2038,13 +2034,66 @@ export function processFreeAgentsAndAiTransfers(
         : 'MID'
     );
 
-    // Candidate AI clubs (excluding the player's former club and user club so they always move to a DIFFERENT AI club)
+    if (item.wasUserClub) {
+      const freeAgentPlayer: Player = {
+        ...fa,
+        currentClubId: '',
+        currentLeagueId: 'free_agents',
+        isFreeAgent: true,
+        contractYears: 0,
+        isListedForTransfer: false,
+      };
+      safeMarket = [
+        freeAgentPlayer,
+        ...safeMarket.filter(p => p && p.id !== freeAgentPlayer.id),
+      ];
+
+      newTransfers.push({
+        id: `tx_fa_exp_${Date.now()}_${fa.id}_${Math.random().toString(36).slice(2, 6)}`,
+        playerId: fa.id,
+        playerName: fa.name,
+        playerRating: fa.overallRating,
+        position: fa.position,
+        type: 'sell',
+        fee: 0,
+        salary: fa.salary || 2500,
+        date: `الموسم ${seasonNumber} - الجولة ${currentRound}`,
+        seasonNumber,
+        round: currentRound,
+        fromClubName: item.formerClubName || 'فريقك',
+        toClubName: 'سوق اللاعبين الأحرار (Free Agent)',
+        timestamp: Date.now(),
+      });
+
+      inboxNotifications.push({
+        id: `msg_fa_left_${Date.now()}_${fa.id}_${Math.random().toString(36).slice(2, 5)}`,
+        title: `انتهاء عقد: تحول ${fa.name} إلى لاعب حر (Free Agent) 📄`,
+        sender: 'لجنة شؤون اللاعبين والتعاقدات',
+        date: `الموسم ${seasonNumber}`,
+        type: 'transfer',
+        read: false,
+        content: `انتهت مدة عقد اللاعب ${fa.name} (${fa.position} - تقييم ${fa.overallRating}) مع ناديك رسمياً (0 سنوات متبقية) دون تجديد، وتم إخراجه من قائمة الفريق وتحويل حالته إلى "لاعب حر" (Free Agent) متاح مجاناً في سوق الانتقالات.`,
+      });
+      continue;
+    }
+
+    // Candidate AI clubs (excluding the player's former club and user club)
     const otherAiClubs = safeTeams.filter(
       c => c && !c.isUserClub && (!(_userClubId && c.id === _userClubId)) && c.id !== item.formerClubId
     );
-    if (otherAiClubs.length === 0) continue;
+    if (otherAiClubs.length === 0) {
+      safeMarket.push({
+        ...fa,
+        currentClubId: '',
+        currentLeagueId: 'free_agents',
+        isFreeAgent: true,
+        contractYears: 0,
+        isListedForTransfer: false,
+      });
+      continue;
+    }
 
-    // Prefer clubs that need this position or have smaller squads, sorted by closeness in rating/reputation
+    // Prefer clubs that need this position or have smaller squads
     const preferredClubs = otherAiClubs.filter(c => {
       const squad = c.players || [];
       if (squad.length >= 30) return false;
@@ -2054,7 +2103,6 @@ export function processFreeAgentsAndAiTransfers(
     });
 
     const poolToPickFrom = preferredClubs.length > 0 ? preferredClubs : otherAiClubs;
-    // Sort by smallest squad first so clubs that lost players get reinforced immediately
     poolToPickFrom.sort((a, b) => (a.players?.length || 0) - (b.players?.length || 0));
     const topCandidates = poolToPickFrom.slice(0, Math.min(4, poolToPickFrom.length));
     const buyer = topCandidates[Math.floor(Math.random() * topCandidates.length)] || otherAiClubs[0];
@@ -2069,6 +2117,7 @@ export function processFreeAgentsAndAiTransfers(
       ...fa,
       currentClubId: buyer.id,
       currentLeagueId: buyer.leagueId || '',
+      isFreeAgent: false,
       contractYears: newContractYears,
       salary: newSalary,
       isListedForTransfer: false,
@@ -2077,7 +2126,6 @@ export function processFreeAgentsAndAiTransfers(
     };
 
     buyer.players = [...(buyer.players || []).filter(p => p && p.id !== signedPlayer.id), signedPlayer];
-    // Immediately integrate the player into the new club's starting lineup so they actively play!
     const syncedBuyer = syncClubLineupAfterTransfer(buyer, signedPlayer.id);
     buyer.tactics = syncedBuyer.tactics;
 
@@ -2097,18 +2145,6 @@ export function processFreeAgentsAndAiTransfers(
       toClubName: buyer.name,
       timestamp: Date.now(),
     });
-
-    if (item.wasUserClub) {
-      inboxNotifications.push({
-        id: `msg_fa_left_${Date.now()}_${fa.id}_${Math.random().toString(36).slice(2, 5)}`,
-        title: `انتقال حر بعد انتهاء العقد: رحيل ${fa.name} إلى ${buyer.name} 📄`,
-        sender: 'لجنة شؤون اللاعبين والتعاقدات',
-        date: `الموسم ${seasonNumber}`,
-        type: 'transfer',
-        read: false,
-        content: `انتهت مدة عقد اللاعب ${fa.name} (${fa.position} - تقييم ${fa.overallRating}) مع ناديك رسمياً (0 سنوات متبقية)، وانتقل في صفقة انتقال حر إلى صفوف نادي (${buyer.name}) بعقد لمدة ${newContractYears} سنوات وراتب شهري ${newSalary.toLocaleString()} ج.م، وشارك رسمياً في التشكيلة الأساسية لناديه الجديد.`,
-      });
-    }
   }
 
   // 3. Ensure every club has at least 16 players and a valid synced lineup after contract expirations

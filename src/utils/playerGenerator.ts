@@ -6,6 +6,7 @@ import {
   PlayerPersonality,
 } from '../types/game';
 import { getCountryById, GLOBAL_COUNTRIES } from '../data/countriesData';
+import { STAR_RATINGS_OVERRIDES } from '../data/starRatingsOverrides';
 
 const POSITIONS_BY_CATEGORY: Record<PositionCategory, Position[]> = {
   GK: ['GK'],
@@ -118,30 +119,30 @@ export function generatePlayer(options: GeneratePlayerOptions): Player {
 
   let effectiveBaseLevel = baseLevel;
   if (isArabLeagueOrCountry) {
-    // Compress inflated base levels (e.g. 76-86) down to realistic 62-72 range for Arab leagues
-    if (effectiveBaseLevel >= 82) {
-      effectiveBaseLevel = 70 + Math.round((effectiveBaseLevel - 82) * 0.5); // 82->70, 86->72
+    // Keep realistic, balanced ratings for Arab leagues without crushing squads down to 50/54
+    if (effectiveBaseLevel >= 84) {
+      effectiveBaseLevel = 76 + Math.round((effectiveBaseLevel - 84) * 0.5);
     } else if (effectiveBaseLevel >= 74) {
-      effectiveBaseLevel = 64 + Math.round((effectiveBaseLevel - 74) * 0.75); // 74->64, 80->69
-    } else if (effectiveBaseLevel >= 66) {
-      effectiveBaseLevel = 58 + Math.round((effectiveBaseLevel - 66) * 0.75); // 66->58, 72->63
+      effectiveBaseLevel = 71 + Math.round((effectiveBaseLevel - 74) * 0.65);
+    } else if (effectiveBaseLevel >= 65) {
+      effectiveBaseLevel = 64 + Math.round((effectiveBaseLevel - 65) * 0.75);
     }
   }
 
-  const variance = Math.floor(Math.random() * 7 - 3); // -3 to +3
-  const maxAllowedOvr = isArabLeagueOrCountry ? (isForeign ? 78 : 75) : 91;
-  const overall = Math.min(maxAllowedOvr, Math.max(42, effectiveBaseLevel + variance));
+  const variance = Math.floor(Math.random() * 5 - 2); // -2 to +2
+  const maxAllowedOvr = isArabLeagueOrCountry ? (isForeign ? 84 : 81) : 92;
+  const overall = Math.min(maxAllowedOvr, Math.max(52, effectiveBaseLevel + variance));
 
   // Potential is higher for young players, with realistic caps
   const potentialBoost =
     age <= 20
-      ? Math.floor(Math.random() * 8 + 3)
+      ? Math.floor(Math.random() * 8 + 4)
       : age <= 24
       ? Math.floor(Math.random() * 5 + 2)
       : age <= 27
-      ? Math.floor(Math.random() * 2 + 1)
+      ? Math.floor(Math.random() * 3 + 1)
       : 0;
-  const maxAllowedPot = isArabLeagueOrCountry ? (isForeign ? 82 : 80) : 94;
+  const maxAllowedPot = isArabLeagueOrCountry ? (isForeign ? 86 : 85) : 94;
   const potential = Math.min(maxAllowedPot, overall + potentialBoost);
 
   // Position-specific attributes
@@ -256,27 +257,15 @@ export function calibrateRealisticPlayerRating(
   clubReputationHint: number = 65
 ): Player {
   if (!player || typeof player !== 'object') return player;
-  if (player._realisticCalibratedV2) return player;
 
   const pId = String(player.id || '');
   const clubId = String(clubIdHint || player.currentClubId || player.clubId || '').toLowerCase();
   const leagueId = String(leagueIdHint || player.currentLeagueId || player.leagueId || '').toLowerCase();
-  const natCode = String(player.nationalityCode || '').toUpperCase();
-  const natName = String(player.nationality || '');
 
-  const isArabNationality =
-    ARAB_NATIONALITY_CODES.has(natCode) ||
-    ARAB_COUNTRY_KEYWORDS.some(kw => natName.includes(kw));
-
-  const isArabLeague =
-    /^(egy|sau|mar|tun|alg|uae|qat)_/.test(leagueId) ||
-    /^(eg1|eg2|eg3|sau1|sau2|sau3|sau4|mar_|tun_|alg_|uae_|qat_|al_ahly|zamalek|pyramids|al_masry|al_hilal|al_nassr|al_ittihad|al_shabab|al_qadsiah|team_)/.test(clubId);
-
-  const isTopEuroLeague = /^(esp|eng|ita|ger|fra)_tier_1/.test(leagueId) ||
-    /^(esp1|eng1|ita_|ger_|fra_)/.test(clubId);
-
-  const oldOvr = Number(player.overallRating) || 65;
-  const oldPot = Number(player.potentialRating) || oldOvr;
+  const rawOvr = Number(player.overallRating ?? player.rating ?? 65);
+  const oldOvr = Number.isFinite(rawOvr) && rawOvr > 0 ? rawOvr : 65;
+  const rawPot = Number(player.potentialRating ?? player.potential ?? oldOvr);
+  const oldPot = Number.isFinite(rawPot) && rawPot >= oldOvr ? rawPot : oldOvr;
   const age = Number(player.age) || 24;
   const posCat: PositionCategory =
     player.positionCategory ||
@@ -288,119 +277,118 @@ export function calibrateRealisticPlayerRating(
       ? 'MID'
       : 'FWD');
 
-  // If neither an Arab player nor playing in an Arab league, keep European/LatAm ratings intact
-  if (!isArabNationality && !isArabLeague) {
-    return { ...player, _realisticCalibratedV2: true } as any;
+  // 1. Check explicit worldwide and regional star overrides first (never downgrade developed players)
+  const starOverride = STAR_RATINGS_OVERRIDES[pId] || ELITE_ARAB_WORLD_STARS[pId];
+  if (starOverride) {
+    const targetOvr = Math.max(40, Math.min(99, Math.round(starOverride.ovr)));
+    const finalOvr = Math.max(oldOvr, targetOvr);
+    const finalPot = Math.max(finalOvr, starOverride.pot ? Math.max(finalOvr, starOverride.pot) : oldPot);
+    const valuation =
+      player.marketValue && player.salary && finalOvr === oldOvr
+        ? { marketValue: player.marketValue, salary: player.salary }
+        : calculatePlayerValuation(finalOvr, finalPot, age, posCat, clubReputationHint);
+    return {
+      ...player,
+      overallRating: finalOvr,
+      potentialRating: finalPot,
+      attributes: {
+        pace: player.attributes?.pace ?? finalOvr,
+        shooting: player.attributes?.shooting ?? Math.max(35, finalOvr - 4),
+        passing: player.attributes?.passing ?? Math.max(40, finalOvr - 2),
+        dribbling: player.attributes?.dribbling ?? Math.max(40, finalOvr - 2),
+        defending: player.attributes?.defending ?? Math.max(35, finalOvr - 5),
+        physical: player.attributes?.physical ?? finalOvr,
+        ...(player.attributes || {}),
+        ...((starOverride as any).attributes || {}),
+      },
+      marketValue: valuation.marketValue,
+      salary: valuation.salary,
+      _realisticCalibratedV2: true,
+    } as any;
   }
 
+  // 2. Self-Heal Protection: Recover players whose ratings were previously crushed to 50-54 by legacy tier clamping
   let newOvr = oldOvr;
-  let newPot = oldPot;
+  let newPot = Math.max(oldOvr, oldPot);
 
-  // 1. Check explicit world/regional star overrides first
-  if (ELITE_ARAB_WORLD_STARS[pId]) {
-    newOvr = ELITE_ARAB_WORLD_STARS[pId].ovr;
-    newPot = ELITE_ARAB_WORLD_STARS[pId].pot;
-  } else if (isTopEuroLeague && isArabNationality) {
-    // Arab player in Top 5 European League (e.g. Salah, Hakimi, Brahim, Mazraoui, or generated)
-    newOvr = oldOvr > 84 ? Math.min(88, oldOvr) : Math.min(81, oldOvr);
-    newPot = Math.min(88, Math.max(newOvr, oldPot - Math.max(0, oldOvr - newOvr)));
-  } else if (isArabLeague && !isArabNationality) {
-    // Foreign international player in an Arab league
-    const isSaudiBigClub = /^(sau1_hilal|sau1_nassr|sau1_ittihad|sau1_ahli|sau1_qadsiah|sau1_shabab|al_hilal|al_nassr|al_ittihad|al_ahli_sau|al_qadsiah|al_shabab)/.test(clubId);
-    if (isSaudiBigClub) {
-      // Foreign stars in top Saudi clubs (e.g. Ronaldo, Neves, Milinkovic-Savic, Benzema, Kante)
-      if (oldOvr >= 86) newOvr = 82 + Math.min(3, Math.floor((oldOvr - 86) * 0.5)); // 82-85 max
-      else if (oldOvr >= 80) newOvr = 77 + Math.round((oldOvr - 80) * 0.8); // 77-81
-      else newOvr = Math.min(76, oldOvr - 2);
+  const isLegacyCrushedRating =
+    oldOvr >= 45 &&
+    oldOvr <= 54 &&
+    (oldPot >= 63 ||
+      (Number(player.salary) || 0) >= 4500 ||
+      (Number(player.marketValue) || 0) >= 180000 ||
+      /tier_1|tier_2|tier_3/.test(leagueId) ||
+      clubReputationHint >= 50);
+
+  if (isLegacyCrushedRating) {
+    if (oldPot >= 64) {
+      newOvr = Math.min(82, Math.max(60, oldPot - (age <= 23 ? 5 : age <= 27 ? 3 : 1)));
+    } else if ((Number(player.salary) || 0) >= 15000) {
+      newOvr = 71;
+    } else if ((Number(player.salary) || 0) >= 5000) {
+      newOvr = 64;
+    } else if (/tier_1/.test(leagueId) || clubReputationHint >= 70) {
+      newOvr = 68;
+    } else if (/tier_2/.test(leagueId) || clubReputationHint >= 55) {
+      newOvr = 63;
     } else {
-      // Foreign players in Egypt / Morocco / Tunisia / Algeria / UAE / Qatar / mid-table Saudi
-      if (oldOvr >= 80) newOvr = 73 + Math.min(3, Math.floor((oldOvr - 80) * 0.5)); // 73-76 max
-      else if (oldOvr >= 74) newOvr = 68 + Math.round((oldOvr - 74) * 0.75); // 68-72
-      else if (oldOvr >= 68) newOvr = 64 + Math.round((oldOvr - 68) * 0.65); // 64-68
-      else newOvr = oldOvr;
+      newOvr = 59;
     }
-    const potGap = Math.min(6, Math.max(0, oldPot - oldOvr));
-    newPot = age >= 28 ? newOvr : Math.min(isSaudiBigClub ? 85 : 79, newOvr + potGap);
-  } else {
-    // Arab player in Arab leagues (or free agent Arab player)
-    const isTier2 = /tier_2|^eg2|^sau2/.test(leagueId) || /^eg2|^sau2/.test(clubId);
-    const isTier3 = /tier_3|^eg3|^sau3/.test(leagueId) || /^eg3|^sau3/.test(clubId);
-    const isTier4 = /tier_4|^team_|^sau4/.test(leagueId) || /^team_|^sau4/.test(clubId);
-
-    const isTopArabGiant =
-      /^(eg1_ahly|eg1_zamalek|eg1_pyramids|al_ahly|zamalek|pyramids|sau1_hilal|sau1_nassr|sau1_ittihad|sau1_ahli|al_hilal|al_nassr|al_ittihad|al_ahli_sau|mar_wydad|mar_raja|mar_far|mar_berkane|tun_esperance|alg_mca|alg_crb|uae_ain|uae_wasl|uae_shabab_ahli|qat_sadd|qat_duhail)/.test(
-        clubId
-      );
-
-    if (isTier4) {
-      newOvr = Math.min(54, Math.max(45, Math.round(46 + (oldOvr - 45) * 0.35)));
-    } else if (isTier3) {
-      newOvr = Math.min(59, Math.max(49, Math.round(51 + (oldOvr - 50) * 0.4)));
-    } else if (isTier2) {
-      newOvr = Math.min(65, Math.max(54, Math.round(56 + (oldOvr - 55) * 0.45)));
-    } else if (isTopArabGiant) {
-      // Top Arab giant domestic player: realistic 65 - 75 OVR range
-      if (oldOvr >= 83) newOvr = 75;
-      else if (oldOvr >= 80) newOvr = 72 + Math.round((oldOvr - 80) * 0.75); // 80->72, 82->74
-      else if (oldOvr >= 75) newOvr = 68 + Math.round((oldOvr - 75) * 0.75); // 75->68, 79->71
-      else if (oldOvr >= 70) newOvr = 65 + Math.round((oldOvr - 70) * 0.6);  // 70->65, 74->67
-      else newOvr = Math.max(58, oldOvr - 3);
-    } else {
-      // Mid-table / standard Arab Tier 1 club player: realistic 60 - 70 OVR range
-      if (oldOvr >= 80) newOvr = 70;
-      else if (oldOvr >= 75) newOvr = 66 + Math.round((oldOvr - 75) * 0.7); // 75->66, 79->69
-      else if (oldOvr >= 70) newOvr = 63 + Math.round((oldOvr - 70) * 0.6); // 70->63, 74->65
-      else if (oldOvr >= 65) newOvr = 60 + Math.round((oldOvr - 65) * 0.6); // 65->60, 69->62
-      else newOvr = Math.max(54, oldOvr - 2);
-    }
-
-    const rawGap = Math.max(0, oldPot - oldOvr);
-    const realisticBoost =
-      age <= 21 ? Math.min(7, Math.max(3, rawGap)) : age <= 25 ? Math.min(4, Math.max(1, rawGap)) : age <= 27 ? Math.min(2, rawGap) : 0;
-    const maxCap = isTier4 ? 62 : isTier3 ? 66 : isTier2 ? 71 : isTopArabGiant ? 80 : 76;
-    newPot = Math.min(maxCap, newOvr + realisticBoost);
+    newPot = Math.max(newOvr, oldPot);
   }
 
-  const delta = newOvr - oldOvr;
-  const oldAttrs = player.attributes || {
-    pace: oldOvr,
-    shooting: oldOvr - 4,
-    passing: oldOvr - 2,
-    dribbling: oldOvr - 2,
-    defending: oldOvr - 5,
-    physical: oldOvr,
+  // 3. Preserve existing attributes without ever resetting or downgrading them
+  const isGK = posCat === 'GK' || player.position === 'GK';
+  const isDef = posCat === 'DEF';
+  const isMid = posCat === 'MID';
+  const isFwd = posCat === 'FWD';
+
+  const existingAttrs = player.attributes && typeof player.attributes === 'object' ? player.attributes : null;
+  const ratingHealedDelta = Math.max(0, newOvr - oldOvr);
+
+  const resolveSafeAttribute = (rawVal: any, fallbackOffset: number, minFloor = 35): number => {
+    const num = Number(rawVal);
+    if (Number.isFinite(num) && num > 0) {
+      // If the player was healed from a 50/54 rating crush, lift the crushed attribute proportionally
+      if (ratingHealedDelta > 0 && num <= 56) {
+        return Math.min(95, Math.max(minFloor, Math.round(num + ratingHealedDelta)));
+      }
+      return Math.min(99, Math.max(minFloor, Math.round(num)));
+    }
+    return Math.min(92, Math.max(minFloor, Math.round(newOvr + fallbackOffset)));
   };
 
-  // Scale attributes smoothly so technical stats match the realistic OVR while keeping physical/pace natural
-  const scaleAttr = (val: number, weight = 0.85, minVal = 28, maxVal = 86) => {
-    const base = Number.isFinite(val) ? val : oldOvr;
-    return Math.min(maxVal, Math.max(minVal, Math.round(base + delta * weight)));
-  };
-
-  const calibratedAttributes = {
-    pace: scaleAttr(oldAttrs.pace, 0.55, 38, 87),
-    shooting: scaleAttr(oldAttrs.shooting, 0.85, 22, 84),
-    passing: scaleAttr(oldAttrs.passing, 0.85, 28, 84),
-    dribbling: scaleAttr(oldAttrs.dribbling, 0.82, 28, 85),
-    defending: scaleAttr(oldAttrs.defending, 0.85, 22, 84),
-    physical: scaleAttr(oldAttrs.physical, 0.6, 40, 86),
+  const preservedAttributes = {
+    pace: resolveSafeAttribute(existingAttrs?.pace, 1, 38),
+    shooting: resolveSafeAttribute(existingAttrs?.shooting, isFwd ? 3 : isDef ? -10 : -2, 25),
+    passing: resolveSafeAttribute(existingAttrs?.passing, isMid ? 3 : isGK ? -10 : -1, 30),
+    dribbling: resolveSafeAttribute(existingAttrs?.dribbling, isFwd || isMid ? 2 : isGK ? -14 : -3, 30),
+    defending: resolveSafeAttribute(existingAttrs?.defending, isDef ? 4 : isFwd ? -12 : -3, 25),
+    physical: resolveSafeAttribute(existingAttrs?.physical, 1, 40),
     goalkeeping:
-      oldAttrs.goalkeeping !== undefined || player.position === 'GK'
-        ? scaleAttr(oldAttrs.goalkeeping ?? oldOvr, 0.9, 35, 85)
+      existingAttrs?.goalkeeping !== undefined || isGK
+        ? resolveSafeAttribute(existingAttrs?.goalkeeping, isGK ? 2 : -20, isGK ? 45 : 15)
         : undefined,
   };
 
-  // Recalculate realistic marketValue and salary if rating was reduced
-  const valuation =
-    delta !== 0
-      ? calculatePlayerValuation(newOvr, newPot, age, posCat, clubReputationHint)
-      : { marketValue: player.marketValue || 250000, salary: player.salary || 8000 };
+  const hasValidValuation =
+    Number.isFinite(Number(player.marketValue)) &&
+    Number(player.marketValue) > 0 &&
+    Number.isFinite(Number(player.salary)) &&
+    Number(player.salary) > 0 &&
+    ratingHealedDelta === 0;
+
+  const valuation = hasValidValuation
+    ? { marketValue: Number(player.marketValue), salary: Number(player.salary) }
+    : calculatePlayerValuation(newOvr, newPot, age, posCat, clubReputationHint);
 
   return {
     ...player,
+    currentClubId: player.currentClubId || clubId || undefined,
+    currentLeagueId: player.currentLeagueId || leagueId || undefined,
     overallRating: newOvr,
     potentialRating: newPot,
-    attributes: calibratedAttributes,
+    attributes: preservedAttributes,
     marketValue: valuation.marketValue,
     salary: valuation.salary,
     _realisticCalibratedV2: true,
@@ -586,8 +574,8 @@ export function generateFreeAgentsMarket(count = 20): Player[] {
 export function ensureClubSquadIntegrity(club: any): any {
   if (!club) return club;
   const existingPlayers: Player[] = Array.isArray(club.players) ? [...club.players] : [];
-  
-  // 1. Deduplicate
+
+  // 1. Deduplicate while preserving full player attributes & ratings
   const seenIds = new Set<string>();
   const seenNames = new Set<string>();
   const cleanPlayers: Player[] = [];
@@ -600,61 +588,97 @@ export function ensureClubSquadIntegrity(club: any): any {
 
     seenIds.add(p.id);
     if (normName) seenNames.add(normName);
-    cleanPlayers.push({
-      ...p,
-      currentClubId: club.id,
-      currentLeagueId: club.leagueId || p.currentLeagueId || '',
-    });
+    cleanPlayers.push(
+      calibrateRealisticPlayerRating(
+        {
+          ...p,
+          currentClubId: club.id,
+          currentLeagueId: club.leagueId || p.currentLeagueId || '',
+        },
+        club.id,
+        club.leagueId,
+        club.reputation || 65
+      )
+    );
   }
 
-  // 2. Minimum squad size enforcement: At least 20 players (target 22)
-  if (cleanPlayers.length < 20) {
-    const needed = 22 - cleanPlayers.length;
-    const countryCode = club.countryCode || 'EGY';
-    const rep = club.reputation || 50;
-    const tier = club.division || (club as any).tier || 4;
-    const baseLevel = tier === 1 ? 75 : tier === 2 ? 67 : tier === 3 ? 59 : 52;
+  // 2. Enforce positional minimums & minimum squad size (at least 20-22 players)
+  const countryCode = club.countryCode || 'EGY';
+  const rep = Number(club.reputation) || 60;
+  const tier = Number(club.division || (club as any).tier || (/tier_1|^eg1|^sau1/.test(String(club.leagueId || club.id)) ? 1 : /tier_2|^eg2|^sau2/.test(String(club.leagueId || club.id)) ? 2 : /tier_3|^eg3|^sau3/.test(String(club.leagueId || club.id)) ? 3 : 4));
 
-    const blueprintSlots: { pos: Position; cat: PositionCategory }[] = [
-      { pos: 'GK', cat: 'GK' },
-      { pos: 'CB', cat: 'DEF' },
-      { pos: 'RB', cat: 'DEF' },
-      { pos: 'LB', cat: 'DEF' },
-      { pos: 'CM', cat: 'MID' },
-      { pos: 'CDM', cat: 'MID' },
-      { pos: 'CAM', cat: 'MID' },
-      { pos: 'RW', cat: 'FWD' },
-      { pos: 'LW', cat: 'FWD' },
-      { pos: 'ST', cat: 'FWD' },
-    ];
+  const baseLevel =
+    tier === 1
+      ? Math.max(70, Math.min(78, Math.round(rep * 0.94)))
+      : tier === 2
+      ? Math.max(63, Math.min(70, Math.round(rep * 0.96)))
+      : tier === 3
+      ? Math.max(58, Math.min(64, Math.round(Math.max(58, rep * 0.98))))
+      : Math.max(55, Math.min(61, Math.round(Math.max(56, rep + 15))));
 
-    for (let i = 0; i < needed; i++) {
-      const slot = blueprintSlots[i % blueprintSlots.length];
-      const newP = generatePlayer({
-        countryId: countryCode,
-        clubId: club.id,
-        leagueId: club.leagueId,
-        clubReputation: rep,
-        baseLevel,
-        position: slot.pos,
-        positionCategory: slot.cat,
-      });
+  const countByCategory = (cat: PositionCategory) =>
+    cleanPlayers.filter(p => p.positionCategory === cat).length;
 
-      newP.id = `${club.id}_squad_${cleanPlayers.length + 1}_${Date.now()}`;
-      newP.currentClubId = club.id;
-      newP.currentLeagueId = club.leagueId || '';
-      newP.number = cleanPlayers.length + 1;
+  const requiredSlots: { pos: Position; cat: PositionCategory }[] = [];
+  const gkNeeded = Math.max(0, 2 - countByCategory('GK'));
+  for (let i = 0; i < gkNeeded; i++) requiredSlots.push({ pos: 'GK', cat: 'GK' });
 
-      const nName = (newP.name || '').trim().toLowerCase();
-      if (!seenNames.has(nName)) {
-        seenNames.add(nName);
-        seenIds.add(newP.id);
-        cleanPlayers.push(newP);
-      }
+  const defPositions: Position[] = ['CB', 'CB', 'RB', 'LB', 'CB', 'RB'];
+  const defNeeded = Math.max(0, 6 - countByCategory('DEF'));
+  for (let i = 0; i < defNeeded; i++) requiredSlots.push({ pos: defPositions[i % defPositions.length], cat: 'DEF' });
+
+  const midPositions: Position[] = ['CM', 'CDM', 'CAM', 'CM', 'CDM', 'CAM'];
+  const midNeeded = Math.max(0, 6 - countByCategory('MID'));
+  for (let i = 0; i < midNeeded; i++) requiredSlots.push({ pos: midPositions[i % midPositions.length], cat: 'MID' });
+
+  const fwdPositions: Position[] = ['ST', 'RW', 'LW', 'ST'];
+  const fwdNeeded = Math.max(0, 4 - countByCategory('FWD'));
+  for (let i = 0; i < fwdNeeded; i++) requiredSlots.push({ pos: fwdPositions[i % fwdPositions.length], cat: 'FWD' });
+
+  const blueprintSlots: { pos: Position; cat: PositionCategory }[] = [
+    { pos: 'GK', cat: 'GK' },
+    { pos: 'CB', cat: 'DEF' },
+    { pos: 'RB', cat: 'DEF' },
+    { pos: 'LB', cat: 'DEF' },
+    { pos: 'CM', cat: 'MID' },
+    { pos: 'CDM', cat: 'MID' },
+    { pos: 'CAM', cat: 'MID' },
+    { pos: 'RW', cat: 'FWD' },
+    { pos: 'LW', cat: 'FWD' },
+    { pos: 'ST', cat: 'FWD' },
+  ];
+
+  const targetSquadSize = 22;
+  let slotIdx = 0;
+  let safetyAttempts = 0;
+
+  while ((cleanPlayers.length < 20 || requiredSlots.length > 0) && cleanPlayers.length < targetSquadSize && safetyAttempts < 40) {
+    safetyAttempts++;
+    const slot = requiredSlots.length > 0 ? requiredSlots.shift()! : blueprintSlots[slotIdx++ % blueprintSlots.length];
+    const newP = generatePlayer({
+      countryId: countryCode,
+      clubId: club.id,
+      leagueId: club.leagueId,
+      clubReputation: rep,
+      baseLevel,
+      position: slot.pos,
+      positionCategory: slot.cat,
+    });
+
+    newP.id = `${club.id}_squad_${cleanPlayers.length + 1}_${Date.now()}_${safetyAttempts}`;
+    newP.currentClubId = club.id;
+    newP.currentLeagueId = club.leagueId || '';
+    newP.number = cleanPlayers.length + 1;
+
+    const nName = (newP.name || '').trim().toLowerCase();
+    if (!seenNames.has(nName)) {
+      seenNames.add(nName);
+      seenIds.add(newP.id);
+      cleanPlayers.push(newP);
     }
   }
 
-  // 3. Fix numbers
+  // 3. Fix jersey numbers
   const usedNumbers = new Set<number>();
   cleanPlayers.forEach((p, idx) => {
     if (!p.number || usedNumbers.has(p.number)) {
@@ -665,8 +689,66 @@ export function ensureClubSquadIntegrity(club: any): any {
     usedNumbers.add(p.number);
   });
 
+  // 4. Ensure valid startingPlayerIds (11) and benchPlayerIds (7)
+  const validIdsSet = new Set(cleanPlayers.map(p => p.id));
+  let startingIds: string[] = Array.isArray(club.tactics?.startingPlayerIds)
+    ? club.tactics.startingPlayerIds.filter((id: string) => validIdsSet.has(id))
+    : [];
+  let benchIds: string[] = Array.isArray(club.tactics?.benchPlayerIds)
+    ? club.tactics.benchPlayerIds.filter((id: string) => validIdsSet.has(id) && !startingIds.includes(id))
+    : [];
+
+  if (startingIds.length < 11) {
+    const remaining = cleanPlayers.filter(p => !startingIds.includes(p.id));
+    // Prefer at least 1 GK in starting 11
+    const hasStarterGk = startingIds.some(id => cleanPlayers.find(p => p.id === id)?.positionCategory === 'GK');
+    if (!hasStarterGk) {
+      const gk = remaining.find(p => p.positionCategory === 'GK');
+      if (gk) {
+        startingIds.unshift(gk.id);
+      }
+    }
+    for (const p of remaining) {
+      if (startingIds.length >= 11) break;
+      if (!startingIds.includes(p.id)) {
+        startingIds.push(p.id);
+      }
+    }
+    benchIds = benchIds.filter(id => !startingIds.includes(id));
+  }
+
+  if (benchIds.length < 7) {
+    for (const p of cleanPlayers) {
+      if (benchIds.length >= 7) break;
+      if (!startingIds.includes(p.id) && !benchIds.includes(p.id)) {
+        benchIds.push(p.id);
+      }
+    }
+  }
+
   return {
     ...club,
     players: cleanPlayers,
+    tactics: club.tactics
+      ? {
+          ...club.tactics,
+          startingPlayerIds: startingIds.slice(0, 11),
+          benchPlayerIds: benchIds.slice(0, 7),
+        }
+      : {
+          formation: '4-3-3',
+          mentality: 'balanced',
+          passingStyle: 'mixed',
+          tempo: 'normal',
+          attackingWidth: 'normal',
+          attackFocus: 'mixed',
+          pressingIntensity: 'medium',
+          defensiveLine: 'normal',
+          timeWasting: 'never',
+          offsideTrap: false,
+          counterAttack: true,
+          startingPlayerIds: startingIds.slice(0, 11),
+          benchPlayerIds: benchIds.slice(0, 7),
+        },
   };
 }

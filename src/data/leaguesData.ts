@@ -205,15 +205,19 @@ let isInitializedFromStorage = false;
  */
 function prunePlayerForStorage(p: any) {
   if (!p) return null;
+  const ovr = Number(p.overallRating ?? p.rating) || 65;
+  const pot = Math.max(ovr, Number(p.potentialRating ?? p.potential) || ovr);
   return {
     id: p.id,
     name: p.name,
     age: p.age,
+    number: p.number,
     position: p.position,
     positionCategory: p.positionCategory,
-    overallRating: p.overallRating || p.rating || 65,
-    potentialRating: p.potentialRating || 70,
+    overallRating: ovr,
+    potentialRating: pot,
     attributes: p.attributes,
+    marketValue: p.marketValue,
     salary: p.salary,
     contractYears: p.contractYears,
     nationality: p.nationality,
@@ -222,6 +226,7 @@ function prunePlayerForStorage(p: any) {
     fitness: p.fitness,
     currentClubId: p.currentClubId,
     currentLeagueId: p.currentLeagueId,
+    _realisticCalibratedV2: true,
     stats: p.stats ? {
       appearances: p.stats.appearances || 0,
       goals: p.stats.goals || 0,

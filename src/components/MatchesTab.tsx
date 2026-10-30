@@ -13,6 +13,7 @@ import { TacticalMatchReportCard } from './TacticalMatchReportCard';
 import { RestartSeasonModal } from './RestartSeasonModal';
 import { WorldStarLoanModal } from './modals/WorldStarLoanModal';
 import { ClubCrest3DShield } from './models/Football3DModels';
+import { ClubBadge } from './ClubBadge';
 import { fireLightweightCelebration } from '../utils/confetti';
 import {
   analyzeLiveMatchSituation,
@@ -482,11 +483,8 @@ export const MatchesTab: React.FC = () => {
             
             {/* Home Team */}
             <div className="col-span-2 flex flex-col items-center text-center">
-              <div 
-                className="w-14 h-14 rounded-2xl flex items-center justify-center font-black text-xl shadow-lg border border-white/20 mb-1.5"
-                style={{ backgroundColor: liveMatch.homeTeam.primaryColor, color: '#fff' }}
-              >
-                {liveMatch.homeTeam.shortName.slice(0, 2)}
+              <div className="mb-1.5 flex justify-center">
+                <ClubBadge club={liveMatch.homeTeam} size="lg" />
               </div>
               <h3 className="font-bold text-sm text-white truncate max-w-full">
                 {liveMatch.homeTeam.name}
@@ -523,11 +521,8 @@ export const MatchesTab: React.FC = () => {
 
             {/* Away Team */}
             <div className="col-span-2 flex flex-col items-center text-center">
-              <div 
-                className="w-14 h-14 rounded-2xl flex items-center justify-center font-black text-xl shadow-lg border border-white/20 mb-1.5"
-                style={{ backgroundColor: liveMatch.awayTeam.primaryColor, color: '#fff' }}
-              >
-                {liveMatch.awayTeam.shortName.slice(0, 2)}
+              <div className="mb-1.5 flex justify-center">
+                <ClubBadge club={liveMatch.awayTeam} size="lg" />
               </div>
               <h3 className="font-bold text-sm text-white truncate max-w-full">
                 {liveMatch.awayTeam.name}
@@ -2008,7 +2003,7 @@ export const MatchesTab: React.FC = () => {
                   clubName={userClub?.name || 'فريقك'}
                   primaryColor={userClub?.primaryColor || '#10b981'}
                   secondaryColor={userClub?.secondaryColor || '#ffffff'}
-                  rating={upcomingMatchAnalysis?.userSquad?.overall || 70}
+                  reputation={upcomingMatchAnalysis?.userSquad?.overall || 70}
                   size="md"
                 />
                 <span className="text-xs font-black text-white">{userClub?.name || 'فريقك'}</span>
@@ -2029,7 +2024,7 @@ export const MatchesTab: React.FC = () => {
                   clubName={upcomingMatchAnalysis?.oppClub?.name || 'المنافس'}
                   primaryColor={upcomingMatchAnalysis?.oppClub?.primaryColor || '#e11d48'}
                   secondaryColor={upcomingMatchAnalysis?.oppClub?.secondaryColor || '#ffffff'}
-                  rating={upcomingMatchAnalysis?.oppSquad?.overall || 70}
+                  reputation={upcomingMatchAnalysis?.oppSquad?.overall || 70}
                   size="md"
                 />
                 <span className="text-xs font-black text-white">{upcomingMatchAnalysis?.oppClub?.name || 'المنافس'}</span>

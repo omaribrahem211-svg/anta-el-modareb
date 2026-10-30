@@ -6,6 +6,8 @@ import { calculateSuggestedRenewalWage } from '../utils/contractAlertEngine';
 import { getPositionArabic, getPositionBadgeClass } from '../utils/positionHelper';
 import { AdManager } from '../services/adManager';
 import { PlayerKit3DModel } from './models/Football3DModels';
+import { PlayerCard } from './PlayerCard';
+import { ClubBadge } from './ClubBadge';
 import { ModalPortal } from './common/ModalPortal';
 import {
   X,
@@ -236,20 +238,19 @@ export const PlayerModal: React.FC<PlayerModalProps> = ({ player, onClose, onSta
         className="w-full max-w-lg bg-slate-900 border border-slate-700/80 rounded-3xl p-5 shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto custom-scrollbar"
         onClick={(e) => e.stopPropagation()}
       >
-        {/* Header Bar with 3D Sculpted Kit Figurine */}
+        {/* Header Bar with Player Card */}
         <div className="flex items-start justify-between border-b border-slate-800 pb-3 gap-3">
-          <div className="flex items-start gap-3.5 min-w-0 flex-1">
-            <PlayerKit3DModel
-              number={player.number || 10}
-              position={player.position}
-              overall={player.overallRating}
-              primaryColor={playerClub?.primaryColor || userClub?.primaryColor || '#10b981'}
-              secondaryColor={playerClub?.secondaryColor || userClub?.secondaryColor || '#ffffff'}
-              isGK={player.position === 'GK'}
-              size="md"
-            />
-            <div className="min-w-0 flex-1">
-              <div className="flex flex-wrap items-center gap-2">
+          <div className="flex flex-col sm:flex-row items-center sm:items-start gap-3.5 min-w-0 flex-1">
+            <div className="shrink-0 flex justify-center">
+              <PlayerCard
+                player={player}
+                club={playerClub || userClub}
+                size="sm"
+                showGlow={true}
+              />
+            </div>
+            <div className="min-w-0 flex-1 text-center sm:text-right">
+              <div className="flex flex-wrap items-center justify-center sm:justify-start gap-2">
                 <h3 className="font-black text-lg sm:text-xl text-white break-words leading-tight">{player.name}</h3>
                 {player.number && (
                   <span className="text-xs text-slate-400 font-mono bg-slate-850 border border-slate-700 px-1.5 py-0.5 rounded-md">
@@ -260,7 +261,7 @@ export const PlayerModal: React.FC<PlayerModalProps> = ({ player, onClose, onSta
               {player.nickname && (
                 <div className="text-xs text-amber-400 font-bold mt-0.5">"{player.nickname}"</div>
               )}
-              <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
+              <div className="flex flex-wrap items-center justify-center sm:justify-start gap-1.5 mt-1.5">
                 <span className={`text-[11px] px-2.5 py-0.5 rounded-full border font-bold ${getPositionBadgeClass(player.position)}`}>
                   {getPositionArabic(player.position)} ({player.position})
                 </span>
@@ -285,7 +286,7 @@ export const PlayerModal: React.FC<PlayerModalProps> = ({ player, onClose, onSta
 
           <button 
             onClick={onClose}
-            className="p-2 rounded-xl bg-slate-800 text-slate-400 hover:text-white hover:bg-slate-700 shrink-0 cursor-pointer"
+            className="p-2 rounded-xl bg-slate-800 text-slate-400 hover:text-white hover:bg-slate-700 shrink-0 cursor-pointer self-start"
           >
             <X className="w-5 h-5" />
           </button>
@@ -308,9 +309,12 @@ export const PlayerModal: React.FC<PlayerModalProps> = ({ player, onClose, onSta
               <Building2 className="w-3 h-3 text-cyan-400" />
               النادي الحالي
             </span>
-            <span className="font-bold text-slate-100 truncate mt-0.5">
-              {playerClub ? playerClub.name : safeClubInfo.clubName}
-            </span>
+            <div className="flex items-center gap-1.5 mt-0.5 truncate">
+              <ClubBadge club={playerClub || userClub || { name: safeClubInfo.clubName }} size="xs" />
+              <span className="font-bold text-slate-100 truncate">
+                {playerClub ? playerClub.name : safeClubInfo.clubName}
+              </span>
+            </div>
           </div>
 
           <div className="flex flex-col">
@@ -852,7 +856,28 @@ export const PlayerModal: React.FC<PlayerModalProps> = ({ player, onClose, onSta
             <button
               onClick={() => {
                 if (onStartNegotiation) {
-                  onStartNegotiation(player);
+                  const isFree =
+                    statusInfo.status === 'free_agent' ||
+                    (!playerClub && safeClubInfo.clubName.includes('وكيل حر'));
+                  const enrichedPlayer: Player = {
+                    ...player,
+                    overallRating: player.overallRating || (player as any).rating || 65,
+                    age: player.age || 24,
+                    salary: player.salary || 5000,
+                    currentClubId: isFree ? '' : (player.currentClubId || playerClub?.id || ''),
+                    marketValue: isFree ? 0 : (askingPrice || player.marketValue || 50000),
+                    isFreeAgent: isFree,
+                    contractYears: isFree ? 0 : Math.max(1, player.contractYears || 2),
+                    ...({
+                      rating: player.overallRating || (player as any).rating || 65,
+                      club: isFree ? 'لاعب حر' : (playerClub?.name || safeClubInfo.clubName || 'نادٍ محترف'),
+                      currentClubName: isFree ? 'لاعب حر' : (playerClub?.name || safeClubInfo.clubName || 'نادٍ محترف'),
+                      price: isFree ? 0 : (askingPrice || player.marketValue || 50000),
+                      askingPrice: isFree ? 0 : (askingPrice || player.marketValue || 50000),
+                      contractType: isFree ? 'free' : 'club',
+                    } as any),
+                  };
+                  onStartNegotiation(enrichedPlayer);
                   onClose();
                 }
               }}

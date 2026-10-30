@@ -58,6 +58,7 @@ import {
 } from '../services/sponsorshipService';
 import { hireStaffMember, getClubStaffBonuses } from '../utils/staffEngine';
 import { processPostMatchPlayerUpdates, buildMatchStatsMap } from '../utils/playerFatigueEngine';
+import { reorderStartingIdsForFormation } from '../utils/lineupSlots';
 import { simulateMultipleLeagueRounds } from '../utils/batchSimulationEngine';
 import {
   applyAttributeUpgrade,
@@ -149,6 +150,7 @@ import { challengesManager, ChallengeReward } from '../services/challengesServic
 import { MIGRATION_STORAGE_KEY, runOneTimeWorldMigration, inferClubCountry } from '../utils/worldMigration';
 import { validateWorldDatabase, sanitizeWorldPlayerOwnership } from '../utils/worldValidation';
 import { isRealClub, loadRealClubSquad } from '../data/realPlayersData';
+import { ensureClubSquadIntegrity, calibrateRealisticPlayerRating } from '../utils/playerGenerator';
 import { useAuth } from './AuthContext';
 import { getLocalTrainerProfile, saveLocalTrainerProfile, generateTrainerId } from '../services/trainerProfileService';
 import { gameStateRepository } from '../services/gameStateRepository';
@@ -156,9 +158,15 @@ import { migrateSavePayload, CURRENT_SAVE_FORMAT_VERSION } from '../services/sav
 import { smartSyncManager, SmartSyncInput } from '../services/smartSyncManager';
 import { canPlayerJoinClub, DEFAULT_ECONOMY_CONFIG, calculateClubMonthlyIncome, calculateClubTotalMonthlyWages, validateTransferFinancials } from '../services/economyService';
 import { fetchActiveBroadcasts, applyWorldOverridesToClubs, applyWorldOverridesToMarket, isPlayerDeletedInOverrides, SUPER_ADMIN_EMAIL } from '../services/adminService';
-import { redeemPromoCode, getOrCreateGuestDeviceId } from '../services/promoCodeService';
+import {
+  redeemPromoCode,
+  validatePromoCodeForRedemption,
+  commitValidatedPromoCodeRedemption,
+  getOrCreateGuestDeviceId,
+} from '../services/promoCodeService';
 import { isQuotaExceededError, markQuotaExceeded, isRecentQuotaExceeded } from '../utils/firestoreErrorHelper';
 import { validateCareerState, resignManagerFromClub, appointManagerToClub } from '../utils/careerValidator';
+import { STAR_RATINGS_OVERRIDES } from '../data/starRatingsOverrides';
 import {
   calculatePlayerFairValue,
   calculateContractDurationTransferFee,
@@ -326,7 +334,7 @@ interface GameContextType {
   }) => { success: boolean; message: string };
   respondToNegotiationOffer: (
     negotiationId: string,
-    action: 'accept_counter' | 'raise_salary' | 'cancel',
+    action: 'accept_counter' | 'raise_salary' | 'complete_now' | 'cancel',
     extraValue?: number
   ) => { success: boolean; message: string };
   cancelNegotiation: (negotiationId: string) => void;
@@ -416,7 +424,10 @@ interface GameContextType {
   grantChallengeReward: (reward: ChallengeReward) => { success: boolean; message: string };
 
   // Promo / Gift Codes System (نظام استرداد أكواد الهدايا والمكافآت)
-  redeemGiftCode: (code: string) => Promise<{ success: boolean; message: string; rewardAmount?: number; rewardCoins?: number }>;
+  redeemGiftCode: (
+    code: string,
+    onAdStarting?: (info: { code: string; rewardAmount: number; rewardCoins: number }) => void
+  ) => Promise<{ success: boolean; message: string; rewardAmount?: number; rewardCoins?: number }>;
 
   // Sponsorship System (نظام عقود الرعاية والشراكات التجارية)
   availableSponsorOffers: SponsorshipOffer[];
@@ -533,6 +544,20 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     // Filter out players permanently deleted in admin editor
     players = players.filter(p => p && p.id && !isPlayerDeletedInOverrides(p.id));
 
+    // Ensure every club has a complete, balanced squad of at least 20-22 players
+    if (t.id && players.length < 20) {
+      const integrityClub = ensureClubSquadIntegrity({
+        ...t,
+        country,
+        countryCode: resolvedCountryCode,
+        leagueId,
+        players,
+      });
+      if (Array.isArray(integrityClub?.players) && integrityClub.players.length >= players.length) {
+        players = integrityClub.players;
+      }
+    }
+
     // Clean up any old fictional Arabic names
     let cleanName = t.name;
     let cleanShortName = t.shortName;
@@ -558,13 +583,34 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     else if (t.id === 'eg1_ahly') { cleanName = 'النادي الأهلي'; cleanShortName = 'الأهلي'; }
     else if (t.id === 'eg1_zamalek') { cleanName = 'نادي الزمالك'; cleanShortName = 'الزمالك'; }
     else if (t.id === 'eg1_pyramids') { cleanName = 'نادي بيراميدز'; cleanShortName = 'بيراميدز'; }
+    else if (t.id === 'eg1_ittihad') { cleanName = 'الاتحاد السكندري'; cleanShortName = 'الاتحاد'; }
 
-    const startingPlayerIds = t.tactics?.startingPlayerIds && t.tactics.startingPlayerIds.length === 11
-      ? t.tactics.startingPlayerIds
-      : players.slice(0, 11).map(p => p.id);
-    const benchPlayerIds = t.tactics?.benchPlayerIds && t.tactics.benchPlayerIds.length > 0
-      ? t.tactics.benchPlayerIds
-      : players.slice(11, 18).map(p => p.id);
+    const validIdSet = new Set(players.map(p => p.id));
+    let startingPlayerIds = Array.isArray(t.tactics?.startingPlayerIds)
+      ? t.tactics.startingPlayerIds.filter(id => validIdSet.has(id))
+      : [];
+    if (startingPlayerIds.length < 11) {
+      const hasGk = startingPlayerIds.some(id => players.find(p => p.id === id)?.positionCategory === 'GK');
+      if (!hasGk) {
+        const gk = players.find(p => p.positionCategory === 'GK' && !startingPlayerIds.includes(p.id));
+        if (gk) startingPlayerIds.unshift(gk.id);
+      }
+      for (const p of players) {
+        if (startingPlayerIds.length >= 11) break;
+        if (!startingPlayerIds.includes(p.id)) startingPlayerIds.push(p.id);
+      }
+    }
+    let benchPlayerIds = Array.isArray(t.tactics?.benchPlayerIds)
+      ? t.tactics.benchPlayerIds.filter(id => validIdSet.has(id) && !startingPlayerIds.includes(id))
+      : [];
+    if (benchPlayerIds.length < 7) {
+      for (const p of players) {
+        if (benchPlayerIds.length >= 7) break;
+        if (!startingPlayerIds.includes(p.id) && !benchPlayerIds.includes(p.id)) {
+          benchPlayerIds.push(p.id);
+        }
+      }
+    }
 
     let initialBudget = Number.isFinite(t.budget) ? t.budget : 250000;
     if (Array.isArray(t.sponsors) && t.sponsors.length > 0) {
@@ -586,18 +632,58 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       countryId,
       countryCode: resolvedCountryCode,
       leagueId,
-      players: players.map(p => ({
-        ...p,
-        nationality: p.nationality || country,
-        nationalityCode: p.nationalityCode || resolvedCountryCode,
-        countryOfBirth: p.countryOfBirth || p.nationality || country,
-        currentClubId: p.currentClubId || t.id,
-        currentLeagueId: p.currentLeagueId || leagueId,
-        stats: p.stats || { appearances: 0, goals: 0, assists: 0, yellowCards: 0, redCards: 0, cleanSheets: 0, averageRating: 6.5 },
-        attributes: p.attributes || { pace: 60, shooting: 60, passing: 60, dribbling: 60, defending: 60, physical: 60 },
-        savings: p.savings !== undefined ? p.savings : calculateInitialPlayerSavings(p),
-        totalBonusesReceived: p.totalBonusesReceived ?? 0,
-      })),
+      players: players.map(p => {
+        const calibrated = calibrateRealisticPlayerRating(p, t.id, leagueId, t.reputation || 65);
+        let effectiveOvr = calibrated.overallRating || p.overallRating || p.rating || 65;
+        let effectivePot = Math.max(effectiveOvr, calibrated.potentialRating || p.potentialRating || effectiveOvr);
+        let effectiveAttrs = calibrated.attributes || p.attributes || {
+          pace: effectiveOvr,
+          shooting: Math.max(35, effectiveOvr - 3),
+          passing: effectiveOvr,
+          dribbling: effectiveOvr,
+          defending: Math.max(35, effectiveOvr - 4),
+          physical: effectiveOvr,
+        };
+        let effectiveVal = calibrated.marketValue ?? p.marketValue;
+
+        const starOverride = p.id ? STAR_RATINGS_OVERRIDES[p.id] : undefined;
+        if (starOverride) {
+          const targetOvr = Math.max(40, Math.min(99, Math.round(starOverride.ovr)));
+          // Only apply if current rating is lower; never downgrade developed/trained players
+          if (effectiveOvr < targetOvr) {
+            effectiveOvr = targetOvr;
+            effectivePot = Math.max(effectiveOvr, starOverride.pot ? Math.max(effectiveOvr, starOverride.pot) : effectivePot);
+            if (starOverride.attributes) {
+              effectiveAttrs = {
+                ...effectiveAttrs,
+                ...starOverride.attributes,
+              };
+            }
+            effectiveVal = syncPlayerMarketValueWithRating({
+              ...p,
+              overallRating: effectiveOvr,
+              potentialRating: effectivePot,
+            });
+          }
+        }
+
+        return {
+          ...p,
+          ...calibrated,
+          overallRating: effectiveOvr,
+          potentialRating: effectivePot,
+          marketValue: effectiveVal !== undefined ? effectiveVal : p.marketValue,
+          attributes: effectiveAttrs,
+          nationality: p.nationality || country,
+          nationalityCode: p.nationalityCode || resolvedCountryCode,
+          countryOfBirth: p.countryOfBirth || p.nationality || country,
+          currentClubId: p.currentClubId || t.id,
+          currentLeagueId: p.currentLeagueId || leagueId,
+          stats: p.stats || { appearances: 0, goals: 0, assists: 0, yellowCards: 0, redCards: 0, cleanSheets: 0, averageRating: 6.5 },
+          savings: p.savings !== undefined ? p.savings : calculateInitialPlayerSavings(p),
+          totalBonusesReceived: p.totalBonusesReceived ?? 0,
+        };
+      }),
       sponsors: [],
       youthAcademyProspects: Array.isArray(t.youthAcademyProspects) && t.youthAcademyProspects.length > 0
         ? t.youthAcademyProspects
@@ -3104,9 +3190,14 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const setFormation = (formation: FormationType) => {
     setTeams(prev => prev.map(t => {
       if (!t.isUserClub || !t.tactics) return t;
+      const reorderedStarters = reorderStartingIdsForFormation(t, formation);
       return {
         ...t,
-        tactics: { ...t.tactics, formation }
+        tactics: {
+          ...t.tactics,
+          formation,
+          startingPlayerIds: reorderedStarters,
+        }
       };
     }));
   };
@@ -6556,7 +6647,13 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       }
 
       setTeams(transferResult.updatedTeams);
-      setTransferMarket(prev => (Array.isArray(prev) ? prev : []).filter(p => p && p.id && p.id !== player.id));
+      const normBoughtName = normalizePlayerKey(player.name);
+      setTransferMarket(prev =>
+        (Array.isArray(prev) ? prev : []).filter(
+          p => p && p.id && p.id !== player.id && (normBoughtName ? normalizePlayerKey(p.name) !== normBoughtName : true)
+        )
+      );
+      setActiveNegotiations(prev => (Array.isArray(prev) ? prev : []).filter(n => n.playerId !== player.id));
 
       if (transferResult.transferEntry) {
         setTransferHistory(prev => [transferResult.transferEntry!, ...(Array.isArray(prev) ? prev : [])]);
@@ -6739,12 +6836,21 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     const newStarting = userClub.tactics?.startingPlayerIds.filter(id => id !== playerId) || [];
     const newBench = userClub.tactics?.benchPlayerIds.filter(id => id !== playerId) || [];
+    const soldMarketPlayer: Player = {
+      ...targetPlayer,
+      currentClubId: chosenBuyer?.id || '',
+      currentLeagueId: chosenBuyer?.leagueId || 'free_agents',
+      isFreeAgent: !chosenBuyer,
+      contractYears: chosenBuyer ? 3 : 0,
+      isListedForTransfer: Boolean(chosenBuyer),
+    };
 
     setTeams(prev => prev.map(t => {
-      if (t.isUserClub) {
+      if (t.isUserClub || t.id === userClub.id) {
         return {
           ...t,
-          budget: t.budget + saleAmount,
+          budget: (t.budget || 0) + saleAmount,
+          transferBudget: (t.transferBudget || t.budget || 0) + saleAmount,
           players: (t.players || []).filter(p => p.id !== playerId),
           tactics: t.tactics ? {
             ...t.tactics,
@@ -6753,8 +6859,23 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           } : undefined,
         };
       }
+      if (chosenBuyer && t.id === chosenBuyer.id) {
+        return {
+          ...t,
+          players: [...(t.players || []).filter(p => p.id !== playerId), soldMarketPlayer],
+        };
+      }
       return t;
     }));
+
+    if (!chosenBuyer) {
+      setTransferMarket(prev => [
+        soldMarketPlayer,
+        ...(Array.isArray(prev) ? prev.filter(p => p && p.id !== playerId) : []),
+      ]);
+    }
+    setActiveNegotiations(prev => prev.filter(n => n.playerId !== playerId));
+    setIncomingBids(prev => prev.filter(b => b.playerId !== playerId));
 
     const transferEntry: TransferHistoryEntry = {
       id: `tx_${Date.now()}_${targetPlayer.id}`,
@@ -10247,9 +10368,18 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         (targetPlayer as any).currentClubName || sellingClub?.name,
         teams
       );
+      const hasClubAssociation = Boolean(
+        sellingClub ||
+          resolvedClub.club ||
+          (targetPlayer.currentClubId && targetPlayer.currentClubId !== 'free_agents' && targetPlayer.currentClubId !== '') ||
+          (!resolvedClub.clubName.includes('وكيل حر') && !resolvedClub.clubName.includes('لاعب حر'))
+      );
       const isFreeAgent =
-        (targetPlayer.contractYears !== undefined && targetPlayer.contractYears <= 0) ||
-        (!targetPlayer.currentClubId && !sellingClub && resolvedClub.clubName.includes('وكيل حر'));
+        !hasClubAssociation &&
+        (targetPlayer.isFreeAgent === true ||
+          targetPlayer.currentLeagueId === 'free_agents' ||
+          (targetPlayer.contractYears !== undefined && targetPlayer.contractYears <= 0) ||
+          proposal.transferFee <= 0);
       const displaySellingClubName = isFreeAgent ? 'لاعب حر (بدون نادٍ)' : resolvedClub.clubName;
       const effectiveTransferFee = isFreeAgent ? 0 : proposal.transferFee;
 
@@ -10259,6 +10389,43 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
       const safeRawDate = calendarDate?.rawDateStr || new Date().toISOString().slice(0, 10);
       const safeDateArabic = calendarDate?.formattedArabic || 'اليوم';
+      const safeContractYears = Math.min(5, Math.max(1, proposal.contractYears || 3));
+      const { fairMarketValue, recommendedMonthlyWage } = calculatePlayerFairValue(targetPlayer, sellingClub || resolvedClub.club);
+      const requiredClubFee = isFreeAgent
+        ? 0
+        : calculateContractDurationTransferFee(fairMarketValue, safeContractYears, false);
+      const requiredPlayerWage = Math.max(1500, Number(targetPlayer.salary) || recommendedMonthlyWage || 2500);
+      const offeredWage = Math.max(1000, proposal.monthlySalary || requiredPlayerWage);
+
+      const joinCheck = canPlayerJoinClub(targetPlayer, userClub);
+
+      let initialStage: ActiveNegotiation['stage'] = 'player_terms';
+      let demandedFee: number | undefined = undefined;
+      let demandedSalary: number | undefined = undefined;
+      let actionRequired = true;
+      let statusMessage = '';
+
+      if (!joinCheck.canJoin) {
+        initialStage = 'rejected';
+        actionRequired = false;
+        statusMessage = joinCheck.reason || `رفض ${targetPlayer.name} العرض لعدم تناسب طموحاته مع الدرجة الحالية لناديك.`;
+      } else if (!isFreeAgent && effectiveTransferFee < Math.round(requiredClubFee * 0.85)) {
+        initialStage = 'club_counter';
+        demandedFee = requiredClubFee;
+        actionRequired = true;
+        statusMessage = `عرض مقابل من ${displaySellingClubName}: تطلب الإدارة مبلغ ${requiredClubFee.toLocaleString()} ج.م للموافقة الفورية على انتقال ${targetPlayer.name}.`;
+      } else if (offeredWage < Math.round(requiredPlayerWage * 0.85)) {
+        initialStage = 'player_counter';
+        demandedSalary = requiredPlayerWage;
+        actionRequired = true;
+        statusMessage = `وافق النادي على العرض، بينما طلب وكيل اللاعب ${targetPlayer.name} راتباً شهرياً قدره ${requiredPlayerWage.toLocaleString()} ج.م للتوقيع الفوري.`;
+      } else {
+        initialStage = 'player_terms';
+        actionRequired = true;
+        statusMessage = isFreeAgent
+          ? `✅ وافق اللاعب الحر ${targetPlayer.name} على شروط العقد (${safeContractYears} سنوات)! يمكنك إتمام التوقيع الفوري الآن.`
+          : `✅ وافقت إدارة ${displaySellingClubName} واللاعب ${targetPlayer.name} على العرض المالي! يمكنك حسم وإتمام التعاقد فوراً.`;
+      }
 
       const newNegotiation: ActiveNegotiation = {
         id: `neg_${Date.now()}_${targetPlayer.id}`,
@@ -10274,31 +10441,34 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         buyerClubId: userClub.id,
         buyerClubName: userClub.name,
         bidFee: effectiveTransferFee,
-        offeredSalary: proposal.monthlySalary || targetPlayer.salary || 2500,
-        contractYears: Math.min(5, Math.max(1, proposal.contractYears || 3)),
+        offeredSalary: offeredWage,
+        contractYears: safeContractYears,
         squadRole: proposal.squadRole || 'first_team',
-        stage: isFreeAgent ? 'player_terms' : 'club_review',
-        daysRemainingInStage: isFreeAgent ? 1 : 2,
-        statusMessage: isFreeAgent
-          ? `تم تقديم عرض تعاقد حر لمدة ${Math.min(5, Math.max(1, proposal.contractYears || 3))} سنوات للاعب، في انتظار توقيعه الرسمي.`
-          : `تم إرسال عرض الشراء الرسمي إلى إدارة ${displaySellingClubName}، في انتظار مراجعتهم.`,
-        actionRequired: false,
+        demandedFee,
+        demandedSalary,
+        stage: initialStage,
+        daysRemainingInStage: initialStage === 'rejected' ? 0 : 1,
+        statusMessage,
+        actionRequired,
         history: [
           {
             dateStr: safeRawDate,
-            message: `[${safeDateArabic}] بدء المفاوضات وتقديم العرض المبدئي (مدة العقد: ${Math.min(5, Math.max(1, proposal.contractYears || 3))} سنوات).`,
+            message: `[${safeDateArabic}] تقديم عرض رسمي (قيمة الصفقة: ${effectiveTransferFee.toLocaleString()} ج.م • الراتب: ${offeredWage.toLocaleString()} ج.م • المدة: ${safeContractYears} سنوات).`,
             from: 'manager',
+          },
+          {
+            dateStr: safeRawDate,
+            message: `[${safeDateArabic}] ${statusMessage}`,
+            from: initialStage === 'club_counter' ? 'club' : 'player',
           },
         ],
       };
 
-      setActiveNegotiations(prev => [newNegotiation, ...prev]);
+      setActiveNegotiations(prev => [newNegotiation, ...prev.filter(n => n.playerId !== targetPlayer!.id || n.type !== 'buy')]);
 
       return {
-        success: true,
-        message: isFreeAgent
-          ? `تم تقديم عرض التعاقد الحر للاعب ${targetPlayer.name}. سيصلك الرد خلال الأيام القادمة عبر تقدم التقويم.`
-          : `تم إرسال عرض الشراء لنادي ${displaySellingClubName}. تابع تقدم الردود يومياً.`,
+        success: initialStage !== 'rejected',
+        message: statusMessage,
       };
     } catch (err: any) {
       console.error('[startPlayerNegotiation] Exception caught:', err);
@@ -10306,10 +10476,10 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
   };
 
-  // Respond to Counter-Offers in Negotiations
+  // Respond to Counter-Offers or Immediately Finalize Negotiations
   const respondToNegotiationOffer = (
     negotiationId: string,
-    action: 'accept_counter' | 'raise_salary' | 'cancel',
+    action: 'accept_counter' | 'raise_salary' | 'complete_now' | 'cancel',
     extraValue?: number
   ): { success: boolean; message: string } => {
     const neg = activeNegotiations.find(n => n.id === negotiationId);
@@ -10320,98 +10490,120 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       return { success: true, message: 'تم إلغاء المفاوضات والانسحاب من الصفقة.' };
     }
 
-    if (action === 'accept_counter' && neg.demandedFee) {
-      if (userClub && neg.demandedFee > userClub.budget) {
-        return { success: false, message: 'المبلغ المطلوب يتجاوز ميزانية النادي الحالية.' };
-      }
+    if (!userClub) return { success: false, message: 'أنت غير مرتبط بنادٍ!' };
 
-      setActiveNegotiations(prev => prev.map(n => {
-        if (n.id === negotiationId) {
-          return {
-            ...n,
-            bidFee: neg.demandedFee || n.bidFee,
-            stage: 'player_terms',
-            daysInStage: 0,
-            statusMessage: 'وافق النادي البائع على العرض المعدل! جاري توثيق مدة العقد مع اللاعب.',
-            actionRequired: false,
-            history: [
-              ...n.history,
-              {
-                dateStr: calendarDate.rawDateStr,
-                message: `[${calendarDate.formattedArabic}] قبول المقابل المالي المطلوب من النادي البائع (${(neg.demandedFee || 0).toLocaleString()} ج.م).`,
-                from: 'manager' as const,
-              },
-            ],
-          };
-        }
-        return n;
-      }));
+    // Determine final fee and salary for immediate completion
+    const finalFee =
+      action === 'accept_counter'
+        ? (extraValue ?? neg.demandedFee ?? neg.bidFee ?? 0)
+        : (neg.bidFee ?? 0);
+    const finalSalary =
+      action === 'raise_salary'
+        ? (extraValue ?? neg.demandedSalary ?? neg.offeredSalary ?? 2500)
+        : (neg.demandedSalary ?? neg.offeredSalary ?? 2500);
 
-      return { success: true, message: 'تمت الموافقة على طلب النادي البائع، وانتقلت المفاوضات لتوقيع عقد اللاعب.' };
+    if (userClub.budget < finalFee) {
+      return {
+        success: false,
+        message: `ميزانية النادي (${userClub.budget.toLocaleString()} ج.م) لا تكفي لدفع قيمة الصفقة المطلوبة (${finalFee.toLocaleString()} ج.م)!`,
+      };
     }
 
-    if (action === 'raise_salary') {
-      if (!userClub) return { success: false, message: 'أنت غير مرتبط بنادٍ!' };
-
-      if (userClub.budget < neg.bidFee) {
-        return { success: false, message: `ميزانية النادي (${userClub.budget.toLocaleString()} ج.م) لا تكفي لدفع قيمة الصفقة المطلوبة (${neg.bidFee.toLocaleString()} ج.م)!` };
-      }
-
-      // Resolve full player object
+    if (
+      action === 'accept_counter' ||
+      action === 'raise_salary' ||
+      action === 'complete_now'
+    ) {
       const fullPlayer = resolveFullPlayerObject(
         {
           ...neg,
-          offeredSalary: extraValue || neg.offeredSalary || 2500,
+          bidFee: finalFee,
+          offeredSalary: finalSalary,
         },
         teams,
         transferMarket
       );
 
+      const safeYears = Math.min(5, Math.max(1, neg.contractYears || 3));
       const signedPlayer: Player = {
         ...fullPlayer,
         currentClubId: userClub.id,
         currentLeagueId: activeLeague.id,
-        salary: extraValue || fullPlayer.salary || 2500,
-        contractYears: Math.min(5, Math.max(1, neg.contractYears || 3)),
+        isFreeAgent: false,
+        salary: finalSalary,
+        contractYears: safeYears,
         isListedForTransfer: false,
         morale: 95,
         fitness: 100,
       };
 
-      // Add to userClub squad & deduct transfer fee
+      // Add to userClub squad, deduct transfer fee from budget, and remove from selling club
       const normSignedName = normalizePlayerKey(signedPlayer.name);
-      setTeams(prevTeams => (Array.isArray(prevTeams) ? prevTeams : []).map(t => {
-        if (!t) return t;
-        if (t.isUserClub || t.id === userClub.id) {
-          const filtered = (t.players || []).filter(p => p && p.id && p.id !== neg.playerId && (normSignedName ? normalizePlayerKey(p.name) !== normSignedName : true));
-          return {
-            ...t,
-            budget: Math.max(0, (t.budget || 0) - neg.bidFee),
-            players: [...filtered, signedPlayer],
-          };
-        }
-        if (neg.playerClubId && t.id === neg.playerClubId) {
-          return {
-            ...t,
-            budget: (t.budget || 0) + neg.bidFee,
-            players: (t.players || []).filter(p => p && p.id && p.id !== neg.playerId && (normSignedName ? normalizePlayerKey(p.name) !== normSignedName : true)),
-          };
-        }
-        if (t.players && t.players.some(p => p && (p.id === neg.playerId || (normSignedName && normalizePlayerKey(p.name) === normSignedName)))) {
-          return {
-            ...t,
-            players: (t.players || []).filter(p => p && p.id && p.id !== neg.playerId && (normSignedName ? normalizePlayerKey(p.name) !== normSignedName : true)),
-          };
-        }
-        return t;
-      }));
+      setTeams(prevTeams =>
+        (Array.isArray(prevTeams) ? prevTeams : []).map(t => {
+          if (!t) return t;
+          if (t.isUserClub || t.id === userClub.id) {
+            const filtered = (t.players || []).filter(
+              p =>
+                p &&
+                p.id &&
+                p.id !== neg.playerId &&
+                (normSignedName ? normalizePlayerKey(p.name) !== normSignedName : true)
+            );
+            return {
+              ...t,
+              budget: Math.max(0, (t.budget || 0) - finalFee),
+              transferBudget: Math.max(0, (t.transferBudget || t.budget || 0) - finalFee),
+              players: [...filtered, signedPlayer],
+            };
+          }
+          if (neg.playerClubId && t.id === neg.playerClubId) {
+            return {
+              ...t,
+              budget: (t.budget || 0) + finalFee,
+              players: (t.players || []).filter(
+                p =>
+                  p &&
+                  p.id &&
+                  p.id !== neg.playerId &&
+                  (normSignedName ? normalizePlayerKey(p.name) !== normSignedName : true)
+              ),
+            };
+          }
+          if (
+            t.players &&
+            t.players.some(
+              p => p && (p.id === neg.playerId || (normSignedName && normalizePlayerKey(p.name) === normSignedName))
+            )
+          ) {
+            return {
+              ...t,
+              players: (t.players || []).filter(
+                p =>
+                  p &&
+                  p.id &&
+                  p.id !== neg.playerId &&
+                  (normSignedName ? normalizePlayerKey(p.name) !== normSignedName : true)
+              ),
+            };
+          }
+          return t;
+        })
+      );
 
-      // Remove from market by both ID and normalized name
-      setTransferMarket(prev => (Array.isArray(prev) ? prev : []).filter(p => p && p.id && p.id !== neg.playerId && (normSignedName ? normalizePlayerKey(p.name) !== normSignedName : true)));
+      // Remove from transferMarket by both ID and normalized name
+      setTransferMarket(prev =>
+        (Array.isArray(prev) ? prev : []).filter(
+          p =>
+            p &&
+            p.id &&
+            p.id !== neg.playerId &&
+            (normSignedName ? normalizePlayerKey(p.name) !== normSignedName : true)
+        )
+      );
 
-      // Transfer history entry
       const historyEntry: TransferHistoryEntry = {
-        id: `th_neg_raise_${neg.id}_${Date.now()}`,
+        id: `th_neg_comp_${neg.id}_${Date.now()}`,
         date: calendarDate.formattedArabic,
         playerName: neg.playerName,
         playerId: neg.playerId,
@@ -10419,37 +10611,37 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         position: fullPlayer.position || neg.playerPosition,
         fromClubName: neg.playerClubName || 'وكيل حر',
         toClubName: userClub.name,
-        fee: neg.bidFee,
-        salary: extraValue,
+        fee: finalFee,
+        salary: finalSalary,
         seasonNumber: season.seasonNumber,
         type: 'buy',
         timestamp: Date.now(),
       };
       setTransferHistory(prev => [historyEntry, ...(Array.isArray(prev) ? prev : [])]);
 
-      // Update club economy
       setClubEconomy(prev => ({
         ...prev,
-        transferSpendingTotal: (prev.transferSpendingTotal || 0) + neg.bidFee,
-        currentSeasonNetProfit: (prev.currentSeasonNetProfit || 0) - neg.bidFee,
+        transferSpendingTotal: (prev.transferSpendingTotal || 0) + finalFee,
+        currentSeasonNetProfit: (prev.currentSeasonNetProfit || 0) - finalFee,
       }));
 
-      // Remove completed negotiation immediately from active negotiations list
-      setActiveNegotiations(prev => prev.filter(n => n.id !== negotiationId));
+      setActiveNegotiations(prev => prev.filter(n => n.id !== negotiationId && n.playerId !== neg.playerId));
 
-      // Inbox message
       const msg: InboxMessage = {
         id: `msg_trans_signed_${Date.now()}_${neg.playerId}`,
-        title: `تم إتمام التعاقد مع ${neg.playerName}! ✍️`,
+        title: `تم إتمام التعاقد الرسمي مع ${neg.playerName}! ✍️`,
         sender: 'لجنة التعاقدات والاحتراف',
         date: calendarDate.formattedArabic,
         type: 'transfer',
         read: false,
-        content: `تم توقيع العقود رسمياً مع اللاعب ${neg.playerName} براتب شهري ${extraValue.toLocaleString()} ج.م وانضم اللاعب مباشرة لقائمة الفريق.`,
+        content: `تم توقيع العقود رسمياً مع اللاعب ${neg.playerName} قادماً من (${neg.playerClubName || 'صفقة حرة'}) مقابل ${finalFee.toLocaleString()} ج.م وبراتب شهري ${finalSalary.toLocaleString()} ج.م لمدة ${safeYears} سنوات، وانضم اللاعب مباشرة لقائمة فريقك.`,
       };
       setInbox(prev => [msg, ...prev]);
 
-      return { success: true, message: `تمت الموافقة على راتب ${neg.playerName} وانضم رسمياً إلى قائمة فريقك!` };
+      return {
+        success: true,
+        message: `تم حسم الصفقة بنجاح! انضم ${neg.playerName} رسمياً إلى قائمة فريقك.`,
+      };
     }
 
     return { success: false, message: 'إجراء غير معروف.' };
@@ -11416,7 +11608,8 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   // PROMO / GIFT CODES SYSTEM (نظام أكواد الهدايا والمكافآت)
   // ----------------------------------------------------
   const redeemGiftCode = async (
-    code: string
+    code: string,
+    onAdStarting?: (info: { code: string; rewardAmount: number; rewardCoins: number }) => void
   ): Promise<{ success: boolean; message: string; rewardAmount?: number; rewardCoins?: number }> => {
     if (!userClub) {
       return { 
@@ -11425,68 +11618,147 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       };
     }
 
+    const managerInfo = {
+      userId: user?.uid || manager.trainerId || getOrCreateGuestDeviceId(),
+      managerName: manager.name || 'المدرب',
+      clubName: userClub.name || 'النادي',
+      trainerId: manager.trainerId,
+    };
+
     try {
-      const res = await redeemPromoCode(code, {
-        userId: user?.uid || manager.trainerId || getOrCreateGuestDeviceId(),
-        managerName: manager.name || 'المدرب',
-        clubName: userClub.name || 'النادي',
-        trainerId: manager.trainerId,
-      });
+      // 1. Strictly validate the code BEFORE loading or showing any advertisement.
+      // If the code is expired, invalid, exhausted, disabled, or already redeemed, this throws immediately and NO ad loads!
+      const validated = await validatePromoCodeForRedemption(code, managerInfo);
 
-      if (res.success && res.rewardAmount > 0) {
-        // 1. Inject cash directly into user club budget
-        setTeams(prev => prev.map(t => {
-          if (!t.isUserClub && t.id !== userClub.id) return t;
-          return {
-            ...t,
-            budget: (t.budget || 0) + res.rewardAmount,
-          };
-        }));
-
-        // 2. Add to manager career earnings and personal wallet if coins given
-        setManager(prev => ({
-          ...prev,
-          careerEarnings: (prev.careerEarnings || 0) + res.rewardAmount,
-          personalWallet: res.rewardCoins ? (prev.personalWallet || 0) + (res.rewardCoins * 100) : prev.personalWallet,
-        }));
-
-        if (res.rewardCoins && res.rewardCoins > 0) {
-          try {
-            const authData = localStorage.getItem('anta_el_modareb_auth_user');
-            if (authData) {
-              const parsed = JSON.parse(authData);
-              parsed.virtualCoins = (parsed.virtualCoins || 0) + res.rewardCoins;
-              localStorage.setItem('anta_el_modareb_auth_user', JSON.stringify(parsed));
-            }
-          } catch (_) {}
-        }
-
-        // 3. Official banking inbox notification for the manager
-        const bonusMsg: InboxMessage = {
-          id: `msg_promo_${Date.now()}_${Math.random()}`,
-          title: `🎁 استرداد كود هدية: إيداع (+${res.rewardAmount.toLocaleString()} ج.م) في الخزينة`,
-          sender: 'إدارة اللعبة والمسابقات',
-          date: `الجولة ${currentRound}`,
-          type: 'board',
-          read: false,
-          content: `تهانينا يا كابتن ${manager.name}!\n\nتم التحقق من كود الهدية [${res.code}] بنجاح وإيداع مبلغ قدره (${res.rewardAmount.toLocaleString()} جنيه مصري) مباشرة في ميزانية نادي ${userClub.name}.${res.rewardCoins ? `\nبالإضافة إلى منحك (${res.rewardCoins}) كوينز ذهبية!` : ''}\n\nبيان المكافأة: ${res.description}\n\nنتمنى لك كل التوفيق والانتصارات في قيادة ناديك!`,
-        };
-        setInbox(prev => [bonusMsg, ...prev]);
-
-        // 4. Save game automatically
-        setTimeout(() => {
-          saveToCloud(false).catch(() => {});
-        }, 500);
-
-        return {
-          success: true,
-          message: res.message,
-          rewardAmount: res.rewardAmount,
-          rewardCoins: res.rewardCoins,
-        };
+      // 2. Notify caller that the code is valid and the user is eligible for the reward, so the ad is now starting
+      if (onAdStarting) {
+        try {
+          onAdStarting({
+            code: validated.officialCode,
+            rewardAmount: validated.matchedCode.rewardAmount,
+            rewardCoins: validated.matchedCode.rewardCoins || 0,
+          });
+        } catch {}
       }
 
-      return { success: false, message: res.message || 'فشل استرداد الكود.' };
+      // 3. Load and play the Rewarded Ad ONLY now that we know the user will receive the code's funds
+      return await new Promise<{ success: boolean; message: string; rewardAmount?: number; rewardCoins?: number }>(async (resolve) => {
+        let settled = false;
+        let committedResult: {
+          success: boolean;
+          message: string;
+          rewardAmount: number;
+          rewardCoins: number;
+        } | null = null;
+
+        const finishResolve = (result: { success: boolean; message: string; rewardAmount?: number; rewardCoins?: number }) => {
+          if (settled) return;
+          settled = true;
+          resolve(result);
+        };
+
+        const applyRewardPayout = () => {
+          if (committedResult) return;
+
+          const res = commitValidatedPromoCodeRedemption(validated, managerInfo);
+          committedResult = {
+            success: true,
+            message: res.message,
+            rewardAmount: res.rewardAmount,
+            rewardCoins: res.rewardCoins,
+          };
+
+          challengesManager.recordAdWatched();
+
+          // A. Inject cash directly into user club budget
+          setTeams(prev => prev.map(t => {
+            if (!t.isUserClub && t.id !== userClub.id) return t;
+            return {
+              ...t,
+              budget: (t.budget || 0) + res.rewardAmount,
+              transferBudget: (t.transferBudget || 0) + res.rewardAmount,
+            };
+          }));
+
+          setClubEconomy(prev => ({
+            ...prev,
+            clubBudget: (prev.clubBudget || 0) + res.rewardAmount,
+          }));
+
+          // B. Add to manager career earnings and personal wallet if coins given
+          setManager(prev => ({
+            ...prev,
+            careerEarnings: (prev.careerEarnings || 0) + res.rewardAmount,
+            personalWallet: res.rewardCoins ? (prev.personalWallet || 0) + (res.rewardCoins * 100) : prev.personalWallet,
+          }));
+
+          if (res.rewardCoins && res.rewardCoins > 0) {
+            try {
+              const authData = localStorage.getItem('anta_el_modareb_auth_user');
+              if (authData) {
+                const parsed = JSON.parse(authData);
+                parsed.virtualCoins = (parsed.virtualCoins || 0) + res.rewardCoins;
+                localStorage.setItem('anta_el_modareb_auth_user', JSON.stringify(parsed));
+              }
+            } catch (_) {}
+          }
+
+          // C. Official banking inbox notification for the manager
+          const bonusMsg: InboxMessage = {
+            id: `msg_promo_${Date.now()}_${Math.random()}`,
+            title: `🎁 استرداد كود هدية: إيداع (+${res.rewardAmount.toLocaleString()} ج.م) في الخزينة`,
+            sender: 'إدارة اللعبة والمسابقات',
+            date: `الجولة ${currentRound}`,
+            type: 'board',
+            read: false,
+            content: `تهانينا يا كابتن ${manager.name}!\n\nتم التحقق من كود الهدية [${res.code}] ومشاهدة الإعلان بنجاح، وتم إيداع مبلغ قدره (${res.rewardAmount.toLocaleString()} جنيه مصري) مباشرة في ميزانية نادي ${userClub.name}.${res.rewardCoins ? `\nبالإضافة إلى منحك (${res.rewardCoins}) كوينز ذهبية!` : ''}\n\nبيان المكافأة: ${res.description}\n\nنتمنى لك كل التوفيق والانتصارات في قيادة ناديك!`,
+          };
+          setInbox(prev => [bonusMsg, ...prev]);
+
+          // D. Save game automatically
+          setTimeout(() => {
+            saveToCloud(false).catch(() => {});
+          }, 500);
+        };
+
+        try {
+          const started = await AdManager.showRewardedForAction({
+            actionType: 'redeem_promo_code',
+            onUserEarnedReward: () => {
+              applyRewardPayout();
+            },
+            onDismiss: (rewardEarned) => {
+              if (rewardEarned || committedResult) {
+                applyRewardPayout();
+                finishResolve(committedResult!);
+              } else {
+                finishResolve({
+                  success: false,
+                  message: 'لم تكتمل مشاهدة الإعلان! يجب مشاهدة الإعلان بالكامل لاستلام أموال الكود.',
+                });
+              }
+            },
+            onFailure: (adErr) => {
+              finishResolve({
+                success: false,
+                message: adErr?.message || 'تعذر تحميل الإعلان حالياً، لم يتم استهلاك الكود. يرجى التحقق من اتصال الإنترنت والمحاولة مرة أخرى.',
+              });
+            },
+          });
+
+          if (!started && !committedResult) {
+            finishResolve({
+              success: false,
+              message: 'تعذر تحميل الإعلان حالياً، لم يتم استهلاك الكود. يرجى المحاولة مرة أخرى.',
+            });
+          }
+        } catch (adEx: any) {
+          finishResolve({
+            success: false,
+            message: adEx?.message || 'حدث خطأ أثناء تشغيل الإعلان، لم يتم استهلاك الكود.',
+          });
+        }
+      });
     } catch (err: any) {
       return { success: false, message: err?.message || 'حدث خطأ أثناء محاولة استرداد الكود.' };
     }

@@ -140,6 +140,7 @@ export interface Player {
   guestMatchesRemaining?: number; // عدد المباريات المتبقية (عادة 1)
   guestStarTier?: 'legend' | 'world_class' | 'star' | 'wildcard';
   guestStarQuote?: string;
+  photoUrl?: string;
 }
 
 export type StaffRole = 
@@ -418,6 +419,7 @@ export interface Club {
   worldRank?: number;
   previousWorldRank?: number;
   monthlyRankChange?: number;
+  logoUrl?: string;
 }
 
 export interface LeagueStanding {

@@ -363,7 +363,7 @@ function GameApp() {
             setSelectedPlayer(null);
             handleTabChange('transfers');
             setTimeout(() => {
-              window.dispatchEvent(new CustomEvent('open-player-negotiation', { detail: { player: targetP } }));
+              window.dispatchEvent(new CustomEvent('open-player-negotiation', { detail: targetP }));
             }, 100);
           }}
         />

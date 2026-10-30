@@ -656,14 +656,20 @@ export function cleanPromoCodeInput(raw: string): string {
     .trim();
 }
 
+export interface ValidatedPromoCodeContext {
+  matchedCode: PromoCode;
+  officialCode: string;
+  normalizedCode: string;
+  userIdentifier: string;
+  usedIds: string[];
+}
+
 /**
- * Redeem a promo code for a manager:
- * - Checks local cached codes and Firestore cloud codes seamlessly.
- * - Prevents multiple uses by the same manager using unique user/device ID.
- * - Prevents usage of expired, inactive, or exhausted codes.
- * - Supports offline and instant local redemption with background sync.
+ * Step 1: Strictly validate promo code eligibility BEFORE loading or playing any ad.
+ * - Throws immediately if code is invalid, inactive, expired, exhausted, or already redeemed by this user/device.
+ * - Does NOT consume or mark the code as redeemed yet.
  */
-export async function redeemPromoCode(
+export async function validatePromoCodeForRedemption(
   rawInput: string,
   managerInfo: {
     userId: string;
@@ -671,7 +677,7 @@ export async function redeemPromoCode(
     clubName: string;
     trainerId?: string;
   }
-): Promise<RedeemResult> {
+): Promise<ValidatedPromoCodeContext> {
   const normalizedCode = cleanPromoCodeInput(rawInput);
   const strippedCode = normalizedCode.replace(/[-_]/g, '');
 
@@ -688,66 +694,69 @@ export async function redeemPromoCode(
   // Guarantee truly unique user/device identifier (never share static placeholders like 'TRN-INIT' across players!)
   const userIdentifier = getEffectiveUserIdentifier(managerInfo.userId, managerInfo.trainerId);
 
-  // 2. Look up promo code: First in local cache & persistent store, then Firestore cloud fallback
+  // 2. Fast check local redemption record on THIS specific device first
+  const localRedeemed = getLocalRedeemedCodeKeys();
+  if (localRedeemed.includes(normalizedCode) || localRedeemed.includes(strippedCode)) {
+    throw new Error('لقد قمت باسترداد هذا الكود بالفعل مسبقاً على هذا الجهاز! لا يمكن استرداد الكود أكثر من مرة لنفس المدرب.');
+  }
+
+  // 3. Look up promo code: Check local cache AND verify latest status from Firestore cloud when online
   const cachedCodes = getCachedPromoCodes();
   let matchedCode: PromoCode | undefined = cachedCodes.find(
     c => cleanPromoCodeInput(c.code) === normalizedCode || 
          cleanPromoCodeInput(c.code).replace(/[-_]/g, '') === strippedCode
   );
 
-  // If not found in local cache, check Firestore with safety timeout (up to 6000ms for mobile networks)
-  if (!matchedCode) {
-    try {
-      // Step A: Direct document lookup by normalizedCode
-      const codeRef = doc(db, 'promo_codes', normalizedCode);
-      const getDocPromise = getDoc(codeRef);
-      const timeoutPromise = new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error('Firestore read timeout')), 6000)
-      );
-      const docSnap = await Promise.race([getDocPromise, timeoutPromise]);
-      if (docSnap && docSnap.exists()) {
-        matchedCode = { id: docSnap.id, ...docSnap.data() } as PromoCode;
-      } else if (strippedCode !== normalizedCode) {
-        // Step B: Direct document lookup by strippedCode
-        const strippedRef = doc(db, 'promo_codes', strippedCode);
-        const strippedSnap = await getDoc(strippedRef).catch(() => null);
-        if (strippedSnap && strippedSnap.exists()) {
-          matchedCode = { id: strippedSnap.id, ...strippedSnap.data() } as PromoCode;
-        }
+  try {
+    const lookupId = matchedCode ? cleanPromoCodeInput(matchedCode.code) : normalizedCode;
+    const codeRef = doc(db, 'promo_codes', lookupId);
+    const getDocPromise = getDoc(codeRef);
+    const timeoutPromise = new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error('Firestore read timeout')), matchedCode ? 3000 : 5500)
+    );
+    const docSnap = await Promise.race([getDocPromise, timeoutPromise]);
+    if (docSnap && docSnap.exists()) {
+      matchedCode = { id: docSnap.id, ...docSnap.data() } as PromoCode;
+    } else if (!matchedCode && strippedCode !== normalizedCode) {
+      // Step B: Direct document lookup by strippedCode
+      const strippedRef = doc(db, 'promo_codes', strippedCode);
+      const strippedSnap = await getDoc(strippedRef).catch(() => null);
+      if (strippedSnap && strippedSnap.exists()) {
+        matchedCode = { id: strippedSnap.id, ...strippedSnap.data() } as PromoCode;
       }
+    }
 
-      // Step C: If still not found, query by code field
-      if (!matchedCode) {
-        const qCode = query(collection(db, 'promo_codes'), where('code', '==', normalizedCode));
-        const qSnap = await getDocs(qCode).catch(() => null);
-        if (qSnap && !qSnap.empty) {
-          matchedCode = { id: qSnap.docs[0].id, ...qSnap.docs[0].data() } as PromoCode;
-        }
+    // Step C: If still not found, query by code field
+    if (!matchedCode) {
+      const qCode = query(collection(db, 'promo_codes'), where('code', '==', normalizedCode));
+      const qSnap = await getDocs(qCode).catch(() => null);
+      if (qSnap && !qSnap.empty) {
+        matchedCode = { id: qSnap.docs[0].id, ...qSnap.docs[0].data() } as PromoCode;
       }
+    }
 
-      // Step D: If still not found, search full collection in-memory
-      if (!matchedCode) {
-        const allSnap = await getDocs(collection(db, 'promo_codes')).catch(() => null);
-        if (allSnap && !allSnap.empty) {
-          for (const d of allSnap.docs) {
-            const data = d.data() as PromoCode;
-            const cCode = cleanPromoCodeInput(data.code || d.id);
-            if (cCode === normalizedCode || cCode.replace(/[-_]/g, '') === strippedCode) {
-              matchedCode = { id: d.id, ...data };
-              break;
-            }
+    // Step D: If still not found, search full collection in-memory
+    if (!matchedCode) {
+      const allSnap = await getDocs(collection(db, 'promo_codes')).catch(() => null);
+      if (allSnap && !allSnap.empty) {
+        for (const d of allSnap.docs) {
+          const data = d.data() as PromoCode;
+          const cCode = cleanPromoCodeInput(data.code || d.id);
+          if (cCode === normalizedCode || cCode.replace(/[-_]/g, '') === strippedCode) {
+            matchedCode = { id: d.id, ...data };
+            break;
           }
         }
       }
-
-      if (matchedCode) {
-        // Add to local cache for future instantaneous lookups
-        const updated = [matchedCode, ...cachedCodes.filter(c => cleanPromoCodeInput(c.code) !== cleanPromoCodeInput(matchedCode!.code))];
-        cachePromoCodes(updated);
-      }
-    } catch (err) {
-      console.warn('[PromoCodes] Cloud lookup note:', err);
     }
+
+    if (matchedCode) {
+      // Update local cache with latest cloud state
+      const updated = [matchedCode, ...cachedCodes.filter(c => cleanPromoCodeInput(c.code) !== cleanPromoCodeInput(matchedCode!.code))];
+      cachePromoCodes(updated);
+    }
+  } catch (err) {
+    console.warn('[PromoCodes] Cloud lookup note:', err);
   }
 
   // If code was not found anywhere
@@ -758,13 +767,12 @@ export async function redeemPromoCode(
 
   const officialCode = cleanPromoCodeInput(matchedCode.code);
 
-  // 3. Check local redemption record on THIS specific device
-  const localRedeemed = getLocalRedeemedCodeKeys();
+  // 4. Re-check local redemption record against officialCode
   if (localRedeemed.includes(officialCode) || localRedeemed.includes(normalizedCode) || localRedeemed.includes(strippedCode)) {
     throw new Error('لقد قمت باسترداد هذا الكود بالفعل مسبقاً على هذا الجهاز! لا يمكن استرداد الكود أكثر من مرة لنفس المدرب.');
   }
 
-  // 4. Validate code business rules
+  // 5. Validate code business rules (active, expiration, maxUses, user history, valid reward)
   if (!matchedCode.isActive) {
     recordFailedAttempt();
     throw new Error('عذراً، هذا الكود معطل حالياً أو تم إيقافه من قِبل إدارة اللعبة.');
@@ -780,8 +788,12 @@ export async function redeemPromoCode(
     throw new Error('عذراً، لقد استُنفد هذا الكود بالكامل ووصل للحد الأقصى المسموح من الاستخدامات!');
   }
 
+  if (!matchedCode.rewardAmount || matchedCode.rewardAmount <= 0) {
+    recordFailedAttempt();
+    throw new Error('عذراً، هذا الكود لا يحتوي على مكافأة مالية متاحة حالياً.');
+  }
+
   // Filter out any stale generic placeholders like 'TRN-INIT', 'TRN-RESTORED', 'anon_manager' or 'local_user'
-  // so no user is EVER falsely blocked by another player's generic ID!
   const rawUsedIds = Array.isArray(matchedCode.usedByManagerIds) ? matchedCode.usedByManagerIds : [];
   const usedIds = rawUsedIds.filter(id => !isGenericOrSharedIdentifier(id));
   if (usedIds.includes(userIdentifier)) {
@@ -789,7 +801,30 @@ export async function redeemPromoCode(
     throw new Error('لقد قمت باسترداد هذا الكود بالفعل مسبقاً! لا يمكن استخدام الكود مرتين لنفس الحساب أو الجهاز.');
   }
 
-  // 5. Apply redemption locally
+  return {
+    matchedCode,
+    officialCode,
+    normalizedCode,
+    userIdentifier,
+    usedIds,
+  };
+}
+
+/**
+ * Step 2: Finalize and commit promo code redemption ONLY AFTER the user has watched the rewarded ad.
+ */
+export function commitValidatedPromoCodeRedemption(
+  validated: ValidatedPromoCodeContext,
+  managerInfo: {
+    userId: string;
+    managerName: string;
+    clubName: string;
+    trainerId?: string;
+  }
+): RedeemResult {
+  const { matchedCode, officialCode, normalizedCode, userIdentifier, usedIds } = validated;
+  const cachedCodes = getCachedPromoCodes();
+
   const redemptionRecord: PromoCodeRedemption = {
     userId: userIdentifier,
     managerName: managerInfo.managerName || 'المدرب',
@@ -799,7 +834,7 @@ export async function redeemPromoCode(
   };
 
   const nextUsedCount = (matchedCode.usedCount || 0) + 1;
-  const nextUsedIds = [...usedIds, userIdentifier];
+  const nextUsedIds = Array.from(new Set([...usedIds, userIdentifier]));
   const nextRedeemedBy = Array.isArray(matchedCode.redeemedBy)
     ? [...matchedCode.redeemedBy, redemptionRecord].slice(-100)
     : [redemptionRecord];
@@ -821,7 +856,7 @@ export async function redeemPromoCode(
   markCodeRedeemedLocally(normalizedCode);
   clearRateLimit();
 
-  // 6. Background cloud sync to Firestore with safety timeout
+  // Background cloud sync to Firestore with safety timeout
   const syncRedemptionToCloud = async () => {
     try {
       const codeRef = doc(db, 'promo_codes', officialCode);
@@ -849,4 +884,20 @@ export async function redeemPromoCode(
     description: updatedCode.description || 'مكافأة كود الهدية',
     message: `مبروك يا كابتن! تم استرداد الكود بنجاح وإيداع (${updatedCode.rewardAmount.toLocaleString()} ج.م) مباشرة في ميزانية ناديك! 💰🎉`
   };
+}
+
+/**
+ * Redeem a promo code for a manager (validates and commits).
+ */
+export async function redeemPromoCode(
+  rawInput: string,
+  managerInfo: {
+    userId: string;
+    managerName: string;
+    clubName: string;
+    trainerId?: string;
+  }
+): Promise<RedeemResult> {
+  const validated = await validatePromoCodeForRedemption(rawInput, managerInfo);
+  return commitValidatedPromoCodeRedemption(validated, managerInfo);
 }

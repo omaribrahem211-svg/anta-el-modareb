@@ -2164,64 +2164,153 @@ export function simulateMatchStep(
           description: `🧤 ركلة جزاء ضائعة! حارس ${defendingTeam.shortName} يتألق ببراعة خرافية ويتصدى لركلة الجزاء من أمام (${taker.name}) وسط ذهول الجميع!`
         });
       }
-    } else if (subRoll < 0.07) {
-      // Fouls & Cards with real red card dismissal enforcement
-      const isHomeFoul = Math.random() < (currentHomeTactics.pressingIntensity === 'high' ? 0.55 : 0.45);
+    } else if (subRoll < 0.052) {
+      // Fouls, Disciplinary Cards & Rare Minor Knocks (calibrated to realistic football rates: 3% - 7% red card probability per match)
+      const getTacticalAggression = (tac?: TeamTactics) => {
+        const pressMult =
+          tac?.pressingIntensity === 'gegenpress'
+            ? 1.32
+            : tac?.pressingIntensity === 'high'
+            ? 1.18
+            : tac?.pressingIntensity === 'low'
+            ? 0.82
+            : 1.0;
+        const mentMult =
+          tac?.mentality === 'ultra_attacking' || tac?.mentality === 'all_out_attack'
+            ? 1.14
+            : tac?.mentality === 'attacking'
+            ? 1.06
+            : tac?.mentality === 'park_the_bus' || tac?.mentality === 'ultra_defensive'
+            ? 0.90
+            : 1.0;
+        return pressMult * mentMult;
+      };
+
+      const homeAggression = getTacticalAggression(currentHomeTactics);
+      const awayAggression = getTacticalAggression(currentAwayTactics);
+      const homeFoulShare = homeAggression / (homeAggression + awayAggression);
+      const isHomeFoul = Math.random() < homeFoulShare;
+
       if (isHomeFoul) {
         homeFouls++;
-        if (Math.random() < 0.24) {
-          homeYellowCards++;
-          const p = pickPlayerByPosition(homeActivePlayers, 'DEF', 'MID');
-          if (updatedHomeYellowed.includes(p.id)) {
-            homeRedCards++;
-            activeHomeLineup = activeHomeLineup.filter(id => id !== p.id);
-            updatedHomeRedded.push(p.id);
-            newEvents.push({
-              minute: nextMinute,
-              type: 'red_card',
-              teamId: prevState.homeTeam.id,
-              playerId: p.id,
-              playerName: p.name,
-              description: `🟥 الإنذار الثاني والطرد! الحكم يشهر البطاقة الصفراء الثانية ثم الحمراء في وجه اللاعب (${p.name}) من ${prevState.homeTeam.shortName} ليكمل الفريق المباراة بعشرة لاعبين!`
-            });
+        const cardRoll = Math.random();
+        const yellowThreshold = 0.145 * homeAggression;
+        const directRedThreshold = 0.0055 * homeAggression; // ~1.2% per match direct red
+
+        const candidatePool = homeActivePlayers.filter(p => p.positionCategory !== 'GK');
+        const p =
+          candidatePool.length > 0
+            ? candidatePool[Math.floor(Math.random() * candidatePool.length)]
+            : pickPlayerByPosition(homeActivePlayers, 'DEF', 'MID');
+
+        if (cardRoll < directRedThreshold && homeRedCards < 2 && p) {
+          homeRedCards++;
+          activeHomeLineup = activeHomeLineup.filter(id => id !== p.id);
+          updatedHomeRedded.push(p.id);
+          newEvents.push({
+            minute: nextMinute,
+            type: 'red_card',
+            teamId: prevState.homeTeam.id,
+            playerId: p.id,
+            playerName: p.name,
+            description: `🟥 بطاقة حمراء مباشرة! تدخل عنيف ومتهور من اللاعب (${p.name}) لاعب ${prevState.homeTeam.shortName} والحكم يطرده فوراً من الملعب!`
+          });
+        } else if (cardRoll < yellowThreshold && p) {
+          // If player already has a yellow card, they play cautiously (~86% chance another unbooked player committed the foul or ref gives verbal warning)
+          let targetPlayer = p;
+          if (updatedHomeYellowed.includes(targetPlayer.id)) {
+            const unbooked = candidatePool.filter(pl => !updatedHomeYellowed.includes(pl.id));
+            if (unbooked.length > 0 && Math.random() < 0.86) {
+              targetPlayer = unbooked[Math.floor(Math.random() * unbooked.length)];
+            }
+          }
+
+          if (updatedHomeYellowed.includes(targetPlayer.id)) {
+            if (homeRedCards < 2 && Math.random() < 0.45 * homeAggression) {
+              homeYellowCards++;
+              homeRedCards++;
+              activeHomeLineup = activeHomeLineup.filter(id => id !== targetPlayer.id);
+              updatedHomeRedded.push(targetPlayer.id);
+              newEvents.push({
+                minute: nextMinute,
+                type: 'red_card',
+                teamId: prevState.homeTeam.id,
+                playerId: targetPlayer.id,
+                playerName: targetPlayer.name,
+                description: `🟥 الإنذار الثاني والطرد! الحكم يشهر البطاقة الصفراء الثانية ثم الحمراء في وجه اللاعب (${targetPlayer.name}) من ${prevState.homeTeam.shortName} ليكمل الفريق المباراة بعشرة لاعبين!`
+              });
+            }
           } else {
-            updatedHomeYellowed.push(p.id);
+            homeYellowCards++;
+            updatedHomeYellowed.push(targetPlayer.id);
             newEvents.push({
               minute: nextMinute,
               type: 'yellow_card',
               teamId: prevState.homeTeam.id,
-              playerId: p.id,
-              playerName: p.name,
-              description: `🟨 بطاقة صفراء على اللاعب (${p.name}) من ${prevState.homeTeam.shortName} بعد تدخل قوي لإيقاف انطلاقة المنافس.`
+              playerId: targetPlayer.id,
+              playerName: targetPlayer.name,
+              description: `🟨 بطاقة صفراء على اللاعب (${targetPlayer.name}) من ${prevState.homeTeam.shortName} بعد تدخل تكتيكي لإيقاف انطلاقة المنافس.`
             });
           }
         }
       } else {
         awayFouls++;
-        if (Math.random() < 0.24) {
-          awayYellowCards++;
-          const p = pickPlayerByPosition(awayActivePlayers, 'DEF', 'MID');
-          if (updatedAwayYellowed.includes(p.id)) {
-            awayRedCards++;
-            activeAwayLineup = activeAwayLineup.filter(id => id !== p.id);
-            updatedAwayRedded.push(p.id);
-            newEvents.push({
-              minute: nextMinute,
-              type: 'red_card',
-              teamId: prevState.awayTeam.id,
-              playerId: p.id,
-              playerName: p.name,
-              description: `🟥 الإنذار الثاني والطرد! الحكم يشهر البطاقة الحمراء للاعب (${p.name}) من ${prevState.awayTeam.shortName} ليكمل فريقه المباراة بنقص عددي!`
-            });
+        const cardRoll = Math.random();
+        const yellowThreshold = 0.145 * awayAggression;
+        const directRedThreshold = 0.0055 * awayAggression;
+
+        const candidatePool = awayActivePlayers.filter(p => p.positionCategory !== 'GK');
+        const p =
+          candidatePool.length > 0
+            ? candidatePool[Math.floor(Math.random() * candidatePool.length)]
+            : pickPlayerByPosition(awayActivePlayers, 'DEF', 'MID');
+
+        if (cardRoll < directRedThreshold && awayRedCards < 2 && p) {
+          awayRedCards++;
+          activeAwayLineup = activeAwayLineup.filter(id => id !== p.id);
+          updatedAwayRedded.push(p.id);
+          newEvents.push({
+            minute: nextMinute,
+            type: 'red_card',
+            teamId: prevState.awayTeam.id,
+            playerId: p.id,
+            playerName: p.name,
+            description: `🟥 بطاقة حمراء مباشرة! الحكم يطرد اللاعب (${p.name}) من ${prevState.awayTeam.shortName} بعد عرقلة خطيرة من الخلف!`
+          });
+        } else if (cardRoll < yellowThreshold && p) {
+          let targetPlayer = p;
+          if (updatedAwayYellowed.includes(targetPlayer.id)) {
+            const unbooked = candidatePool.filter(pl => !updatedAwayYellowed.includes(pl.id));
+            if (unbooked.length > 0 && Math.random() < 0.86) {
+              targetPlayer = unbooked[Math.floor(Math.random() * unbooked.length)];
+            }
+          }
+
+          if (updatedAwayYellowed.includes(targetPlayer.id)) {
+            if (awayRedCards < 2 && Math.random() < 0.45 * awayAggression) {
+              awayYellowCards++;
+              awayRedCards++;
+              activeAwayLineup = activeAwayLineup.filter(id => id !== targetPlayer.id);
+              updatedAwayRedded.push(targetPlayer.id);
+              newEvents.push({
+                minute: nextMinute,
+                type: 'red_card',
+                teamId: prevState.awayTeam.id,
+                playerId: targetPlayer.id,
+                playerName: targetPlayer.name,
+                description: `🟥 الإنذار الثاني والطرد! الحكم يشهر البطاقة الحمراء للاعب (${targetPlayer.name}) من ${prevState.awayTeam.shortName} ليكمل فريقه المباراة بنقص عددي!`
+              });
+            }
           } else {
-            updatedAwayYellowed.push(p.id);
+            awayYellowCards++;
+            updatedAwayYellowed.push(targetPlayer.id);
             newEvents.push({
               minute: nextMinute,
               type: 'yellow_card',
               teamId: prevState.awayTeam.id,
-              playerId: p.id,
-              playerName: p.name,
-              description: `🟨 إنذار أصفر للاعب (${p.name}) من ${prevState.awayTeam.shortName} بسبب عرقلة واضحة.`
+              playerId: targetPlayer.id,
+              playerName: targetPlayer.name,
+              description: `🟨 إنذار أصفر للاعب (${targetPlayer.name}) من ${prevState.awayTeam.shortName} بسبب عرقلة واضحة.`
             });
           }
         }
@@ -2620,13 +2709,21 @@ export function simulateMatch(
     }
   });
 
-  // Generate realistic cards
-  const homeCardsCount = Math.floor(Math.random() * 3);
-  const awayCardsCount = Math.floor(Math.random() * 3 + (ratingDelta > 10 ? 1 : 0));
+  // Generate realistic cards (calibrated: 0-2 yellows per team, ~4.5% total match red card chance)
+  const homePressAgg = homeTactics?.pressingIntensity === 'gegenpress' ? 1.25 : homeTactics?.pressingIntensity === 'high' ? 1.12 : 1.0;
+  const awayPressAgg = awayTactics?.pressingIntensity === 'gegenpress' ? 1.25 : awayTactics?.pressingIntensity === 'high' ? 1.12 : 1.0;
+
+  const homeCardsCount = Math.floor(Math.random() * 2.4 * homePressAgg);
+  const awayCardsCount = Math.floor(Math.random() * 2.4 * awayPressAgg + (ratingDelta > 12 ? 0.4 : 0));
+  const usedHomeYellowIds = new Set<string>();
+  const usedAwayYellowIds = new Set<string>();
+
   for (let c = 0; c < homeCardsCount; c++) {
     const min = Math.floor(Math.random() * 80 + 10);
-    const player = pickPlayerByPosition(safeOutfieldHome.length > 0 ? safeOutfieldHome : homePlayers, 'DEF', 'MID');
+    const pool = (safeOutfieldHome.length > 0 ? safeOutfieldHome : homePlayers).filter(p => p && !usedHomeYellowIds.has(p.id));
+    const player = pool.length > 0 ? pool[Math.floor(Math.random() * pool.length)] : pickPlayerByPosition(safeOutfieldHome.length > 0 ? safeOutfieldHome : homePlayers, 'DEF', 'MID');
     if (player && player.id) {
+      usedHomeYellowIds.add(player.id);
       events.push({
         minute: min,
         type: 'yellow_card',
@@ -2639,8 +2736,10 @@ export function simulateMatch(
   }
   for (let c = 0; c < awayCardsCount; c++) {
     const min = Math.floor(Math.random() * 80 + 10);
-    const player = pickPlayerByPosition(safeOutfieldAway.length > 0 ? safeOutfieldAway : awayPlayers, 'DEF', 'MID');
+    const pool = (safeOutfieldAway.length > 0 ? safeOutfieldAway : awayPlayers).filter(p => p && !usedAwayYellowIds.has(p.id));
+    const player = pool.length > 0 ? pool[Math.floor(Math.random() * pool.length)] : pickPlayerByPosition(safeOutfieldAway.length > 0 ? safeOutfieldAway : awayPlayers, 'DEF', 'MID');
     if (player && player.id) {
+      usedAwayYellowIds.add(player.id);
       events.push({
         minute: min,
         type: 'yellow_card',
@@ -2648,6 +2747,36 @@ export function simulateMatch(
         playerId: player.id,
         playerName: player.name,
         description: `🟨 بطاقة صفراء للاعب (${player.name}) من ${safeAway.shortName}.`,
+      });
+    }
+  }
+
+  let homeRedCardsCount = 0;
+  let awayRedCardsCount = 0;
+  if (Math.random() < 0.024 * homePressAgg) {
+    const player = pickPlayerByPosition(safeOutfieldHome.length > 0 ? safeOutfieldHome : homePlayers, 'DEF', 'MID');
+    if (player && player.id) {
+      homeRedCardsCount = 1;
+      events.push({
+        minute: Math.floor(Math.random() * 55 + 30),
+        type: 'red_card',
+        teamId: safeHome.id,
+        playerId: player.id,
+        playerName: player.name,
+        description: `🟥 بطاقة حمراء للاعب (${player.name}) من ${safeHome.shortName} بعد تدخل خشن.`,
+      });
+    }
+  } else if (Math.random() < 0.024 * awayPressAgg) {
+    const player = pickPlayerByPosition(safeOutfieldAway.length > 0 ? safeOutfieldAway : awayPlayers, 'DEF', 'MID');
+    if (player && player.id) {
+      awayRedCardsCount = 1;
+      events.push({
+        minute: Math.floor(Math.random() * 55 + 30),
+        type: 'red_card',
+        teamId: safeAway.id,
+        playerId: player.id,
+        playerName: player.name,
+        description: `🟥 بطاقة حمراء للاعب (${player.name}) من ${safeAway.shortName} بعد تدخل خشن.`,
       });
     }
   }
@@ -2667,14 +2796,14 @@ export function simulateMatch(
     awayShots,
     homeShotsOnTarget,
     awayShotsOnTarget,
-    homeFouls: Math.round(7 + Math.random() * 7),
-    awayFouls: Math.round(8 + Math.random() * 8),
+    homeFouls: Math.round(6 + Math.random() * 6),
+    awayFouls: Math.round(7 + Math.random() * 6),
     homeCorners: Math.max(1, Math.round(homeShots * 0.4 + (Math.random() * 2))),
     awayCorners: Math.max(1, Math.round(awayShots * 0.35 + (Math.random() * 2))),
     homeYellowCards: homeCardsCount,
     awayYellowCards: awayCardsCount,
-    homeRedCards: 0,
-    awayRedCards: 0,
+    homeRedCards: homeRedCardsCount,
+    awayRedCards: awayRedCardsCount,
   };
 
   events.sort((a, b) => a.minute - b.minute);

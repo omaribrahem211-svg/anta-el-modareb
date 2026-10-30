@@ -24,6 +24,7 @@ import { getClubDisplayName } from '../data/leaguesData';
 import { AfricanChampionsLeagueView } from './continental/AfricanChampionsLeagueView';
 import { getDomesticCupDefinitionForCountry } from '../data/competitionsData';
 import { isEuropeanCountry } from '../utils/continentalEngine';
+import { ClubBadge } from './ClubBadge';
 
 export const LeagueTab: React.FC = () => {
   const {
@@ -263,6 +264,8 @@ export const LeagueTab: React.FC = () => {
                   const isPromotionZone = activeLeague.tier > 1 && idx < promotionSpots;
                   const isRelegationZone = relegationSpots > 0 && idx >= totalTeams - relegationSpots;
 
+                  const matchingClub = teams.find(t => t && (t.id === team.teamId || t.name === team.teamName));
+
                   return (
                     <tr
                       key={team.teamId}
@@ -300,6 +303,7 @@ export const LeagueTab: React.FC = () => {
 
                       <td className="py-3 px-2">
                         <div className="flex items-center gap-1.5">
+                          <ClubBadge club={matchingClub || { id: team.teamId, name: team.teamName }} size="xs" />
                           <span
                             className={`truncate max-w-[130px] sm:max-w-[180px] ${
                               isUser ? 'text-amber-300 font-bold' : 'text-slate-200'

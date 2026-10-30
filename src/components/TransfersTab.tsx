@@ -29,6 +29,8 @@ import { NegotiationModal } from './NegotiationModal';
 import { GLOBAL_LEAGUES, getCustomLeagues } from '../data/leaguesData';
 import { calibrateRealisticPlayerRating } from '../utils/playerGenerator';
 import { loadWorldStateFromDb } from '../utils/storage/indexedDbStorage';
+import { PlayerAvatar } from './PlayerAvatar';
+import { ClubBadge } from './ClubBadge';
 
 export interface TransferRumor {
   id: string;
@@ -284,35 +286,61 @@ const MarketPlayerCard = React.memo<MarketPlayerCardProps>(
     const player = useMemo(() => {
       const raw = item.player;
       if (!raw || !raw.id) return raw;
+      const isFree = item.statusType === 'free';
+      const resolvedClubName = isFree ? 'لاعب حر' : (item.club?.name || item.clubName || 'نادٍ محترف');
+      const resolvedClubId = isFree ? '' : (item.club?.id || raw.currentClubId || '');
+
       const cached = playerCalibrationCache.get(raw.id);
-      if (
+      const baseCalibrated =
         cached &&
         cached.overallRating === raw.overallRating &&
         cached.marketValue === raw.marketValue
-      ) {
-        return cached;
-      }
-      const calibrated =
-        item.statusType === 'free'
-          ? calibrateRealisticPlayerRating(raw, '', 'free_agents', 50)
-          : calibrateRealisticPlayerRating(raw, item.club?.id || '', item.leagueId, item.club?.reputation || 65);
-      // If player was trained and their rating/marketValue increased beyond the static club template, preserve their trained rating & marketValue
-      const finalPlayer: Player =
-        raw.overallRating > calibrated.overallRating || (raw.marketValue || 0) > (calibrated.marketValue || 0)
-          ? {
-              ...calibrated,
-              overallRating: Math.max(raw.overallRating, calibrated.overallRating),
-              potentialRating: Math.max(raw.potentialRating || 0, calibrated.potentialRating || 0),
-              marketValue: Math.max(raw.marketValue || 0, calibrated.marketValue || 0),
-              attributes: raw.attributes || calibrated.attributes,
-            }
-          : calibrated;
-      playerCalibrationCache.set(raw.id, finalPlayer);
-      return finalPlayer;
-    }, [item.player, item.club?.id, item.leagueId, item.club?.reputation, item.statusType]);
+          ? cached
+          : (() => {
+              const calibrated = isFree
+                ? calibrateRealisticPlayerRating(raw, '', 'free_agents', 50)
+                : calibrateRealisticPlayerRating(raw, resolvedClubId, item.leagueId, item.club?.reputation || 65);
+              const merged: Player =
+                raw.overallRating > calibrated.overallRating || (raw.marketValue || 0) > (calibrated.marketValue || 0)
+                  ? {
+                      ...calibrated,
+                      overallRating: Math.max(raw.overallRating, calibrated.overallRating),
+                      potentialRating: Math.max(raw.potentialRating || 0, calibrated.potentialRating || 0),
+                      marketValue: Math.max(raw.marketValue || 0, calibrated.marketValue || 0),
+                      attributes: raw.attributes || calibrated.attributes,
+                    }
+                  : calibrated;
+              playerCalibrationCache.set(raw.id, merged);
+              return merged;
+            })();
 
-    const safeClubName = item.clubName || 'وكيل حر';
-    const effectiveAskingPrice = item.askingPrice || player.marketValue || 50000;
+      const cardPrice = isFree ? 0 : (item.askingPrice || baseCalibrated.marketValue || 50000);
+      const cardSalary = baseCalibrated.salary || raw.salary || 2500;
+      const cardOvr = baseCalibrated.overallRating || raw.overallRating || 65;
+
+      return {
+        ...baseCalibrated,
+        name: baseCalibrated.name || raw.name || 'لاعب محترف',
+        overallRating: cardOvr,
+        age: baseCalibrated.age || raw.age || 24,
+        salary: cardSalary,
+        marketValue: isFree ? (baseCalibrated.marketValue || 50000) : cardPrice,
+        currentClubId: resolvedClubId,
+        isFreeAgent: isFree,
+        contractYears: isFree ? 0 : Math.max(1, raw.contractYears ?? baseCalibrated.contractYears ?? 2),
+        ...({
+          rating: cardOvr,
+          club: resolvedClubName,
+          currentClubName: resolvedClubName,
+          price: cardPrice,
+          askingPrice: cardPrice,
+          contractType: isFree ? 'free' : 'club',
+        } as any),
+      } as Player;
+    }, [item.player, item.club?.id, item.club?.name, item.clubName, item.leagueId, item.club?.reputation, item.statusType, item.askingPrice]);
+
+    const safeClubName = item.statusType === 'free' ? 'لاعب حر' : (item.club?.name || item.clubName || 'نادٍ محترف');
+    const effectiveAskingPrice = item.statusType === 'free' ? 0 : (item.askingPrice || player.marketValue || 50000);
     const effectiveSalary = player.salary || 2500;
 
     const isAffordableFee = hasUserClub && clubBudget >= effectiveAskingPrice;
@@ -373,194 +401,216 @@ const MarketPlayerCard = React.memo<MarketPlayerCardProps>(
     return (
       <div
         style={{
-          height: `${VIRTUAL_CARD_HEIGHT}px`,
           border: '1px solid rgba(255, 255, 255, 0.08)',
-          willChange: 'transform',
         }}
-        className="bg-[#0b111e] hover:border-emerald-500/30 rounded-2xl p-3 flex flex-col justify-between select-none relative overflow-hidden"
+        className="w-full bg-[#0b111e] hover:border-emerald-500/35 rounded-2xl p-3.5 sm:p-4 flex flex-col gap-3 select-none relative transition-colors"
       >
-        {/* Top Accent Strip */}
+        {/* Right Accent Strip */}
         <div
-          className="absolute top-0 right-0 bottom-0 w-1"
+          className="absolute top-2 right-0 bottom-2 w-1 rounded-l-full"
           style={{ backgroundColor: item.club?.primaryColor || ratingTier.accent }}
         />
 
-        {/* Row 1: Rating Shield + Identity Dossier + Valuation Tag */}
-        <div className="grid grid-cols-[52px_minmax(0,1fr)_auto] items-center gap-2.5 pr-1">
-          {/* OVR & Position Shield */}
-          <div
-            onClick={() => onSelectPlayer(player)}
-            className={`w-[52px] h-[54px] rounded-xl border flex flex-col items-center justify-center cursor-pointer shrink-0 ${ratingTier.box}`}
-          >
-            <span className="text-base font-black font-mono leading-none tabular-nums text-white">
-              {ovr}
-            </span>
-            <div className="flex items-center gap-1 mt-1">
-              <span className={`text-[9px] font-black font-mono px-1 rounded border ${posColor}`}>
-                {player.position}
-              </span>
-              {pot > ovr && (
-                <span className="text-[8px] font-mono font-bold text-emerald-400" title={`الإمكانية المستقبلية: ${pot}`}>
-                  ↑{pot}
-                </span>
-              )}
-            </div>
-          </div>
-
-          {/* Player Identity & Club Info */}
-          <div className="min-w-0 pr-1 flex-1">
-            <div className="flex items-center gap-1.5 min-w-0 flex-wrap">
-              <button
-                type="button"
-                onClick={() => onSelectPlayer(player)}
-                className="font-black text-xs sm:text-sm text-white hover:text-emerald-400 text-right cursor-pointer leading-tight break-words"
-                title={`عرض بطاقة اللاعب الكاملة: ${player.name}`}
+        {/* Row 1: Rating Shield & Avatar + Identity Dossier + Valuation Tag */}
+        <div className="flex items-start justify-between gap-2.5 pr-1.5 flex-wrap sm:flex-nowrap">
+          <div className="flex items-center gap-2.5 min-w-0 flex-1">
+            {/* Avatar & OVR Badge */}
+            <div
+              onClick={() => onSelectPlayer(player)}
+              className="flex items-center gap-1.5 cursor-pointer shrink-0"
+            >
+              <PlayerAvatar
+                player={player}
+                primaryColor={item.club?.primaryColor}
+                secondaryColor={item.club?.secondaryColor}
+                size="sm"
+              />
+              <div
+                className={`w-[46px] h-[52px] rounded-xl border flex flex-col items-center justify-center shrink-0 ${ratingTier.box}`}
               >
-                {player.name}
-              </button>
-              <span className="text-[10px] text-slate-300 bg-slate-950/90 px-1.5 py-0.5 rounded-md border border-white/[0.06] shrink-0 font-medium">
-                {flag} {player.nationality || 'مصر'}
-              </span>
-              {item.statusType !== 'contract' && (
-                <span
-                  className={`text-[9px] font-bold px-1.5 py-0.5 rounded-md shrink-0 ${
-                    item.statusType === 'listed'
-                      ? 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30'
-                      : item.statusType === 'free'
-                      ? 'bg-cyan-500/15 text-cyan-300 border border-cyan-500/30'
-                      : item.statusType === 'expiring'
-                      ? 'bg-amber-500/15 text-amber-300 border border-amber-500/30'
-                      : 'bg-purple-500/15 text-purple-300 border border-purple-500/30'
-                  }`}
-                >
-                  {item.statusLabel}
+                <span className="text-sm font-black font-mono leading-none tabular-nums text-white">
+                  {ovr}
                 </span>
-              )}
+                <div className="flex items-center gap-0.5 mt-1">
+                  <span className={`text-[8px] font-black font-mono px-1 rounded border ${posColor}`}>
+                    {player.position}
+                  </span>
+                  {pot > ovr && (
+                    <span className="text-[7px] font-mono font-bold text-emerald-400" title={`الإمكانية المستقبلية: ${pot}`}>
+                      ↑{pot}
+                    </span>
+                  )}
+                </div>
+              </div>
             </div>
 
-            <div className="flex items-center gap-1.5 text-[11px] text-slate-400 mt-1 min-w-0 flex-wrap">
-              <span className="flex items-center gap-1 text-slate-200 font-semibold truncate">
-                <Building2 className="w-3 h-3 text-cyan-400 shrink-0" />
-                {safeClubName}
-              </span>
-              <span className="text-slate-600 shrink-0">•</span>
-              <span className="text-slate-400 truncate hidden xs:inline">{item.leagueName}</span>
-              <span className="text-slate-600 shrink-0 hidden xs:inline">•</span>
-              <span className="shrink-0 font-mono tabular-nums text-slate-300">{player.age} عاماً</span>
+            {/* Player Identity & Club Info */}
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-1.5 min-w-0 flex-wrap">
+                <button
+                  type="button"
+                  onClick={() => onSelectPlayer(player)}
+                  className="font-black text-xs sm:text-sm text-white hover:text-emerald-400 text-right cursor-pointer leading-snug"
+                  title={`عرض بطاقة اللاعب الكاملة: ${player.name || 'اسم اللاعب'}`}
+                >
+                  {player.name || 'اسم اللاعب'}
+                </button>
+                {player.nickname && (
+                  <span className="text-[9px] font-bold text-amber-300 bg-amber-500/10 px-1.5 py-0.5 rounded-md border border-amber-500/25 shrink-0">
+                    «{player.nickname}»
+                  </span>
+                )}
+                <span className="text-[10px] text-slate-300 bg-slate-950/90 px-1.5 py-0.5 rounded-md border border-white/[0.06] shrink-0 font-medium">
+                  {flag} {player.nationality || 'مصر'}
+                </span>
+                {item.statusType !== 'contract' && (
+                  <span
+                    className={`text-[9px] font-bold px-1.5 py-0.5 rounded-md shrink-0 ${
+                      item.statusType === 'listed'
+                        ? 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30'
+                        : item.statusType === 'free'
+                        ? 'bg-cyan-500/15 text-cyan-300 border border-cyan-500/30'
+                        : item.statusType === 'expiring'
+                        ? 'bg-amber-500/15 text-amber-300 border border-amber-500/30'
+                        : 'bg-purple-500/15 text-purple-300 border border-purple-500/30'
+                    }`}
+                  >
+                    {item.statusLabel}
+                  </span>
+                )}
+              </div>
+
+              <div className="flex items-center gap-1.5 text-[11px] text-slate-400 mt-1 min-w-0 flex-wrap">
+                <span className="flex items-center gap-1 text-slate-200 font-semibold">
+                  <ClubBadge club={item.club || { name: safeClubName, primaryColor: item.club?.primaryColor }} size="xs" />
+                  <span>{safeClubName}</span>
+                </span>
+                <span className="text-slate-600 shrink-0">•</span>
+                <span className="text-slate-400">{item.leagueName}</span>
+                <span className="text-slate-600 shrink-0">•</span>
+                <span className="shrink-0 font-mono tabular-nums text-slate-300">
+                  <span dir="ltr" className="inline-block">{player.age || 24}</span> عاماً
+                </span>
+              </div>
             </div>
           </div>
 
           {/* Asking Price & Valuation Box */}
-          <div className="bg-slate-950/90 border border-white/[0.08] rounded-xl px-2.5 py-1.5 text-left shrink-0 shadow-sm flex flex-col justify-center min-w-[85px]">
-            <div className="text-[9px] text-slate-400 font-semibold leading-none">السعر المطلوب:</div>
-            <div className="text-xs sm:text-sm font-black text-emerald-400 font-mono tabular-nums leading-tight mt-0.5">
-              {item.askingPrice > 0 ? formatCompactCurrency(item.askingPrice) : 'انتقال حر'}
+          <div className="bg-slate-950/90 border border-white/[0.08] rounded-xl px-3 py-1.5 text-left shrink-0 flex flex-col justify-center min-w-[96px]">
+            <div className="text-[9px] text-slate-400 font-semibold leading-none text-right">السعر المطلوب:</div>
+            <div className="text-xs sm:text-sm font-black text-emerald-400 font-mono tabular-nums leading-tight mt-0.5 text-right">
+              {item.statusType !== 'free' && effectiveAskingPrice > 0 ? (
+                <span dir="ltr" className="inline-block">{formatCompactCurrency(effectiveAskingPrice)}</span>
+              ) : (
+                'انتقال حر'
+              )}
             </div>
-            <div className="text-[10px] text-slate-400 font-mono tabular-nums mt-1 leading-none">
-              الراتب: <span className="text-cyan-300 font-bold">{formatCompactCurrency(effectiveSalary, false)}</span>
+            <div className="text-[10px] text-slate-400 font-mono tabular-nums mt-1 leading-none text-right">
+              الراتب:{' '}
+              <span dir="ltr" className="inline-block text-cyan-300 font-bold">
+                {formatCompactCurrency(effectiveSalary, false)}/ش
+              </span>
             </div>
           </div>
         </div>
 
-        {/* Row 2: 6-Attribute Scouting Strip + Action Buttons */}
-        <div className="grid grid-cols-12 items-center gap-2 pt-2 border-t border-white/[0.06] pr-1">
-          {/* 6-Attribute Mini Matrix */}
-          <div className="col-span-6 sm:col-span-7 grid grid-cols-6 gap-1 bg-slate-950/80 rounded-xl px-1.5 py-1 border border-white/[0.05] text-center">
-            <div>
-              <span className="text-[8px] text-slate-500 block leading-none">سرعة</span>
-              <span className={`text-[11px] font-black font-mono tabular-nums ${getStatColor(attrs.pace)}`}>
-                {attrs.pace}
-              </span>
-            </div>
-            <div>
-              <span className="text-[8px] text-slate-500 block leading-none">تسديد</span>
-              <span className={`text-[11px] font-black font-mono tabular-nums ${getStatColor(attrs.shooting)}`}>
-                {attrs.shooting}
-              </span>
-            </div>
-            <div>
-              <span className="text-[8px] text-slate-500 block leading-none">تمرير</span>
-              <span className={`text-[11px] font-black font-mono tabular-nums ${getStatColor(attrs.passing)}`}>
-                {attrs.passing}
-              </span>
-            </div>
-            <div>
-              <span className="text-[8px] text-slate-500 block leading-none">مراوغة</span>
-              <span className={`text-[11px] font-black font-mono tabular-nums ${getStatColor(attrs.dribbling || 60)}`}>
-                {attrs.dribbling || 60}
-              </span>
-            </div>
-            <div>
-              <span className="text-[8px] text-slate-500 block leading-none">دفاع</span>
-              <span className={`text-[11px] font-black font-mono tabular-nums ${getStatColor(attrs.defending)}`}>
-                {attrs.defending}
-              </span>
-            </div>
-            <div>
-              <span className="text-[8px] text-slate-500 block leading-none">بدني</span>
-              <span className={`text-[11px] font-black font-mono tabular-nums ${getStatColor(attrs.physical || 62)}`}>
-                {attrs.physical || 62}
-              </span>
-            </div>
+        {/* Row 2: Full-Width 6-Attribute Visual Scouting Strip */}
+        <div className="w-full grid grid-cols-6 gap-1.5 bg-slate-950/85 rounded-xl px-2 py-1.5 border border-white/[0.06] text-center pr-1.5">
+          <div>
+            <span className="text-[9px] text-slate-400 block leading-none mb-0.5">سرعة</span>
+            <span className={`text-xs font-black font-mono tabular-nums ${getStatColor(attrs.pace)}`}>
+              {attrs.pace}
+            </span>
           </div>
-
-          {/* Action Buttons */}
-          <div className="col-span-6 sm:col-span-5 flex items-center justify-end gap-1.5">
-            <button
-              type="button"
-              onClick={() => onSelectPlayer(player)}
-              title="ملف اللاعب الكامل"
-              className="w-8 h-8 rounded-xl bg-slate-950 hover:bg-slate-800 text-slate-300 border border-white/[0.08] flex items-center justify-center shrink-0 active:scale-95 transition-transform cursor-pointer"
-            >
-              <Eye className="w-3.5 h-3.5" />
-            </button>
-
-            {isUserClubPlayer ? (
-              <div className="flex-1 bg-slate-950 text-slate-400 text-[10px] h-8 rounded-xl font-bold border border-white/[0.06] flex items-center justify-center px-2 truncate">
-                ضمن قائمتك
-              </div>
-            ) : (
-              <>
-                <button
-                  type="button"
-                  onClick={() => onStartNegotiation(player)}
-                  className="flex-1 h-8 px-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-[11px] flex items-center justify-center gap-1 shrink-0 active:scale-95 transition-transform cursor-pointer"
-                >
-                  <Briefcase className="w-3 h-3 shrink-0" />
-                  <span className="truncate">تفاوض</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => canDirectBuy && onDirectBuy(player, effectiveAskingPrice)}
-                  disabled={!canDirectBuy}
-                  title={
-                    !hasUserClub
-                      ? 'يجب تولي تدريب نادٍ'
-                      : !isAffordableFee
-                      ? `الميزانية لا تكفي (${formatCompactCurrency(clubBudget)} / ${formatCompactCurrency(effectiveAskingPrice)})`
-                      : !isAffordableWage
-                      ? 'يتجاوز سقف الرواتب المتاح'
-                      : 'شراء مباشر بالسعر المطلوب'
-                  }
-                  className={`h-8 px-2 rounded-xl text-[10px] font-bold flex items-center justify-center gap-1 shrink-0 transition-transform ${
-                    canDirectBuy
-                      ? 'bg-cyan-950 hover:bg-cyan-900 text-cyan-300 border border-cyan-500/40 active:scale-95 cursor-pointer'
-                      : 'bg-slate-950/80 text-slate-500 border border-white/[0.05] cursor-not-allowed opacity-70'
-                  }`}
-                >
-                  {canDirectBuy ? (
-                    <>
-                      <UserPlus className="w-3 h-3 shrink-0" />
-                      <span>شراء</span>
-                    </>
-                  ) : (
-                    <span>{!isAffordableFee ? 'الميزانية' : 'الرواتب'}</span>
-                  )}
-                </button>
-              </>
-            )}
+          <div>
+            <span className="text-[9px] text-slate-400 block leading-none mb-0.5">تسديد</span>
+            <span className={`text-xs font-black font-mono tabular-nums ${getStatColor(attrs.shooting)}`}>
+              {attrs.shooting}
+            </span>
           </div>
+          <div>
+            <span className="text-[9px] text-slate-400 block leading-none mb-0.5">تمرير</span>
+            <span className={`text-xs font-black font-mono tabular-nums ${getStatColor(attrs.passing)}`}>
+              {attrs.passing}
+            </span>
+          </div>
+          <div>
+            <span className="text-[9px] text-slate-400 block leading-none mb-0.5">مراوغة</span>
+            <span className={`text-xs font-black font-mono tabular-nums ${getStatColor(attrs.dribbling || 60)}`}>
+              {attrs.dribbling || 60}
+            </span>
+          </div>
+          <div>
+            <span className="text-[9px] text-slate-400 block leading-none mb-0.5">دفاع</span>
+            <span className={`text-xs font-black font-mono tabular-nums ${getStatColor(attrs.defending)}`}>
+              {attrs.defending}
+            </span>
+          </div>
+          <div>
+            <span className="text-[9px] text-slate-400 block leading-none mb-0.5">بدني</span>
+            <span className={`text-xs font-black font-mono tabular-nums ${getStatColor(attrs.physical || 62)}`}>
+              {attrs.physical || 62}
+            </span>
+          </div>
+        </div>
+
+        {/* Row 3: Unclipped Action Buttons Footer */}
+        <div className="flex items-center justify-between gap-2 pt-2 border-t border-white/[0.07] pr-1.5">
+          <button
+            type="button"
+            onClick={() => onSelectPlayer(player)}
+            title="ملف اللاعب الكامل"
+            className="px-3 py-2 rounded-xl bg-slate-950 hover:bg-slate-800 text-slate-300 border border-white/[0.08] flex items-center justify-center gap-1.5 text-xs font-bold shrink-0 active:scale-95 transition-transform cursor-pointer"
+          >
+            <Eye className="w-3.5 h-3.5 text-slate-400" />
+            <span>ملف اللاعب</span>
+          </button>
+
+          {isUserClubPlayer ? (
+            <div className="flex-1 bg-slate-950 text-slate-400 text-xs py-2 rounded-xl font-bold border border-white/[0.06] flex items-center justify-center px-3">
+              ضمن قائمة فريقك الحالية
+            </div>
+          ) : (
+            <div className="flex items-center gap-2 flex-1 justify-end">
+              <button
+                type="button"
+                onClick={() => onStartNegotiation(player)}
+                className="flex-1 py-2 px-3 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-xs flex items-center justify-center gap-1.5 active:scale-95 transition-transform cursor-pointer"
+              >
+                <Briefcase className="w-3.5 h-3.5 shrink-0" />
+                <span>تفاوض</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => canDirectBuy && onDirectBuy(player, effectiveAskingPrice)}
+                disabled={!canDirectBuy}
+                title={
+                  !hasUserClub
+                    ? 'يجب تولي تدريب نادٍ'
+                    : !isAffordableFee
+                    ? `الميزانية لا تكفي (${formatCompactCurrency(clubBudget)} / ${formatCompactCurrency(effectiveAskingPrice)})`
+                    : !isAffordableWage
+                    ? 'يتجاوز سقف الرواتب المتاح'
+                    : 'شراء مباشر بالسعر المطلوب'
+                }
+                className={`flex-1 py-2 px-3 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-transform ${
+                  canDirectBuy
+                    ? 'bg-cyan-950 hover:bg-cyan-900 text-cyan-300 border border-cyan-500/40 active:scale-95 cursor-pointer'
+                    : 'bg-slate-950/80 text-slate-500 border border-white/[0.05] cursor-not-allowed opacity-70'
+                }`}
+              >
+                {canDirectBuy ? (
+                  <>
+                    <UserPlus className="w-3.5 h-3.5 shrink-0" />
+                    <span>{item.statusType === 'free' || effectiveAskingPrice <= 0 ? 'توقيع حر' : 'شراء مباشر'}</span>
+                  </>
+                ) : (
+                  <span>{!isAffordableFee ? 'الميزانية لا تكفي' : 'يتجاوز الرواتب'}</span>
+                )}
+              </button>
+            </div>
+          )}
         </div>
       </div>
     );
@@ -568,7 +618,10 @@ const MarketPlayerCard = React.memo<MarketPlayerCardProps>(
   (prevProps, nextProps) =>
     prevProps.item.player.id === nextProps.item.player.id &&
     prevProps.item.askingPrice === nextProps.item.askingPrice &&
-    prevProps.item.statusType === nextProps.item.statusType
+    prevProps.item.statusType === nextProps.item.statusType &&
+    prevProps.item.isUserClubPlayer === nextProps.item.isUserClubPlayer &&
+    prevProps.clubBudget === nextProps.clubBudget &&
+    prevProps.remainingWageBudget === nextProps.remainingWageBudget
 );
 
 MarketPlayerCard.displayName = 'MarketPlayerCard';
@@ -632,11 +685,10 @@ export const TransfersTab: React.FC<TransfersTabProps> = ({
   const [sortOrder, setSortOrder] = useState<'desc' | 'asc'>('desc');
   const [isFilterSheetOpen, setIsFilterSheetOpen] = useState(false);
 
-  // Virtual Scroll State
+  // Progressive batch rendering state for flexible-height player cards
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
-  const [scrollTop, setScrollTop] = useState(0);
-  const [viewportHeight, setViewportHeight] = useState(VIRTUAL_VIEWPORT_HEIGHT);
-  const rafRef = useRef<number | null>(null);
+  const [visibleCardCount, setVisibleCardCount] = useState<number>(30);
+  const [boughtPlayerIds, setBoughtPlayerIds] = useState<Set<string>>(() => new Set());
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -646,7 +698,7 @@ export const TransfersTab: React.FC<TransfersTabProps> = ({
   }, [searchQuery]);
 
   useEffect(() => {
-    setScrollTop(0);
+    setVisibleCardCount(30);
     if (scrollContainerRef.current) {
       scrollContainerRef.current.scrollTop = 0;
     }
@@ -666,28 +718,15 @@ export const TransfersTab: React.FC<TransfersTabProps> = ({
     sortOrder,
   ]);
 
-  useEffect(() => {
-    const updateSize = () => {
-      if (scrollContainerRef.current) {
-        const h = scrollContainerRef.current.clientHeight;
-        if (h > 100) setViewportHeight(h);
+  const handleListScroll = useCallback(
+    (e: React.UIEvent<HTMLDivElement>) => {
+      const el = e.currentTarget;
+      if (el.scrollHeight - el.scrollTop - el.clientHeight < 420) {
+        setVisibleCardCount(prev => prev + 30);
       }
-    };
-    updateSize();
-    window.addEventListener('resize', updateSize, { passive: true });
-    return () => window.removeEventListener('resize', updateSize);
-  }, [activeTabMode]);
-
-  const handleVirtualScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
-    const currentTop = e.currentTarget.scrollTop;
-    if (rafRef.current !== null) {
-      cancelAnimationFrame(rafRef.current);
-    }
-    rafRef.current = requestAnimationFrame(() => {
-      setScrollTop(currentTop);
-      rafRef.current = null;
-    });
-  }, []);
+    },
+    []
+  );
 
   const currentWageBill = userClub
     ? (userClub.players || []).reduce((acc, p) => acc + (p?.salary || 0), 0)
@@ -1078,10 +1117,101 @@ export const TransfersTab: React.FC<TransfersTabProps> = ({
     return map;
   }, [allDbPlayers]);
 
+  const normalizeSelectedTransferPlayer = useCallback(
+    (rawInput: any): Player | null => {
+      if (!rawInput) return null;
+      // Unwrap if passed as { player: Player } from CustomEvent or wrapper object
+      const unwrapped: any = rawInput?.player && typeof rawInput.player === 'object' ? rawInput.player : rawInput;
+      const matchedItem =
+        (unwrapped?.id ? dbItemByIdMap.get(unwrapped.id) : undefined) ||
+        (unwrapped?.name
+          ? allDbPlayers.find(i => i.player && i.player.name === unwrapped.name)
+          : undefined);
+
+      const basePlayer: Partial<Player> = {
+        ...(matchedItem?.player || {}),
+        ...unwrapped,
+      };
+
+      const resolvedId = basePlayer.id || matchedItem?.player?.id;
+      const resolvedName = basePlayer.name || matchedItem?.player?.name;
+      if (!resolvedId && !resolvedName) return null;
+
+      const resolvedClubObj =
+        matchedItem?.club ||
+        teams.find(
+          t =>
+            (basePlayer.currentClubId && t.id === basePlayer.currentClubId) ||
+            (t.players || []).some(p => p && p.id === resolvedId)
+        ) ||
+        null;
+
+      const rawClubName =
+        resolvedClubObj?.name ||
+        matchedItem?.clubName ||
+        (basePlayer as any).currentClubName ||
+        (basePlayer as any).club ||
+        '';
+
+      const hasValidClub = Boolean(
+        resolvedClubObj ||
+          (basePlayer.currentClubId && basePlayer.currentClubId !== 'free_agents' && basePlayer.currentClubId !== '') ||
+          (rawClubName && !rawClubName.includes('وكيل حر') && !rawClubName.includes('لاعب حر'))
+      );
+
+      const isFree =
+        matchedItem?.statusType === 'free' ||
+        (!hasValidClub &&
+          ((basePlayer as any).contractType === 'free' ||
+            basePlayer.isFreeAgent === true ||
+            basePlayer.currentLeagueId === 'free_agents' ||
+            (basePlayer.contractYears !== undefined && basePlayer.contractYears <= 0)));
+
+      const finalOvr = Number(basePlayer.overallRating ?? (basePlayer as any).rating ?? matchedItem?.player?.overallRating ?? 65);
+      const finalAge = Number(basePlayer.age ?? matchedItem?.player?.age ?? 24);
+      const finalSalary = Number(basePlayer.salary ?? matchedItem?.player?.salary ?? 5000);
+      const finalClubName = isFree ? 'لاعب حر' : (rawClubName || 'نادٍ محترف');
+      const finalClubId = isFree ? '' : (resolvedClubObj?.id || basePlayer.currentClubId || '');
+      const finalPrice = isFree
+        ? 0
+        : Number(
+            (basePlayer as any).askingPrice ??
+              (basePlayer as any).price ??
+              matchedItem?.askingPrice ??
+              basePlayer.marketValue ??
+              matchedItem?.player?.marketValue ??
+              50000
+          );
+
+      return {
+        ...(basePlayer as Player),
+        id: resolvedId || `player_${Date.now()}`,
+        name: resolvedName || 'لاعب محترف',
+        position: (basePlayer.position || matchedItem?.player?.position || 'CM') as Player['position'],
+        overallRating: finalOvr,
+        age: finalAge,
+        salary: finalSalary,
+        marketValue: isFree ? (basePlayer.marketValue || 50000) : finalPrice,
+        currentClubId: finalClubId,
+        isFreeAgent: isFree,
+        contractYears: isFree ? 0 : Math.max(1, Number(basePlayer.contractYears ?? matchedItem?.player?.contractYears ?? 2)),
+        ...({
+          rating: finalOvr,
+          club: finalClubName,
+          currentClubName: finalClubName,
+          price: finalPrice,
+          askingPrice: finalPrice,
+          contractType: isFree ? 'free' : 'club',
+        } as any),
+      };
+    },
+    [dbItemByIdMap, allDbPlayers, teams]
+  );
+
   useEffect(() => {
     const handleOpenNeg = (e: Event) => {
-      const customEv = e as CustomEvent<Player>;
-      const targetPlayer = customEv.detail;
+      const customEv = e as CustomEvent<any>;
+      const targetPlayer = normalizeSelectedTransferPlayer(customEv.detail);
       if (!targetPlayer) return;
 
       setActiveTabMode('buy');
@@ -1101,7 +1231,7 @@ export const TransfersTab: React.FC<TransfersTabProps> = ({
 
     window.addEventListener('open-player-negotiation', handleOpenNeg);
     return () => window.removeEventListener('open-player-negotiation', handleOpenNeg);
-  }, [activeNegotiations]);
+  }, [activeNegotiations, normalizeSelectedTransferPlayer]);
 
   // Comprehensive league list with official Arabic names from GLOBAL_LEAGUES + custom leagues
   const availableLeagues = useMemo(() => {
@@ -1159,13 +1289,19 @@ export const TransfersTab: React.FC<TransfersTabProps> = ({
     const effMinOvr = minOverall === '' ? 40 : Number(minOverall);
     const effMaxOvr = maxOverall === '' ? 99 : Number(maxOverall);
 
+    const userSquadIdSet = new Set(
+      (userClub?.players || []).map(p => p?.id).filter(Boolean) as string[]
+    );
+
     return allDbPlayers
       .filter(item => {
         const p = item.player;
         if (!p) return false;
 
-        // Never display the user club's own players in the transfer market search list
-        if (item.isUserClubPlayer) return false;
+        // Never display the user club's own players or newly bought players in the transfer market search list
+        if (item.isUserClubPlayer || userSquadIdSet.has(p.id) || boughtPlayerIds.has(p.id)) {
+          return false;
+        }
 
         // 1-Tap Smart Scouting Lens Filter
         if (scoutingPreset === 'affordable') {
@@ -1260,35 +1396,13 @@ export const TransfersTab: React.FC<TransfersTabProps> = ({
     maxOverall,
     sortBy,
     sortOrder,
+    userClub?.players,
+    boughtPlayerIds,
   ]);
 
-  // Virtual Window Calculation
-  const virtualWindow = useMemo(() => {
-    const totalCount = filteredPlayers.length;
-    const totalHeight = Math.max(0, totalCount * VIRTUAL_ROW_STRIDE - VIRTUAL_CARD_GAP);
-
-    const rawStartIndex = Math.floor(scrollTop / VIRTUAL_ROW_STRIDE);
-    const visibleCount = Math.ceil(viewportHeight / VIRTUAL_ROW_STRIDE);
-
-    const startIndex = Math.max(0, rawStartIndex - VIRTUAL_OVERSCAN);
-    const endIndex = Math.min(totalCount - 1, rawStartIndex + visibleCount + VIRTUAL_OVERSCAN);
-
-    const visibleItems =
-      totalCount > 0 && startIndex <= endIndex
-        ? filteredPlayers.slice(startIndex, endIndex + 1)
-        : [];
-
-    const offsetY = startIndex * VIRTUAL_ROW_STRIDE;
-
-    return {
-      totalCount,
-      totalHeight,
-      startIndex,
-      endIndex,
-      visibleItems,
-      offsetY,
-    };
-  }, [filteredPlayers, scrollTop, viewportHeight]);
+  const visibleMarketItems = useMemo(() => {
+    return filteredPlayers.slice(0, visibleCardCount);
+  }, [filteredPlayers, visibleCardCount]);
 
   const handleResetFilters = useCallback(() => {
     setScoutingPreset('all');
@@ -1338,6 +1452,11 @@ export const TransfersTab: React.FC<TransfersTabProps> = ({
         const msg = (result as any)?.message || 'تمت صفقة الشراء بنجاح!';
         const succ = (result as any)?.success !== false;
         if (succ) {
+          setBoughtPlayerIds(prev => {
+            const next = new Set(prev);
+            next.add(player.id);
+            return next;
+          });
           setExternalDbPlayers(prev => prev.filter(entry => entry.player?.id !== player.id));
           setTransferCounter(c => c + 1);
         }
@@ -1354,21 +1473,22 @@ export const TransfersTab: React.FC<TransfersTabProps> = ({
 
   const handleStartNegotiation = useCallback(
     (player: Player) => {
-      if (!player) return;
+      const normalizedPlayer = normalizeSelectedTransferPlayer(player);
+      if (!normalizedPlayer) return;
       const existing = activeNegotiations.find(
-        n => n.playerId === player.id && n.type === 'buy' && n.stage !== 'completed' && n.stage !== 'rejected'
+        n => n.playerId === normalizedPlayer.id && n.type === 'buy' && n.stage !== 'completed' && n.stage !== 'rejected'
       );
       if (existing) {
-        setNegotiatingPlayer(player);
+        setNegotiatingPlayer(normalizedPlayer);
         setSelectedNegotiation(existing);
         setIsNegotiationModalOpen(true);
       } else {
-        setNegotiatingPlayer(player);
+        setNegotiatingPlayer(normalizedPlayer);
         setSelectedNegotiation(null);
         setIsNegotiationModalOpen(true);
       }
     },
-    [activeNegotiations]
+    [activeNegotiations, normalizeSelectedTransferPlayer]
   );
 
   const handleOpenExistingNegotiation = useCallback(
@@ -1413,6 +1533,12 @@ export const TransfersTab: React.FC<TransfersTabProps> = ({
       if (!player || !player.id) return;
       const res = sellPlayer(player.id);
       if (res.success) {
+        setBoughtPlayerIds(prev => {
+          if (!prev.has(player.id)) return prev;
+          const next = new Set(prev);
+          next.delete(player.id);
+          return next;
+        });
         setTransferCounter(c => c + 1);
       }
       setNotification({ text: res.message, type: res.success ? 'success' : 'error' });
@@ -1422,7 +1548,7 @@ export const TransfersTab: React.FC<TransfersTabProps> = ({
   );
 
   return (
-    <div className="space-y-3 pb-6" dir="rtl">
+    <div className="flex flex-col space-y-3 pb-24" dir="rtl">
       {/* ================================================================ */}
       {/* 1. NEW EXECUTIVE SCOUTING & FINANCIAL COMMAND BENTO HEADER       */}
       {/* ================================================================ */}
@@ -1740,10 +1866,63 @@ export const TransfersTab: React.FC<TransfersTabProps> = ({
                 </>
               )}
             </div>
+
+            {/* Direct Quick Sort Bar (Unclipped) */}
+            <div className="pt-2 border-t border-white/[0.06] flex items-center justify-between gap-2 flex-wrap">
+              <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar py-0.5">
+                <span className="text-[11px] text-slate-400 font-bold shrink-0 flex items-center gap-1 pl-1">
+                  <ArrowUpDown className="w-3 h-3 text-emerald-400" />
+                  <span>ترتيب حسب:</span>
+                </span>
+                {[
+                  { id: 'overall', label: 'التقييم العام' },
+                  { id: 'value', label: 'السعر المطلوب' },
+                  { id: 'salary', label: 'الراتب' },
+                  { id: 'age', label: 'العمر' },
+                  { id: 'name', label: 'الاسم' },
+                ].map(opt => {
+                  const isActive = sortBy === opt.id;
+                  return (
+                    <button
+                      key={opt.id}
+                      type="button"
+                      onClick={() => {
+                        if (sortBy === opt.id) {
+                          setSortOrder(prev => (prev === 'desc' ? 'asc' : 'desc'));
+                        } else {
+                          setSortBy(opt.id as any);
+                          setSortOrder('desc');
+                        }
+                      }}
+                      className={`px-2.5 py-1.5 rounded-xl text-[11px] font-bold whitespace-nowrap shrink-0 transition-transform active:scale-95 cursor-pointer flex items-center gap-1 ${
+                        isActive
+                          ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 font-black'
+                          : 'bg-slate-950 text-slate-400 hover:text-white border border-white/[0.06]'
+                      }`}
+                    >
+                      <span>{opt.label}</span>
+                      {isActive && (
+                        <span className="text-[10px] font-mono">
+                          {sortOrder === 'desc' ? '↓' : '↑'}
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setSortOrder(prev => (prev === 'desc' ? 'asc' : 'desc'))}
+                className="px-2.5 py-1.5 rounded-xl text-[11px] font-bold bg-slate-950 text-slate-300 hover:text-emerald-400 border border-white/[0.08] shrink-0 cursor-pointer"
+              >
+                {sortOrder === 'desc' ? 'تنازلي ↓' : 'تصاعدي ↑'}
+              </button>
+            </div>
           </div>
 
           {/* Results Count & Active Sort Summary Bar */}
-          <div className="flex items-center justify-between text-[11px] px-1.5 text-slate-400">
+          <div className="flex items-center justify-between text-[11px] px-1.5 py-1 text-slate-400">
             <div className="flex items-center gap-2 flex-wrap">
               <span>
                 نتائج الرصد:{' '}
@@ -1765,24 +1944,12 @@ export const TransfersTab: React.FC<TransfersTabProps> = ({
               onClick={() => setIsFilterSheetOpen(true)}
               className="flex items-center gap-1 text-slate-300 hover:text-emerald-400 font-medium cursor-pointer"
             >
-              <ArrowUpDown className="w-3 h-3 text-emerald-400" />
-              <span>
-                الفرز:{' '}
-                {sortBy === 'overall'
-                  ? 'التقييم العام'
-                  : sortBy === 'value'
-                  ? 'السعر المطلوب'
-                  : sortBy === 'salary'
-                  ? 'الراتب'
-                  : sortBy === 'age'
-                  ? 'العمر'
-                  : 'الاسم'}{' '}
-                ({sortOrder === 'desc' ? 'تنازلي' : 'تصاعدي'})
-              </span>
+              <SlidersHorizontal className="w-3 h-3 text-emerald-400" />
+              <span>تخصيص الفلاتر</span>
             </button>
           </div>
 
-          {/* VIRTUALIZED SCOUTING DOSSIER CARDS VIEWPORT */}
+          {/* FLEXIBLE SCROLLABLE SCOUTING DOSSIER CARDS LIST (NO FIXED HEIGHT CLIPPING) */}
           {filteredPlayers.length === 0 ? (
             <div
               className="text-center py-12 bg-[#090e1a] rounded-2xl text-xs text-slate-400 space-y-2.5"
@@ -1801,44 +1968,34 @@ export const TransfersTab: React.FC<TransfersTabProps> = ({
           ) : (
             <div
               ref={scrollContainerRef}
-              onScroll={handleVirtualScroll}
-              style={{
-                height: 'calc(100vh - 295px)',
-                minHeight: '470px',
-                maxHeight: '700px',
-                willChange: 'transform',
-              }}
-              className="overflow-y-auto overscroll-contain pr-0.5 rounded-2xl"
+              onScroll={handleListScroll}
+              className="flex-1 overflow-y-auto pb-24 space-y-3 pr-0.5 rounded-2xl"
             >
-              <div
-                style={{
-                  height: `${virtualWindow.totalHeight}px`,
-                  position: 'relative',
-                }}
-              >
-                <div
-                  style={{
-                    transform: `translate3d(0, ${virtualWindow.offsetY}px, 0)`,
-                    willChange: 'transform',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: `${VIRTUAL_CARD_GAP}px`,
-                  }}
-                >
-                  {virtualWindow.visibleItems.map(item => (
-                    <MarketPlayerCard
-                      key={`${item.player.id}_${item.club?.id || 'free'}`}
-                      item={item}
-                      clubBudget={clubTransferBudget}
-                      remainingWageBudget={remainingWageBudget}
-                      hasUserClub={Boolean(userClub)}
-                      onSelectPlayer={onSelectPlayer}
-                      onStartNegotiation={handleStartNegotiation}
-                      onDirectBuy={handleBuy}
-                    />
-                  ))}
+              {visibleMarketItems.map(item => (
+                <MarketPlayerCard
+                  key={`${item.player.id}_${item.club?.id || 'free'}`}
+                  item={item}
+                  clubBudget={clubTransferBudget}
+                  remainingWageBudget={remainingWageBudget}
+                  hasUserClub={Boolean(userClub)}
+                  onSelectPlayer={onSelectPlayer}
+                  onStartNegotiation={handleStartNegotiation}
+                  onDirectBuy={handleBuy}
+                />
+              ))}
+
+              {visibleCardCount < filteredPlayers.length && (
+                <div className="pt-2 pb-6 text-center">
+                  <button
+                    type="button"
+                    onClick={() => setVisibleCardCount(prev => prev + 40)}
+                    className="w-full sm:w-auto px-6 py-3 rounded-2xl bg-slate-900 hover:bg-slate-800 text-emerald-400 font-black text-xs border border-emerald-500/30 active:scale-95 transition-transform cursor-pointer"
+                  >
+                    عرض المزيد من اللاعبين ({Math.min(filteredPlayers.length - visibleCardCount, 40)} من أصل{' '}
+                    {(filteredPlayers.length - visibleCardCount).toLocaleString()} متبقين)
+                  </button>
                 </div>
-              </div>
+              )}
             </div>
           )}
         </div>
@@ -2172,15 +2329,23 @@ export const TransfersTab: React.FC<TransfersTabProps> = ({
       )}
 
       {/* ================================================================ */}
-      {/* VIEW 3: ACTIVE NEGOTIATIONS HUB                                  */}
+      {/* VIEW 3: ACTIVE NEGOTIATIONS HUB (FAST / INSTANT RESOLUTION)      */}
       {/* ================================================================ */}
       {activeTabMode === 'negotiations' && (
-        <div className="space-y-3">
+        <div className="space-y-3 pb-24">
           <div
-            className="bg-[#090e1a] p-3 rounded-2xl text-xs text-slate-400"
-            style={{ border: '1px solid rgba(255, 255, 255, 0.08)' }}
+            className="bg-[#090e1a] p-3.5 rounded-2xl text-xs text-slate-300 flex items-center justify-between gap-2 flex-wrap"
+            style={{ border: '1px solid rgba(6, 182, 212, 0.25)' }}
           >
-            💡 غرفة العمليات الخاصة بمفاوضات الشراء والبيع الجارية لناديك. تتحدث حالة العروض مع تقدم أيام التقويم.
+            <div className="flex items-center gap-2">
+              <Briefcase className="w-4 h-4 text-cyan-400 shrink-0" />
+              <span>
+                <strong className="text-white">غرفة المفاوضات الجارية والحسم السريع:</strong> تابع حالة عروضك (مقبول • عرض مضاد • قيد الانتظار • مرفوض) واحسم الصفقات فوراً دون انتظار جولات طويلة.
+              </span>
+            </div>
+            <span className="text-[11px] font-mono bg-cyan-950 text-cyan-300 border border-cyan-700/60 px-2.5 py-1 rounded-xl font-bold">
+              إجمالي المفاوضات: {activeNegotiations.length}
+            </span>
           </div>
 
           {activeNegotiations.length === 0 ? (
@@ -2195,27 +2360,55 @@ export const TransfersTab: React.FC<TransfersTabProps> = ({
               </p>
             </div>
           ) : (
-            <div className="space-y-2.5">
+            <div className="space-y-3">
               {activeNegotiations.map(neg => {
                 const isSell = neg.type === 'sell';
                 const safeSellingClub = neg.sellingClubName || neg.playerClubName || 'نادي اللاعب';
                 const buyerClubDisplay = neg.buyerClubName || 'النادي المشتري';
                 const buyerClubObj = teams.find(t => t.id === neg.buyerClubId);
 
+                // Map stage to clear user-facing status (Pending / Accepted / Counter-offer / Rejected)
+                const isAccepted = neg.stage === 'player_terms' || neg.stage === 'completed';
+                const isCounter = neg.stage === 'club_counter' || neg.stage === 'player_counter';
+                const isRejected = neg.stage === 'rejected' || neg.stage === 'cancelled';
+
+                const statusBadge = isRejected
+                  ? {
+                      label: '❌ مرفوض (Rejected)',
+                      cls: 'bg-rose-950 text-rose-300 border border-rose-700',
+                    }
+                  : isCounter
+                  ? {
+                      label: '🔄 عرض مضاد (Counter-Offer)',
+                      cls: 'bg-amber-950 text-amber-300 border border-amber-600',
+                    }
+                  : isAccepted
+                  ? {
+                      label: '✅ مقبول وجاهز للتوقيع (Accepted)',
+                      cls: 'bg-emerald-950 text-emerald-300 border border-emerald-600',
+                    }
+                  : {
+                      label: isSell ? '🔥 عرض رسمي متاح (Incoming Bid)' : '⏳ قيد الانتظار (Pending)',
+                      cls: 'bg-cyan-950 text-cyan-300 border border-cyan-600',
+                    };
+
                 return (
                   <div
                     key={neg.id}
                     style={{
-                      border: neg.actionRequired
+                      border: isAccepted
+                        ? '1px solid rgba(16, 185, 129, 0.55)'
+                        : isCounter
                         ? '1px solid rgba(245, 158, 11, 0.6)'
                         : isSell
-                        ? '1px solid rgba(244, 63, 94, 0.35)'
-                        : '1px solid rgba(255, 255, 255, 0.08)',
+                        ? '1px solid rgba(244, 63, 94, 0.4)'
+                        : '1px solid rgba(255, 255, 255, 0.1)',
                     }}
-                    className="bg-[#0b111e] p-3.5 rounded-2xl space-y-3"
+                    className="bg-[#0b111e] p-4 rounded-2xl flex flex-col gap-3"
                   >
-                    <div className="flex items-start justify-between flex-wrap gap-2">
-                      <div>
+                    {/* Header: Player Name, Club, Offered Deal & Status Badge */}
+                    <div className="flex items-start justify-between flex-wrap gap-2.5">
+                      <div className="space-y-1.5">
                         <div className="flex items-center gap-2 flex-wrap">
                           <span
                             className={`px-2 py-0.5 rounded-md text-[10px] font-bold ${
@@ -2224,79 +2417,85 @@ export const TransfersTab: React.FC<TransfersTabProps> = ({
                                 : 'bg-cyan-950 text-cyan-300 border border-cyan-700'
                             }`}
                           >
-                            {isSell ? '💰 عرض بيع وارد' : '🛒 مفاوضة شراء'}
+                            {isSell ? '💰 عرض بيع وارد' : '🛒 صفقة شراء'}
                           </span>
-                          <h4 className="font-bold text-sm text-white">{neg.playerName}</h4>
-                          <span className="text-[10px] bg-slate-950 text-slate-300 px-2 py-0.5 rounded font-mono border border-white/[0.06]">
-                            {neg.playerPosition} • {neg.playerOverall}
+                          <h4 className="font-black text-sm sm:text-base text-white">{neg.playerName}</h4>
+                          <span className="text-[11px] bg-slate-950 text-emerald-300 px-2 py-0.5 rounded-lg font-mono font-bold border border-white/[0.08]">
+                            {neg.playerPosition} • OVR {neg.playerOverall}
                           </span>
                         </div>
 
-                        <p className="text-xs text-slate-400 mt-1">
-                          {isSell ? (
-                            <>
-                              النادي المشتري: <strong className="text-emerald-400 font-bold">{buyerClubDisplay}</strong>{' '}
-                              {buyerClubObj && (
-                                <span className="text-[10px] text-slate-500 font-mono">
-                                  (الميزانية: {formatCompactCurrency(buyerClubObj.budget || 0)})
-                                </span>
-                              )}{' '}
-                              | قيمة العرض:{' '}
-                              <strong className="text-emerald-400 font-mono font-bold">
-                                {formatCompactCurrency(neg.bidFee || 0)}
-                              </strong>
-                            </>
-                          ) : (
-                            <>
-                              النادي البائع: <strong className="text-slate-200 font-bold">{safeSellingClub}</strong> | العرض
-                              المقدم:{' '}
-                              <strong className="text-emerald-400 font-mono">
-                                {formatCompactCurrency(neg.bidFee || 0)}
-                              </strong>{' '}
-                              | راتب:{' '}
-                              <strong className="text-slate-200 font-mono">
-                                {formatCompactCurrency(neg.offeredSalary || 0, false)}/ش
-                              </strong>
-                            </>
-                          )}
-                        </p>
+                        {/* Clear Deal Details Grid */}
+                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1 text-xs">
+                          <div className="bg-slate-950/90 border border-white/[0.06] rounded-xl px-2.5 py-1.5">
+                            <span className="text-[10px] text-slate-400 block">
+                              {isSell ? 'النادي المشتري' : 'النادي الحالي'}
+                            </span>
+                            <strong className="text-slate-100 font-bold truncate block">
+                              {isSell ? buyerClubDisplay : safeSellingClub}
+                            </strong>
+                          </div>
+
+                          <div className="bg-slate-950/90 border border-white/[0.06] rounded-xl px-2.5 py-1.5">
+                            <span className="text-[10px] text-slate-400 block">العرض المالي</span>
+                            <strong className="text-emerald-400 font-mono font-black block">
+                              {neg.bidFee > 0 ? formatCompactCurrency(neg.bidFee) : 'انتقال حر (0 ج.م)'}
+                            </strong>
+                          </div>
+
+                          <div className="bg-slate-950/90 border border-white/[0.06] rounded-xl px-2.5 py-1.5">
+                            <span className="text-[10px] text-slate-400 block">الراتب الشهري</span>
+                            <strong className="text-cyan-300 font-mono font-bold block">
+                              {formatCompactCurrency(neg.offeredSalary || 0, false)}/ش
+                            </strong>
+                          </div>
+
+                          <div className="bg-slate-950/90 border border-white/[0.06] rounded-xl px-2.5 py-1.5">
+                            <span className="text-[10px] text-slate-400 block">مدة العقد</span>
+                            <strong className="text-amber-300 font-mono font-bold block">
+                              {neg.contractYears || 3} سنوات
+                            </strong>
+                          </div>
+                        </div>
+
+                        {/* Counter-Offer Highlight if present */}
+                        {isCounter && (neg.demandedFee || neg.demandedSalary) && (
+                          <div className="bg-amber-950/40 border border-amber-500/40 rounded-xl px-3 py-1.5 text-xs text-amber-200 flex items-center gap-2 flex-wrap">
+                            <span className="font-black">⚡ شروط العرض المضاد المطلوبة للحسم الفوري:</span>
+                            {neg.demandedFee !== undefined && (
+                              <span className="font-mono font-bold text-amber-300">
+                                مبلغ الانتقال: {formatCompactCurrency(neg.demandedFee)}
+                              </span>
+                            )}
+                            {neg.demandedSalary !== undefined && (
+                              <span className="font-mono font-bold text-amber-300">
+                                الراتب المطلوب: {formatCompactCurrency(neg.demandedSalary, false)}/ش
+                              </span>
+                            )}
+                          </div>
+                        )}
                       </div>
 
-                      <div className="text-left">
-                        <span
-                          className={`px-2.5 py-1 rounded-full text-[10px] font-bold block ${
-                            neg.stage === 'completed'
-                              ? 'bg-emerald-950 text-emerald-300 border border-emerald-700'
-                              : neg.stage === 'rejected'
-                              ? 'bg-rose-950 text-rose-300 border border-rose-700'
-                              : neg.stage === 'player_terms'
-                              ? 'bg-blue-950 text-blue-300 border border-blue-700'
-                              : neg.stage === 'incoming_bid'
-                              ? 'bg-emerald-950 text-emerald-300 border border-emerald-600'
-                              : 'bg-amber-950 text-amber-300 border border-amber-700'
-                          }`}
-                        >
-                          {neg.stage === 'incoming_bid' &&
-                            (neg.managerHasCountered ? '⚡ عرض نهائي' : '🔥 عرض رسمي متاح')}
-                          {neg.stage === 'club_review' && 'مراجعة النادي'}
-                          {neg.stage === 'club_counter' && (isSell ? 'طلب زيادة المبلغ' : 'عرض مقابل من النادي')}
-                          {neg.stage === 'player_terms' && 'شروط اللاعب'}
-                          {neg.stage === 'player_counter' && 'طلب راتب أعلى'}
-                          {neg.stage === 'completed' && 'اكتملت الصفقة'}
-                          {neg.stage === 'rejected' && 'مرفوضة / منسحب'}
+                      <div className="text-left shrink-0">
+                        <span className={`px-3 py-1 rounded-full text-[11px] font-black block ${statusBadge.cls}`}>
+                          {statusBadge.label}
                         </span>
-                        <span className="text-[10px] text-slate-500 mt-1 flex items-center gap-1 justify-end">
-                          <Clock className="w-3 h-3" /> متبقي {neg.daysRemainingInStage || 1} يوم
-                        </span>
+                        {!isRejected && (
+                          <span className="text-[10px] text-slate-400 mt-1.5 flex items-center gap-1 justify-end font-mono">
+                            <Clock className="w-3 h-3 text-cyan-400" /> الحسم: فوري / جولة واحدة
+                          </span>
+                        )}
                       </div>
                     </div>
 
+                    {/* Status Message Box */}
                     <div className="bg-slate-950 p-2.5 rounded-xl border border-white/[0.06] text-xs text-slate-300 flex items-start gap-2">
                       <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
                       <span>{neg.statusMessage}</span>
                     </div>
 
-                    <div className="flex items-center gap-2 pt-1 border-t border-white/[0.06] flex-wrap">
+                    {/* Action Buttons Footer */}
+                    <div className="flex items-center gap-2 pt-2 border-t border-white/[0.06] flex-wrap">
                       {isSell ? (
                         <>
                           {neg.stage === 'incoming_bid' && (
@@ -2305,13 +2504,21 @@ export const TransfersTab: React.FC<TransfersTabProps> = ({
                                 type="button"
                                 onClick={() => {
                                   const res = acceptSellNegotiation(neg.id);
+                                  if (res.success) {
+                                    setBoughtPlayerIds(prev => {
+                                      const next = new Set(prev);
+                                      next.delete(neg.playerId);
+                                      return next;
+                                    });
+                                    setTransferCounter(c => c + 1);
+                                  }
                                   setNotification({ text: res.message, type: res.success ? 'success' : 'error' });
                                   setTimeout(() => setNotification(null), 4000);
                                 }}
-                                className="flex-1 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-xs py-2 px-3 rounded-xl active:scale-95 transition-transform flex items-center justify-center gap-1.5 cursor-pointer"
+                                className="flex-1 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-xs py-2.5 px-3 rounded-xl active:scale-95 transition-transform flex items-center justify-center gap-1.5 cursor-pointer"
                               >
                                 <Check className="w-4 h-4" />
-                                <span>قبول البيع ({formatCompactCurrency(neg.bidFee || 0)})</span>
+                                <span>قبول البيع الفوري ({formatCompactCurrency(neg.bidFee || 0)})</span>
                               </button>
 
                               <button
@@ -2321,7 +2528,7 @@ export const TransfersTab: React.FC<TransfersTabProps> = ({
                                   setNotification({ text: res.message, type: 'error' });
                                   setTimeout(() => setNotification(null), 3000);
                                 }}
-                                className="bg-slate-950 hover:bg-rose-950 hover:text-rose-300 border border-white/[0.08] text-slate-400 text-xs py-2 px-3 rounded-xl cursor-pointer"
+                                className="bg-slate-950 hover:bg-rose-950 hover:text-rose-300 border border-white/[0.08] text-slate-400 text-xs py-2.5 px-3 rounded-xl cursor-pointer"
                               >
                                 رفض العرض ✕
                               </button>
@@ -2332,7 +2539,7 @@ export const TransfersTab: React.FC<TransfersTabProps> = ({
                             <>
                               <span className="text-xs text-amber-300 flex-1 font-bold">
                                 تم طلب مبلغ ({formatCompactCurrency(neg.demandedFee || 0)}) • سيصل رد {buyerClubDisplay}{' '}
-                                مع تقدم الأيام.
+                                في الجولة القادمة.
                               </span>
                               <button
                                 type="button"
@@ -2360,25 +2567,51 @@ export const TransfersTab: React.FC<TransfersTabProps> = ({
                         </>
                       ) : (
                         <>
-                          <button
-                            type="button"
-                            onClick={() => handleOpenExistingNegotiation(neg)}
-                            className="flex-1 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-xs py-2 rounded-xl active:scale-95 transition-transform cursor-pointer"
-                          >
-                            مراجعة وتعديل العرض ✍️
-                          </button>
+                          {/* Instant Complete Button for Accepted / Pending Buy Deals */}
+                          {(neg.stage === 'player_terms' || neg.stage === 'club_review') && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const res = respondToNegotiationOffer(neg.id, 'complete_now');
+                                if (res.success) {
+                                  setBoughtPlayerIds(prev => {
+                                    const next = new Set(prev);
+                                    next.add(neg.playerId);
+                                    return next;
+                                  });
+                                  setExternalDbPlayers(prev => prev.filter(e => e.player?.id !== neg.playerId));
+                                  setTransferCounter(c => c + 1);
+                                }
+                                setNotification({ text: res.message, type: res.success ? 'success' : 'error' });
+                                setTimeout(() => setNotification(null), 3500);
+                              }}
+                              className="flex-1 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-xs py-2.5 px-3.5 rounded-xl active:scale-95 transition-transform flex items-center justify-center gap-1.5 cursor-pointer"
+                            >
+                              <Check className="w-4 h-4" />
+                              <span>إتمام التعاقد الفوري الآن ✍️</span>
+                            </button>
+                          )}
 
                           {neg.demandedSalary && neg.stage === 'player_counter' && (
                             <button
                               type="button"
                               onClick={() => {
                                 const res = respondToNegotiationOffer(neg.id, 'raise_salary', neg.demandedSalary);
+                                if (res.success) {
+                                  setBoughtPlayerIds(prev => {
+                                    const next = new Set(prev);
+                                    next.add(neg.playerId);
+                                    return next;
+                                  });
+                                  setExternalDbPlayers(prev => prev.filter(e => e.player?.id !== neg.playerId));
+                                  setTransferCounter(c => c + 1);
+                                }
                                 setNotification({ text: res.message, type: res.success ? 'success' : 'error' });
-                                setTimeout(() => setNotification(null), 3000);
+                                setTimeout(() => setNotification(null), 3500);
                               }}
-                              className="bg-cyan-600 hover:bg-cyan-500 text-white font-bold text-xs px-3 py-2 rounded-xl cursor-pointer"
+                              className="flex-1 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs px-3.5 py-2.5 rounded-xl active:scale-95 transition-transform cursor-pointer"
                             >
-                              قبول راتب اللاعب ({formatCompactCurrency(neg.demandedSalary || 0)})
+                              قبول العرض المضاد للراتب وإتمام الصفقة ({formatCompactCurrency(neg.demandedSalary || 0, false)}/ش) ⚡
                             </button>
                           )}
 
@@ -2387,21 +2620,38 @@ export const TransfersTab: React.FC<TransfersTabProps> = ({
                               type="button"
                               onClick={() => {
                                 const res = respondToNegotiationOffer(neg.id, 'accept_counter', neg.demandedFee);
+                                if (res.success) {
+                                  setBoughtPlayerIds(prev => {
+                                    const next = new Set(prev);
+                                    next.add(neg.playerId);
+                                    return next;
+                                  });
+                                  setExternalDbPlayers(prev => prev.filter(e => e.player?.id !== neg.playerId));
+                                  setTransferCounter(c => c + 1);
+                                }
                                 setNotification({ text: res.message, type: res.success ? 'success' : 'error' });
-                                setTimeout(() => setNotification(null), 3000);
+                                setTimeout(() => setNotification(null), 3500);
                               }}
-                              className="bg-cyan-600 hover:bg-cyan-500 text-white font-bold text-xs px-3 py-2 rounded-xl cursor-pointer"
+                              className="flex-1 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs px-3.5 py-2.5 rounded-xl active:scale-95 transition-transform cursor-pointer"
                             >
-                              قبول طلب النادي ({formatCompactCurrency(neg.demandedFee || 0)})
+                              قبول العرض المضاد للنادي وإتمام الصفقة ({formatCompactCurrency(neg.demandedFee || 0)}) ⚡
                             </button>
                           )}
 
                           <button
                             type="button"
-                            onClick={() => cancelNegotiation(neg.id)}
-                            className="bg-slate-950 hover:bg-slate-800 text-slate-400 hover:text-white text-xs px-3 py-2 rounded-xl border border-white/[0.08] cursor-pointer"
+                            onClick={() => handleOpenExistingNegotiation(neg)}
+                            className="bg-slate-900 hover:bg-slate-800 text-cyan-300 border border-cyan-500/30 font-bold text-xs py-2.5 px-3 rounded-xl active:scale-95 transition-transform cursor-pointer"
                           >
-                            إلغاء
+                            تعديل العرض ✍️
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => cancelNegotiation(neg.id)}
+                            className="bg-slate-950 hover:bg-rose-950 text-slate-400 hover:text-rose-300 text-xs px-3 py-2.5 rounded-xl border border-white/[0.08] cursor-pointer"
+                          >
+                            إلغاء ✕
                           </button>
                         </>
                       )}
@@ -2599,15 +2849,56 @@ export const TransfersTab: React.FC<TransfersTabProps> = ({
 
       {/* Interactive Negotiation Modal */}
       {(() => {
-        const negotiatingSellingClub = negotiatingPlayer
-          ? dbItemByIdMap.get(negotiatingPlayer.id)?.club ||
-            teams.find(t => (t.players || []).some(p => p && p.id === negotiatingPlayer.id)) ||
-            null
-          : null;
+        const matchedMarketItem = negotiatingPlayer ? dbItemByIdMap.get(negotiatingPlayer.id) : undefined;
+        const playerContractType = (negotiatingPlayer as any)?.contractType as 'club' | 'free' | undefined;
+        const fallbackClubName =
+          matchedMarketItem?.club?.name ||
+          matchedMarketItem?.clubName ||
+          (negotiatingPlayer as any)?.currentClubName ||
+          (negotiatingPlayer as any)?.club ||
+          '';
+        const isFreeTarget =
+          playerContractType === 'free' ||
+          matchedMarketItem?.statusType === 'free' ||
+          (negotiatingPlayer?.isFreeAgent === true && !fallbackClubName);
+
+        const negotiatingSellingClub: Club | null =
+          !negotiatingPlayer || isFreeTarget
+            ? null
+            : matchedMarketItem?.club ||
+              teams.find(
+                t =>
+                  (negotiatingPlayer.currentClubId && t.id === negotiatingPlayer.currentClubId) ||
+                  (t.players || []).some(p => p && p.id === negotiatingPlayer.id)
+              ) ||
+              (fallbackClubName && !fallbackClubName.includes('وكيل حر') && !fallbackClubName.includes('لاعب حر')
+                ? ({
+                    id: negotiatingPlayer.currentClubId || 'external_club',
+                    name: fallbackClubName,
+                    shortName: fallbackClubName,
+                    primaryColor: '#10b981',
+                    secondaryColor: '#ffffff',
+                    budget: 10000000,
+                    reputation: 70,
+                    players: [],
+                  } as unknown as Club)
+                : null);
+
+        const negotiatingAskingPrice = isFreeTarget
+          ? 0
+          : Number(
+              (negotiatingPlayer as any)?.askingPrice ??
+                (negotiatingPlayer as any)?.price ??
+                matchedMarketItem?.askingPrice ??
+                negotiatingPlayer?.marketValue ??
+                0
+            );
+
         return (
           <NegotiationModal
             player={negotiatingPlayer}
             sellingClub={negotiatingSellingClub}
+            askingPrice={negotiatingAskingPrice}
             userClub={userClub}
             existingNegotiation={selectedNegotiation}
             isOpen={isNegotiationModalOpen}
@@ -2631,7 +2922,17 @@ export const TransfersTab: React.FC<TransfersTabProps> = ({
             }}
             onRespondToCounter={(negId, action, extraVal) => {
               try {
+                const targetNeg = activeNegotiations.find(n => n.id === negId) || selectedNegotiation;
                 const res = respondToNegotiationOffer(negId, action, extraVal);
+                if (res.success && action !== 'cancel' && targetNeg?.playerId) {
+                  setBoughtPlayerIds(prev => {
+                    const next = new Set(prev);
+                    next.add(targetNeg.playerId);
+                    return next;
+                  });
+                  setExternalDbPlayers(prev => prev.filter(e => e.player?.id !== targetNeg.playerId));
+                  setTransferCounter(c => c + 1);
+                }
                 setNotification({ text: res.message, type: res.success ? 'success' : 'error' });
                 setTimeout(() => setNotification(null), 3500);
                 setIsNegotiationModalOpen(false);

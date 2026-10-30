@@ -26,6 +26,11 @@ export const PromoCodeRedeemModal: React.FC<PromoCodeRedeemModalProps> = ({ isOp
   const [codeInput, setCodeInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [adLoadingInfo, setAdLoadingInfo] = useState<{
+    code: string;
+    rewardAmount: number;
+    rewardCoins: number;
+  } | null>(null);
   const [successResult, setSuccessResult] = useState<{
     code: string;
     amount: number;
@@ -57,7 +62,11 @@ export const PromoCodeRedeemModal: React.FC<PromoCodeRedeemModalProps> = ({ isOp
     try {
       setLoading(true);
       setError(null);
-      const res = await redeemGiftCode(cleanCode);
+      setAdLoadingInfo(null);
+
+      const res = await redeemGiftCode(cleanCode, (validInfo) => {
+        setAdLoadingInfo(validInfo);
+      });
 
       if (res.success && res.rewardAmount) {
         setSuccessResult({
@@ -74,12 +83,14 @@ export const PromoCodeRedeemModal: React.FC<PromoCodeRedeemModalProps> = ({ isOp
       setError(err?.message || 'حدث خطأ أثناء التحقق من الكود!');
     } finally {
       setLoading(false);
+      setAdLoadingInfo(null);
     }
   };
 
   const handleResetModal = () => {
     setSuccessResult(null);
     setError(null);
+    setAdLoadingInfo(null);
     setCodeInput('');
   };
 
@@ -138,7 +149,7 @@ export const PromoCodeRedeemModal: React.FC<PromoCodeRedeemModalProps> = ({ isOp
             <div className="space-y-1.5">
               <h4 className="font-black text-lg text-white">مبروك يا كابتن!</h4>
               <p className="text-xs text-slate-300 max-w-xs mx-auto leading-relaxed">
-                تم التحقق من الكود بنجاح وإيداع المبلغ في خزينة ناديك فوراً.
+                تم التحقق من الكود ومشاهدة الإعلان بنجاح وإيداع المبلغ في خزينة ناديك فوراً.
               </p>
             </div>
 
@@ -192,6 +203,16 @@ export const PromoCodeRedeemModal: React.FC<PromoCodeRedeemModalProps> = ({ isOp
               </div>
             )}
 
+            {/* Ad Loading Banner (ONLY shown when code is verified as valid & active) */}
+            {adLoadingInfo && (
+              <div className="p-3 bg-emerald-950/80 border border-emerald-500/50 rounded-2xl text-emerald-200 text-xs font-bold flex items-center gap-2.5 animate-fade-in">
+                <Loader2 className="w-4 h-4 text-emerald-400 animate-spin shrink-0" />
+                <span className="leading-relaxed">
+                  الكود صالح! جاري تحميل وتشغيل الإعلان لإيداع (+{adLoadingInfo.rewardAmount.toLocaleString()} ج.م) في خزينة ناديك...
+                </span>
+              </div>
+            )}
+
             <div className="space-y-2">
               <label className="text-xs font-bold text-slate-300 flex items-center justify-between">
                 <span>اكتب كود الهدية:</span>
@@ -231,9 +252,9 @@ export const PromoCodeRedeemModal: React.FC<PromoCodeRedeemModalProps> = ({ isOp
                 <span>شروط وأمان الاسترداد:</span>
               </div>
               <ul className="list-disc list-inside space-y-0.5 text-slate-400 text-[10px] pr-1 leading-relaxed">
-                <li>يتم إيداع المبلغ المالي فورياً في الميزانية الرسمية لناديك.</li>
+                <li>يتم التحقق من صلاحية الكود أولاً؛ إذا كان الكود منتهياً أو غير صالح فلن يتم تحميل أي إعلان.</li>
+                <li>عند التأكد من صلاحية الكود، يُعرض إعلان قصير وتودع الأموال فوراً في ميزانية ناديك بعد مشاهدته.</li>
                 <li>كل كود متاح لعدد استخدامات محدد ويُستخدم مرة واحدة فقط لكل مدرب.</li>
-                <li>يتم التحقق سحابياً لمنع أي محاولات تكرار أو تلاعب بالرصيد.</li>
               </ul>
             </div>
 
@@ -256,12 +277,12 @@ export const PromoCodeRedeemModal: React.FC<PromoCodeRedeemModalProps> = ({ isOp
                 {loading ? (
                   <>
                     <Loader2 className="w-4 h-4 animate-spin text-slate-950" />
-                    <span>جاري التحقق والاسترداد...</span>
+                    <span>{adLoadingInfo ? 'جاري عرض الإعلان لاستلام المكافأة...' : 'جاري التحقق من صلاحية الكود...'}</span>
                   </>
                 ) : (
                   <>
                     <Sparkles className="w-4 h-4 text-slate-950" />
-                    <span>استرداد المكافأة فوراً 🎁</span>
+                    <span>مشاهدة إعلان واسترداد المكافأة 🎬🎁</span>
                   </>
                 )}
               </button>

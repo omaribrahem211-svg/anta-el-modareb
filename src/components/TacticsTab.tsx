@@ -1,402 +1,217 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo, useRef, useEffect, useCallback } from 'react';
 import { useGame } from '../context/GameContext';
-import { FormationType, Player, TacticalMentality, PassingStyle, PressingIntensity, TempoSpeed, TacticalStyle, TeamTactics } from '../types/game';
-import { validateSquadLineup } from '../utils/squadValidator';
-import { getPositionArabic, getPositionBadgeClass } from '../utils/positionHelper';
-import { ALL_FORMATIONS, ALL_TACTICAL_STYLES } from '../utils/tacticalKnowledgeEngine';
-import { getLicenseRank } from '../utils/careerProgressionEngine';
-import { PlayerKit3DModel } from './models/Football3DModels';
+import {
+  FormationType,
+  TeamTactics,
+  Player,
+  TacticalStyle,
+  CoachingLicenseTier,
+} from '../types/game';
+import { getPositionArabic } from '../utils/positionHelper';
+import {
+  ALL_FORMATIONS,
+  ALL_TACTICAL_STYLES,
+  isTacticalItemUnlocked,
+} from '../utils/tacticalKnowledgeEngine';
+import {
+  isPlayerInjured,
+  isPlayerSuspended,
+  getEffectiveLineup,
+  getOvrColorClasses,
+  formatPlayerDualName,
+} from '../utils/squadHelpers';
+import {
+  FORMATION_SLOTS,
+  isPlayerOutOfPosition,
+  getPositionFitScore,
+  pickBestLineupForFormation,
+} from '../utils/lineupSlots';
+import { PlayerAvatar } from './PlayerAvatar';
+import { ModalPortal } from './common/ModalPortal';
 import {
   Sliders,
-  Sparkles,
   Shield,
   Zap,
-  Target,
-  Crown,
-  ChevronDown,
-  Activity,
+  Crosshair,
   Award,
+  RotateCcw,
   Users,
-  Check,
-  AlertCircle,
-  AlertTriangle,
-  ShieldAlert,
-  Flame,
-  Layers,
-  Compass,
   Lock,
-  Unlock,
+  Brain,
+  CheckCircle2,
+  AlertTriangle,
+  Compass,
+  Bandage,
+  AlertCircle,
+  Sparkles,
+  ChevronDown,
+  ChevronUp,
+  Undo2,
+  X,
+  UserPlus,
 } from 'lucide-react';
 
 interface TacticsTabProps {
   onSelectPlayer: (player: Player) => void;
 }
 
-// Position coordinates on a 100x100 virtual pitch for each formation
-const FORMATION_SLOTS: Record<FormationType, { pos: string; top: number; left: number }[]> = {
-  '4-3-3': [
-    { pos: 'GK', top: 88, left: 50 },
-    { pos: 'RB', top: 70, left: 18 },
-    { pos: 'CB', top: 72, left: 39 },
-    { pos: 'CB', top: 72, left: 61 },
-    { pos: 'LB', top: 70, left: 82 },
-    { pos: 'CDM', top: 52, left: 50 },
-    { pos: 'CM', top: 44, left: 32 },
-    { pos: 'CM', top: 44, left: 68 },
-    { pos: 'RW', top: 22, left: 20 },
-    { pos: 'ST', top: 16, left: 50 },
-    { pos: 'LW', top: 22, left: 80 },
-  ],
-  '4-4-2': [
-    { pos: 'GK', top: 88, left: 50 },
-    { pos: 'RB', top: 70, left: 18 },
-    { pos: 'CB', top: 72, left: 39 },
-    { pos: 'CB', top: 72, left: 61 },
-    { pos: 'LB', top: 70, left: 82 },
-    { pos: 'RM', top: 46, left: 18 },
-    { pos: 'CM', top: 48, left: 39 },
-    { pos: 'CM', top: 48, left: 61 },
-    { pos: 'LM', top: 46, left: 82 },
-    { pos: 'ST', top: 18, left: 36 },
-    { pos: 'ST', top: 18, left: 64 },
-  ],
-  '4-2-3-1': [
-    { pos: 'GK', top: 88, left: 50 },
-    { pos: 'RB', top: 70, left: 18 },
-    { pos: 'CB', top: 72, left: 39 },
-    { pos: 'CB', top: 72, left: 61 },
-    { pos: 'LB', top: 70, left: 82 },
-    { pos: 'CDM', top: 54, left: 36 },
-    { pos: 'CDM', top: 54, left: 64 },
-    { pos: 'RAM', top: 34, left: 20 },
-    { pos: 'CAM', top: 32, left: 50 },
-    { pos: 'LAM', top: 34, left: 80 },
-    { pos: 'ST', top: 15, left: 50 },
-  ],
-  '3-5-2': [
-    { pos: 'GK', top: 88, left: 50 },
-    { pos: 'CB', top: 72, left: 25 },
-    { pos: 'CB', top: 74, left: 50 },
-    { pos: 'CB', top: 72, left: 75 },
-    { pos: 'RWB', top: 48, left: 12 },
-    { pos: 'CM', top: 50, left: 34 },
-    { pos: 'CDM', top: 54, left: 50 },
-    { pos: 'CM', top: 50, left: 66 },
-    { pos: 'LWB', top: 48, left: 88 },
-    { pos: 'ST', top: 18, left: 36 },
-    { pos: 'ST', top: 18, left: 64 },
-  ],
-  '5-3-2': [
-    { pos: 'GK', top: 88, left: 50 },
-    { pos: 'RWB', top: 68, left: 12 },
-    { pos: 'CB', top: 74, left: 30 },
-    { pos: 'CB', top: 75, left: 50 },
-    { pos: 'CB', top: 74, left: 70 },
-    { pos: 'LWB', top: 68, left: 88 },
-    { pos: 'CM', top: 46, left: 30 },
-    { pos: 'CM', top: 48, left: 50 },
-    { pos: 'CM', top: 46, left: 70 },
-    { pos: 'ST', top: 18, left: 36 },
-    { pos: 'ST', top: 18, left: 64 },
-  ],
-  '4-1-4-1': [
-    { pos: 'GK', top: 88, left: 50 },
-    { pos: 'RB', top: 70, left: 18 },
-    { pos: 'CB', top: 72, left: 39 },
-    { pos: 'CB', top: 72, left: 61 },
-    { pos: 'LB', top: 70, left: 82 },
-    { pos: 'CDM', top: 56, left: 50 },
-    { pos: 'RM', top: 38, left: 18 },
-    { pos: 'CM', top: 40, left: 39 },
-    { pos: 'CM', top: 40, left: 61 },
-    { pos: 'LM', top: 38, left: 82 },
-    { pos: 'ST', top: 16, left: 50 },
-  ],
-  '3-4-3': [
-    { pos: 'GK', top: 88, left: 50 },
-    { pos: 'CB', top: 72, left: 25 },
-    { pos: 'CB', top: 74, left: 50 },
-    { pos: 'CB', top: 72, left: 75 },
-    { pos: 'LM', top: 48, left: 15 },
-    { pos: 'CM', top: 50, left: 38 },
-    { pos: 'CM', top: 50, left: 62 },
-    { pos: 'RM', top: 48, left: 85 },
-    { pos: 'LW', top: 22, left: 20 },
-    { pos: 'ST', top: 16, left: 50 },
-    { pos: 'RW', top: 22, left: 80 },
-  ],
-  '4-5-1': [
-    { pos: 'GK', top: 88, left: 50 },
-    { pos: 'RB', top: 70, left: 18 },
-    { pos: 'CB', top: 72, left: 39 },
-    { pos: 'CB', top: 72, left: 61 },
-    { pos: 'LB', top: 70, left: 82 },
-    { pos: 'RM', top: 44, left: 15 },
-    { pos: 'CM', top: 46, left: 33 },
-    { pos: 'CDM', top: 54, left: 50 },
-    { pos: 'CM', top: 46, left: 67 },
-    { pos: 'LM', top: 44, left: 85 },
-    { pos: 'ST', top: 16, left: 50 },
-  ],
-  '4-1-2-1-2': [
-    { pos: 'GK', top: 88, left: 50 },
-    { pos: 'RB', top: 70, left: 18 },
-    { pos: 'CB', top: 72, left: 39 },
-    { pos: 'CB', top: 72, left: 61 },
-    { pos: 'LB', top: 70, left: 82 },
-    { pos: 'CDM', top: 56, left: 50 },
-    { pos: 'CM', top: 44, left: 30 },
-    { pos: 'CM', top: 44, left: 70 },
-    { pos: 'CAM', top: 32, left: 50 },
-    { pos: 'ST', top: 16, left: 36 },
-    { pos: 'ST', top: 16, left: 64 },
-  ],
-  '5-4-1': [
-    { pos: 'GK', top: 88, left: 50 },
-    { pos: 'RWB', top: 68, left: 12 },
-    { pos: 'CB', top: 74, left: 30 },
-    { pos: 'CB', top: 75, left: 50 },
-    { pos: 'CB', top: 74, left: 70 },
-    { pos: 'LWB', top: 68, left: 88 },
-    { pos: 'RM', top: 44, left: 18 },
-    { pos: 'CM', top: 46, left: 39 },
-    { pos: 'CM', top: 46, left: 61 },
-    { pos: 'LM', top: 44, left: 82 },
-    { pos: 'ST', top: 16, left: 50 },
-  ],
-  '4-2-4': [
-    { pos: 'GK', top: 88, left: 50 },
-    { pos: 'RB', top: 70, left: 18 },
-    { pos: 'CB', top: 72, left: 39 },
-    { pos: 'CB', top: 72, left: 61 },
-    { pos: 'LB', top: 70, left: 82 },
-    { pos: 'CM', top: 48, left: 38 },
-    { pos: 'CM', top: 48, left: 62 },
-    { pos: 'RW', top: 22, left: 15 },
-    { pos: 'ST', top: 16, left: 38 },
-    { pos: 'ST', top: 16, left: 62 },
-    { pos: 'LW', top: 22, left: 85 },
-  ],
-  '4-3-2-1': [
-    { pos: 'GK', top: 88, left: 50 },
-    { pos: 'RB', top: 70, left: 18 },
-    { pos: 'CB', top: 72, left: 39 },
-    { pos: 'CB', top: 72, left: 61 },
-    { pos: 'LB', top: 70, left: 82 },
-    { pos: 'CM', top: 50, left: 28 },
-    { pos: 'CDM', top: 54, left: 50 },
-    { pos: 'CM', top: 50, left: 72 },
-    { pos: 'CAM', top: 32, left: 35 },
-    { pos: 'CAM', top: 32, left: 65 },
-    { pos: 'ST', top: 15, left: 50 },
-  ],
-  '4-2-2-2': [
-    { pos: 'GK', top: 88, left: 50 },
-    { pos: 'RB', top: 70, left: 18 },
-    { pos: 'CB', top: 72, left: 39 },
-    { pos: 'CB', top: 72, left: 61 },
-    { pos: 'LB', top: 70, left: 82 },
-    { pos: 'CDM', top: 56, left: 36 },
-    { pos: 'CDM', top: 56, left: 64 },
-    { pos: 'CAM', top: 36, left: 25 },
-    { pos: 'CAM', top: 36, left: 75 },
-    { pos: 'ST', top: 18, left: 36 },
-    { pos: 'ST', top: 18, left: 64 },
-  ],
-  '4-3-1-2': [
-    { pos: 'GK', top: 88, left: 50 },
-    { pos: 'RB', top: 70, left: 18 },
-    { pos: 'CB', top: 72, left: 39 },
-    { pos: 'CB', top: 72, left: 61 },
-    { pos: 'LB', top: 70, left: 82 },
-    { pos: 'CM', top: 52, left: 28 },
-    { pos: 'CDM', top: 56, left: 50 },
-    { pos: 'CM', top: 52, left: 72 },
-    { pos: 'CAM', top: 34, left: 50 },
-    { pos: 'ST', top: 18, left: 36 },
-    { pos: 'ST', top: 18, left: 64 },
-  ],
-  '3-4-2-1': [
-    { pos: 'GK', top: 88, left: 50 },
-    { pos: 'CB', top: 72, left: 25 },
-    { pos: 'CB', top: 74, left: 50 },
-    { pos: 'CB', top: 72, left: 75 },
-    { pos: 'LWB', top: 50, left: 12 },
-    { pos: 'CM', top: 52, left: 38 },
-    { pos: 'CM', top: 52, left: 62 },
-    { pos: 'RWB', top: 50, left: 88 },
-    { pos: 'CAM', top: 32, left: 34 },
-    { pos: 'CAM', top: 32, left: 66 },
-    { pos: 'ST', top: 16, left: 50 },
-  ],
-  '3-4-1-2': [
-    { pos: 'GK', top: 88, left: 50 },
-    { pos: 'CB', top: 72, left: 25 },
-    { pos: 'CB', top: 74, left: 50 },
-    { pos: 'CB', top: 72, left: 75 },
-    { pos: 'LM', top: 48, left: 14 },
-    { pos: 'CM', top: 52, left: 38 },
-    { pos: 'CM', top: 52, left: 62 },
-    { pos: 'RM', top: 48, left: 86 },
-    { pos: 'CAM', top: 34, left: 50 },
-    { pos: 'ST', top: 18, left: 36 },
-    { pos: 'ST', top: 18, left: 64 },
-  ],
-  '5-2-3': [
-    { pos: 'GK', top: 88, left: 50 },
-    { pos: 'LWB', top: 68, left: 12 },
-    { pos: 'CB', top: 74, left: 30 },
-    { pos: 'CB', top: 75, left: 50 },
-    { pos: 'CB', top: 74, left: 70 },
-    { pos: 'RWB', top: 68, left: 88 },
-    { pos: 'CM', top: 48, left: 38 },
-    { pos: 'CM', top: 48, left: 62 },
-    { pos: 'LW', top: 22, left: 20 },
-    { pos: 'ST', top: 16, left: 50 },
-    { pos: 'RW', top: 22, left: 80 },
-  ],
-  '4-1-3-2': [
-    { pos: 'GK', top: 88, left: 50 },
-    { pos: 'LB', top: 70, left: 18 },
-    { pos: 'CB', top: 72, left: 39 },
-    { pos: 'CB', top: 72, left: 61 },
-    { pos: 'RB', top: 70, left: 82 },
-    { pos: 'CDM', top: 58, left: 50 },
-    { pos: 'LM', top: 40, left: 20 },
-    { pos: 'CAM', top: 36, left: 50 },
-    { pos: 'RM', top: 40, left: 80 },
-    { pos: 'ST', top: 18, left: 36 },
-    { pos: 'ST', top: 18, left: 64 },
-  ],
-  '3-3-3-1': [
-    { pos: 'GK', top: 88, left: 50 },
-    { pos: 'CB', top: 72, left: 25 },
-    { pos: 'CB', top: 74, left: 50 },
-    { pos: 'CB', top: 72, left: 75 },
-    { pos: 'LWB', top: 54, left: 18 },
-    { pos: 'CDM', top: 56, left: 50 },
-    { pos: 'RWB', top: 54, left: 82 },
-    { pos: 'LAM', top: 34, left: 25 },
-    { pos: 'CAM', top: 32, left: 50 },
-    { pos: 'RAM', top: 34, left: 75 },
-    { pos: 'ST', top: 16, left: 50 },
-  ],
-  '3-4-3-diamond': [
-    { pos: 'GK', top: 88, left: 50 },
-    { pos: 'CB', top: 72, left: 25 },
-    { pos: 'CB', top: 74, left: 50 },
-    { pos: 'CB', top: 72, left: 75 },
-    { pos: 'CDM', top: 56, left: 50 },
-    { pos: 'LM', top: 46, left: 15 },
-    { pos: 'RM', top: 46, left: 85 },
-    { pos: 'CAM', top: 36, left: 50 },
-    { pos: 'LW', top: 20, left: 20 },
-    { pos: 'ST', top: 15, left: 50 },
-    { pos: 'RW', top: 20, left: 80 },
-  ],
-  '4-4-1-1': [
-    { pos: 'GK', top: 88, left: 50 },
-    { pos: 'RB', top: 70, left: 18 },
-    { pos: 'CB', top: 72, left: 39 },
-    { pos: 'CB', top: 72, left: 61 },
-    { pos: 'LB', top: 70, left: 82 },
-    { pos: 'RM', top: 46, left: 18 },
-    { pos: 'CM', top: 48, left: 39 },
-    { pos: 'CM', top: 48, left: 61 },
-    { pos: 'LM', top: 46, left: 82 },
-    { pos: 'CAM', top: 30, left: 50 },
-    { pos: 'ST', top: 16, left: 50 },
-  ],
-  '4-2-3-1-asym': [
-    { pos: 'GK', top: 88, left: 50 },
-    { pos: 'RB', top: 70, left: 18 },
-    { pos: 'CB', top: 72, left: 39 },
-    { pos: 'CB', top: 72, left: 61 },
-    { pos: 'LB', top: 70, left: 82 },
-    { pos: 'CDM', top: 56, left: 38 },
-    { pos: 'CM', top: 52, left: 62 },
-    { pos: 'CAM', top: 36, left: 50 },
-    { pos: 'RW', top: 22, left: 18 },
-    { pos: 'ST', top: 16, left: 50 },
-    { pos: 'LW', top: 28, left: 82 },
-  ],
-  '3-2-4-1': [
-    { pos: 'GK', top: 88, left: 50 },
-    { pos: 'CB', top: 72, left: 25 },
-    { pos: 'CB', top: 74, left: 50 },
-    { pos: 'CB', top: 72, left: 75 },
-    { pos: 'CDM', top: 56, left: 36 },
-    { pos: 'CDM', top: 56, left: 64 },
-    { pos: 'LM', top: 38, left: 14 },
-    { pos: 'CAM', top: 36, left: 38 },
-    { pos: 'CAM', top: 36, left: 62 },
-    { pos: 'RM', top: 38, left: 86 },
-    { pos: 'ST', top: 16, left: 50 },
-  ],
-  '3-2-2-3': [
-    { pos: 'GK', top: 88, left: 50 },
-    { pos: 'CB', top: 72, left: 25 },
-    { pos: 'CB', top: 74, left: 50 },
-    { pos: 'CB', top: 72, left: 75 },
-    { pos: 'CDM', top: 58, left: 38 },
-    { pos: 'CDM', top: 58, left: 62 },
-    { pos: 'CAM', top: 38, left: 38 },
-    { pos: 'CAM', top: 38, left: 62 },
-    { pos: 'RW', top: 22, left: 18 },
-    { pos: 'ST', top: 16, left: 50 },
-    { pos: 'LW', top: 22, left: 82 },
-  ],
-  '2-3-5': [
-    { pos: 'GK', top: 88, left: 50 },
-    { pos: 'CB', top: 74, left: 38 },
-    { pos: 'CB', top: 74, left: 62 },
-    { pos: 'RWB', top: 56, left: 20 },
-    { pos: 'CDM', top: 54, left: 50 },
-    { pos: 'LWB', top: 56, left: 80 },
-    { pos: 'RW', top: 20, left: 14 },
-    { pos: 'CAM', top: 22, left: 32 },
-    { pos: 'ST', top: 16, left: 50 },
-    { pos: 'CAM', top: 22, left: 68 },
-    { pos: 'LW', top: 20, left: 86 },
-  ],
-  '4-2-1-3': [
-    { pos: 'GK', top: 88, left: 50 },
-    { pos: 'RB', top: 70, left: 18 },
-    { pos: 'CB', top: 72, left: 39 },
-    { pos: 'CB', top: 72, left: 61 },
-    { pos: 'LB', top: 70, left: 82 },
-    { pos: 'CDM', top: 54, left: 36 },
-    { pos: 'CDM', top: 54, left: 64 },
-    { pos: 'CAM', top: 36, left: 50 },
-    { pos: 'RW', top: 22, left: 20 },
-    { pos: 'ST', top: 16, left: 50 },
-    { pos: 'LW', top: 22, left: 80 },
-  ],
+type SubTabType = 'lineup' | 'tactics' | 'roles';
+type FormationCategoryFilter = 'ALL' | 'DEF_5' | 'BAL_4' | 'ATK_3' | 'ELITE';
+
+const LICENSE_NAMES_AR: Record<string, string> = {
+  NONE: 'مبتدئ',
+  BASIC: 'أساسية',
+  PREMIER: 'ممتازة',
+  CONTINENTAL: 'قارية',
+  LEGENDARY: 'أسطورية',
+  D: 'رخصة D',
+  C: 'رخصة C',
+  B: 'رخصة B',
+  A: 'رخصة A',
+  PRO: 'رخصة PRO',
+  ELITE: 'رخصة النخبة ELITE',
 };
 
+function getLicenseNameAr(tier: CoachingLicenseTier | string): string {
+  return LICENSE_NAMES_AR[tier] || `رخصة ${tier}`;
+}
+
 export const TacticsTab: React.FC<TacticsTabProps> = ({ onSelectPlayer }) => {
-  const {
-    userClub,
-    manager,
-    updateTactics,
-    setFormation,
-    swapPlayers,
-    setCaptainAndSetPieces,
-    updateStartingLineup,
-  } = useGame();
+  const { userClub, manager, updateTactics, setFormation, updateStartingLineup } = useGame();
 
-  const [selectedSlotIndex, setSelectedSlotIndex] = useState<number | null>(null);
-  const [selectedPlayerForSwap, setSelectedPlayerForSwap] = useState<{
-    id: string;
-    name: string;
-    position: string;
-    overall: number;
-    role: 'starter' | 'bench' | 'reserve';
+  // جميع الـ Hooks في الأعلى قبل أي return شرطي
+  const [activeSubTab, setActiveSubTab] = useState<SubTabType>('lineup');
+  const [selectedSwapId, setSelectedSwapId] = useState<string | null>(null);
+  const [emptySlotPickerIdx, setEmptySlotPickerIdx] = useState<number | null>(null);
+  const [formationSheetOpen, setFormationSheetOpen] = useState(false);
+  const [formationCatFilter, setFormationCatFilter] = useState<FormationCategoryFilter>('ALL');
+  const [showAdvancedInstructions, setShowAdvancedInstructions] = useState(false);
+  const [confirmAutoPickOpen, setConfirmAutoPickOpen] = useState(false);
+  const [undoLineup, setUndoLineup] = useState<{
+    startingIds: string[];
+    benchIds: string[];
   } | null>(null);
-  const [benchFilter, setBenchFilter] = useState<'all' | 'bench' | 'reserves'>('all');
-  const [activeSubTab, setActiveSubTab] = useState<'pitch' | 'instructions' | 'roles'>('pitch');
-  const [notification, setNotification] = useState<string | null>(null);
+  const [swapNotification, setSwapNotification] = useState<string | null>(null);
 
+  // حالة السحب والإفلات باللمس أو الماوس (Pointer Events / HTML5 Drag)
+  const [draggedPlayerId, setDraggedPlayerId] = useState<string | null>(null);
+  const [dragOverTarget, setDragOverTarget] = useState<{
+    type: 'slot' | 'player';
+    slotIdx?: number;
+    playerId?: string;
+  } | null>(null);
+
+  // مرجع لتنظيف مؤقت الإشعارات عند إلغاء تركيب المكوّن
+  const notificationTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const showToast = useCallback((message: string, duration = 2600) => {
+    if (notificationTimerRef.current) {
+      clearTimeout(notificationTimerRef.current);
+    }
+    setSwapNotification(message);
+    notificationTimerRef.current = setTimeout(() => {
+      setSwapNotification(null);
+      notificationTimerRef.current = null;
+    }, duration);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (notificationTimerRef.current) {
+        clearTimeout(notificationTimerRef.current);
+      }
+    };
+  }, []);
+
+  // استخراج اللاعبين والتشكيل الفعلي بشكل آمن
+  const allPlayers = useMemo(() => {
+    if (!userClub || !Array.isArray(userClub.players)) return [];
+    return userClub.players.filter((p): p is Player => Boolean(p));
+  }, [userClub]);
+
+  const { startingIds, benchIds } = useMemo(
+    () => getEffectiveLineup(userClub),
+    [userClub]
+  );
+
+  const currentFormation: FormationType = userClub?.tactics?.formation || '4-3-3';
+  const slots = FORMATION_SLOTS[currentFormation] || FORMATION_SLOTS['4-3-3'];
+
+  // بناء مصفوفة الـ 11 خانة مع الحفاظ على فهرس كل خانة (null = مركز شاغر)
+  const startingSlots = useMemo<(Player | null)[]>(() => {
+    return Array.from({ length: 11 }, (_, idx) => {
+      const id = startingIds[idx];
+      if (!id) return null;
+      return allPlayers.find((p) => p.id === id) ?? null;
+    });
+  }, [startingIds, allPlayers]);
+
+  // قائمة البدلاء والاحتياط خارج الـ 11 الأساسيين
+  const nonStartingPlayers = useMemo(() => {
+    const starterSet = new Set(
+      startingSlots.filter((p): p is Player => Boolean(p)).map((p) => p.id)
+    );
+    const benchOrdered: Player[] = [];
+    for (const bId of benchIds) {
+      const p = allPlayers.find((pl) => pl.id === bId);
+      if (p && !starterSet.has(p.id) && !benchOrdered.some((x) => x.id === p.id)) {
+        benchOrdered.push(p);
+      }
+    }
+    const reserves = allPlayers.filter(
+      (p) => !starterSet.has(p.id) && !benchOrdered.some((x) => x.id === p.id)
+    );
+    return [...benchOrdered, ...reserves];
+  }, [allPlayers, startingSlots, benchIds]);
+
+  // إحصاءات جاهزية وانسجام التشكيل الأساسي
+  const lineupReadiness = useMemo(() => {
+    const activeStarters = startingSlots.filter((p): p is Player => Boolean(p));
+    const count = activeStarters.length;
+    const avgOvr =
+      count > 0
+        ? Math.round(activeStarters.reduce((s, p) => s + p.overallRating, 0) / count)
+        : 0;
+    const avgFitness =
+      count > 0
+        ? Math.round(activeStarters.reduce((s, p) => s + (p.fitness ?? 100), 0) / count)
+        : 0;
+    let outOfPosCount = 0;
+    startingSlots.forEach((p, idx) => {
+      const slot = slots[idx];
+      if (p && slot && isPlayerOutOfPosition(p, slot.pos)) {
+        outOfPosCount += 1;
+      }
+    });
+    const unavailableCount = activeStarters.filter(
+      (p) => isPlayerInjured(p) || isPlayerSuspended(p)
+    ).length;
+    return {
+      count,
+      avgOvr,
+      avgFitness,
+      outOfPosCount,
+      unavailableCount,
+    };
+  }, [startingSlots, slots]);
+
+  // إجمالي عدد التشكيلات ديناميكياً
+  const totalFormationsCount = useMemo(() => Object.keys(ALL_FORMATIONS).length, []);
+
+  // قائمة التشكيلات مصنفة للـ Bottom Sheet
+  const filteredFormationDefinitions = useMemo(() => {
+    const allList = Object.values(ALL_FORMATIONS);
+    return allList.filter((f) => {
+      if (formationCatFilter === 'ALL') return true;
+      if (formationCatFilter === 'ELITE') return f.minLicense === 'PRO' || f.minLicense === 'ELITE' || f.minLicense === 'A';
+      if (formationCatFilter === 'DEF_5') return f.id.startsWith('5-');
+      if (formationCatFilter === 'BAL_4') return f.id.startsWith('4-');
+      if (formationCatFilter === 'ATK_3') return f.id.startsWith('3-') || f.id.startsWith('2-');
+      return true;
+    });
+  }, [formationCatFilter]);
+
+  // حالة المدرب الحر بدون نادٍ
   if (!userClub || manager.isUnemployed) {
     return (
       <div className="space-y-4 pb-20 animate-fade-in text-center py-16 px-4" dir="rtl">
@@ -405,1098 +220,1414 @@ export const TacticsTab: React.FC<TacticsTabProps> = ({ onSelectPlayer }) => {
         </div>
         <h2 className="text-lg font-black text-white mt-4">أنت حالياً مدرب حر (بدون نادٍ)</h2>
         <p className="text-xs text-slate-400 max-w-md mx-auto leading-relaxed mt-1">
-          لا يوجد لديك خطة تكتيكية أو تشكيل أساسي لتعديله. اختر نادياً من الشواغر التدريبية في تبويب المسيرة لبدء قيادته فنياً!
+          إعدادات التكتيك وخطط اللعب ستكون متاحة فور توقيعك عقداً تدريبياً مع أحد الأندية من تبويب المسيرة!
         </p>
       </div>
     );
   }
 
-  const rawTactics = userClub.tactics || ({} as any);
-  const allPlayers = (userClub.players || []).filter(Boolean);
-  const safeStartingIds = Array.isArray(rawTactics.startingPlayerIds) && rawTactics.startingPlayerIds.length > 0
-    ? rawTactics.startingPlayerIds
-    : allPlayers.slice(0, 11).map(p => p?.id).filter(Boolean);
-  const safeBenchIds = Array.isArray(rawTactics.benchPlayerIds)
-    ? rawTactics.benchPlayerIds
-    : allPlayers.slice(11, 18).map(p => p?.id).filter(Boolean);
-
-  const tactics: TeamTactics = {
-    formation: rawTactics.formation || '4-3-3',
-    mentality: rawTactics.mentality || 'balanced',
-    passingStyle: rawTactics.passingStyle || 'short',
-    pressingIntensity: rawTactics.pressingIntensity || 'balanced',
-    tempo: rawTactics.tempo || 'balanced',
-    startingPlayerIds: safeStartingIds,
-    benchPlayerIds: safeBenchIds,
-    captainId: rawTactics.captainId || allPlayers[0]?.id || '',
-    penaltyTakerId: rawTactics.penaltyTakerId || allPlayers[0]?.id || '',
-    freeKickTakerId: rawTactics.freeKickTakerId || allPlayers[0]?.id || '',
-    cornerTakerId: rawTactics.cornerTakerId || allPlayers[0]?.id || '',
+  const tactics: TeamTactics = userClub.tactics || {
+    formation: '4-3-3',
+    mentality: 'balanced',
+    passingStyle: 'short',
+    pressingIntensity: 'balanced',
+    tempo: 'balanced',
+    startingPlayerIds: startingIds,
+    benchPlayerIds: benchIds,
+    captainId: allPlayers[0]?.id || '',
+    penaltyTakerId: allPlayers[0]?.id || '',
+    freeKickTakerId: allPlayers[0]?.id || '',
+    cornerTakerId: allPlayers[0]?.id || '',
   };
 
-  const startingPlayers = (tactics.startingPlayerIds || []).map(id => allPlayers.find(p => p && p.id === id)).filter(Boolean) as Player[];
-  const benchPlayers = (tactics.benchPlayerIds || []).map(id => allPlayers.find(p => p && p.id === id)).filter(Boolean) as Player[];
-  const reservePlayers = allPlayers.filter(p => p && p.id && !tactics.startingPlayerIds.includes(p.id) && !tactics.benchPlayerIds.includes(p.id));
-
-  const currentSlots = FORMATION_SLOTS[tactics.formation] || FORMATION_SLOTS['4-3-3'];
-  const validationResult = validateSquadLineup(userClub);
-
-  const handlePlayerSwapSelection = (
-    player: Player,
-    role: 'starter' | 'bench' | 'reserve',
-    slotIdx?: number
-  ) => {
-    if (!selectedPlayerForSwap) {
-      // Pick first player
-      setSelectedPlayerForSwap({
-        id: player.id,
-        name: player.name,
-        position: player.position,
-        overall: player.overallRating,
-        role,
-      });
-      if (typeof slotIdx === 'number') {
-        setSelectedSlotIndex(slotIdx);
-      }
-    } else {
-      // If clicking same player, cancel selection
-      if (selectedPlayerForSwap.id === player.id) {
-        setSelectedPlayerForSwap(null);
-        setSelectedSlotIndex(null);
-        return;
-      }
-
-      // Execute Swap
-      swapPlayers(selectedPlayerForSwap.id, player.id);
-      setNotification(`تم تبديل ${selectedPlayerForSwap.name} مع ${player.name} بنجاح! 🔄`);
-      setSelectedPlayerForSwap(null);
-      setSelectedSlotIndex(null);
-      setTimeout(() => setNotification(null), 3500);
+  // تبديل لاعبين (بين خانة أساسية ولاعب آخر أو بين خانتين)
+  const executePlayerSwap = (sourcePlayerId: string, targetPlayerId: string) => {
+    if (sourcePlayerId === targetPlayerId) {
+      setSelectedSwapId(null);
+      return;
     }
-  };
 
-  const handleMoveReserveToBench = (reservePlayer: Player) => {
-    if (benchPlayers.length < 7) {
-      // Just add to bench
-      const nextBench = [...tactics.benchPlayerIds, reservePlayer.id];
-      updateStartingLineup(tactics.startingPlayerIds, nextBench);
-      setNotification(`تمت إضافة ${reservePlayer.name} إلى دكة البدلاء بنجاح! 🪑`);
-    } else {
-      // Swap with the last bench player
-      const targetBenchPlayer = benchPlayers[benchPlayers.length - 1];
-      if (targetBenchPlayer) {
-        swapPlayers(targetBenchPlayer.id, reservePlayer.id);
-        setNotification(`تم استبدال ${targetBenchPlayer.name} ونزول ${reservePlayer.name} في دكة البدلاء 🔄`);
-      }
+    const p1 = allPlayers.find((p) => p.id === sourcePlayerId);
+    const p2 = allPlayers.find((p) => p.id === targetPlayerId);
+    if (!p1 || !p2) return;
+
+    const p1InStarting = startingIds.includes(sourcePlayerId);
+    const p2InStarting = startingIds.includes(targetPlayerId);
+
+    // منع إدخال مصاب أو موقوف إلى التشكيل الأساسي
+    if (!p1InStarting && p2InStarting && (isPlayerInjured(p1) || isPlayerSuspended(p1))) {
+      showToast(
+        isPlayerInjured(p1)
+          ? `⛔ لا يمكن إشراك ${p1.name} لأنه مصاب حالياً!`
+          : `⛔ لا يمكن إشراك ${p1.name} لأنه موقوف حالياً!`,
+        3200
+      );
+      setSelectedSwapId(null);
+      return;
     }
-    setTimeout(() => setNotification(null), 3500);
-  };
 
-  const handleMoveBenchToReserves = (benchPlayer: Player) => {
-    if (reservePlayers.length > 0) {
-      // Swap with first reserve player
-      const targetReservePlayer = reservePlayers[0];
-      swapPlayers(benchPlayer.id, targetReservePlayer.id);
-      setNotification(`تم نقل ${benchPlayer.name} للاحتياط ودخول ${targetReservePlayer.name} للدكة 🔄`);
-    } else {
-      // Remove from bench
-      const nextBench = tactics.benchPlayerIds.filter(id => id !== benchPlayer.id);
-      updateStartingLineup(tactics.startingPlayerIds, nextBench);
-      setNotification(`تم نقل ${benchPlayer.name} إلى قائمة الاحتياط.`);
+    if (!p2InStarting && p1InStarting && (isPlayerInjured(p2) || isPlayerSuspended(p2))) {
+      showToast(
+        isPlayerInjured(p2)
+          ? `⛔ لا يمكن إشراك ${p2.name} لأنه مصاب حالياً!`
+          : `⛔ لا يمكن إشراك ${p2.name} لأنه موقوف حالياً!`,
+        3200
+      );
+      setSelectedSwapId(null);
+      return;
     }
-    setTimeout(() => setNotification(null), 3500);
+
+    setUndoLineup({ startingIds: [...startingIds], benchIds: [...benchIds] });
+
+    const newStarting = [...startingIds];
+    const newBench = [...benchIds];
+
+    const sIdx1 = newStarting.indexOf(sourcePlayerId);
+    const sIdx2 = newStarting.indexOf(targetPlayerId);
+    const bIdx1 = newBench.indexOf(sourcePlayerId);
+    const bIdx2 = newBench.indexOf(targetPlayerId);
+
+    if (sIdx1 !== -1 && sIdx2 !== -1) {
+      newStarting[sIdx1] = targetPlayerId;
+      newStarting[sIdx2] = sourcePlayerId;
+    } else if (sIdx1 !== -1 && sIdx2 === -1) {
+      newStarting[sIdx1] = targetPlayerId;
+      if (bIdx2 !== -1) {
+        newBench[bIdx2] = sourcePlayerId;
+      } else if (!newBench.includes(sourcePlayerId) && newBench.length < 7) {
+        newBench.push(sourcePlayerId);
+      }
+    } else if (sIdx1 === -1 && sIdx2 !== -1) {
+      newStarting[sIdx2] = sourcePlayerId;
+      if (bIdx1 !== -1) {
+        newBench[bIdx1] = targetPlayerId;
+      } else if (!newBench.includes(targetPlayerId) && newBench.length < 7) {
+        newBench.push(targetPlayerId);
+      }
+    } else if (bIdx1 !== -1 && bIdx2 !== -1) {
+      newBench[bIdx1] = targetPlayerId;
+      newBench[bIdx2] = sourcePlayerId;
+    }
+
+    updateStartingLineup(newStarting, newBench);
+    setSelectedSwapId(null);
+    showToast(`🔄 تم التبديل بين ${formatPlayerDualName(p1.name)} و ${formatPlayerDualName(p2.name)}`);
   };
 
-  const handleAutoPickBest11 = () => {
-    const squad = Array.isArray(userClub?.players) ? userClub.players : [];
-    // Filter available players first (not injured, not suspended)
-    const availablePlayers = squad.filter(p => !p.isInjured && (!p.suspensionMatches || p.suspensionMatches <= 0) && !p.isSuspended);
-    const pool = availablePlayers.length >= 11 ? availablePlayers : squad;
+  // وضع لاعب في خانة شاغرة محددة بالفهرس
+  const assignPlayerToSlotIndex = (slotIdx: number, candidate: Player) => {
+    if (isPlayerInjured(candidate) || isPlayerSuspended(candidate)) {
+      showToast(
+        isPlayerInjured(candidate)
+          ? `⛔ لا يمكن إشراك ${candidate.name} لأنه مصاب!`
+          : `⛔ لا يمكن إشراك ${candidate.name} لأنه موقوف!`,
+        3000
+      );
+      return;
+    }
 
-    const slots = FORMATION_SLOTS[tactics.formation] || FORMATION_SLOTS['4-3-3'];
-    const chosenPlayerIds: string[] = [];
-    const best11: Player[] = [];
+    setUndoLineup({ startingIds: [...startingIds], benchIds: [...benchIds] });
 
-    // Slot-by-slot smart placement prioritizing fitness, energy and exact positional fit
-    slots.forEach(slot => {
-      const remainingCandidates = pool.filter(p => !chosenPlayerIds.includes(p.id));
-      if (remainingCandidates.length === 0) return;
+    const newStarting = Array.from({ length: 11 }, (_, i) => startingIds[i] || '');
+    const existingIdx = newStarting.indexOf(candidate.id);
+    const displacedId = newStarting[slotIdx];
 
-      const scored = remainingCandidates.map(player => {
-        const fitness = player.fitness ?? 100;
-        const morale = player.morale ?? 75;
-        
-        // 1. Fitness & Energy weight (50%) + Overall Rating (40%) + Morale (10%)
-        let score = (player.overallRating * 0.40) + (fitness * 0.50) + (morale * 0.10);
+    if (existingIdx !== -1) {
+      newStarting[existingIdx] = displacedId || '';
+    }
+    newStarting[slotIdx] = candidate.id;
 
-        // 2. Penalize severe fatigue heavily so tired stars sit on the bench
-        if (fitness < 65) {
-          score -= (65 - fitness) * 2.0;
-        }
+    const cleanedStarting = newStarting.filter(Boolean);
+    const newBench = benchIds.filter((id) => id !== candidate.id);
+    if (displacedId && !cleanedStarting.includes(displacedId) && !newBench.includes(displacedId)) {
+      newBench.unshift(displacedId);
+    }
 
-        // 3. Exact position match bonus
-        if (player.position.toUpperCase() === slot.pos.toUpperCase()) {
-          score += 35;
-        } else {
-          // Category match
-          const slotCategory = (slot.pos === 'GK') ? 'GK'
-            : ['CB', 'RB', 'LB', 'RWB', 'LWB'].includes(slot.pos) ? 'DEF'
-            : ['CDM', 'CM', 'CAM', 'RM', 'LM', 'RAM', 'LAM'].includes(slot.pos) ? 'MID'
-            : 'FWD';
+    updateStartingLineup(newStarting, newBench.slice(0, 7));
+    setEmptySlotPickerIdx(null);
+    setSelectedSwapId(null);
+    showToast(`✅ تم وضع ${candidate.name} في مركز ${slots[slotIdx]?.pos || ''}`);
+  };
 
-          if (player.positionCategory === slotCategory) {
-            score += 15;
-          } else {
-            // Out of position severe penalty
-            score -= 45;
-          }
-        }
+  const handlePlayerTap = (playerId: string) => {
+    if (!selectedSwapId) {
+      setSelectedSwapId(playerId);
+      return;
+    }
+    executePlayerSwap(selectedSwapId, playerId);
+  };
 
-        return { player, score };
-      });
+  // اختيار التشكيلة مع منع التشكيلات المقفلة
+  const handleSelectFormation = (formationId: FormationType) => {
+    const def = ALL_FORMATIONS[formationId];
+    const unlocked = def ? isTacticalItemUnlocked(def.minLicense, manager.license) : true;
+    if (!unlocked) {
+      const reqLicense = def ? getLicenseNameAr(def.minLicense) : 'رخصة متقدمة';
+      showToast(`🔒 التشكيلة ${formationId} مقفلة — مطلوب ${reqLicense}`, 3200);
+      return;
+    }
+    setFormation(formationId);
+    setFormationSheetOpen(false);
+    showToast(`📐 تم تطبيق التشكيلة ${formationId} وإعادة توزيع المراكز تلقائياً`);
+  };
 
-      scored.sort((a, b) => b.score - a.score);
-      const topPick = scored[0]?.player;
-      if (topPick) {
-        chosenPlayerIds.push(topPick.id);
-        best11.push(topPick);
-      }
+  // اختيار الهوية التكتيكية مع منع الأنماط المقفلة
+  const handleSelectTacticalStyle = (styleId: TacticalStyle) => {
+    const def = ALL_TACTICAL_STYLES[styleId];
+    const unlocked = def ? isTacticalItemUnlocked(def.minLicense, manager.license) : true;
+    if (!unlocked) {
+      const reqLicense = def ? getLicenseNameAr(def.minLicense) : 'رخصة متقدمة';
+      showToast(`🔒 أسلوب "${def?.nameArabic || styleId}" مقفل — مطلوب ${reqLicense}`, 3200);
+      return;
+    }
+    updateTactics({ ...tactics, tacticalStyle: styleId });
+    showToast(`⚡ تم تفعيل الهوية التكتيكية: ${ALL_TACTICAL_STYLES[styleId]?.nameArabic}`);
+  };
+
+  // الاختيار التلقائي لأفضل تشكيل (مع حفظ نسخة للتراجع)
+  const handleExecuteAutoPick = () => {
+    setUndoLineup({ startingIds: [...startingIds], benchIds: [...benchIds] });
+    const best = pickBestLineupForFormation(userClub, currentFormation);
+    updateStartingLineup(best.startingIds, best.benchIds);
+    setConfirmAutoPickOpen(false);
+    setSelectedSwapId(null);
+    showToast('✨ تم اختيار أفضل 11 لاعباً أساسياً و7 بدلاء حسب المراكز واللياقة!');
+  };
+
+  const handleUndoLineup = () => {
+    if (!undoLineup) return;
+    updateStartingLineup(undoLineup.startingIds, undoLineup.benchIds);
+    setUndoLineup(null);
+    showToast('↩️ تم التراجع واستعادة التشكيل السابق');
+  };
+
+  const handleTacticChange = (key: keyof TeamTactics, value: any) => {
+    updateTactics({
+      ...tactics,
+      [key]: value,
     });
-
-    // Fallback if any slots couldn't be filled
-    if (best11.length < 11) {
-      const fallbackRemaining = squad.filter(p => !chosenPlayerIds.includes(p.id))
-        .sort((a, b) => ((b.fitness || 100) * 0.6 + b.overallRating * 0.4) - ((a.fitness || 100) * 0.6 + a.overallRating * 0.4));
-      while (best11.length < 11 && fallbackRemaining.length > 0) {
-        const p = fallbackRemaining.shift()!;
-        chosenPlayerIds.push(p.id);
-        best11.push(p);
-      }
-    }
-
-    const startingIds = best11.map(p => p.id);
-    // Bench: select highest energy/fitness bench players covering positions
-    const benchPool = squad.filter(p => !startingIds.includes(p.id))
-      .sort((a, b) => ((b.fitness || 100) * 0.55 + b.overallRating * 0.45) - ((a.fitness || 100) * 0.55 + a.overallRating * 0.45));
-    const benchIds = benchPool.slice(0, 7).map(p => p.id);
-
-    updateStartingLineup(startingIds, benchIds);
-    setNotification(`⚡ تم اختيار التشكيلة بذكاء: إعطاء الأولوية للجاهزية واللياقة البدنية والمراكز المتوافقة مع خطة ${tactics.formation}!`);
-    setTimeout(() => setNotification(null), 4000);
   };
+
+  // اللاعب المحدد حالياً للتبديل (إن وجد)
+  const selectedSwapPlayer = selectedSwapId
+    ? allPlayers.find((p) => p.id === selectedSwapId) || null
+    : null;
+  const selectedSwapSlotIdx = selectedSwapId ? startingIds.indexOf(selectedSwapId) : -1;
+  const selectedSwapSlotPos =
+    selectedSwapSlotIdx !== -1 ? slots[selectedSwapSlotIdx]?.pos : selectedSwapPlayer?.position;
+
+  const activeStyleDef =
+    ALL_TACTICAL_STYLES[tactics.tacticalStyle || 'total_football'] ||
+    ALL_TACTICAL_STYLES.total_football;
 
   return (
-    <div className="space-y-4 pb-20 animate-fade-in">
-      
-      {/* Tactics Header Navigation */}
-      <div className="bg-slate-900/90 border border-slate-800 p-3.5 rounded-3xl space-y-3">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <Sliders className="w-5 h-5 text-emerald-400" />
-            <h2 className="font-bold text-base text-white">الخطة والتكتيك الميداني</h2>
-          </div>
-
-          <button
-            onClick={handleAutoPickBest11}
-            className="flex items-center gap-1.5 bg-emerald-950 hover:bg-emerald-900 border border-emerald-700 text-emerald-300 px-3 py-1.5 rounded-xl text-xs font-bold transition-all active:scale-95"
-          >
-            <Sparkles className="w-3.5 h-3.5 text-amber-400" />
-            <span>التشكيل الأفضل</span>
-          </button>
+    <div className="space-y-3 pb-24 animate-fade-in" dir="rtl">
+      {/* شريط الإشعارات العائم */}
+      {swapNotification && (
+        <div className="fixed bottom-20 left-1/2 -translate-x-1/2 z-50 bg-slate-900/95 border border-emerald-500/60 text-white px-4 py-2.5 rounded-2xl shadow-2xl text-xs font-bold flex items-center gap-2 animate-bounce">
+          <span>{swapNotification}</span>
         </div>
+      )}
 
-        {/* Sub Navigation */}
-        <div className="grid grid-cols-3 gap-1 bg-slate-950/80 p-1 rounded-2xl border border-slate-800">
-          <button
-            onClick={() => setActiveSubTab('pitch')}
-            className={`py-2 text-xs font-bold rounded-xl transition-all ${
-              activeSubTab === 'pitch'
-                ? 'bg-emerald-500 text-slate-950 shadow-md'
-                : 'text-slate-400 hover:text-white'
-            }`}
-          >
-            الملعب والتشكيل (11)
-          </button>
-          <button
-            onClick={() => setActiveSubTab('instructions')}
-            className={`py-2 text-xs font-bold rounded-xl transition-all ${
-              activeSubTab === 'instructions'
-                ? 'bg-emerald-500 text-slate-950 shadow-md'
-                : 'text-slate-400 hover:text-white'
-            }`}
-          >
-            النهج والتعليمات
-          </button>
-          <button
-            onClick={() => setActiveSubTab('roles')}
-            className={`py-2 text-xs font-bold rounded-xl transition-all ${
-              activeSubTab === 'roles'
-                ? 'bg-emerald-500 text-slate-950 shadow-md'
-                : 'text-slate-400 hover:text-white'
-            }`}
-          >
-            شارة القيادة والكرات الثابتة
-          </button>
+      {/* شريط التبويبات الفرعية الثلاثة (التشكيل | الخطة | الأدوار) */}
+      <div className="sticky top-0 z-20 bg-slate-950/95 backdrop-blur-md py-1.5 border-b border-slate-800/80">
+        <div className="grid grid-cols-3 gap-1.5 bg-slate-900 p-1 rounded-2xl border border-slate-800">
+          {[
+            { id: 'lineup', label: 'التشكيل والملعب', icon: Users },
+            { id: 'tactics', label: 'الخطة والتعليمات', icon: Sliders },
+            { id: 'roles', label: 'الأدوار والكرات الثابتة', icon: Award },
+          ].map((tab) => {
+            const Icon = tab.icon;
+            const isActive = activeSubTab === tab.id;
+            return (
+              <button
+                key={tab.id}
+                type="button"
+                onClick={() => setActiveSubTab(tab.id as SubTabType)}
+                className={`py-2 px-2 rounded-xl text-xs font-black transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                  isActive
+                    ? 'bg-emerald-500 text-slate-950 shadow-md'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                <Icon className="w-3.5 h-3.5 shrink-0" />
+                <span className="truncate">{tab.label}</span>
+              </button>
+            );
+          })}
         </div>
       </div>
 
-      {/* Lineup Validation Issue Alert Banner */}
-      {!validationResult.isValid && (
-        <div className="bg-red-950/70 border-2 border-red-500 rounded-2xl p-4 shadow-xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-right">
-          <div className="flex items-start gap-3">
-            <div className="w-9 h-9 rounded-xl bg-red-900/80 border border-red-500 text-red-200 flex items-center justify-center shrink-0">
-              <ShieldAlert className="w-5 h-5 animate-pulse" />
-            </div>
-            <div>
-              <h4 className="font-bold text-xs sm:text-sm text-red-100">
-                🚨 تنبيه: يوجد لاعبون غير مؤهلين (مصابون أو موقوفون) في التشكيل الأساسي!
-              </h4>
-              <p className="text-[11px] text-red-300 mt-0.5">
-                لن تتمكن من الانتقال لليوم التالي أو خوض المباراة حتى استبدالهم: {validationResult.invalidStarters.map(s => s.player.name).join('، ')}
-              </p>
-            </div>
-          </div>
-
-          <button
-            onClick={handleAutoPickBest11}
-            className="self-end sm:self-center px-4 py-2 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-slate-950 font-black text-xs rounded-xl shadow-lg flex items-center gap-1.5 transition-all active:scale-95 cursor-pointer shrink-0"
-          >
-            <Zap className="w-3.5 h-3.5" />
-            <span>تسوية التشكيل تلقائياً ⚡</span>
-          </button>
-        </div>
-      )}
-
-      {notification && (
-        <div className="bg-emerald-950 border border-emerald-700 text-emerald-300 text-xs font-bold p-3 rounded-2xl flex items-center justify-center gap-2">
-          <Check className="w-4 h-4" />
-          <span>{notification}</span>
-        </div>
-      )}
-
-      {/* VIEW 1: Interactive Pitch */}
-      {activeSubTab === 'pitch' && (
-        <div className="space-y-4">
-          
-          {/* Formation Selector Bar */}
-          <div className="bg-slate-900 border border-slate-800 p-3.5 rounded-3xl space-y-2.5">
-            <div className="flex items-center justify-between">
-              <span className="text-xs text-slate-300 font-bold flex items-center gap-1.5">
-                <Sliders className="w-3.5 h-3.5 text-amber-400" />
-                <span>الرسم التكتيكي (26 تشكيل عالمي):</span>
-              </span>
-              <span className="text-[10px] bg-amber-950/80 text-amber-300 border border-amber-800/80 px-2 py-0.5 rounded-full font-bold">
-                رخصتك: {manager.license}
-              </span>
-            </div>
-
-            <div className="flex items-center gap-1.5 overflow-x-auto pb-1 no-scrollbar">
-              {Object.values(ALL_FORMATIONS).map((fmt) => {
-                const isUnlocked = getLicenseRank(manager.license) >= getLicenseRank(fmt.minLicense);
-                const isSelected = tactics.formation === fmt.id;
-
-                return (
-                  <button
-                    key={fmt.id}
-                    onClick={() => {
-                      if (isUnlocked) {
-                        setFormation(fmt.id);
-                        setNotification(`تم تطبيق تشكيل ${fmt.nameArabic}`);
-                      } else {
-                        setNotification(`🔒 خطة ${fmt.nameArabic} تتطلب رخصة تدريب (${fmt.minLicense}) على الأقل! رخصتك الحالية (${manager.license}).`);
-                      }
-                    }}
-                    className={`px-3 py-1.5 rounded-xl text-xs font-mono font-bold whitespace-nowrap transition-all flex-shrink-0 cursor-pointer flex items-center gap-1.5 ${
-                      isSelected
-                        ? 'bg-amber-500 text-slate-950 shadow-md scale-105 ring-2 ring-amber-400'
-                        : isUnlocked
-                        ? 'bg-slate-800 text-slate-200 hover:text-white hover:bg-slate-700'
-                        : 'bg-slate-950/90 text-slate-500 border border-slate-800/80 hover:border-slate-700'
-                    }`}
-                  >
-                    {!isUnlocked && <Lock className="w-3 h-3 text-slate-500" />}
-                    <span>{fmt.id}</span>
-                    {!isUnlocked && (
-                      <span className="text-[9px] px-1 py-0.5 rounded bg-slate-900 text-amber-500/80 font-bold">
-                        {fmt.minLicense}
-                      </span>
-                    )}
-                  </button>
-                );
-              })}
-            </div>
-
-            {/* Selected Formation Info Card */}
-            {ALL_FORMATIONS[tactics.formation] && (
-              <div className="bg-slate-950/70 border border-slate-800/80 p-2.5 rounded-2xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 text-xs">
-                <div className="space-y-0.5">
-                  <div className="flex items-center gap-2">
-                    <span className="font-black text-amber-300 text-xs">
-                      {ALL_FORMATIONS[tactics.formation].nameArabic}
+      {/* ==================== 1) تبويب التشكيل والملعب ==================== */}
+      {activeSubTab === 'lineup' && (
+        <div className="space-y-3">
+          {/* شريط جاهزية وانسجام التشكيل + أزرار التشكيلة والاختيار التلقائي */}
+          <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-3 space-y-2.5">
+            <div className="flex items-center justify-between gap-2 flex-wrap">
+              {/* زر فتح نافذة التشكيلات */}
+              <button
+                type="button"
+                onClick={() => setFormationSheetOpen(true)}
+                className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-950 hover:bg-slate-800 border border-emerald-500/40 text-white transition-all cursor-pointer"
+              >
+                <Compass className="w-4 h-4 text-emerald-400" />
+                <div className="text-right">
+                  <span className="text-[9px] text-slate-400 block leading-none">
+                    خطة الانتشار ({totalFormationsCount} متاحة)
+                  </span>
+                  <span className="text-xs font-black font-mono text-emerald-400">
+                    {currentFormation}{' '}
+                    <span className="font-sans text-[10px] text-slate-300 font-bold">
+                      ({ALL_FORMATIONS[currentFormation]?.nameArabic || currentFormation})
                     </span>
-                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-800 text-slate-300 border border-slate-700">
-                      الرخصة المطلوبة: {ALL_FORMATIONS[tactics.formation].minLicense}
-                    </span>
-                  </div>
-                  <p className="text-[11px] text-slate-400 leading-relaxed">
-                    {ALL_FORMATIONS[tactics.formation].descriptionArabic}
-                  </p>
-                </div>
-                <div className="flex items-center gap-1.5 shrink-0 self-end sm:self-auto">
-                  <span className="text-[10px] text-emerald-400 bg-emerald-950/80 border border-emerald-500/30 px-2 py-0.5 rounded-lg">
-                    {ALL_FORMATIONS[tactics.formation].strengthsArabic}
                   </span>
                 </div>
+                <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
+              </button>
+
+              {/* أزرار أفضل تشكيل + تراجع */}
+              <div className="flex items-center gap-1.5">
+                {undoLineup && (
+                  <button
+                    type="button"
+                    onClick={handleUndoLineup}
+                    className="px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-amber-300 border border-slate-700 text-[11px] font-bold flex items-center gap-1 transition-all cursor-pointer"
+                  >
+                    <Undo2 className="w-3.5 h-3.5" />
+                    <span>تراجع</span>
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setConfirmAutoPickOpen(true)}
+                  className="px-3 py-1.5 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 text-slate-950 text-xs font-black flex items-center gap-1 shadow-md active:scale-95 transition-all cursor-pointer"
+                >
+                  <Sparkles className="w-3.5 h-3.5" />
+                  <span>أفضل تشكيل</span>
+                </button>
+              </div>
+            </div>
+
+            {/* مؤشرات الجاهزية والانسجام */}
+            <div className="grid grid-cols-3 gap-2 text-center">
+              <div className="bg-slate-950/70 px-2.5 py-1.5 rounded-xl border border-slate-800 flex items-center justify-between">
+                <span className="text-[10px] text-slate-400">قوة الأساسيين</span>
+                <span className="text-xs font-black font-mono text-emerald-400">
+                  {lineupReadiness.avgOvr} OVR
+                </span>
+              </div>
+              <div className="bg-slate-950/70 px-2.5 py-1.5 rounded-xl border border-slate-800 flex items-center justify-between">
+                <span className="text-[10px] text-slate-400">متوسط اللياقة</span>
+                <span
+                  className={`text-xs font-black font-mono ${
+                    lineupReadiness.avgFitness >= 75
+                      ? 'text-emerald-400'
+                      : lineupReadiness.avgFitness >= 60
+                      ? 'text-amber-400'
+                      : 'text-red-400'
+                  }`}
+                >
+                  {lineupReadiness.avgFitness}%
+                </span>
+              </div>
+              <div className="bg-slate-950/70 px-2.5 py-1.5 rounded-xl border border-slate-800 flex items-center justify-between">
+                <span className="text-[10px] text-slate-400">خارج المركز</span>
+                <span
+                  className={`text-xs font-black font-mono ${
+                    lineupReadiness.outOfPosCount === 0 ? 'text-emerald-400' : 'text-amber-400'
+                  }`}
+                >
+                  {lineupReadiness.outOfPosCount === 0
+                    ? 'متناغم ✓'
+                    : `${lineupReadiness.outOfPosCount} لاعب`}
+                </span>
+              </div>
+            </div>
+
+            {/* شريط إرشاد التبديل النشط */}
+            {selectedSwapPlayer ? (
+              <div className="bg-amber-500/15 border border-amber-500/40 rounded-xl px-3 py-1.5 flex items-center justify-between text-xs text-amber-200">
+                <span>
+                  اختر لاعباً آخر من الملعب أو الدكة للتبديل مع{' '}
+                  <strong className="text-white font-black">{formatPlayerDualName(selectedSwapPlayer.name)}</strong> (
+                  {selectedSwapSlotPos})
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setSelectedSwapId(null)}
+                  className="text-[11px] font-bold text-amber-300 hover:text-white px-2 py-0.5 rounded bg-slate-900/70"
+                >
+                  إلغاء
+                </button>
+              </div>
+            ) : (
+              <div className="flex items-center justify-between text-[10px] text-slate-400 px-1">
+                <span>اضغط على أي لاعب أو اسحبه للتبديل بين المراكز والدكة</span>
+                <span>الأساسيون: {lineupReadiness.count}/11</span>
               </div>
             )}
           </div>
 
-          {/* Football Field Visualizer */}
-          <div className="relative w-full aspect-[4/5] sm:aspect-[4/4.5] max-w-lg mx-auto bg-gradient-to-b from-emerald-900 via-emerald-800 to-emerald-900 rounded-3xl border-4 border-emerald-950 shadow-2xl overflow-hidden p-3 select-none">
-            
-            {/* Field Grass Stripes Texture */}
-            <div className="absolute inset-0 opacity-15 bg-[repeating-linear-gradient(0deg,transparent,transparent_30px,rgba(0,0,0,0.4)_30px,rgba(0,0,0,0.4)_60px)]" />
+          {/* الملعب التكتيكي التفاعلي (SVG خفيف وسريع بدون مجسمات ثلاثية الأبعاد ثقيلة) */}
+          <div className="relative w-full max-w-[440px] mx-auto aspect-[3/4] rounded-3xl overflow-hidden border-2 border-emerald-800/80 shadow-2xl select-none bg-emerald-950">
+            {/* خلفية العشب وتخطيط الملعب بـ SVG */}
+            <svg
+              viewBox="0 0 300 400"
+              className="absolute inset-0 w-full h-full pointer-events-none"
+              preserveAspectRatio="none"
+            >
+              <defs>
+                <pattern id="pitchStripes" width="300" height="40" patternUnits="userSpaceOnUse">
+                  <rect width="300" height="20" fill="#064e3b" />
+                  <rect y="20" width="300" height="20" fill="#065f46" />
+                </pattern>
+              </defs>
+              <rect width="300" height="400" fill="url(#pitchStripes)" />
+              {/* حدود الملعب */}
+              <rect
+                x="12"
+                y="12"
+                width="276"
+                height="376"
+                fill="none"
+                stroke="rgba(255,255,255,0.28)"
+                strokeWidth="2"
+              />
+              {/* خط المنتصف والدائرة */}
+              <line
+                x1="12"
+                y1="200"
+                x2="288"
+                y2="200"
+                stroke="rgba(255,255,255,0.28)"
+                strokeWidth="2"
+              />
+              <circle
+                cx="150"
+                cy="200"
+                r="36"
+                fill="none"
+                stroke="rgba(255,255,255,0.28)"
+                strokeWidth="2"
+              />
+              <circle cx="150" cy="200" r="3" fill="rgba(255,255,255,0.4)" />
+              {/* منطقة الجزاء العلوية (الهجوم) */}
+              <rect
+                x="68"
+                y="12"
+                width="164"
+                height="58"
+                fill="none"
+                stroke="rgba(255,255,255,0.28)"
+                strokeWidth="2"
+              />
+              <rect
+                x="105"
+                y="12"
+                width="90"
+                height="22"
+                fill="none"
+                stroke="rgba(255,255,255,0.28)"
+                strokeWidth="2"
+              />
+              {/* منطقة الجزاء السفلية (حارس المرمى) */}
+              <rect
+                x="68"
+                y="330"
+                width="164"
+                height="58"
+                fill="none"
+                stroke="rgba(255,255,255,0.28)"
+                strokeWidth="2"
+              />
+              <rect
+                x="105"
+                y="366"
+                width="90"
+                height="22"
+                fill="none"
+                stroke="rgba(255,255,255,0.28)"
+                strokeWidth="2"
+              />
+            </svg>
 
-            {/* Field Markings */}
-            <div className="absolute inset-3 border-2 border-white/30 rounded-2xl pointer-events-none">
-              {/* Half-way Line & Center Circle */}
-              <div className="absolute top-1/2 left-0 right-0 h-[2px] bg-white/30 -translate-y-1/2" />
-              <div className="absolute top-1/2 left-1/2 w-24 h-24 border-2 border-white/30 rounded-full -translate-x-1/2 -translate-y-1/2" />
-              <div className="absolute top-1/2 left-1/2 w-2 h-2 bg-white/40 rounded-full -translate-x-1/2 -translate-y-1/2" />
+            {/* خانات اللاعبين الـ 11 على الملعب */}
+            {slots.map((slot, index) => {
+              const player = startingSlots[index] ?? null;
 
-              {/* Penalty Boxes */}
-              <div className="absolute top-0 left-1/2 -translate-x-1/2 w-48 h-20 border-b-2 border-x-2 border-white/30 rounded-b-xl" />
-              <div className="absolute bottom-0 left-1/2 -translate-x-1/2 w-48 h-20 border-t-2 border-x-2 border-white/30 rounded-t-xl" />
+              // خانة شاغرة: عند الضغط تفتح قائمة اختيار لاعب متاح
+              if (!player) {
+                return (
+                  <div
+                    key={`empty-slot-${index}`}
+                    style={{ top: `${slot.top}%`, left: `${slot.left}%` }}
+                    onClick={() => setEmptySlotPickerIdx(index)}
+                    onDragOver={(e) => {
+                      e.preventDefault();
+                      setDragOverTarget({ type: 'slot', slotIdx: index });
+                    }}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      if (draggedPlayerId) {
+                        const dragged = allPlayers.find((p) => p.id === draggedPlayerId);
+                        if (dragged) assignPlayerToSlotIndex(index, dragged);
+                      }
+                      setDraggedPlayerId(null);
+                      setDragOverTarget(null);
+                    }}
+                    className={`absolute -translate-x-1/2 -translate-y-1/2 flex flex-col items-center cursor-pointer z-10 group transition-transform active:scale-95 ${
+                      dragOverTarget?.type === 'slot' && dragOverTarget.slotIdx === index
+                        ? 'scale-110'
+                        : ''
+                    }`}
+                  >
+                    <div className="w-10 h-10 rounded-full border-2 border-dashed border-amber-400/80 bg-slate-950/75 flex flex-col items-center justify-center text-amber-300 shadow-lg group-hover:border-amber-300">
+                      <UserPlus className="w-3.5 h-3.5" />
+                      <span className="text-[8px] font-black font-mono leading-none mt-0.5">
+                        {slot.pos}
+                      </span>
+                    </div>
+                    <span className="mt-0.5 px-1.5 py-0.2 rounded bg-amber-500/90 text-slate-950 font-black text-[9px] shadow">
+                      شاغر
+                    </span>
+                  </div>
+                );
+              }
 
-              {/* Goal Boxes */}
-              <div className="absolute top-0 left-1/2 -translate-x-1/2 w-24 h-8 border-b-2 border-x-2 border-white/30" />
-              <div className="absolute bottom-0 left-1/2 -translate-x-1/2 w-24 h-8 border-t-2 border-x-2 border-white/30" />
-            </div>
-
-            {/* Starting 11 3D Kit Figurines on Pitch */}
-            {currentSlots.map((slot, index) => {
-              const player = startingPlayers[index];
-              const isSelected = selectedPlayerForSwap?.id === player?.id || selectedSlotIndex === index;
-              const isPlayerInjured = !!player?.isInjured;
-              const isPlayerSuspended = !!(player?.isSuspended || (player?.suspensionMatches && player.suspensionMatches > 0));
-              const isPlayerIneligible = isPlayerInjured || isPlayerSuspended;
+              const isSelected = selectedSwapId === player.id;
+              const isCaptain = tactics.captainId === player.id;
+              const injured = isPlayerInjured(player);
+              const suspended = isPlayerSuspended(player);
+              const outOfPos = isPlayerOutOfPosition(player, slot.pos);
+              const ovrStyle = getOvrColorClasses(player.overallRating);
+              const fitness = Math.max(0, Math.min(100, player.fitness ?? 100));
+              const dualName = formatPlayerDualName(player.name);
 
               return (
                 <div
-                  key={index}
-                  onClick={() => {
-                    if (player) {
-                      handlePlayerSwapSelection(player, 'starter', index);
-                    }
-                  }}
-                  className={`absolute -translate-x-1/2 -translate-y-1/2 flex flex-col items-center cursor-pointer transition-transform active:scale-90 z-10 ${
-                    isSelected ? 'scale-125 z-20' : 'hover:scale-110'
-                  }`}
+                  key={`slot-${index}-${player.id}`}
                   style={{ top: `${slot.top}%`, left: `${slot.left}%` }}
+                  draggable
+                  onDragStart={() => setDraggedPlayerId(player.id)}
+                  onDragEnd={() => {
+                    setDraggedPlayerId(null);
+                    setDragOverTarget(null);
+                  }}
+                  onDragOver={(e) => {
+                    e.preventDefault();
+                    setDragOverTarget({ type: 'player', playerId: player.id });
+                  }}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    if (draggedPlayerId && draggedPlayerId !== player.id) {
+                      executePlayerSwap(draggedPlayerId, player.id);
+                    }
+                    setDraggedPlayerId(null);
+                    setDragOverTarget(null);
+                  }}
+                  onClick={() => handlePlayerTap(player.id)}
+                  className={`absolute -translate-x-1/2 -translate-y-1/2 flex flex-col items-center cursor-pointer transition-transform z-10 ${
+                    isSelected ||
+                    (dragOverTarget?.type === 'player' && dragOverTarget.playerId === player.id)
+                      ? 'scale-125 z-20'
+                      : 'hover:scale-105'
+                  }`}
                 >
-                  {/* 3D Sculpted Kit Figurine */}
+                  {/* الدائرة التكتيكية للاعب بألوان النادي ورقم القميص */}
                   <div className="relative">
-                    <PlayerKit3DModel
-                      number={player?.number || index + 1}
-                      position={slot.pos}
-                      overall={player?.overallRating}
-                      primaryColor={isPlayerIneligible ? '#991b1b' : (userClub.primaryColor || '#10b981')}
-                      secondaryColor={userClub.secondaryColor || '#ffffff'}
-                      isGK={slot.pos === 'GK' || player?.positionCategory === 'GK'}
-                      isCaptain={Boolean(player && tactics.captainId === player.id)}
-                      isSelected={isSelected}
-                      size="sm"
-                    />
-
-                    {/* Ineligibility Icon Badge */}
-                    {isPlayerInjured && (
-                      <span className="absolute -top-1 -left-1 w-4 h-4 bg-red-600 text-white font-black text-[9px] rounded-full flex items-center justify-center border border-white shadow z-30">
-                        🚑
+                    <div
+                      style={{
+                        backgroundColor:
+                          slot.pos === 'GK' ? '#eab308' : userClub.primaryColor || '#10b981',
+                        borderColor: isSelected
+                          ? '#fbbf24'
+                          : injured || suspended
+                          ? '#ef4444'
+                          : userClub.secondaryColor || '#ffffff',
+                      }}
+                      className={`w-10 h-10 sm:w-11 sm:h-11 rounded-full border-2 shadow-lg flex flex-col items-center justify-center relative ${
+                        isSelected ? 'ring-4 ring-amber-400/80 animate-pulse' : ''
+                      }`}
+                    >
+                      <span
+                        style={{
+                          color: slot.pos === 'GK' ? '#0f172a' : '#ffffff',
+                          textShadow: '0 1px 2px rgba(0,0,0,0.85)',
+                        }}
+                        className="font-black font-mono text-xs sm:text-sm leading-none tabular-nums"
+                      >
+                        {player.number}
                       </span>
-                    )}
-                    {isPlayerSuspended && !isPlayerInjured && (
-                      <span className="absolute -top-1 -left-1 w-4 h-4 bg-red-600 text-white font-black text-[9px] rounded-full flex items-center justify-center border border-white shadow z-30">
-                        🟥
+                      <span
+                        style={{
+                          color: slot.pos === 'GK' ? '#0f172a' : '#ffffff',
+                          textShadow: '0 1px 2px rgba(0,0,0,0.85)',
+                        }}
+                        className="text-[8px] font-black font-mono leading-none mt-0.5 opacity-95"
+                      >
+                        {slot.pos}
                       </span>
-                    )}
-                  </div>
-
-                  {/* Player Name & Overall Rating Pill */}
-                  <div className={`px-2 py-0.5 rounded-lg text-[10px] font-bold -mt-0.5 shadow-md text-center flex items-center justify-center gap-1 ${
-                    isSelected
-                      ? 'bg-amber-500 text-slate-950 font-black border border-amber-300'
-                      : isPlayerIneligible
-                      ? 'bg-red-950 text-red-200 border border-red-600 font-bold'
-                      : 'bg-slate-950/95 text-white border border-slate-700/80'
-                  }`}>
-                    <span className="truncate max-w-[62px]">{player ? player.name.split(' ')[0] : 'شاغر'}</span>
-                    {player && (
-                      <span className={`px-1 py-0.2 rounded text-[9px] font-mono font-black ${
-                        player.overallRating >= 80
-                          ? 'bg-amber-400 text-slate-950'
-                          : player.overallRating >= 70
-                          ? 'bg-emerald-500 text-slate-950'
-                          : 'bg-slate-700 text-slate-200'
-                      }`} title={`طاقة اللاعب: ${player.overallRating}`}>
-                        {player.overallRating}
-                      </span>
-                    )}
-                  </div>
-
-                  {/* Position Badge & Fitness Battery Dot */}
-                  {player && (
-                    <div className="flex items-center gap-1 mt-0.5 bg-slate-950/80 px-1.5 py-0.5 rounded-full border border-white/10 shadow-sm">
-                      <span className="text-[8px] font-bold text-amber-300 font-mono">{slot.pos}</span>
-                      <span className="text-[8px] text-slate-500">•</span>
-                      <span className={`w-1.5 h-1.5 rounded-full ${isPlayerIneligible ? 'bg-red-500' : player.fitness > 80 ? 'bg-emerald-400' : 'bg-amber-400'}`} />
-                      <span className="text-[8px] text-white/90 font-mono">{player.fitness}%</span>
                     </div>
-                  )}
+
+                    {/* شارة التقييم المصغرة أعلى اليمين */}
+                    <span
+                      className={`absolute -top-1 -right-2 px-1 py-0.2 rounded-md text-[9px] font-black font-mono tabular-nums border shadow ${ovrStyle.badgeBg} ${ovrStyle.badgeText} ${ovrStyle.badgeBorder}`}
+                    >
+                      {player.overallRating}
+                    </span>
+
+                    {/* شارة الكابتن */}
+                    {isCaptain && (
+                      <span className="absolute -top-1 -left-1.5 w-4 h-4 rounded-full bg-amber-400 text-slate-950 font-black text-[9px] flex items-center justify-center border border-slate-950 shadow">
+                        C
+                      </span>
+                    )}
+
+                    {/* تنبيه لعب في غير مركزه */}
+                    {outOfPos && !injured && !suspended && (
+                      <span
+                        title={`يلعب خارج مركزه الأصلي (${player.position})`}
+                        className="absolute -bottom-0.5 -left-1.5 w-4 h-4 rounded-full bg-amber-500 text-slate-950 font-black text-[9px] flex items-center justify-center border border-slate-950 shadow"
+                      >
+                        !
+                      </span>
+                    )}
+
+                    {/* تنبيه الإصابة أو الإيقاف */}
+                    {(injured || suspended) && (
+                      <span className="absolute -bottom-0.5 -left-1.5 w-4 h-4 rounded-full bg-red-600 text-white font-black text-[9px] flex items-center justify-center border border-slate-950 shadow animate-bounce">
+                        {injured ? '+' : '🟥'}
+                      </span>
+                    )}
+                  </div>
+
+                  {/* شريط الاسم الأول والثاني واللياقة أسفل الدائرة */}
+                  <div
+                    title={player.name}
+                    className="mt-0.5 bg-slate-950/95 border border-slate-700/90 px-2 py-0.5 rounded-lg text-center shadow-lg min-w-[64px] max-w-[96px] sm:max-w-[110px]"
+                  >
+                    <div className="text-[9.5px] sm:text-[10.5px] font-extrabold text-white truncate leading-[1.25] tracking-tight">
+                      {dualName}
+                    </div>
+                    <div className="w-full h-1 bg-slate-800 rounded-full overflow-hidden mt-0.5">
+                      <div
+                        className={`h-full ${
+                          fitness >= 75
+                            ? 'bg-emerald-400'
+                            : fitness >= 55
+                            ? 'bg-amber-400'
+                            : 'bg-red-500'
+                        }`}
+                        style={{ width: `${fitness}%` }}
+                      />
+                    </div>
+                  </div>
                 </div>
               );
             })}
-
           </div>
 
-          {/* Active Swap Banner if player selected */}
-          {selectedPlayerForSwap && (
-            <div className="bg-amber-950/90 border-2 border-amber-400/90 rounded-2xl p-3.5 flex flex-col sm:flex-row items-center justify-between gap-3 animate-fade-in shadow-xl">
-              <div className="flex items-center gap-2.5 text-xs text-white">
-                <span className="text-lg animate-bounce">🔄</span>
-                <div>
-                  <span className="text-amber-300 font-bold">اللاعب المحدد للتبديل: </span>
-                  <strong className="text-white font-black">{selectedPlayerForSwap.name}</strong> 
-                  <span className="text-slate-300 mr-1.5">
-                    ({selectedPlayerForSwap.position} - طاقة {selectedPlayerForSwap.overall} - {selectedPlayerForSwap.role === 'starter' ? 'أساسي' : selectedPlayerForSwap.role === 'bench' ? 'دكة البدلاء' : 'احتياطي'})
-                  </span>
-                </div>
+          {/* شريط دكة البدلاء والاحتياط الأفقي القابل للتمرير */}
+          <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-3 space-y-2">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-1.5">
+                <Users className="w-4 h-4 text-sky-400" />
+                <h3 className="text-xs font-black text-white">
+                  دكة البدلاء والاحتياط ({nonStartingPlayers.length})
+                </h3>
               </div>
-              <div className="flex items-center gap-2">
-                <span className="text-[11px] text-amber-200 font-medium hidden sm:inline">اضغط على أي لاعب آخر لإتمام التبديل</span>
-                <button
-                  onClick={() => {
-                    setSelectedPlayerForSwap(null);
-                    setSelectedSlotIndex(null);
-                  }}
-                  className="bg-slate-900 hover:bg-slate-800 text-slate-200 text-xs px-3 py-1.5 rounded-xl border border-slate-700 font-bold cursor-pointer"
-                >
-                  إلغاء التحديد ✕
-                </button>
+              <span className="text-[10px] text-slate-400">
+                اسحب أو اضغط للتبديل • اضغط على "ملف" للتفاصيل
+              </span>
+            </div>
+
+            <div className="flex items-stretch gap-2 overflow-x-auto pb-1 no-scrollbar">
+              {nonStartingPlayers.map((player, idx) => {
+                const isBenchSlot = idx < 7;
+                const isSelected = selectedSwapId === player.id;
+                const injured = isPlayerInjured(player);
+                const suspended = isPlayerSuspended(player);
+                const ovrStyle = getOvrColorClasses(player.overallRating);
+                const fitness = Math.max(0, Math.min(100, player.fitness ?? 100));
+
+                // حساب مدى ملاءمة هذا البديل للخانة المحددة حالياً في الملعب
+                const fitWithSelected =
+                  selectedSwapSlotPos && selectedSwapId !== player.id
+                    ? getPositionFitScore(player, selectedSwapSlotPos)
+                    : null;
+
+                return (
+                  <div
+                    key={player.id}
+                    draggable={!injured && !suspended}
+                    onDragStart={() => setDraggedPlayerId(player.id)}
+                    onDragEnd={() => {
+                      setDraggedPlayerId(null);
+                      setDragOverTarget(null);
+                    }}
+                    onClick={() => handlePlayerTap(player.id)}
+                    className={`w-36 sm:w-40 shrink-0 rounded-2xl p-2.5 border transition-all cursor-pointer flex flex-col justify-between ${
+                      isSelected
+                        ? 'bg-amber-500/20 border-amber-400 ring-2 ring-amber-400/50'
+                        : injured || suspended
+                        ? 'bg-red-950/20 border-red-900/50 opacity-75'
+                        : fitWithSelected !== null && fitWithSelected >= 88
+                        ? 'bg-emerald-950/40 border-emerald-500/70'
+                        : 'bg-slate-950/80 border-slate-800 hover:border-slate-700'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-1">
+                      <span
+                        className={`text-[10px] font-black font-mono tabular-nums px-1.5 py-0.2 rounded border ${ovrStyle.badgeBg} ${ovrStyle.badgeText} ${ovrStyle.badgeBorder}`}
+                      >
+                        {player.overallRating}
+                      </span>
+                      <span className="text-[9.5px] font-bold font-mono px-1.5 py-0.2 rounded bg-slate-800 text-slate-300 border border-slate-700">
+                        {player.position}
+                      </span>
+                    </div>
+
+                    <div className="my-1.5 flex items-center gap-2">
+                      <PlayerAvatar
+                        player={player}
+                        primaryColor={userClub.primaryColor}
+                        secondaryColor={userClub.secondaryColor}
+                        size="sm"
+                      />
+                      <div className="min-w-0 flex-1">
+                        <div
+                          title={player.name}
+                          className="text-[11.5px] sm:text-xs font-extrabold text-white truncate leading-snug tracking-tight"
+                        >
+                          {formatPlayerDualName(player.name)}
+                        </div>
+                        <div className="text-[10px] text-slate-400 font-mono tabular-nums mt-0.5">
+                          <span dir="ltr" className="inline-block text-slate-300 font-bold">#{player.number}</span> •{' '}
+                          <span dir="ltr" className="inline-block">{fitness}%</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center justify-between gap-1 pt-1 border-t border-slate-800/80">
+                      {injured ? (
+                        <span className="text-[9px] text-red-400 font-bold flex items-center gap-0.5">
+                          <Bandage className="w-2.5 h-2.5" /> مصاب
+                        </span>
+                      ) : suspended ? (
+                        <span className="text-[9px] text-amber-400 font-bold flex items-center gap-0.5">
+                          <AlertCircle className="w-2.5 h-2.5" /> موقوف
+                        </span>
+                      ) : fitWithSelected !== null ? (
+                        <span
+                          className={`text-[9px] font-bold ${
+                            fitWithSelected >= 70 ? 'text-emerald-400' : 'text-amber-400'
+                          }`}
+                        >
+                          {fitWithSelected >= 88
+                            ? 'مركز مطابق ★'
+                            : fitWithSelected >= 70
+                            ? 'مناسب للخط'
+                            : 'خارج المركز !'}
+                        </span>
+                      ) : (
+                        <span
+                          className={`text-[9px] font-bold ${
+                            isBenchSlot ? 'text-sky-400' : 'text-slate-500'
+                          }`}
+                        >
+                          {isBenchSlot ? `بديل #${idx + 1}` : 'احتياط'}
+                        </span>
+                      )}
+
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onSelectPlayer(player);
+                        }}
+                        className="text-[9px] text-slate-400 hover:text-white underline"
+                      >
+                        ملف
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ==================== 2) تبويب الخطة والتعليمات ==================== */}
+      {activeSubTab === 'tactics' && (
+        <div className="space-y-3">
+          {/* أزرار التقسيم السريعة (Segmented Controls) للعقلية والتمرير والضغط */}
+          <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-3.5 space-y-3.5">
+            {/* 1. العقلية التكتيكية */}
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-slate-200 flex items-center gap-1.5">
+                  <Shield className="w-3.5 h-3.5 text-amber-400" />
+                  العقلية التكتيكية
+                </span>
+                <span className="text-[10px] text-slate-400">
+                  {tactics.mentality === 'ultra_attacking' || tactics.mentality === 'attacking'
+                    ? 'هجوم + / دفاع -'
+                    : tactics.mentality === 'ultra_defensive' || tactics.mentality === 'defensive'
+                    ? 'دفاع + / هجوم -'
+                    : 'توازن الخطوط'}
+                </span>
+              </div>
+              <div className="grid grid-cols-5 gap-1 bg-slate-950 p-1 rounded-xl border border-slate-800">
+                {[
+                  { id: 'ultra_defensive', label: 'تحفظ شديد' },
+                  { id: 'defensive', label: 'دفاعية' },
+                  { id: 'balanced', label: 'متوازنة' },
+                  { id: 'attacking', label: 'هجومية' },
+                  { id: 'ultra_attacking', label: 'اندفاع كامل' },
+                ].map((item) => (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() => handleTacticChange('mentality', item.id)}
+                    className={`py-1.5 px-1 rounded-lg text-[10px] font-bold transition-all cursor-pointer ${
+                      tactics.mentality === item.id
+                        ? 'bg-amber-500 text-slate-950 font-black shadow'
+                        : 'text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* 2. أسلوب التمرير */}
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-slate-200 flex items-center gap-1.5">
+                  <Crosshair className="w-3.5 h-3.5 text-blue-400" />
+                  أسلوب التمرير
+                </span>
+                <span className="text-[10px] text-slate-400">
+                  {tactics.passingStyle === 'short' || tactics.passingStyle === 'tiki_taka_short'
+                    ? 'استحواذ + / دقة +'
+                    : tactics.passingStyle === 'long_balls'
+                    ? 'مرتدات سريعة +'
+                    : 'متنوع ومباشر'}
+                </span>
+              </div>
+              <div className="grid grid-cols-3 gap-1 bg-slate-950 p-1 rounded-xl border border-slate-800">
+                {[
+                  { id: 'short', label: 'قصير (تيكي تاكا)' },
+                  { id: 'direct', label: 'مباشر متوازن' },
+                  { id: 'long_balls', label: 'كرات طولية' },
+                ].map((item) => (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() => handleTacticChange('passingStyle', item.id)}
+                    className={`py-1.5 px-2 rounded-lg text-[11px] font-bold transition-all cursor-pointer ${
+                      tactics.passingStyle === item.id
+                        ? 'bg-blue-500 text-slate-950 font-black shadow'
+                        : 'text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* 3. شدة الضغط */}
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-slate-200 flex items-center gap-1.5">
+                  <Zap className="w-3.5 h-3.5 text-red-400" />
+                  شدة الضغط البدني
+                </span>
+                <span className="text-[10px] text-slate-400">
+                  {tactics.pressingIntensity === 'high' || tactics.pressingIntensity === 'gegenpress'
+                    ? 'افتكاك + / استهلاك لياقة -'
+                    : tactics.pressingIntensity === 'low'
+                    ? 'توفير لياقة +'
+                    : 'ضغط متوازن'}
+                </span>
+              </div>
+              <div className="grid grid-cols-4 gap-1 bg-slate-950 p-1 rounded-xl border border-slate-800">
+                {[
+                  { id: 'low', label: 'منخفض' },
+                  { id: 'balanced', label: 'متوازن' },
+                  { id: 'high', label: 'ضغط عالٍ' },
+                  { id: 'gegenpress', label: 'عكسي خانق' },
+                ].map((item) => (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() => handleTacticChange('pressingIntensity', item.id)}
+                    className={`py-1.5 px-1 rounded-lg text-[10px] font-bold transition-all cursor-pointer ${
+                      tactics.pressingIntensity === item.id
+                        ? 'bg-red-500 text-white font-black shadow'
+                        : 'text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          {/* الهوية التكتيكية (16 أسلوباً مع قفل الرخص التدريبية) */}
+          <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-3.5 space-y-2.5">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold text-white flex items-center gap-1.5">
+                <Brain className="w-4 h-4 text-emerald-400" />
+                الهوية التكتيكية ({Object.keys(ALL_TACTICAL_STYLES).length} أسلوباً)
+              </span>
+              <span className="text-[10px] text-emerald-400 font-bold">
+                النشط: {activeStyleDef?.nameArabic}
+              </span>
+            </div>
+
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 max-h-60 overflow-y-auto pr-0.5">
+              {Object.values(ALL_TACTICAL_STYLES).map((style) => {
+                const unlocked = isTacticalItemUnlocked(style.minLicense, manager.license);
+                const isSelected = (tactics.tacticalStyle || 'total_football') === style.id;
+                const reqLicenseName = getLicenseNameAr(style.minLicense);
+
+                return (
+                  <button
+                    key={style.id}
+                    type="button"
+                    onClick={() => handleSelectTacticalStyle(style.id)}
+                    className={`p-2.5 rounded-xl border text-right transition-all flex flex-col justify-between cursor-pointer ${
+                      isSelected
+                        ? 'bg-emerald-950/60 border-emerald-500 text-white shadow-md'
+                        : unlocked
+                        ? 'bg-slate-950/60 border-slate-800 text-slate-300 hover:border-slate-700'
+                        : 'bg-slate-950/30 border-slate-800/50 text-slate-500 opacity-75'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-1">
+                      <span className="text-xs font-bold truncate">{style.nameArabic}</span>
+                      {!unlocked && <Lock className="w-3.5 h-3.5 text-amber-400 shrink-0" />}
+                    </div>
+                    <p className="text-[10px] text-slate-400 line-clamp-2 mt-1 leading-relaxed">
+                      {style.descArabic}
+                    </p>
+                    {!unlocked && (
+                      <span className="mt-1.5 inline-block text-[9px] font-bold text-amber-300 bg-amber-950/60 border border-amber-800/50 px-1.5 py-0.5 rounded">
+                        مطلوب {reqLicenseName}
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* الملخص التكتيكي الديناميكي المبني مباشرة من ALL_TACTICAL_STYLES لجميع الأنماط الـ 16 */}
+          {activeStyleDef && (
+            <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-3.5 space-y-2">
+              <div className="flex items-center justify-between">
+                <h4 className="text-xs font-black text-white flex items-center gap-1.5">
+                  <Sparkles className="w-4 h-4 text-amber-400" />
+                  التحليل التكتيكي لأسلوب: {activeStyleDef.nameArabic}
+                </h4>
+                <span className="text-[10px] font-mono text-slate-400">
+                  {getLicenseNameAr(activeStyleDef.minLicense)}
+                </span>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+                <div className="bg-emerald-950/30 border border-emerald-800/50 p-2.5 rounded-xl flex items-start gap-2">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+                  <div>
+                    <span className="text-[10px] text-emerald-400 font-bold block">
+                      نقاط القوة والتفوق المضاد
+                    </span>
+                    <p className="text-[11px] text-slate-200 leading-relaxed">
+                      {activeStyleDef.counterAdvantageArabic}
+                    </p>
+                  </div>
+                </div>
+                <div className="bg-amber-950/30 border border-amber-800/50 p-2.5 rounded-xl flex items-start gap-2">
+                  <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                  <div>
+                    <span className="text-[10px] text-amber-400 font-bold block">
+                      تحذير عدم التوافق والمخاطر
+                    </span>
+                    <p className="text-[11px] text-slate-200 leading-relaxed">
+                      {activeStyleDef.mismatchWarningArabic}
+                    </p>
+                  </div>
+                </div>
               </div>
             </div>
           )}
 
-          {/* Bench & Reserve Swapper Sheet */}
-          <div className="bg-slate-900 border border-slate-800 p-4 rounded-3xl space-y-3">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800/80 pb-3">
-              <div className="flex items-center gap-2">
-                <Users className="w-4 h-4 text-emerald-400" />
-                <h3 className="font-bold text-sm text-white">
-                  دكة البدلاء وقائمة الاحتياط ({allPlayers.length - startingPlayers.length} لاعب)
-                </h3>
-              </div>
+          {/* قسم التعليمات المتقدمة القابل للطي */}
+          <div className="bg-slate-900/90 border border-slate-800 rounded-2xl overflow-hidden">
+            <button
+              type="button"
+              onClick={() => setShowAdvancedInstructions((prev) => !prev)}
+              className="w-full p-3.5 flex items-center justify-between text-xs font-black text-white hover:bg-slate-800/50 transition-colors cursor-pointer"
+            >
+              <span className="flex items-center gap-2">
+                <Sliders className="w-4 h-4 text-purple-400" />
+                <span>تعليمات متقدمة (بناء اللعب، مصيدة الضغط، أدوار الأظهرة والهجوم)</span>
+              </span>
+              {showAdvancedInstructions ? (
+                <ChevronUp className="w-4 h-4 text-slate-400" />
+              ) : (
+                <ChevronDown className="w-4 h-4 text-slate-400" />
+              )}
+            </button>
 
-              {/* View Filters */}
-              <div className="flex items-center gap-1 bg-slate-950 p-1 rounded-xl border border-slate-800 text-[11px]">
-                <button
-                  onClick={() => setBenchFilter('all')}
-                  className={`px-2.5 py-1 rounded-lg font-bold transition-all ${
-                    benchFilter === 'all' ? 'bg-emerald-500 text-slate-950' : 'text-slate-400 hover:text-white'
-                  }`}
-                >
-                  الكل ({benchPlayers.length + reservePlayers.length})
-                </button>
-                <button
-                  onClick={() => setBenchFilter('bench')}
-                  className={`px-2.5 py-1 rounded-lg font-bold transition-all ${
-                    benchFilter === 'bench' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-white'
-                  }`}
-                >
-                  🪑 دكة البدلاء ({benchPlayers.length}/7)
-                </button>
-                <button
-                  onClick={() => setBenchFilter('reserves')}
-                  className={`px-2.5 py-1 rounded-lg font-bold transition-all ${
-                    benchFilter === 'reserves' ? 'bg-amber-600 text-white' : 'text-slate-400 hover:text-white'
-                  }`}
-                >
-                  👥 الاحتياط ({reservePlayers.length})
-                </button>
-              </div>
-            </div>
-
-            {/* Players List with Swap Controls */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5 max-h-80 overflow-y-auto pr-1">
-              {(benchFilter === 'all'
-                ? [...benchPlayers, ...reservePlayers]
-                : benchFilter === 'bench'
-                ? benchPlayers
-                : reservePlayers
-              ).map((p) => {
-                const isBench = benchPlayers.some(bp => bp.id === p.id);
-                const role = isBench ? 'bench' : 'reserve';
-                const isSelected = selectedPlayerForSwap?.id === p.id;
-                const isPlayerInjured = !!p.isInjured;
-                const isPlayerSuspended = !!(p.isSuspended || (p.suspensionMatches && p.suspensionMatches > 0));
-
-                return (
-                  <div
-                    key={p.id}
-                    className={`border p-3 rounded-2xl transition-all flex items-center justify-between gap-2 text-xs ${
-                      isSelected
-                        ? 'bg-amber-950/80 border-amber-400 ring-2 ring-amber-400/50 text-white shadow-lg'
-                        : isPlayerInjured || isPlayerSuspended
-                        ? 'border-red-900/80 bg-red-950/20'
-                        : isBench
-                        ? 'border-blue-900/60 bg-blue-950/20 hover:border-blue-700'
-                        : 'border-slate-800 bg-slate-950/70 hover:border-slate-700'
-                    }`}
+            {showAdvancedInstructions && (
+              <div className="p-3.5 pt-0 border-t border-slate-800/80 grid grid-cols-1 sm:grid-cols-2 gap-3 animate-fade-in">
+                <div>
+                  <label className="text-[11px] text-slate-400 font-bold block mb-1">
+                    أسلوب بناء اللعب من الخلف
+                  </label>
+                  <select
+                    value={tactics.buildUpStyle || 'standard'}
+                    onChange={(e) => handleTacticChange('buildUpStyle', e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2 text-xs text-white"
                   >
-                    <div
-                      onClick={() => handlePlayerSwapSelection(p, role)}
-                      className="flex items-center gap-2.5 cursor-pointer flex-1 min-w-0"
-                    >
-                      <div className="flex flex-col items-center justify-center shrink-0">
-                        <span className="text-[8px] text-slate-400 font-bold leading-none mb-0.5">طاقة</span>
-                        <div className={`w-9 h-8 rounded-xl flex items-center justify-center font-black font-mono text-xs border ${
-                          isSelected
-                            ? 'bg-amber-500 text-slate-950 border-amber-300'
-                            : isPlayerInjured || isPlayerSuspended
-                            ? 'bg-red-950 border-red-700 text-red-300'
-                            : p.overallRating >= 80
-                            ? 'bg-amber-500/20 border-amber-400 text-amber-300'
-                            : p.overallRating >= 70
-                            ? 'bg-emerald-950/80 border-emerald-500 text-emerald-300'
-                            : isBench
-                            ? 'bg-blue-900/80 border-blue-600 text-blue-200'
-                            : 'bg-slate-800 border-slate-700 text-slate-300'
-                        }`} title={`طاقة اللاعب: ${p.overallRating}`}>
-                          {p.overallRating}
-                        </div>
-                      </div>
+                    <option value="standard">بناء لعب متوازن</option>
+                    <option value="from_back">تمريرات قصيرة من الخلف</option>
+                    <option value="patient">تدوير صبور للكرة</option>
+                    <option value="direct_pivot">تمرير مباشر للمحور</option>
+                    <option value="channel_balls">كرات طولية في القنوات</option>
+                  </select>
+                </div>
 
-                      <div className="min-w-0">
-                        <div className="font-bold text-white flex items-center gap-1.5 truncate">
-                          <span className="truncate">{p.name}</span>
-                          <span className="text-[10px] text-slate-400 font-mono">#{p.number}</span>
-                          {isPlayerInjured && <span title="مصاب">🚑</span>}
-                          {isPlayerSuspended && <span title="موقوف">🟥</span>}
-                        </div>
+                <div>
+                  <label className="text-[11px] text-slate-400 font-bold block mb-1">
+                    منطقة مصيدة الضغط
+                  </label>
+                  <select
+                    value={tactics.pressingTrap || 'none'}
+                    onChange={(e) => handleTacticChange('pressingTrap', e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2 text-xs text-white"
+                  >
+                    <option value="none">ضغط تقليدي متوازن</option>
+                    <option value="trap_wings">مصيدة الأطراف</option>
+                    <option value="trap_center">مصيدة العمق</option>
+                    <option value="zonal_trap">مصيدة المناطق المتقدمة</option>
+                  </select>
+                </div>
 
-                        <div className="text-[10px] text-slate-400 flex items-center gap-1.5 flex-wrap mt-0.5">
-                          <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold border ${getPositionBadgeClass(p.position)}`}>
-                            {getPositionArabic(p.position)} ({p.position})
-                          </span>
-                          <span className="text-slate-400">
-                            لياقة: <strong className={p.fitness > 75 ? 'text-emerald-400' : 'text-amber-400'}>{p.fitness}%</strong>
-                          </span>
-                          {isPlayerInjured && <span className="text-red-400 font-bold">({p.injuryType || 'إصابة'})</span>}
-                          {isPlayerSuspended && <span className="text-red-400 font-bold">({p.suspensionMatches} مباريات إيقاف)</span>}
-                        </div>
-                      </div>
-                    </div>
+                <div>
+                  <label className="text-[11px] text-slate-400 font-bold block mb-1">
+                    أدوار الأظهرة (RB / LB)
+                  </label>
+                  <select
+                    value={tactics.fullbackRole || 'standard'}
+                    onChange={(e) => handleTacticChange('fullbackRole', e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2 text-xs text-white"
+                  >
+                    <option value="standard">تقدم متوازن حسب الموقف</option>
+                    <option value="overlapping">تقدم هجومي مستمر على الأطراف</option>
+                    <option value="inverted">أظهرة وهمية للعمق (Inverted)</option>
+                    <option value="stay_back">بقاء في الدفاع لتأمين الخلف</option>
+                  </select>
+                </div>
 
-                    {/* Action Buttons for this player */}
-                    <div className="flex items-center gap-1 shrink-0">
-                      {isBench ? (
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleMoveBenchToReserves(p);
-                          }}
-                          title="نقل للاحتياط"
-                          className="px-2 py-1 bg-slate-800 hover:bg-amber-950 hover:text-amber-300 border border-slate-700 rounded-lg text-[10px] font-bold text-slate-300 transition-all"
-                        >
-                          ⬇️ للاحتياط
-                        </button>
-                      ) : (
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleMoveReserveToBench(p);
-                          }}
-                          title="ترقية لدكة البدلاء"
-                          className="px-2 py-1 bg-blue-950/80 hover:bg-blue-900 border border-blue-700/80 rounded-lg text-[10px] font-bold text-blue-200 transition-all"
-                        >
-                          ⬆️ للدكة
-                        </button>
-                      )}
-
-                      <button
-                        onClick={() => handlePlayerSwapSelection(p, role)}
-                        className={`p-1.5 rounded-lg text-xs font-bold transition-all ${
-                          isSelected
-                            ? 'bg-amber-400 text-slate-950'
-                            : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
-                        }`}
-                        title="تبديل مع لاعب آخر"
-                      >
-                        🔄
-                      </button>
-
-                      <button
-                        onClick={() => onSelectPlayer(p)}
-                        className="p-1.5 rounded-lg text-xs font-bold bg-slate-800 text-slate-400 hover:text-white hover:bg-slate-700 transition-all"
-                        title="عرض بطاقة اللاعب"
-                      >
-                        👁️
-                      </button>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
+                <div>
+                  <label className="text-[11px] text-slate-400 font-bold block mb-1">
+                    دور رأس الحربة (ST)
+                  </label>
+                  <select
+                    value={tactics.strikerRole || 'advanced_forward'}
+                    onChange={(e) => handleTacticChange('strikerRole', e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2 text-xs text-white"
+                  >
+                    <option value="advanced_forward">مهاجم صريح متقدم</option>
+                    <option value="poacher">قناص داخل الصندوق (Poacher)</option>
+                    <option value="target_man">محطة هجومية للكرات العالية</option>
+                    <option value="false_9">مهاجم وهمي ساقط للوسط (False 9)</option>
+                    <option value="pressing_forward">مهاجم ضاغط</option>
+                  </select>
+                </div>
+              </div>
+            )}
           </div>
-
         </div>
       )}
 
-      {/* VIEW 2: Tactical Instructions & Style */}
-      {activeSubTab === 'instructions' && (
-        <div className="space-y-4">
-          
-          {/* Tactical Style (طريقة وأسلوب اللعب وفلسفة المدرب) */}
-          <div className="bg-slate-900 border border-slate-800 p-4 rounded-3xl space-y-3">
-            <div className="flex items-center justify-between">
-              <label className="text-xs font-bold text-white flex items-center gap-1.5">
-                <Compass className="w-4 h-4 text-amber-400" />
-                <span>فلسفات وأساليب اللعب العالمية (Tactical Philosophies):</span>
-              </label>
-              <span className="text-[10px] bg-amber-950/80 text-amber-300 border border-amber-800/80 px-2 py-0.5 rounded-full font-bold">
-                رخصتك التدريبية: {manager.license}
-              </span>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-              {Object.values(ALL_TACTICAL_STYLES).map(style => {
-                const isUnlocked = getLicenseRank(manager.license) >= getLicenseRank(style.minLicense);
-                const isSelected = (tactics.tacticalStyle || 'total_football') === style.id;
-                const exp = (manager.tacticalExperience && (manager.tacticalExperience as any)[style.id]) ?? 50;
-
-                return (
-                  <div
-                    key={style.id}
-                    onClick={() => {
-                      if (isUnlocked) {
-                        updateTactics({ ...tactics, tacticalStyle: style.id });
-                        setNotification(`تم اعتماد فلسفة: ${style.nameArabic}`);
-                      } else {
-                        setNotification(`🔒 أسلوب (${style.nameArabic}) يتطلب رخصة تدريب (${style.minLicense}) على الأقل! رخصتك الحالية (${manager.license}).`);
-                      }
-                    }}
-                    className={`p-3.5 rounded-2xl border text-right transition-all cursor-pointer relative overflow-hidden ${
-                      isSelected
-                        ? 'bg-amber-950/80 border-amber-500 text-amber-100 shadow-xl ring-2 ring-amber-500/40'
-                        : isUnlocked
-                        ? 'bg-slate-950/70 border-slate-800 text-slate-300 hover:bg-slate-850 hover:border-slate-700'
-                        : 'bg-slate-950/90 border-slate-900 text-slate-500 hover:border-slate-800 opacity-75'
-                    }`}
-                  >
-                    {/* Header */}
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="space-y-0.5">
-                        <div className="flex items-center gap-1.5">
-                          <span className="font-bold text-xs text-white">{style.nameArabic}</span>
-                          {!isUnlocked && <Lock className="w-3.5 h-3.5 text-amber-500 shrink-0" />}
-                        </div>
-                        <span className="text-[10px] text-slate-400 block">{style.nameEnglish}</span>
-                      </div>
-
-                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0 border ${
-                        isUnlocked
-                          ? 'bg-emerald-950/80 text-emerald-300 border-emerald-500/30'
-                          : 'bg-amber-950/80 text-amber-400 border-amber-500/40'
-                      }`}>
-                        {isUnlocked ? `رخصة ${style.minLicense} ✓` : `مطلوب رخصة ${style.minLicense}`}
-                      </span>
-                    </div>
-
-                    {/* Description */}
-                    <p className="text-[11px] text-slate-400 mt-2 leading-relaxed">{style.descArabic}</p>
-
-                    {/* Synergy & Counter Advantage */}
-                    <div className="mt-2.5 pt-2 border-t border-slate-800/80 text-[10px] space-y-1">
-                      <div className="text-emerald-400 flex items-center gap-1">
-                        <span>⚡ الميزة التكتيكية:</span>
-                        <span className="text-slate-300">{style.counterAdvantageArabic}</span>
-                      </div>
-                      <div className="text-amber-400 flex items-center gap-1">
-                        <span>⚠️ الحذر الفني:</span>
-                        <span className="text-slate-400">{style.mismatchWarningArabic}</span>
-                      </div>
-                    </div>
-
-                    {/* Mastery XP Progress Bar */}
-                    {isUnlocked && (
-                      <div className="mt-2.5 pt-1.5 border-t border-slate-800/60 flex items-center justify-between text-[10px]">
-                        <span className="text-slate-400">معدل إتقان الخطة:</span>
-                        <div className="flex items-center gap-1.5">
-                          <div className="w-20 bg-slate-800 rounded-full h-1.5 overflow-hidden">
-                            <div
-                              className="h-full bg-gradient-to-r from-cyan-500 to-emerald-500 rounded-full"
-                              style={{ width: `${Math.min(100, exp)}%` }}
-                            />
-                          </div>
-                          <span className="font-mono font-bold text-cyan-400">{exp}/100</span>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* Advanced Tactical Roles & Instructions */}
-          <div className="bg-slate-900 border border-slate-800 p-4 rounded-3xl space-y-4">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-2.5">
-              <label className="text-xs font-bold text-white flex items-center gap-1.5">
-                <Layers className="w-4 h-4 text-cyan-400" />
-                <span>التعليمات التكتيكية المتقدمة (Advanced Instructions):</span>
-              </label>
-              <span className="text-[10px] bg-cyan-950 text-cyan-300 border border-cyan-800/80 px-2 py-0.5 rounded-full font-bold">
-                تحكم احترافي
-              </span>
-            </div>
-
-            {/* Build-up Style */}
-            <div className="space-y-2">
-              <span className="text-xs font-bold text-slate-300 flex items-center gap-1.5">
-                <span>1. نمط بناء اللعب من الخلف (Build-up Style):</span>
-              </span>
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
-                {[
-                  { id: 'standard', label: 'تدرج كروي متوازن', desc: 'خيارات تمرير مفتوحة' },
-                  { id: 'from_back', label: 'تحضير قصير صبور', desc: 'بناء مع حارس المرمى' },
-                  { id: 'direct_pivot', label: 'عمودي نحو المحطة', desc: 'تخطي وسط الملعب' },
-                  { id: 'channel_balls', label: 'عبر أروقة الأطراف', desc: 'استغلال المساحات الجانبية' },
-                ].map(opt => (
-                  <button
-                    key={opt.id}
-                    onClick={() => updateTactics({ ...tactics, buildUpStyle: opt.id as any })}
-                    className={`p-2.5 rounded-2xl border text-right transition-all cursor-pointer ${
-                      (tactics.buildUpStyle || 'standard') === opt.id
-                        ? 'bg-cyan-950 border-cyan-500 text-cyan-200 ring-1 ring-cyan-500/50'
-                        : 'bg-slate-950/70 border-slate-800 text-slate-400 hover:text-white hover:bg-slate-800'
-                    }`}
-                  >
-                    <div className="font-bold text-white text-xs">{opt.label}</div>
-                    <div className="text-[10px] text-slate-400 mt-0.5">{opt.desc}</div>
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Pressing Trap */}
-            <div className="space-y-2">
-              <span className="text-xs font-bold text-slate-300 flex items-center gap-1.5">
-                <span>2. مصيدة الضغط واسترجاع الكرة (Pressing Trap):</span>
-              </span>
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
-                {[
-                  { id: 'none', label: 'ضغط متوازن بدون فخ', desc: 'تغطية متساوية للملعب' },
-                  { id: 'trap_wings', label: 'حصار على خط التماس', desc: 'إجبار الخصم على الأطراف' },
-                  { id: 'trap_center', label: 'خنق العمق والوسط', desc: 'افتكاك الكرة بالدائرة' },
-                  { id: 'zonal_trap', label: 'مصيدة المساحات النصفية', desc: 'عزل صانعي ألعاب الخصم' },
-                ].map(opt => (
-                  <button
-                    key={opt.id}
-                    onClick={() => updateTactics({ ...tactics, pressingTrap: opt.id as any })}
-                    className={`p-2.5 rounded-2xl border text-right transition-all cursor-pointer ${
-                      (tactics.pressingTrap || 'none') === opt.id
-                        ? 'bg-amber-950 border-amber-500 text-amber-200 ring-1 ring-amber-500/50'
-                        : 'bg-slate-950/70 border-slate-800 text-slate-400 hover:text-white hover:bg-slate-800'
-                    }`}
-                  >
-                    <div className="font-bold text-white text-xs">{opt.label}</div>
-                    <div className="text-[10px] text-slate-400 mt-0.5">{opt.desc}</div>
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Fullback Roles */}
-            <div className="space-y-2">
-              <span className="text-xs font-bold text-slate-300 flex items-center gap-1.5">
-                <span>3. توظيف الأظهرة (Fullback Roles):</span>
-              </span>
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
-                {[
-                  { id: 'standard', label: 'ظهير تقليدي', desc: 'مساندة متزنة دفاعاً وهجوماً' },
-                  { id: 'overlapping', label: 'ظهير طائر متداخل', desc: 'انطلاقات هجومية وعرضيات' },
-                  { id: 'inverted', label: 'ظهير مقلوب للعمق', desc: 'الدخول كلاعب وسط إضافي' },
-                  { id: 'stay_back', label: 'التزام دفاعي صارم', desc: 'تأمين المرتدات والبقاء بالخلف' },
-                ].map(opt => (
-                  <button
-                    key={opt.id}
-                    onClick={() => updateTactics({ ...tactics, fullbackRole: opt.id as any })}
-                    className={`p-2.5 rounded-2xl border text-right transition-all cursor-pointer ${
-                      (tactics.fullbackRole || 'standard') === opt.id
-                        ? 'bg-emerald-950 border-emerald-500 text-emerald-200 ring-1 ring-emerald-500/50'
-                        : 'bg-slate-950/70 border-slate-800 text-slate-400 hover:text-white hover:bg-slate-800'
-                    }`}
-                  >
-                    <div className="font-bold text-white text-xs">{opt.label}</div>
-                    <div className="text-[10px] text-slate-400 mt-0.5">{opt.desc}</div>
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Striker Roles */}
-            <div className="space-y-2">
-              <span className="text-xs font-bold text-slate-300 flex items-center gap-1.5">
-                <span>4. دور رأس الحربة (Striker Role):</span>
-              </span>
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
-                {[
-                  { id: 'advanced_forward', label: 'مهاجم متقدم صريح', desc: 'الجري في المساحات والتسجيل' },
-                  { id: 'target_man', label: 'مهاجم محطة بدني', desc: 'الاستلام بظهره وربح الهوائيات' },
-                  { id: 'false_9', label: 'مهاجم وهمي ساقط', desc: 'النزول للوسط وتفريغ المساحات' },
-                  { id: 'pressing_forward', label: 'مهاجم ضاغط مقاتل', desc: 'إزعاج مدافعي الخصم ومطاردتهم' },
-                ].map(opt => (
-                  <button
-                    key={opt.id}
-                    onClick={() => updateTactics({ ...tactics, strikerRole: opt.id as any })}
-                    className={`p-2.5 rounded-2xl border text-right transition-all cursor-pointer ${
-                      (tactics.strikerRole || 'advanced_forward') === opt.id
-                        ? 'bg-rose-950 border-rose-500 text-rose-200 ring-1 ring-rose-500/50'
-                        : 'bg-slate-950/70 border-slate-800 text-slate-400 hover:text-white hover:bg-slate-800'
-                    }`}
-                  >
-                    <div className="font-bold text-white text-xs">{opt.label}</div>
-                    <div className="text-[10px] text-slate-400 mt-0.5">{opt.desc}</div>
-                  </button>
-                ))}
-              </div>
-            </div>
-          </div>
-
-          {/* Mentality */}
-          <div className="bg-slate-900 border border-slate-800 p-4 rounded-3xl space-y-3">
-            <label className="text-xs font-bold text-slate-300 flex items-center gap-1.5">
-              <Shield className="w-4 h-4 text-emerald-400" />
-              <span>العقلية والنهج التكتيكي العام (Mentality):</span>
-            </label>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-              {[
-                { id: 'ultra_defensive', label: 'دفاع متكتل (أوتوبيس)', desc: 'تراجع شامل والاعتماد على الكرات الطويلة العشوائية' },
-                { id: 'defensive', label: 'دفاع حذر ومرتدات', desc: 'تأمين الخط الخلفي واستغلال سرعة الأجنحة' },
-                { id: 'balanced', label: 'توازن تكتيكي منضبط', desc: 'تحكم في وسط الملعب وموازنة الهجوم والدفاع' },
-                { id: 'attacking', label: 'هجومي منظم وضاغط', desc: 'زيادة عددية في مناطق الخصم والبحث عن الأهداف' },
-                { id: 'ultra_attacking', label: 'هجوم شامل كاسح', desc: 'اندفاع كامل لجميع الخطوط لتسجيل أهداف حاسمة' },
-              ].map(opt => (
-                <button
-                  key={opt.id}
-                  onClick={() => updateTactics({ ...tactics, mentality: opt.id as TacticalMentality })}
-                  className={`p-3 rounded-2xl border text-right transition-all ${
-                    tactics.mentality === opt.id
-                      ? 'bg-emerald-950 border-emerald-500 text-emerald-300'
-                      : 'bg-slate-950/60 border-slate-800 text-slate-300 hover:bg-slate-800'
-                  }`}
-                >
-                  <div className="font-bold text-xs text-white">{opt.label}</div>
-                  <div className="text-[11px] text-slate-400 mt-0.5">{opt.desc}</div>
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* Passing Style */}
-          <div className="bg-slate-900 border border-slate-800 p-4 rounded-3xl space-y-3">
-            <label className="text-xs font-bold text-slate-300 flex items-center gap-1.5">
-              <Zap className="w-4 h-4 text-amber-400" />
-              <span>أسلوب التمرير وبناء الهجمة (Passing Style):</span>
-            </label>
-
-            <div className="grid grid-cols-3 gap-2 text-center text-xs">
-              {[
-                { id: 'short', label: 'تمريرات قصيرة (تيكي تاكا)' },
-                { id: 'direct', label: 'لعب مباشر وسريع' },
-                { id: 'long_balls', label: 'كرات طولية وعالية' },
-              ].map(opt => (
-                <button
-                  key={opt.id}
-                  onClick={() => updateTactics({ ...tactics, passingStyle: opt.id as PassingStyle })}
-                  className={`p-3 rounded-2xl border font-bold transition-all ${
-                    tactics.passingStyle === opt.id
-                      ? 'bg-amber-950 border-amber-500 text-amber-300'
-                      : 'bg-slate-950/60 border-slate-800 text-slate-400 hover:text-white'
-                  }`}
-                >
-                  {opt.label}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* Pressing Intensity */}
-          <div className="bg-slate-900 border border-slate-800 p-4 rounded-3xl space-y-3">
-            <label className="text-xs font-bold text-slate-300 flex items-center gap-1.5">
-              <Activity className="w-4 h-4 text-red-400" />
-              <span>كثافة الضغط والافتكاك (Pressing Intensity):</span>
-            </label>
-
-            <div className="grid grid-cols-3 gap-2 text-center text-xs">
-              {[
-                { id: 'high', label: 'ضغط عالي شرس' },
-                { id: 'balanced', label: 'ضغط متوازن في الوسط' },
-                { id: 'low', label: 'ارتداد وهدوء دفاعي' },
-              ].map(opt => (
-                <button
-                  key={opt.id}
-                  onClick={() => updateTactics({ ...tactics, pressingIntensity: opt.id as PressingIntensity })}
-                  className={`p-3 rounded-2xl border font-bold transition-all ${
-                    tactics.pressingIntensity === opt.id
-                      ? 'bg-red-950 border-red-500 text-red-300'
-                      : 'bg-slate-950/60 border-slate-800 text-slate-400 hover:text-white'
-                  }`}
-                >
-                  {opt.label}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* Tactical Advice & Synergy Insight for the Manager */}
-          <div className="bg-slate-900/90 border border-amber-500/30 p-4 rounded-3xl space-y-3 shadow-lg">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-bold text-amber-300 flex items-center gap-1.5">
-                <Sparkles className="w-4 h-4 text-amber-400" />
-                <span>التقرير التكتيكي الفني للمدرب (Tactical Briefing):</span>
-              </span>
-              <span className="text-[10px] bg-slate-800 text-slate-300 px-2 py-0.5 rounded-full border border-slate-700">
-                مؤشرات تفصيلية
-              </span>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 text-[11px]">
-              <div className="bg-slate-950/80 p-3 rounded-2xl border border-slate-800 space-y-1">
-                <div className="font-bold text-white flex items-center gap-1.5">
-                  <span>🎯 نقطة القوة الأساسية:</span>
-                </div>
-                <div className="text-slate-300 leading-relaxed">
-                  {(tactics.tacticalStyle as any) === 'counter_attack' || (tactics as any).style === 'counter_attack' || (tactics.tacticalStyle as any) === 'direct_counter'
-                    ? 'المرتدات الخاطفة تباغت المنافسين الضاغطين وتصنع مساحات في الثلث الأخير خلف دفاعاتهم.'
-                    : tactics.tacticalStyle === 'catenaccio' || (tactics as any).style === 'park_the_bus'
-                    ? 'تكتل دفاعي حديدي يمنع تسديدات الخصم داخل المنطقة ويقلل تحويل الفرص لأهداف بنسبة كبيرة.'
-                    : tactics.tacticalStyle === 'tiki_taka'
-                    ? 'استحواذ مكثف على دائرة الوسط، يحد من خطورة هجمات الخصم ويصنع فرصاً نوعية بالصبر.'
-                    : tactics.tacticalStyle === 'wing_play'
-                    ? 'استغلال الأروقة والأطراف لإرسال عرضيات متقنة للمهاجمين، فعال جداً ضد الخطط الضيقة.'
-                    : 'توازن منضبط يوزع الجهد على كافة خطوط الملعب ويمنع المفاجآت التكتيكية.'}
-                </div>
-              </div>
-
-              <div className="bg-slate-950/80 p-3 rounded-2xl border border-slate-800 space-y-1">
-                <div className="font-bold text-white flex items-center gap-1.5">
-                  <span>⚠️ التنبيه والجانب البدني:</span>
-                </div>
-                <div className="text-slate-300 leading-relaxed">
-                  {tactics.pressingIntensity === 'high' || tactics.pressingIntensity === 'gegenpress'
-                    ? 'الضغط العالي يستنزف اللياقة بسرعة! احرص على إراحة اللاعبين المتعبين بين الدقيقتين 60 و75.'
-                    : tactics.mentality === 'ultra_attacking'
-                    ? 'الاندفاع الهجومي الكاسح يترك مساحات شاسعة خلف الدفاع، احذر من مرتدات الخصم السريعة.'
-                    : tactics.mentality === 'defensive' || tactics.mentality === 'ultra_defensive'
-                    ? 'التراجع الدفاعي يقلل محاولاتك الهجومية، ستحتاج لاستغلال الكرات الثابتة أو انفراد حاسم.'
-                    : 'حالة بدنية وتكتيكية متزنة تساعدك على قراءة أحداث المباراة والتدخل في الوقت المناسب.'}
-                </div>
-              </div>
-            </div>
-          </div>
-
-        </div>
-      )}
-
-      {/* VIEW 3: Roles & Set Pieces */}
+      {/* ==================== 3) تبويب الأدوار والكرات الثابتة ==================== */}
       {activeSubTab === 'roles' && (
-        <div className="bg-slate-900 border border-slate-800 p-4 rounded-3xl space-y-4">
-          <h3 className="font-bold text-sm text-white flex items-center gap-1.5">
-            <Crown className="w-4 h-4 text-amber-400" />
-            <span>تحديد قائد الفريق ومنفذي الكرات الثابتة</span>
-          </h3>
+        <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-4 space-y-4">
+          <div className="flex items-center justify-between">
+            <h3 className="text-sm font-black text-white flex items-center gap-2">
+              <Award className="w-4 h-4 text-amber-400" />
+              تعيين القائد ومتخصصي الكرات الثابتة
+            </h3>
+            <span className="text-[10px] text-slate-400">
+              مع ترشيح تلقائي لأفضل 3 لاعبين لكل دور
+            </span>
+          </div>
 
-          <div className="space-y-3 text-xs">
-            {/* Captain */}
-            <div className="space-y-1">
-              <label className="text-slate-300 font-bold flex items-center gap-1.5">
-                <Crown className="w-3.5 h-3.5 text-amber-400" />
-                <span>قائد الفريق (Captain):</span>
-              </label>
-              <select
-                value={tactics.captainId}
-                onChange={(e) => setCaptainAndSetPieces({ captainId: e.target.value })}
-                className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2.5 text-white focus:outline-none focus:border-amber-400"
-              >
-                {allPlayers.map(p => (
-                  <option key={p.id} value={p.id}>
-                    {p.name} ({p.position}) - خبرة {p.age} سنة - تقييم {p.overallRating}
-                  </option>
-                ))}
-              </select>
-            </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {[
+              {
+                key: 'captainId' as const,
+                label: 'قائد الفريق (الكابتن)',
+                badge: 'C',
+                scoreFn: (p: Player) => p.overallRating * 2 + p.age * 1.5,
+                statLabel: (p: Player) => `OVR ${p.overallRating} • ${p.age} سنة`,
+              },
+              {
+                key: 'penaltyTakerId' as const,
+                label: 'مسدد ركلات الجزاء',
+                badge: 'PK',
+                scoreFn: (p: Player) => (p.attributes?.shooting || 50) * 2 + p.overallRating,
+                statLabel: (p: Player) => `تسديد ${p.attributes?.shooting || 50}`,
+              },
+              {
+                key: 'freeKickTakerId' as const,
+                label: 'مسدد الركلات الحرة',
+                badge: 'FK',
+                scoreFn: (p: Player) =>
+                  (p.attributes?.shooting || 50) + (p.attributes?.passing || 50),
+                statLabel: (p: Player) =>
+                  `تسديد ${p.attributes?.shooting || 50} • تمرير ${p.attributes?.passing || 50}`,
+              },
+              {
+                key: 'cornerTakerId' as const,
+                label: 'منفذ الركنيات',
+                badge: 'CK',
+                scoreFn: (p: Player) => (p.attributes?.passing || 50) * 2 + p.overallRating,
+                statLabel: (p: Player) => `تمرير ${p.attributes?.passing || 50}`,
+              },
+            ].map((role) => {
+              const currentPlayer =
+                allPlayers.find((p) => p.id === tactics[role.key]) || allPlayers[0];
+              const topCandidates = [...allPlayers]
+                .filter((p) => p.positionCategory !== 'GK' || role.key === 'captainId')
+                .sort((a, b) => role.scoreFn(b) - role.scoreFn(a))
+                .slice(0, 3);
 
-            {/* Penalty Taker */}
-            <div className="space-y-1">
-              <label className="text-slate-300 font-bold flex items-center gap-1.5">
-                <Target className="w-3.5 h-3.5 text-red-400" />
-                <span>مسدد ضربات الجزاء الأول:</span>
-              </label>
-              <select
-                value={tactics.penaltyTakerId}
-                onChange={(e) => setCaptainAndSetPieces({ penaltyTakerId: e.target.value })}
-                className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2.5 text-white focus:outline-none focus:border-red-400"
-              >
-                {allPlayers.map(p => (
-                  <option key={p.id} value={p.id}>
-                    {p.name} ({p.position}) - تسديد {p.attributes.shooting}
-                  </option>
-                ))}
-              </select>
-            </div>
+              return (
+                <div
+                  key={role.key}
+                  className="bg-slate-950/70 border border-slate-800 rounded-2xl p-3 space-y-2.5"
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-slate-200">{role.label}</span>
+                    <span className="px-2 py-0.5 rounded-lg bg-amber-500/20 text-amber-300 border border-amber-500/40 font-black font-mono text-[10px]">
+                      {role.badge}
+                    </span>
+                  </div>
 
-            {/* Free Kicks */}
-            <div className="space-y-1">
-              <label className="text-slate-300 font-bold flex items-center gap-1.5">
-                <Zap className="w-3.5 h-3.5 text-emerald-400" />
-                <span>مسدد الضربات الحرة المباشرة:</span>
-              </label>
-              <select
-                value={tactics.freeKickTakerId}
-                onChange={(e) => setCaptainAndSetPieces({ freeKickTakerId: e.target.value })}
-                className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2.5 text-white focus:outline-none focus:border-emerald-400"
-              >
-                {allPlayers.map(p => (
-                  <option key={p.id} value={p.id}>
-                    {p.name} ({p.position}) - تمرير {p.attributes.passing} - تسديد {p.attributes.shooting}
-                  </option>
-                ))}
-              </select>
-            </div>
+                  {currentPlayer && (
+                    <div className="flex items-center gap-2.5 bg-slate-900/90 p-2 rounded-xl border border-slate-800">
+                      <PlayerAvatar
+                        player={currentPlayer}
+                        primaryColor={userClub.primaryColor}
+                        secondaryColor={userClub.secondaryColor}
+                        size="sm"
+                      />
+                      <div className="min-w-0 flex-1">
+                        <div className="text-xs font-extrabold text-white truncate tracking-tight">
+                          {formatPlayerDualName(currentPlayer.name)}{' '}
+                          <span dir="ltr" className="inline-block font-mono text-slate-400 font-bold">
+                            (#{currentPlayer.number})
+                          </span>
+                        </div>
+                        <div className="text-[10px] text-emerald-400 font-mono">
+                          {role.statLabel(currentPlayer)}
+                        </div>
+                      </div>
+                    </div>
+                  )}
 
-            {/* Corners */}
-            <div className="space-y-1">
-              <label className="text-slate-300 font-bold flex items-center gap-1.5">
-                <Award className="w-3.5 h-3.5 text-blue-400" />
-                <span>منفذ الضربات الركنية:</span>
-              </label>
-              <select
-                value={tactics.cornerTakerId}
-                onChange={(e) => setCaptainAndSetPieces({ cornerTakerId: e.target.value })}
-                className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2.5 text-white focus:outline-none focus:border-blue-400"
-              >
-                {allPlayers.map(p => (
-                  <option key={p.id} value={p.id}>
-                    {p.name} ({p.position}) - تمرير وعرضيات {p.attributes.passing}
-                  </option>
-                ))}
-              </select>
-            </div>
+                  <select
+                    value={tactics[role.key] || ''}
+                    onChange={(e) => handleTacticChange(role.key, e.target.value)}
+                    className="w-full bg-slate-900 border border-slate-800 rounded-xl p-2 text-xs font-bold text-white focus:outline-none focus:border-emerald-500"
+                  >
+                    {allPlayers.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {formatPlayerDualName(p.name)} (#{p.number} - {p.position}) — {role.statLabel(p)}
+                      </option>
+                    ))}
+                  </select>
+
+                  {/* أفضل 3 مرشحين مقترحين */}
+                  <div className="space-y-1">
+                    <span className="text-[10px] text-slate-400 block">أفضل المرشحين:</span>
+                    <div className="flex flex-wrap gap-1">
+                      {topCandidates.map((cand) => (
+                        <button
+                          key={cand.id}
+                          type="button"
+                          onClick={() => handleTacticChange(role.key, cand.id)}
+                          className={`px-2 py-1 rounded-lg text-[10px] font-bold border transition-all cursor-pointer ${
+                            tactics[role.key] === cand.id
+                              ? 'bg-emerald-500 text-slate-950 border-emerald-400'
+                              : 'bg-slate-900 text-slate-300 border-slate-800 hover:border-slate-700'
+                          }`}
+                        >
+                          {formatPlayerDualName(cand.name)} ({role.statLabel(cand)})
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
           </div>
         </div>
       )}
 
+      {/* ==================== نافذة اختيار التشكيلة (Bottom Sheet) ==================== */}
+      {formationSheetOpen && (
+        <ModalPortal>
+          <div
+            className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4"
+            dir="rtl"
+          >
+            <div className="bg-slate-900 border-t sm:border border-slate-800 w-full max-w-lg rounded-t-3xl sm:rounded-3xl p-4 space-y-3 shadow-2xl max-h-[85vh] flex flex-col">
+              <div className="flex items-center justify-between border-b border-slate-800 pb-2.5">
+                <div>
+                  <h3 className="text-sm font-black text-white">
+                    اختر خطة الانتشار ({totalFormationsCount} تشكيلة)
+                  </h3>
+                  <span className="text-[10px] text-slate-400">
+                    يتم إعادة توزيع اللاعبين الأساسيين تلقائياً حسب مراكز التشكيلة الجديدة
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setFormationSheetOpen(false)}
+                  className="p-1.5 rounded-xl bg-slate-800 text-slate-400 hover:text-white"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              {/* فلاتر فئات التشكيلات */}
+              <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar py-0.5">
+                {[
+                  { id: 'ALL', label: 'الكل' },
+                  { id: 'BAL_4', label: 'متوازنة (4 دفاع)' },
+                  { id: 'ATK_3', label: 'هجومية (3 دفاع)' },
+                  { id: 'DEF_5', label: 'دفاعية (5 دفاع)' },
+                  { id: 'ELITE', label: 'نخبوية (برخصة متقدمة)' },
+                ].map((cat) => (
+                  <button
+                    key={cat.id}
+                    type="button"
+                    onClick={() => setFormationCatFilter(cat.id as FormationCategoryFilter)}
+                    className={`px-2.5 py-1 rounded-xl text-[11px] font-bold whitespace-nowrap cursor-pointer ${
+                      formationCatFilter === cat.id
+                        ? 'bg-emerald-500 text-slate-950'
+                        : 'bg-slate-950 text-slate-400 border border-slate-800'
+                    }`}
+                  >
+                    {cat.label}
+                  </button>
+                ))}
+              </div>
+
+              {/* شبكة التشكيلات مع معاينة مصغرة لنقاط الـ 11 لاعباً */}
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 overflow-y-auto pr-0.5 flex-1">
+                {filteredFormationDefinitions.map((fDef) => {
+                  const unlocked = isTacticalItemUnlocked(fDef.minLicense, manager.license);
+                  const isCurrent = currentFormation === fDef.id;
+                  const fSlots = FORMATION_SLOTS[fDef.id] || FORMATION_SLOTS['4-3-3'];
+                  const reqLicenseName = getLicenseNameAr(fDef.minLicense);
+
+                  return (
+                    <button
+                      key={fDef.id}
+                      type="button"
+                      onClick={() => handleSelectFormation(fDef.id)}
+                      className={`p-2.5 rounded-2xl border text-right transition-all flex flex-col justify-between cursor-pointer ${
+                        isCurrent
+                          ? 'bg-emerald-950/70 border-emerald-500 text-white shadow-lg'
+                          : unlocked
+                          ? 'bg-slate-950/80 border-slate-800 hover:border-slate-700 text-slate-200'
+                          : 'bg-slate-950/40 border-slate-800/50 text-slate-500 opacity-75'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between w-full">
+                        <span className="font-mono font-black text-xs text-emerald-400">
+                          {fDef.id}
+                        </span>
+                        {!unlocked && <Lock className="w-3.5 h-3.5 text-amber-400" />}
+                      </div>
+
+                      <div className="text-[11px] font-bold truncate mt-0.5">
+                        {fDef.nameArabic}
+                      </div>
+
+                      {/* معاينة مصغرة للملعب (11 نقطة) */}
+                      <div className="relative w-full h-16 bg-emerald-950/70 border border-emerald-800/40 rounded-lg my-1.5 overflow-hidden">
+                        {fSlots.map((s, idx) => (
+                          <span
+                            key={idx}
+                            style={{ top: `${s.top}%`, left: `${s.left}%` }}
+                            className={`absolute -translate-x-1/2 -translate-y-1/2 w-1.5 h-1.5 rounded-full ${
+                              s.pos === 'GK' ? 'bg-amber-400' : 'bg-emerald-300'
+                            }`}
+                          />
+                        ))}
+                      </div>
+
+                      {!unlocked ? (
+                        <span className="text-[9px] font-bold text-amber-300 bg-amber-950/70 border border-amber-800/50 px-1.5 py-0.5 rounded block text-center">
+                          مطلوب {reqLicenseName}
+                        </span>
+                      ) : (
+                        <span className="text-[9px] text-slate-400 truncate block">
+                          {fDef.strengthsArabic}
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        </ModalPortal>
+      )}
+
+      {/* ==================== نافذة ملء الخانة الشاغرة (Empty Slot Picker) ==================== */}
+      {emptySlotPickerIdx !== null && (
+        <ModalPortal>
+          <div
+            className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4"
+            dir="rtl"
+          >
+            <div className="bg-slate-900 border-t sm:border border-slate-800 w-full max-w-md rounded-t-3xl sm:rounded-3xl p-4 space-y-3 shadow-2xl max-h-[80vh] flex flex-col">
+              <div className="flex items-center justify-between border-b border-slate-800 pb-2.5">
+                <div>
+                  <h3 className="text-sm font-black text-white">
+                    اختر لاعباً لمركز {slots[emptySlotPickerIdx]?.pos} (
+                    {getPositionArabic((slots[emptySlotPickerIdx]?.pos || 'CM') as any)})
+                  </h3>
+                  <span className="text-[10px] text-slate-400">
+                    مرتبون حسب مدى الملاءمة للمركز والتقييم واللياقة
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setEmptySlotPickerIdx(null)}
+                  className="p-1.5 rounded-xl bg-slate-800 text-slate-400 hover:text-white"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <div className="space-y-1.5 overflow-y-auto flex-1">
+                {[...nonStartingPlayers]
+                  .filter((p) => !isPlayerInjured(p) && !isPlayerSuspended(p))
+                  .sort((a, b) => {
+                    const targetPos = slots[emptySlotPickerIdx]?.pos || 'CM';
+                    const scoreA =
+                      getPositionFitScore(a, targetPos) * 10 + a.overallRating * 2 + a.fitness * 0.2;
+                    const scoreB =
+                      getPositionFitScore(b, targetPos) * 10 + b.overallRating * 2 + b.fitness * 0.2;
+                    return scoreB - scoreA;
+                  })
+                  .map((cand) => {
+                    const targetPos = slots[emptySlotPickerIdx]?.pos || 'CM';
+                    const fit = getPositionFitScore(cand, targetPos);
+                    return (
+                      <button
+                        key={cand.id}
+                        type="button"
+                        onClick={() => assignPlayerToSlotIndex(emptySlotPickerIdx, cand)}
+                        className="w-full p-2.5 rounded-2xl bg-slate-950/80 hover:bg-slate-800 border border-slate-800 flex items-center justify-between gap-2 text-right transition-all cursor-pointer"
+                      >
+                        <div className="flex items-center gap-2.5 min-w-0">
+                          <PlayerAvatar
+                            player={cand}
+                            primaryColor={userClub.primaryColor}
+                            secondaryColor={userClub.secondaryColor}
+                            size="sm"
+                          />
+                          <div className="min-w-0">
+                            <div className="text-xs font-extrabold text-white truncate tracking-tight">
+                              {formatPlayerDualName(cand.name)}{' '}
+                              <span dir="ltr" className="inline-block font-mono text-slate-400 font-bold">
+                                (#{cand.number})
+                              </span>
+                            </div>
+                            <div className="text-[10px] text-slate-400">
+                              المركز: {cand.position} • اللياقة: {cand.fitness}%
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-2 shrink-0">
+                          <span
+                            className={`text-[10px] font-bold px-2 py-0.5 rounded-lg ${
+                              fit >= 88
+                                ? 'bg-emerald-950 text-emerald-300 border border-emerald-700'
+                                : fit >= 70
+                                ? 'bg-sky-950 text-sky-300 border border-sky-700'
+                                : 'bg-amber-950 text-amber-300 border border-amber-700'
+                            }`}
+                          >
+                            {fit >= 88 ? 'مطابق تماماً' : fit >= 70 ? 'نفس الخط' : 'خارج المركز'}
+                          </span>
+                          <span className="font-mono font-black text-xs text-emerald-400">
+                            {cand.overallRating}
+                          </span>
+                        </div>
+                      </button>
+                    );
+                  })}
+              </div>
+            </div>
+          </div>
+        </ModalPortal>
+      )}
+
+      {/* ==================== نافذة تأكيد "أفضل تشكيل" ==================== */}
+      {confirmAutoPickOpen && (
+        <ModalPortal>
+          <div
+            className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4"
+            dir="rtl"
+          >
+            <div className="bg-slate-900 border border-slate-800 w-full max-w-sm rounded-3xl p-5 space-y-4 shadow-2xl text-center">
+              <div className="w-12 h-12 rounded-2xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center mx-auto">
+                <RotateCcw className="w-6 h-6" />
+              </div>
+              <div className="space-y-1">
+                <h3 className="text-sm font-black text-white">
+                  تعيين أفضل تشكيل تلقائياً ({currentFormation})؟
+                </h3>
+                <p className="text-xs text-slate-400 leading-relaxed">
+                  سيقوم المساعد الفني باختيار أفضل 11 لاعباً أساسياً و7 بدلاء أصحاء وفقاً لمراكز التشكيلة الحالية واللياقة البدنية. يمكنك التراجع بزر "تراجع" بعد التنفيذ.
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleExecuteAutoPick}
+                  className="flex-1 py-2.5 rounded-2xl bg-emerald-500 hover:bg-emerald-600 text-slate-950 font-black text-xs cursor-pointer"
+                >
+                  نعم، رتّب التشكيل
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setConfirmAutoPickOpen(false)}
+                  className="px-4 py-2.5 rounded-2xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs cursor-pointer"
+                >
+                  إلغاء
+                </button>
+              </div>
+            </div>
+          </div>
+        </ModalPortal>
+      )}
     </div>
   );
 };
