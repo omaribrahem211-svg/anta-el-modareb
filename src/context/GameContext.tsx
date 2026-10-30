@@ -801,6 +801,16 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     return club;
   }, [teams, manager?.currentClubId]);
 
+  const teamsRef = useRef<Club[]>(teams);
+  useEffect(() => {
+    teamsRef.current = teams;
+  }, [teams]);
+
+  const userTacticsRef = useRef<TeamTactics | undefined>(userClub?.tactics);
+  useEffect(() => {
+    userTacticsRef.current = userClub?.tactics;
+  }, [userClub?.tactics]);
+
   const [standings, setStandings] = useState<LeagueStanding[]>(() => {
     try {
       const saved = localStorage.getItem(`${STORAGE_KEY}_standings`);
@@ -1734,21 +1744,79 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   // Migrate legacy localStorage _active_live_match (if present) and restore any active in-progress live match from IndexedDB on initial mount
   useEffect(() => {
     let cancelled = false;
-    const isValidSavedLiveMatch = (candidate: any): boolean =>
-      Boolean(candidate) &&
-      Boolean(candidate.fixture) &&
-      typeof candidate.homeTeam === 'object' &&
-      candidate.homeTeam !== null &&
-      typeof candidate.awayTeam === 'object' &&
-      candidate.awayTeam !== null &&
-      Array.isArray(candidate.events) &&
-      typeof candidate.stats === 'object' &&
-      candidate.stats !== null &&
-      typeof candidate.currentMinute === 'number' &&
-      candidate.currentMinute >= 0 &&
-      candidate.currentMinute < 90 &&
-      candidate.fixture.isPlayed !== true &&
-      candidate.isFinished !== true;
+
+    const restoreMatchFromCandidate = (candidate: any): any | null => {
+      try {
+        if (!candidate || !candidate.fixture) return null;
+        if (typeof candidate.currentMinute !== 'number' || candidate.currentMinute < 0 || candidate.currentMinute >= 90) return null;
+        if (candidate.fixture.isPlayed === true || candidate.isFinished === true) return null;
+
+        // Backward compatibility: legacy saves with complete team squad objects
+        if (
+          candidate.homeTeam &&
+          typeof candidate.homeTeam === 'object' &&
+          Array.isArray(candidate.homeTeam.players) &&
+          candidate.homeTeam.players.length > 0 &&
+          candidate.awayTeam &&
+          typeof candidate.awayTeam === 'object' &&
+          Array.isArray(candidate.awayTeam.players) &&
+          candidate.awayTeam.players.length > 0
+        ) {
+          return {
+            ...candidate,
+            isPlaying: false,
+          };
+        }
+
+        // Lightweight format: Reconstruct teams from current teams state or world database
+        const currentTeams = teamsRef.current?.length ? teamsRef.current : teams;
+        const homeId = candidate.homeTeamId || candidate.homeTeam?.id || candidate.fixture.homeTeamId;
+        const awayId = candidate.awayTeamId || candidate.awayTeam?.id || candidate.fixture.awayTeamId;
+
+        if (!homeId || !awayId) return null;
+
+        const homeClub = currentTeams.find(t => t.id === homeId) || findClubInWorld(homeId);
+        const awayClub = currentTeams.find(t => t.id === awayId) || findClubInWorld(awayId);
+
+        // If either club is missing from world, erase save instead of opening broken match
+        if (!homeClub || !awayClub) {
+          console.warn('[LiveMatchRestore] Club missing from world state for saved match, clearing:', { homeId, awayId });
+          return null;
+        }
+
+        const restoredHome = {
+          ...homeClub,
+          tactics: {
+            ...(homeClub.tactics || {}),
+            ...(candidate.homeTactics || {}),
+            startingPlayerIds: candidate.homeStartingPlayerIds || candidate.homeTactics?.startingPlayerIds || homeClub.tactics?.startingPlayerIds || [],
+            benchPlayerIds: candidate.homeBenchPlayerIds || candidate.homeTactics?.benchPlayerIds || homeClub.tactics?.benchPlayerIds || [],
+          },
+        };
+
+        const restoredAway = {
+          ...awayClub,
+          tactics: {
+            ...(awayClub.tactics || {}),
+            ...(candidate.awayTactics || {}),
+            startingPlayerIds: candidate.awayStartingPlayerIds || candidate.awayTactics?.startingPlayerIds || awayClub.tactics?.startingPlayerIds || [],
+            benchPlayerIds: candidate.awayBenchPlayerIds || candidate.awayTactics?.benchPlayerIds || awayClub.tactics?.benchPlayerIds || [],
+          },
+        };
+
+        return {
+          ...candidate,
+          homeTeam: restoredHome,
+          awayTeam: restoredAway,
+          homeTactics: restoredHome.tactics,
+          awayTactics: restoredAway.tactics,
+          isPlaying: false,
+        };
+      } catch (err) {
+        console.warn('[LiveMatchRestore] Error restoring match candidate:', err);
+        return null;
+      }
+    };
 
     const migrateAndRestoreLiveMatch = async () => {
       const legacyMatchKey = `${STORAGE_KEY}_active_live_match`;
@@ -1761,14 +1829,14 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           } catch {
             parsedLegacy = null;
           }
-          if (isValidSavedLiveMatch(parsedLegacy)) {
-            const pausedLegacy = { ...parsedLegacy, isPlaying: false };
-            await saveActiveLiveMatchToDb(pausedLegacy);
+          const restoredLegacy = restoreMatchFromCandidate(parsedLegacy);
+          if (restoredLegacy) {
+            await saveActiveLiveMatchToDb(restoredLegacy);
             try {
               localStorage.removeItem(legacyMatchKey);
             } catch {}
             if (!cancelled) {
-              setLiveMatch(prev => prev || pausedLegacy);
+              setLiveMatch(prev => prev || restoredLegacy);
             }
             return;
           } else {
@@ -1783,11 +1851,17 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         } catch {}
       }
 
-      const savedMatch = await loadActiveLiveMatchFromDb();
-      if (cancelled || !savedMatch) return;
-      if (isValidSavedLiveMatch(savedMatch)) {
-        setLiveMatch(prev => prev || { ...savedMatch, isPlaying: false });
-      } else {
+      try {
+        const savedMatch = await loadActiveLiveMatchFromDb();
+        if (cancelled || !savedMatch) return;
+        const restored = restoreMatchFromCandidate(savedMatch);
+        if (restored) {
+          setLiveMatch(prev => prev || restored);
+        } else {
+          clearActiveLiveMatchFromDb();
+        }
+      } catch (err) {
+        console.warn('[LiveMatchRestore] Notice reading saved match:', err);
         clearActiveLiveMatchFromDb();
       }
     };
@@ -2761,29 +2835,42 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     };
   }, []);
 
-  // Live match playback timer ticker (Real event-by-event simulation)
-  useEffect(() => {
-    if (!liveMatch || !liveMatch.isPlaying || liveMatch.isFinished || liveMatch.isHalfTime) {
-      if (liveMatchTimerRef.current) {
-        clearInterval(liveMatchTimerRef.current);
-        liveMatchTimerRef.current = null;
-      }
-      return;
-    }
+  // 4) Diagnostic counter for timer recreation frequency
+  const timerRecreateStatsRef = useRef<{ timestamps: number[] }>({ timestamps: [] });
+  // 2) Watchdog tracking ref for stalled live match
+  const liveMatchWatchdogRef = useRef<{ lastMinute: number; lastMinuteChangeTs: number }>({
+    lastMinute: -1,
+    lastMinuteChangeTs: Date.now(),
+  });
+  const recreateLiveMatchTimerRef = useRef<(() => void) | null>(null);
 
-    const intervalTime = Math.max(80, 600 / liveMatch.speed); // e.g. 600ms per simulated minute at 1x
+  const createLiveMatchTimer = useCallback(() => {
+    // 4) Diagnostics: check recreation frequency
+    const now = Date.now();
+    timerRecreateStatsRef.current.timestamps = timerRecreateStatsRef.current.timestamps.filter(t => now - t < 3000);
+    timerRecreateStatsRef.current.timestamps.push(now);
+    if (timerRecreateStatsRef.current.timestamps.length > 5) {
+      console.warn('[LiveMatchTimer] recreated too often', {
+        isPlaying: liveMatchRef.current?.isPlaying,
+        isFinished: liveMatchRef.current?.isFinished,
+        isHalfTime: liveMatchRef.current?.isHalfTime,
+        speed: liveMatchRef.current?.speed,
+      });
+    }
 
     if (liveMatchTimerRef.current) {
       clearInterval(liveMatchTimerRef.current);
       liveMatchTimerRef.current = null;
     }
 
+    const currentSpeed = liveMatchRef.current?.speed || 1;
+    const intervalTime = Math.max(80, 600 / currentSpeed);
+
     liveMatchTimerRef.current = setInterval(() => {
       if (isMatchFinishedRef.current) {
         if (liveMatchTimerRef.current) {
           clearInterval(liveMatchTimerRef.current);
           liveMatchTimerRef.current = null;
-          console.log('[DIAG] TIMER_CLEARED');
         }
         return;
       }
@@ -2793,15 +2880,13 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           if (liveMatchTimerRef.current) {
             clearInterval(liveMatchTimerRef.current);
             liveMatchTimerRef.current = null;
-            console.log('[DIAG] TIMER_CLEARED');
           }
           return prev;
         }
 
-        console.log(`[DIAG] TIMER_TICK minute=${prev.currentMinute}`);
         let next = prev;
         try {
-          next = simulateMatchStep(prev, userClub?.tactics);
+          next = simulateMatchStep(prev, userTacticsRef.current);
         } catch (simErr) {
           console.error('[simulateMatchStep Graceful Recovery]', simErr);
           next = {
@@ -2812,12 +2897,10 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           };
         }
 
-        console.log(`[DIAG] MATCH_END_CHECK minute=${next.currentMinute}`);
-        const isEndCondition = next.isFinished || next.currentMinute >= 90;
-        console.log(`[DIAG] MATCH_END_CONDITION result=${isEndCondition}`);
-
-        if (next.currentMinute >= 90) {
-          console.log('[DIAG] TIMER_REACHED_90');
+        // 2) Track minute changes for watchdog
+        if (next.currentMinute !== liveMatchWatchdogRef.current.lastMinute) {
+          liveMatchWatchdogRef.current.lastMinute = next.currentMinute;
+          liveMatchWatchdogRef.current.lastMinuteChangeTs = Date.now();
         }
 
         if (next.currentMinute >= 90 || next.isFinished) {
@@ -2849,12 +2932,10 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
           isMatchFinishedRef.current = true;
           console.log('[MatchEndingFlow] MATCH_90_REACHED: Simulation interval stopped cleanly once.');
-          console.log('[DIAG] FINISH_MATCH_CALLED');
 
           if (liveMatchTimerRef.current) {
             clearInterval(liveMatchTimerRef.current);
             liveMatchTimerRef.current = null;
-            console.log('[DIAG] TIMER_CLEARED');
           }
 
           return finishedNext;
@@ -2864,13 +2945,29 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           if (liveMatchTimerRef.current) {
             clearInterval(liveMatchTimerRef.current);
             liveMatchTimerRef.current = null;
-            console.log('[DIAG] TIMER_CLEARED');
           }
         }
 
         return next;
       });
     }, intervalTime);
+  }, [userClub, activeLeague]);
+
+  useEffect(() => {
+    recreateLiveMatchTimerRef.current = createLiveMatchTimer;
+  }, [createLiveMatchTimer]);
+
+  // 1) Live match playback timer ticker (Real event-by-event simulation)
+  useEffect(() => {
+    if (!liveMatch || !liveMatch.isPlaying || liveMatch.isFinished || liveMatch.isHalfTime) {
+      if (liveMatchTimerRef.current) {
+        clearInterval(liveMatchTimerRef.current);
+        liveMatchTimerRef.current = null;
+      }
+      return;
+    }
+
+    createLiveMatchTimer();
 
     return () => {
       if (liveMatchTimerRef.current) {
@@ -2878,7 +2975,44 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         liveMatchTimerRef.current = null;
       }
     };
-  }, [liveMatch?.isPlaying, liveMatch?.isFinished, liveMatch?.isHalfTime, liveMatch?.speed, userClub?.tactics]);
+  }, [liveMatch?.isPlaying, liveMatch?.isFinished, liveMatch?.isHalfTime, liveMatch?.speed, createLiveMatchTimer]);
+
+  // 2) Watchdog for stalled live match: monitors every 2 seconds
+  useEffect(() => {
+    if (!liveMatch || !liveMatch.isPlaying || liveMatch.isFinished || liveMatch.isHalfTime) {
+      return;
+    }
+
+    liveMatchWatchdogRef.current.lastMinute = liveMatch.currentMinute;
+    liveMatchWatchdogRef.current.lastMinuteChangeTs = Date.now();
+
+    const watchdogInterval = setInterval(() => {
+      const current = liveMatchRef.current;
+      if (!current || !current.isPlaying || current.isFinished || current.isHalfTime) {
+        return;
+      }
+
+      const now = Date.now();
+      const currentMin = current.currentMinute;
+      if (liveMatchWatchdogRef.current.lastMinute !== currentMin) {
+        liveMatchWatchdogRef.current.lastMinute = currentMin;
+        liveMatchWatchdogRef.current.lastMinuteChangeTs = now;
+        return;
+      }
+
+      const speedFactor = current.speed || 1;
+      const stallThreshold = Math.max(5000, (600 / speedFactor) * 3);
+      if (now - liveMatchWatchdogRef.current.lastMinuteChangeTs >= stallThreshold) {
+        console.warn(`[LiveMatchWatchdog] stalled at minute ${currentMin}`);
+        liveMatchWatchdogRef.current.lastMinuteChangeTs = now;
+        recreateLiveMatchTimerRef.current?.();
+      }
+    }, 2000);
+
+    return () => {
+      clearInterval(watchdogInterval);
+    };
+  }, [liveMatch?.isPlaying, liveMatch?.isFinished, liveMatch?.isHalfTime, liveMatch?.speed]);
 
   // Actions
   const updateTactics = (tactics: TeamTactics) => {

@@ -264,37 +264,100 @@ export function pruneContinentalForStorage(
 // ACTIVE LIVE MATCH & CONTINENTAL CACHE IN INDEXEDDB (NO LOCALSTORAGE QUOTA)
 // ============================================================================
 
+let activeLiveMatchSaveScheduled: any = null;
+
 /**
  * Saves an active in-progress live match snapshot to IndexedDB + Memory Fallback (never localStorage).
- * Strips verbose commentary events before saving to keep the snapshot lightweight.
+ * Lightweight snapshot: saves fixture, score, currentMinute, last 35 events, tactics, stats,
+ * and team/player IDs instead of full 30+ player squad objects.
+ * Deferred via requestIdleCallback/setTimeout(0) to never block match ticks.
  */
 export async function saveActiveLiveMatchToDb(liveMatch: any | null): Promise<void> {
-  // Always ensure legacy localStorage key is removed so it never occupies quota
-  safeLocalStorageRemove(`${LEGACY_STORAGE_PREFIX}_active_live_match`);
-
-  if (!liveMatch) {
-    memoryFallbackStore.delete(IDB_ACTIVE_LIVE_MATCH_KEY);
-    try {
-      await del(IDB_ACTIVE_LIVE_MATCH_KEY);
-    } catch {
-      // ignore
-    }
-    return;
-  }
-
-  const lightweightSnapshot = {
-    ...liveMatch,
-    // Keep only the last 12 commentary/timeline items in the crash-recovery snapshot
-    events: Array.isArray(liveMatch.events)
-      ? liveMatch.events.filter((e: any) => e && (e.type !== 'commentary' || e.minute >= (liveMatch.currentMinute || 0) - 5)).slice(-35)
-      : [],
-  };
-
-  memoryFallbackStore.set(IDB_ACTIVE_LIVE_MATCH_KEY, lightweightSnapshot);
   try {
-    await set(IDB_ACTIVE_LIVE_MATCH_KEY, lightweightSnapshot);
+    // Always ensure legacy localStorage key is removed so it never occupies quota
+    safeLocalStorageRemove(`${LEGACY_STORAGE_PREFIX}_active_live_match`);
+
+    if (!liveMatch) {
+      if (activeLiveMatchSaveScheduled) {
+        if (typeof cancelIdleCallback !== 'undefined') {
+          cancelIdleCallback(activeLiveMatchSaveScheduled);
+        } else {
+          clearTimeout(activeLiveMatchSaveScheduled);
+        }
+        activeLiveMatchSaveScheduled = null;
+      }
+      memoryFallbackStore.delete(IDB_ACTIVE_LIVE_MATCH_KEY);
+      try {
+        await del(IDB_ACTIVE_LIVE_MATCH_KEY);
+      } catch {}
+      return;
+    }
+
+    const homeTeamId = liveMatch.homeTeam?.id || liveMatch.fixture?.homeTeamId;
+    const awayTeamId = liveMatch.awayTeam?.id || liveMatch.fixture?.awayTeamId;
+
+    const lightweightSnapshot = {
+      isLightweight: true,
+      fixture: liveMatch.fixture,
+      currentMinute: liveMatch.currentMinute ?? 0,
+      homeScore: liveMatch.homeScore ?? 0,
+      awayScore: liveMatch.awayScore ?? 0,
+      homePenalties: liveMatch.homePenalties,
+      awayPenalties: liveMatch.awayPenalties,
+      winnerTeamId: liveMatch.winnerTeamId,
+      events: Array.isArray(liveMatch.events)
+        ? liveMatch.events.slice(-35)
+        : [],
+      stats: liveMatch.stats,
+      homeTactics: liveMatch.homeTactics || liveMatch.homeTeam?.tactics,
+      awayTactics: liveMatch.awayTactics || liveMatch.awayTeam?.tactics,
+      homeTeamId,
+      awayTeamId,
+      homeStartingPlayerIds: liveMatch.homeTeam?.tactics?.startingPlayerIds || [],
+      homeBenchPlayerIds: liveMatch.homeTeam?.tactics?.benchPlayerIds || [],
+      awayStartingPlayerIds: liveMatch.awayTeam?.tactics?.startingPlayerIds || [],
+      awayBenchPlayerIds: liveMatch.awayTeam?.tactics?.benchPlayerIds || [],
+      homeSubstitutions: liveMatch.homeSubstitutions || [],
+      awaySubstitutions: liveMatch.awaySubstitutions || [],
+      substitutionsCount: liveMatch.substitutionsCount,
+      isPlaying: false, // Always persist as paused
+      isHalfTime: Boolean(liveMatch.isHalfTime),
+      isFinished: Boolean(liveMatch.isFinished),
+      speed: liveMatch.speed || 1,
+      userClubId: liveMatch.userClubId,
+      matchRevenue: liveMatch.matchRevenue,
+    };
+
+    memoryFallbackStore.set(IDB_ACTIVE_LIVE_MATCH_KEY, lightweightSnapshot);
+
+    const executeCommit = async () => {
+      try {
+        await set(IDB_ACTIVE_LIVE_MATCH_KEY, lightweightSnapshot);
+      } catch (err) {
+        console.warn('[IndexedDbStorage] Notice saving active live match to IndexedDB:', err);
+      }
+    };
+
+    if (activeLiveMatchSaveScheduled) {
+      if (typeof cancelIdleCallback !== 'undefined') {
+        cancelIdleCallback(activeLiveMatchSaveScheduled);
+      } else {
+        clearTimeout(activeLiveMatchSaveScheduled);
+      }
+      activeLiveMatchSaveScheduled = null;
+    }
+
+    if (typeof requestIdleCallback !== 'undefined') {
+      activeLiveMatchSaveScheduled = requestIdleCallback(() => {
+        executeCommit().catch(() => {});
+      }, { timeout: 1000 });
+    } else {
+      activeLiveMatchSaveScheduled = setTimeout(() => {
+        executeCommit().catch(() => {});
+      }, 0);
+    }
   } catch (err) {
-    console.warn('[IndexedDbStorage] Notice saving active live match to IndexedDB (kept in memory):', err);
+    console.warn('[IndexedDbStorage] Graceful ignore in saveActiveLiveMatchToDb:', err);
   }
 }
 
