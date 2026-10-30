@@ -1216,8 +1216,8 @@ export function generateMasterSeasonAgenda(
   seasonNumber: number,
   activeLeague: LeagueDefinition,
   leagueTeams: Club[],
-  cupTournament?: CupTournament | null,
-  continentalTournament?: any,
+  _cupTournament?: CupTournament | null,
+  _continentalTournament?: any,
   userClub?: Club | null
 ): Fixture[] {
   return CalendarManager.generateMasterSchedule({
@@ -1225,8 +1225,8 @@ export function generateMasterSeasonAgenda(
     activeLeague,
     teams: leagueTeams,
     userClub,
-    cupTournament: cupTournament || null,
-    continentalTournament: continentalTournament || null,
+    cupTournament: null,
+    continentalTournament: null,
   });
 }
 
@@ -2570,22 +2570,15 @@ export function processNewSeasonAdvancement(
   // Also persist this active league roster to world
   updateLeagueRosterInWorld(nextActiveLeague.id, updatedLeagueTeams);
 
-  // 6. Initialize Next Season National Cup Tournament for the active country
-  const nextCup = initNationalCupTournament(
-    nextSeasonNumber,
-    nextActiveLeague.country || 'مصر',
-    updatedLeagueTeams,
-    nextUserClub,
-    Math.max(18, (updatedLeagueTeams.length - 1) * 2)
-  );
+  const nextCup = null as any;
 
-  // 4. Generate New Season Schedule & Standings (League + National Cup)
+  // 4. Generate New Season Schedule & Standings (League Only)
   const nextFixtures = generateMasterSeasonAgenda(
     nextSeasonNumber,
     nextActiveLeague,
     updatedLeagueTeams,
-    nextCup,
-    undefined,
+    null,
+    null,
     nextUserClub
   );
   const nextStandings = generateInitialStandings(updatedLeagueTeams);

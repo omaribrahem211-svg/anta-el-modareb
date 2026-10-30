@@ -315,28 +315,27 @@ export const MatchesTab: React.FC = () => {
     [fixtures, currentRound]
   );
 
-  // Active user fixture across all competitions (League, CAF CL, Cup)
+  // Active user fixture for the current League round / schedule
   const userFixture = useMemo(() => {
     if (!userClub?.id || manager.isUnemployed) return undefined;
-    // 0. Priority: Any unplayed Continental or Cup match whose round trigger has arrived (<= currentRound)
-    const dueTournamentMatch = (userCalendarSchedule || []).find(
-      m =>
-        m &&
-        !m.isPlayed &&
-        (m.competitionType === 'CONTINENTAL_CUP' || m.competitionType === 'continental' || m.competitionType === 'DOMESTIC_COP' || m.competitionType === 'cup') &&
-        m.round &&
-        m.round <= currentRound
+    // 1. Current round unplayed fixture for user's club
+    const currentRoundFix = roundFixtures.find(
+      f => f && !f.isPlayed && (f.homeTeamId === userClub.id || f.awayTeamId === userClub.id)
     );
-    if (dueTournamentMatch) return dueTournamentMatch;
-    // 1. Match scheduled for today on real-world calendar (or overdue unplayed match)
-    const todayMatch = (userCalendarSchedule || []).find(m => m && !m.isPlayed && (m.date === calendarDate?.rawDateStr || (m.date || '') <= (calendarDate?.rawDateStr || '')));
+    if (currentRoundFix) return currentRoundFix;
+    // 2. Match scheduled for today on real-world calendar (or earliest unplayed match)
+    const todayMatch = (userCalendarSchedule || []).find(
+      m => m && !m.isPlayed && (m.date === calendarDate?.rawDateStr || (m.date || '') <= (calendarDate?.rawDateStr || ''))
+    );
     if (todayMatch) return todayMatch;
-    // 2. Next upcoming unplayed fixture on or after today
-    const upcoming = (userCalendarSchedule || []).find(m => m && !m.isPlayed && m.date >= (calendarDate?.rawDateStr || ''));
+    // 3. Next upcoming unplayed fixture on or after today
+    const upcoming = (userCalendarSchedule || []).find(
+      m => m && !m.isPlayed && m.date >= (calendarDate?.rawDateStr || '')
+    );
     if (upcoming) return upcoming;
-    // 3. Round fixture fallback
+    // 4. Round fixture fallback
     return roundFixtures.find(f => f && (f.homeTeamId === userClub.id || f.awayTeamId === userClub.id));
-  }, [userClub?.id, manager.isUnemployed, userCalendarSchedule, calendarDate?.rawDateStr, roundFixtures, currentRound]);
+  }, [userClub?.id, manager.isUnemployed, userCalendarSchedule, calendarDate?.rawDateStr, roundFixtures]);
 
   // Resolve upcoming match details for user club
   const upcomingMatchAnalysis = useMemo(() => {

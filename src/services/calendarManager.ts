@@ -312,84 +312,7 @@ export class CalendarManager {
       return candidate;
     };
 
-    // 1. GENERATE CONTINENTAL TOURNAMENT FIXTURES FIRST (Midweeks: Tue/Wed for CCL/UCL, Thu for CCC/UEL)
-    if (continentalTournament && Array.isArray(continentalTournament.matches) && continentalTournament.matches.length > 0) {
-      const meta = this.getContinentalMeta(continentalTournament.competitionId, continentalTournament.name);
-
-      continentalTournament.matches.forEach(cm => {
-        const mdInfo = this.resolveContinentalMatchDate(
-          cm,
-          seasonNumber,
-          continentalTournament.competitionId,
-          continentalTournament.name
-        );
-        const safeDate = assignSafeDate(cm.homeTeamId, cm.awayTeamId, mdInfo.dateObj);
-        const dateStr = this.formatDateStr(safeDate);
-        const timestamp = safeDate.getTime();
-
-        masterSchedule.push({
-          id: cm.id,
-          round: cm.roundTrigger || 1,
-          homeTeamId: cm.homeTeamId,
-          awayTeamId: cm.awayTeamId,
-          competitionType: 'CONTINENTAL_CUP',
-          competitionId: continentalTournament.competitionId || meta.compCode,
-          tournamentId: meta.compCode,
-          competitionName: continentalTournament.name || meta.name,
-          tournamentBadge: meta.badge,
-          stage: cm.stage || 'group',
-          stageName: mdInfo.stageName,
-          groupId: cm.groupId,
-          matchday: cm.matchday,
-          date: dateStr,
-          timestamp,
-          isPlayed: cm.isPlayed || false,
-          homeScore: cm.homeScore,
-          awayScore: cm.awayScore,
-          homePenalties: cm.homePenalties,
-          awayPenalties: cm.awayPenalties,
-          winnerTeamId: cm.winnerTeamId,
-        });
-      });
-    }
-
-    // 2. GENERATE DOMESTIC NATIONAL CUP FIXTURES (Reserved Midweeks: Tuesdays/Wednesdays)
-    if (cupTournament && Array.isArray(cupTournament.matches) && cupTournament.matches.length > 0) {
-      const cupDef = getDomesticCupDefinitionForCountry(cupTournament.country || activeLeague.country || 'مصر');
-      const cupDisplayName = cupTournament.name || cupDef.shortName || cupDef.name;
-
-      cupTournament.matches.forEach(cupM => {
-        const stageInfo = this.resolveDomesticCupStageDate(cupM.stage, seasonNumber, cupDisplayName);
-        const safeDate = assignSafeDate(cupM.homeTeamId, cupM.awayTeamId, stageInfo.dateObj);
-        const dateStr = this.formatDateStr(safeDate);
-        const timestamp = safeDate.getTime();
-
-        masterSchedule.push({
-          id: cupM.id,
-          round: cupM.roundTrigger || 1,
-          homeTeamId: cupM.homeTeamId,
-          awayTeamId: cupM.awayTeamId,
-          competitionType: 'DOMESTIC_COP',
-          competitionId: cupTournament.id || cupDef.id,
-          tournamentId: 'cup',
-          competitionName: cupDisplayName,
-          tournamentBadge: `🛡️ ${cupDef.shortName || cupDisplayName}`,
-          cupStage: cupM.stage,
-          stage: cupM.stage,
-          stageName: stageInfo.stageName,
-          date: dateStr,
-          timestamp,
-          isPlayed: cupM.isPlayed || false,
-          homeScore: cupM.homeScore,
-          awayScore: cupM.awayScore,
-          homePenalties: cupM.homePenalties,
-          awayPenalties: cupM.awayPenalties,
-          winnerTeamId: cupM.winnerTeamId,
-        });
-      });
-    }
-
-    // 3. GENERATE DOMESTIC LEAGUE FIXTURES (Double Round Robin on Weekends: Fri/Sat/Sun)
+    // GENERATE DOMESTIC LEAGUE FIXTURES ONLY (Double Round Robin on Weekly Saturdays)
     const leagueTeams = Array.isArray(teams) && teams.length > 0 ? teams : activeLeague.teams;
     const teamIds = leagueTeams.map(t => t.id);
     const n = teamIds.length;
@@ -421,19 +344,16 @@ export class CalendarManager {
       roundRobinRounds.push(reverseMatches);
     }
 
-    // Map each league round to weekly Weekends starting Aug 15 (Saturday)
+    // Map each league round to weekly Saturdays starting Aug 15
     const leagueStartDate = new Date(startYear, 7, 15); // August 15
     roundRobinRounds.forEach((roundMatches, roundIdx) => {
       const roundNum = roundIdx + 1;
       const roundSaturday = new Date(leagueStartDate);
       roundSaturday.setDate(leagueStartDate.getDate() + roundIdx * 7);
+      const dateStr = this.formatDateStr(roundSaturday);
+      const timestamp = roundSaturday.getTime();
 
       roundMatches.forEach(match => {
-        // assignSafeDate automatically shifts Saturday -> Sunday if either team played Thursday in CCC/UEL!
-        const safeDate = assignSafeDate(match.homeId, match.awayId, roundSaturday);
-        const dateStr = this.formatDateStr(safeDate);
-        const timestamp = safeDate.getTime();
-
         masterSchedule.push({
           id: `fix_league_r${roundNum}_${match.homeId}_${match.awayId}_s${seasonNumber}`,
           round: roundNum,
@@ -467,13 +387,21 @@ export class CalendarManager {
   }
 
   /**
-   * Filters the master schedule to show ONLY the user's club matches in exact chronological order.
+   * Filters the master schedule to show ONLY the user's club League matches in exact chronological order.
    */
   static getUserClubSchedule(userClubId: string | undefined, masterSchedule: CalendarScheduleItem[]): CalendarScheduleItem[] {
     if (!userClubId || !Array.isArray(masterSchedule)) return [];
     return masterSchedule
-      .filter(f => f && (f.homeTeamId === userClubId || f.awayTeamId === userClubId))
+      .filter(f => {
+        if (!f || (f.homeTeamId !== userClubId && f.awayTeamId !== userClubId)) return false;
+        const normType = normalizeCompetitionType(
+          f.competitionType || f.tournamentId || f.competitionId || (f.cupStage ? 'DOMESTIC_COP' : undefined)
+        );
+        return normType === 'LEAGUE';
+      })
       .sort((a, b) => {
+        const roundDiff = (Number(a?.round) || 0) - (Number(b?.round) || 0);
+        if (roundDiff !== 0) return roundDiff;
         const dateA = String(a?.date || '');
         const dateB = String(b?.date || '');
         if (dateA !== dateB) {
@@ -557,6 +485,14 @@ export class CalendarManager {
       skipDirectlyToNextUserMatch = false,
     } = params;
 
+    const leagueSchedule = (Array.isArray(masterSchedule) ? masterSchedule : []).filter(f => {
+      if (!f) return false;
+      const normType = normalizeCompetitionType(
+        f.competitionType || f.tournamentId || f.competitionId || (f.cupStage ? 'DOMESTIC_COP' : undefined)
+      );
+      return normType === 'LEAGUE';
+    });
+
     const { endDateStr } = this.getSeasonDateRange(seasonNumber);
     const getClubObj = (clubId: string): Club => {
       return teams.find(t => t.id === clubId) || ({
@@ -573,7 +509,7 @@ export class CalendarManager {
     let daysToAdvance = 1;
 
     if (skipDirectlyToNextUserMatch && userClubId) {
-      const nextMatch = this.getNextUserMatch(userClubId, currentDateStr, masterSchedule);
+      const nextMatch = this.getNextUserMatch(userClubId, currentDateStr, leagueSchedule);
       if (nextMatch && nextMatch.date && nextMatch.date.trim() > currentDateStr.trim()) {
         targetDateStr = nextMatch.date.trim();
         const diffMs = parseDateString(targetDateStr).getTime() - parseDateString(currentDateStr).getTime();
@@ -591,7 +527,7 @@ export class CalendarManager {
     const isSeasonFinished = targetDateStr >= endDateStr;
     const nextDateObj = formatCalendarDate(parseDateString(targetDateStr), dayIndexInSeason + daysToAdvance);
 
-    const matchesOnDate = masterSchedule.filter(
+    const matchesOnDate = leagueSchedule.filter(
       f => f && !f.isPlayed && f.date && f.date >= currentDateStr && f.date <= targetDateStr
     );
 
@@ -617,50 +553,12 @@ export class CalendarManager {
       const home = getClubObj(fix.homeTeamId) || ({ id: fix.homeTeamId, name: 'فريق', shortName: 'فريق', players: [], reputation: 50, tactics: { formation: '4-4-2' } } as any);
       const away = getClubObj(fix.awayTeamId) || ({ id: fix.awayTeamId, name: 'فريق', shortName: 'فريق', players: [], reputation: 50, tactics: { formation: '4-4-2' } } as any);
 
-      const normType = normalizeCompetitionType(
-        fix.competitionType || fix.tournamentId || fix.competitionId || (fix.cupStage ? 'DOMESTIC_COP' : undefined)
-      );
-      const isCup = normType === 'DOMESTIC_COP';
-      const isContinental = normType === 'CONTINENTAL_CUP';
-
-      if (isCup) {
-        const res = simulateKnockoutMatch(home, away);
-        fix.homeScore = res.homeScore;
-        fix.awayScore = res.awayScore;
-        fix.homePenalties = res.homePenalties;
-        fix.awayPenalties = res.awayPenalties;
-        fix.winnerTeamId = res.winnerTeamId;
-        fix.isPlayed = true;
-        fix.events = pruneAiEvents(res.events);
-        fix.stats = res.stats;
-      } else if (isContinental) {
-        const isKnockout = fix.stage !== 'group' && !fix.stageName?.includes('المجموعات');
-        if (isKnockout) {
-          const res = simulateKnockoutMatch(home, away);
-          fix.homeScore = res.homeScore;
-          fix.awayScore = res.awayScore;
-          fix.homePenalties = res.homePenalties;
-          fix.awayPenalties = res.awayPenalties;
-          fix.winnerTeamId = res.winnerTeamId;
-          fix.isPlayed = true;
-          fix.events = pruneAiEvents(res.events);
-          fix.stats = res.stats;
-        } else {
-          const res = simulateMatch(home, away, home.tactics || { formation: '4-4-2' }, away.tactics || { formation: '4-4-2' });
-          fix.homeScore = res.homeScore;
-          fix.awayScore = res.awayScore;
-          fix.isPlayed = true;
-          fix.events = pruneAiEvents(res.events);
-          fix.stats = res.stats;
-        }
-      } else {
-        const res = simulateMatch(home, away, home.tactics || { formation: '4-4-2' }, away.tactics || { formation: '4-4-2' });
-        fix.homeScore = res.homeScore;
-        fix.awayScore = res.awayScore;
-        fix.isPlayed = true;
-        fix.events = pruneAiEvents(res.events);
-        fix.stats = res.stats;
-      }
+      const res = simulateMatch(home, away, home.tactics || { formation: '4-4-2' }, away.tactics || { formation: '4-4-2' });
+      fix.homeScore = res.homeScore;
+      fix.awayScore = res.awayScore;
+      fix.isPlayed = true;
+      fix.events = pruneAiEvents(res.events);
+      fix.stats = res.stats;
       simulatedFixtures.push(fix);
     });
 
