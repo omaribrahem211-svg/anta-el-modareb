@@ -295,6 +295,12 @@ export async function saveActiveLiveMatchToDb(liveMatch: any | null): Promise<vo
     const homeTeamId = liveMatch.homeTeam?.id || liveMatch.fixture?.homeTeamId;
     const awayTeamId = liveMatch.awayTeam?.id || liveMatch.fixture?.awayTeamId;
 
+    const allEvents: MatchEvent[] = Array.isArray(liveMatch.events) ? liveMatch.events : [];
+    const criticalEventTypes = new Set(['goal', 'yellow_card', 'red_card', 'substitution', 'injury']);
+    const criticalEvents = allEvents.filter(e => e && criticalEventTypes.has(e.type));
+    const otherEvents = allEvents.filter(e => e && !criticalEventTypes.has(e.type)).slice(-35);
+    const persistedEvents = [...criticalEvents, ...otherEvents].sort((a, b) => (a.minute ?? 0) - (b.minute ?? 0));
+
     const lightweightSnapshot = {
       isLightweight: true,
       fixture: liveMatch.fixture,
@@ -304,9 +310,7 @@ export async function saveActiveLiveMatchToDb(liveMatch: any | null): Promise<vo
       homePenalties: liveMatch.homePenalties,
       awayPenalties: liveMatch.awayPenalties,
       winnerTeamId: liveMatch.winnerTeamId,
-      events: Array.isArray(liveMatch.events)
-        ? liveMatch.events.slice(-35)
-        : [],
+      events: persistedEvents,
       stats: liveMatch.stats,
       homeTactics: liveMatch.homeTactics || liveMatch.homeTeam?.tactics,
       awayTactics: liveMatch.awayTactics || liveMatch.awayTeam?.tactics,

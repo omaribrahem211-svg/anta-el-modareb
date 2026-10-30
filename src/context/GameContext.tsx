@@ -1774,17 +1774,17 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         ) {
           const homeStartingIds: string[] = candidate.homeTeam.tactics?.startingPlayerIds || [];
           const awayStartingIds: string[] = candidate.awayTeam.tactics?.startingPlayerIds || [];
-          const legacyHomeLineup = Array.isArray(candidate.homeLineup) && candidate.homeLineup.length > 0
-            ? candidate.homeLineup
-            : homeStartingIds.map((id: string) => candidate.homeTeam.players.find((p: any) => p?.id === id)).filter((p: any) => Boolean(p));
-          const legacyAwayLineup = Array.isArray(candidate.awayLineup) && candidate.awayLineup.length > 0
-            ? candidate.awayLineup
-            : awayStartingIds.map((id: string) => candidate.awayTeam.players.find((p: any) => p?.id === id)).filter((p: any) => Boolean(p));
+          const legacyHomeLineup: string[] = Array.isArray(candidate.homeLineup) && candidate.homeLineup.length > 0
+            ? candidate.homeLineup.map((p: any) => typeof p === 'string' ? p : p?.id).filter(Boolean)
+            : homeStartingIds.filter(id => candidate.homeTeam.players.some((p: any) => p?.id === id));
+          const legacyAwayLineup: string[] = Array.isArray(candidate.awayLineup) && candidate.awayLineup.length > 0
+            ? candidate.awayLineup.map((p: any) => typeof p === 'string' ? p : p?.id).filter(Boolean)
+            : awayStartingIds.filter(id => candidate.awayTeam.players.some((p: any) => p?.id === id));
 
           const defHomeFatigue: Record<string, number> = {};
-          legacyHomeLineup.forEach((p: any) => { if (p?.id) defHomeFatigue[p.id] = 100; });
+          legacyHomeLineup.forEach((id: string) => { if (id) defHomeFatigue[id] = 100; });
           const defAwayFatigue: Record<string, number> = {};
-          legacyAwayLineup.forEach((p: any) => { if (p?.id) defAwayFatigue[p.id] = 100; });
+          legacyAwayLineup.forEach((id: string) => { if (id) defAwayFatigue[id] = 100; });
 
           return {
             ...candidate,
@@ -1849,19 +1849,19 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         const homeStartingIds: string[] = restoredHome.tactics?.startingPlayerIds || [];
         const awayStartingIds: string[] = restoredAway.tactics?.startingPlayerIds || [];
 
-        const resolvedHomeLineup = Array.isArray(candidate.homeLineup) && candidate.homeLineup.length > 0
-          ? candidate.homeLineup
-          : homeStartingIds.map((id: string) => restoredHome.players.find((p: any) => p?.id === id)).filter((p: any) => Boolean(p));
+        const resolvedHomeLineup: string[] = Array.isArray(candidate.homeLineup) && candidate.homeLineup.length > 0
+          ? candidate.homeLineup.map((p: any) => typeof p === 'string' ? p : p?.id).filter(Boolean)
+          : homeStartingIds.filter(id => restoredHome.players.some((p: any) => p?.id === id));
 
-        const resolvedAwayLineup = Array.isArray(candidate.awayLineup) && candidate.awayLineup.length > 0
-          ? candidate.awayLineup
-          : awayStartingIds.map((id: string) => restoredAway.players.find((p: any) => p?.id === id)).filter((p: any) => Boolean(p));
+        const resolvedAwayLineup: string[] = Array.isArray(candidate.awayLineup) && candidate.awayLineup.length > 0
+          ? candidate.awayLineup.map((p: any) => typeof p === 'string' ? p : p?.id).filter(Boolean)
+          : awayStartingIds.filter(id => restoredAway.players.some((p: any) => p?.id === id));
 
         const defaultHomeFatigue: Record<string, number> = {};
-        resolvedHomeLineup.forEach((p: any) => { if (p?.id) defaultHomeFatigue[p.id] = 100; });
+        resolvedHomeLineup.forEach((id: string) => { if (id) defaultHomeFatigue[id] = 100; });
 
         const defaultAwayFatigue: Record<string, number> = {};
-        resolvedAwayLineup.forEach((p: any) => { if (p?.id) defaultAwayFatigue[p.id] = 100; });
+        resolvedAwayLineup.forEach((id: string) => { if (id) defaultAwayFatigue[id] = 100; });
 
         return {
           ...candidate,
