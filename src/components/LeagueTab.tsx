@@ -84,16 +84,23 @@ export const LeagueTab: React.FC = () => {
     return getClubDisplayName(clubId, teams);
   };
 
-  const allPlayers = (teams || [])
-    .filter(Boolean)
-    .flatMap(t => (Array.isArray(t.players) ? t.players.filter(Boolean) : []));
+  const { topScorers, topAssisters } = useMemo(() => {
+    const players = (teams || [])
+      .filter(Boolean)
+      .flatMap(t => (Array.isArray(t.players) ? t.players.filter(Boolean) : []));
 
-  const topScorers = [...allPlayers]
-    .sort((a, b) => (b.stats?.goals || 0) - (a.stats?.goals || 0))
-    .filter(p => (p.stats?.goals || 0) > 0);
-  const topAssisters = [...allPlayers]
-    .sort((a, b) => (b.stats?.assists || 0) - (a.stats?.assists || 0))
-    .filter(p => (p.stats?.assists || 0) > 0);
+    const scorers = [...players]
+      .filter(p => (p.stats?.goals || 0) > 0)
+      .sort((a, b) => (b.stats?.goals || 0) - (a.stats?.goals || 0))
+      .slice(0, 50);
+
+    const assisters = [...players]
+      .filter(p => (p.stats?.assists || 0) > 0)
+      .sort((a, b) => (b.stats?.assists || 0) - (a.stats?.assists || 0))
+      .slice(0, 50);
+
+    return { topScorers: scorers, topAssisters: assisters };
+  }, [teams]);
 
   const effectiveStandings = useMemo(() => {
     const isAllZero = standings.length === 0 || standings.every(s => (s.played || 0) === 0);

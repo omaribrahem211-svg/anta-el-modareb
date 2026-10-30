@@ -309,8 +309,11 @@ export const MatchesTab: React.FC = () => {
     }
   }, [liveMatch?.isFinished]);
 
-  // Current Round Fixtures
-  const roundFixtures = (fixtures || []).filter(f => f && f.round === currentRound);
+  // Current Round Fixtures (Memoized to prevent re-evaluating userFixture and upcomingMatchAnalysis on every live match tick)
+  const roundFixtures = useMemo(
+    () => (fixtures || []).filter(f => f && f.round === currentRound),
+    [fixtures, currentRound]
+  );
 
   // Active user fixture across all competitions (League, CAF CL, Cup)
   const userFixture = useMemo(() => {
@@ -1460,6 +1463,16 @@ export const MatchesTab: React.FC = () => {
   // Not in live match: Show Fixtures & Round Schedule
   return (
     <div className="space-y-4 pb-20 animate-fade-in font-['Cairo',sans-serif]">
+      {/* Non-blocking Simulation & Tournament Processing Indicator */}
+      {isSimulationRunning && (
+        <div className="p-3.5 rounded-2xl bg-slate-900/95 border border-emerald-500/50 text-emerald-300 text-xs font-bold shadow-xl flex items-center justify-between gap-3 animate-pulse">
+          <div className="flex items-center gap-2.5">
+            <div className="w-4 h-4 rounded-full border-2 border-emerald-400 border-t-transparent animate-spin shrink-0" />
+            <span>جاري تحديث نتائج مباريات الجولة وجداول البطولات...</span>
+          </div>
+          <span className="text-[10px] font-mono text-slate-400">معالجة خلفية</span>
+        </div>
+      )}
       
       {/* Toast Notification Banner */}
       {scoutingToast && (

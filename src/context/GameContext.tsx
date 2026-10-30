@@ -1215,6 +1215,12 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
       cupTournament.matches.forEach(cupM => {
         if (!cupM || !cupM.id) return;
+        const isUserCupMatch = Boolean(
+          userClub?.id && (cupM.homeTeamId === userClub.id || cupM.awayTeamId === userClub.id)
+        );
+        const prunedCupEvents = cupM.events
+          ? pruneMatchEventsForStorage(cupM.events, !isUserCupMatch)
+          : undefined;
         const stageInfo = CalendarManager.resolveDomesticCupStageDate(cupM.stage, seasonNum, cupDisplayName);
         const existing = existingMap.get(cupM.id);
         if (!existing) {
@@ -1240,8 +1246,8 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             homePenalties: cupM.homePenalties,
             awayPenalties: cupM.awayPenalties,
             winnerTeamId: cupM.winnerTeamId,
-            events: cupM.events,
-            stats: cupM.stats,
+            events: prunedCupEvents,
+            stats: isUserCupMatch ? cupM.stats : undefined,
           });
         } else if (cupM.isPlayed && !existing.isPlayed) {
           changed = true;
@@ -1255,8 +1261,8 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
               homePenalties: cupM.homePenalties,
               awayPenalties: cupM.awayPenalties,
               winnerTeamId: cupM.winnerTeamId,
-              events: cupM.events || nextFixtures[idx].events,
-              stats: cupM.stats || nextFixtures[idx].stats,
+              events: prunedCupEvents || nextFixtures[idx].events,
+              stats: isUserCupMatch ? (cupM.stats || nextFixtures[idx].stats) : undefined,
             };
           }
         }
@@ -1267,7 +1273,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         String(a?.date || '9999-99-99').localeCompare(String(b?.date || '9999-99-99'))
       );
     });
-  }, [cupTournament, season?.seasonNumber, activeLeague?.country]);
+  }, [cupTournament, season?.seasonNumber, activeLeague?.country, userClub?.id]);
 
   // Continental Tournament State (Supports CCL, CCC, UCL, UEL while keeping backward-compatible key)
   const [africanChampionsLeague, setAfricanChampionsLeague] = useState<ContinentalTournament | null>(() => {
@@ -1520,6 +1526,12 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
       africanChampionsLeague.matches.forEach(cm => {
         if (!cm || !cm.id) return;
+        const isUserContMatch = Boolean(
+          userClub?.id && (cm.homeTeamId === userClub.id || cm.awayTeamId === userClub.id)
+        );
+        const prunedContEvents = cm.events
+          ? pruneMatchEventsForStorage(cm.events, !isUserContMatch)
+          : undefined;
         const mdInfo = CalendarManager.resolveContinentalMatchDate(
           cm,
           seasonNum,
@@ -1551,8 +1563,8 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             homePenalties: cm.homePenalties,
             awayPenalties: cm.awayPenalties,
             winnerTeamId: cm.winnerTeamId,
-            events: cm.events,
-            stats: cm.stats,
+            events: prunedContEvents,
+            stats: isUserContMatch ? cm.stats : undefined,
           });
         } else if (cm.isPlayed && !existing.isPlayed) {
           changed = true;
@@ -1566,8 +1578,8 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
               homePenalties: cm.homePenalties,
               awayPenalties: cm.awayPenalties,
               winnerTeamId: cm.winnerTeamId,
-              events: cm.events || nextFixtures[idx].events,
-              stats: cm.stats || nextFixtures[idx].stats,
+              events: prunedContEvents || nextFixtures[idx].events,
+              stats: isUserContMatch ? (cm.stats || nextFixtures[idx].stats) : undefined,
             };
           }
         }
@@ -1596,12 +1608,11 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     consecutiveUpdatesCount: 0,
   });
 
-  // Self-Healing & Progression Sync Effect for Continental Tournaments:
-  // 1) Auto-detects and repairs any corrupted/prematurely simulated continental saves (e.g. unplayed phantom knockouts).
-  // 2) Synchronizes group standings with played fixtures.
-  // 3) Advances AI matches strictly one matchday at a time only when due and NEVER simulates user matches.
+  // Self-Healing & Non-Blocking Background Progression Sync Effect for Continental Tournaments:
+  // Deferred with setTimeout so it NEVER blocks UI tab navigation or live match startup.
   useEffect(() => {
     if (!africanChampionsLeague || !Array.isArray(africanChampionsLeague.groups)) return;
+    if (isSimulationRunningRef.current || isFinishingMatchRef.current || liveMatchRef.current) return;
 
     const currentSeasonNum = season?.seasonNumber || africanChampionsLeague.seasonNumber || 1;
     const currentCompId = africanChampionsLeague.competitionId || 'ccl';
@@ -1620,177 +1631,195 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       continentalRepairGuardRef.current.consecutiveUpdatesCount = 0;
     }
 
-    if (continentalRepairGuardRef.current.consecutiveUpdatesCount >= 5) {
+    if (continentalRepairGuardRef.current.consecutiveUpdatesCount >= 3) {
       return;
     }
 
-    const hasContinentalTournamentChanged = (
-      prev: ContinentalTournament,
-      next: ContinentalTournament
-    ): boolean => {
-      if (prev === next) return false;
-      if (
-        Boolean(prev.isCompleted) !== Boolean(next.isCompleted) ||
-        prev.currentStage !== next.currentStage ||
-        prev.winnerClubId !== next.winnerClubId ||
-        prev.runnerUpClubId !== next.runnerUpClubId
-      ) {
-        return true;
-      }
-      const prevMatches = prev.matches || [];
-      const nextMatches = next.matches || [];
-      if (prevMatches.length !== nextMatches.length) return true;
-      for (let i = 0; i < prevMatches.length; i++) {
-        const pm = prevMatches[i];
-        const nm = nextMatches[i];
+    const currentFixturesSnapshot = fixturesRef.current || [];
+    const currentTeamsSnapshot = teamsRef.current || [];
+
+    // Signature check to prevent redundant re-evaluations on unrelated state updates
+    const contMatchesSig = (africanChampionsLeague.matches || [])
+      .map(m => `${m?.id}:${m?.isPlayed ? 1 : 0}:${m?.homeScore ?? ''}:${m?.awayScore ?? ''}`)
+      .join('|');
+    const execSignature = `${currentCompId}_${currentSeasonNum}_r${currentRound}_${contMatchesSig}`;
+    if (continentalRepairGuardRef.current.signature === execSignature) {
+      return;
+    }
+
+    const timerId = window.setTimeout(() => {
+      if (isSimulationRunningRef.current || isFinishingMatchRef.current || liveMatchRef.current) return;
+
+      const hasContinentalTournamentChanged = (
+        prev: ContinentalTournament,
+        next: ContinentalTournament
+      ): boolean => {
+        if (prev === next) return false;
         if (
-          !pm ||
-          !nm ||
-          pm.id !== nm.id ||
-          Boolean(pm.isPlayed) !== Boolean(nm.isPlayed) ||
-          pm.homeScore !== nm.homeScore ||
-          pm.awayScore !== nm.awayScore ||
-          pm.homePenalties !== nm.homePenalties ||
-          pm.awayPenalties !== nm.awayPenalties ||
-          pm.winnerTeamId !== nm.winnerTeamId ||
-          pm.homeTeamId !== nm.homeTeamId ||
-          pm.awayTeamId !== nm.awayTeamId
+          Boolean(prev.isCompleted) !== Boolean(next.isCompleted) ||
+          prev.currentStage !== next.currentStage ||
+          prev.winnerClubId !== next.winnerClubId ||
+          prev.runnerUpClubId !== next.runnerUpClubId
         ) {
           return true;
         }
-      }
-      const prevGroups = prev.groups || [];
-      const nextGroups = next.groups || [];
-      if (prevGroups.length !== nextGroups.length) return true;
-      for (let gIdx = 0; gIdx < prevGroups.length; gIdx++) {
-        const pg = prevGroups[gIdx];
-        const ng = nextGroups[gIdx];
-        if (!pg || !ng || (pg.standings || []).length !== (ng.standings || []).length) return true;
-        for (let sIdx = 0; sIdx < ng.standings.length; sIdx++) {
-          const ps = pg.standings[sIdx];
-          const ns = ng.standings[sIdx];
+        const prevMatches = prev.matches || [];
+        const nextMatches = next.matches || [];
+        if (prevMatches.length !== nextMatches.length) return true;
+        for (let i = 0; i < prevMatches.length; i++) {
+          const pm = prevMatches[i];
+          const nm = nextMatches[i];
           if (
-            !ps ||
-            !ns ||
-            ps.teamId !== ns.teamId ||
-            ps.played !== ns.played ||
-            ps.points !== ns.points ||
-            ps.goalDifference !== ns.goalDifference ||
-            ps.goalsFor !== ns.goalsFor
+            !pm ||
+            !nm ||
+            pm.id !== nm.id ||
+            Boolean(pm.isPlayed) !== Boolean(nm.isPlayed) ||
+            pm.homeScore !== nm.homeScore ||
+            pm.awayScore !== nm.awayScore ||
+            pm.homePenalties !== nm.homePenalties ||
+            pm.awayPenalties !== nm.awayPenalties ||
+            pm.winnerTeamId !== nm.winnerTeamId ||
+            pm.homeTeamId !== nm.homeTeamId ||
+            pm.awayTeamId !== nm.awayTeamId
           ) {
             return true;
           }
         }
-      }
-      return false;
-    };
+        const prevGroups = prev.groups || [];
+        const nextGroups = next.groups || [];
+        if (prevGroups.length !== nextGroups.length) return true;
+        for (let gIdx = 0; gIdx < prevGroups.length; gIdx++) {
+          const pg = prevGroups[gIdx];
+          const ng = nextGroups[gIdx];
+          if (!pg || !ng || (pg.standings || []).length !== (ng.standings || []).length) return true;
+          for (let sIdx = 0; sIdx < ng.standings.length; sIdx++) {
+            const ps = pg.standings[sIdx];
+            const ns = ng.standings[sIdx];
+            if (
+              !ps ||
+              !ns ||
+              ps.teamId !== ns.teamId ||
+              ps.played !== ns.played ||
+              ps.points !== ns.points ||
+              ps.goalDifference !== ns.goalDifference ||
+              ps.goalsFor !== ns.goalsFor
+            ) {
+              return true;
+            }
+          }
+        }
+        return false;
+      };
 
-    const fixturesActuallyChanged = (prev: Fixture[], next: Fixture[]): boolean => {
-      if (prev.length !== next.length) return true;
-      for (let i = 0; i < prev.length; i++) {
-        const p = prev[i];
-        const n = next[i];
-        if (
-          p.id !== n.id ||
-          p.isPlayed !== n.isPlayed ||
-          p.homeTeamId !== n.homeTeamId ||
-          p.awayTeamId !== n.awayTeamId ||
-          p.winnerTeamId !== n.winnerTeamId ||
-          p.homeScore !== n.homeScore ||
-          p.awayScore !== n.awayScore ||
-          p.homePenalties !== n.homePenalties ||
-          p.awayPenalties !== n.awayPenalties
-        ) {
-          return true;
+      const fixturesActuallyChanged = (prev: Fixture[], next: Fixture[]): boolean => {
+        if (prev.length !== next.length) return true;
+        for (let i = 0; i < prev.length; i++) {
+          const p = prev[i];
+          const n = next[i];
+          if (
+            p.id !== n.id ||
+            p.isPlayed !== n.isPlayed ||
+            p.homeTeamId !== n.homeTeamId ||
+            p.awayTeamId !== n.awayTeamId ||
+            p.winnerTeamId !== n.winnerTeamId ||
+            p.homeScore !== n.homeScore ||
+            p.awayScore !== n.awayScore ||
+            p.homePenalties !== n.homePenalties ||
+            p.awayPenalties !== n.awayPenalties
+          ) {
+            return true;
+          }
+        }
+        return false;
+      };
+
+      continentalRepairGuardRef.current.signature = execSignature;
+
+      // A. Integrity Repair Check: Heals any phantom completions or premature knockouts from corrupt localStorage
+      const rep = repairContinentalTournamentIntegrity(
+        africanChampionsLeague,
+        currentFixturesSnapshot,
+        userClub,
+        currentRound,
+        currentSeasonNum,
+        currentTeamsSnapshot
+      );
+      if (rep.repaired) {
+        let didUpdate = false;
+        if (rep.updatedTournament && hasContinentalTournamentChanged(africanChampionsLeague, rep.updatedTournament)) {
+          didUpdate = true;
+          setAfricanChampionsLeague(rep.updatedTournament);
+        }
+        if (fixturesActuallyChanged(currentFixturesSnapshot, rep.updatedFixtures)) {
+          didUpdate = true;
+          setFixtures(rep.updatedFixtures);
+        }
+        if (didUpdate) {
+          continentalRepairGuardRef.current.consecutiveUpdatesCount += 1;
+          return;
         }
       }
-      return false;
-    };
 
-    // A. Integrity Repair Check: Heals any phantom completions or premature knockouts from corrupt localStorage
-    const rep = repairContinentalTournamentIntegrity(
-      africanChampionsLeague,
-      fixtures,
-      userClub,
-      currentRound,
-      currentSeasonNum,
-      teams
-    );
-    if (rep.repaired) {
-      let didUpdate = false;
-      if (rep.updatedTournament && hasContinentalTournamentChanged(africanChampionsLeague, rep.updatedTournament)) {
-        didUpdate = true;
-        setAfricanChampionsLeague(rep.updatedTournament);
-      }
-      if (fixturesActuallyChanged(fixtures, rep.updatedFixtures)) {
-        didUpdate = true;
-        setFixtures(rep.updatedFixtures);
-      }
-      if (didUpdate) {
-        continentalRepairGuardRef.current.consecutiveUpdatesCount += 1;
+      // B. Check for active unplayed group matches or knockout stages
+      const unplayedMatches = (africanChampionsLeague.matches || []).filter(m => m && !m.isPlayed);
+      if (unplayedMatches.length === 0) {
+        const recalced = recalculateContinentalGroupStandings(africanChampionsLeague, currentFixturesSnapshot);
+        if (hasContinentalTournamentChanged(africanChampionsLeague, recalced)) {
+          continentalRepairGuardRef.current.consecutiveUpdatesCount += 1;
+          setAfricanChampionsLeague(recalced);
+        }
         return;
       }
-    }
 
-    // B. Check for active unplayed group matches or knockout stages
-    const unplayedMatches = (africanChampionsLeague.matches || []).filter(m => m && !m.isPlayed);
-    if (unplayedMatches.length === 0) {
-      // Recompute standings if needed
-      const recalced = recalculateContinentalGroupStandings(africanChampionsLeague, fixtures);
-      if (hasContinentalTournamentChanged(africanChampionsLeague, recalced)) {
+      // Check if the tournament matchday has arrived
+      const lowestUnplayedTrigger = Math.min(...unplayedMatches.map(m => m.roundTrigger || 1));
+      if (currentRound < lowestUnplayedTrigger) {
+        return;
+      }
+
+      const userMatchInActiveStage = unplayedMatches.find(
+        um =>
+          um &&
+          (um.roundTrigger || 1) <= currentRound &&
+          userClub &&
+          (um.homeTeamId === userClub.id || um.awayTeamId === userClub.id)
+      );
+
+      // STRICT: If user has an unplayed continental match due, STOP and wait for the user to play it!
+      if (userMatchInActiveStage && !userMatchInActiveStage.isPlayed) {
+        return;
+      }
+
+      const recalced = recalculateContinentalGroupStandings(africanChampionsLeague, currentFixturesSnapshot);
+
+      const allTeamsMap = new Map<string, Club>();
+      Object.values(GLOBAL_LEAGUES).forEach(lg => {
+        lg.teams.forEach(c => allTeamsMap.set(c.id, c));
+      });
+      currentTeamsSnapshot.forEach(c => allTeamsMap.set(c.id, c));
+
+      const { updatedTournament } = advanceContinentalTournament(
+        recalced,
+        currentRound,
+        allTeamsMap,
+        userClub,
+        {
+          simulateUserMatches: false,
+          externalFixtures: currentFixturesSnapshot,
+        }
+      );
+
+      if (hasContinentalTournamentChanged(africanChampionsLeague, updatedTournament)) {
+        continentalRepairGuardRef.current.consecutiveUpdatesCount += 1;
+        setAfricanChampionsLeague(updatedTournament);
+      } else if (hasContinentalTournamentChanged(africanChampionsLeague, recalced)) {
         continentalRepairGuardRef.current.consecutiveUpdatesCount += 1;
         setAfricanChampionsLeague(recalced);
       }
-      return;
-    }
+    }, 32);
 
-    // Check if the tournament matchday has arrived
-    const lowestUnplayedTrigger = Math.min(...unplayedMatches.map(m => m.roundTrigger || 1));
-    if (currentRound < lowestUnplayedTrigger) {
-      return;
-    }
-
-    const userMatchInActiveStage = unplayedMatches.find(
-      um =>
-        um &&
-        (um.roundTrigger || 1) <= currentRound &&
-        userClub &&
-        (um.homeTeamId === userClub.id || um.awayTeamId === userClub.id)
-    );
-
-    // STRICT: If user has an unplayed continental match due, STOP and wait for the user to play it!
-    if (userMatchInActiveStage && !userMatchInActiveStage.isPlayed) {
-      return;
-    }
-
-    // Standings sync
-    const recalced = recalculateContinentalGroupStandings(africanChampionsLeague, fixtures);
-
-    const allTeamsMap = new Map<string, Club>();
-    Object.values(GLOBAL_LEAGUES).forEach(lg => {
-      lg.teams.forEach(c => allTeamsMap.set(c.id, c));
-    });
-    teams.forEach(c => allTeamsMap.set(c.id, c));
-
-    const { updatedTournament } = advanceContinentalTournament(
-      recalced,
-      currentRound,
-      allTeamsMap,
-      userClub,
-      {
-        simulateUserMatches: false,
-        externalFixtures: fixtures,
-      }
-    );
-
-    if (hasContinentalTournamentChanged(africanChampionsLeague, updatedTournament)) {
-      continentalRepairGuardRef.current.consecutiveUpdatesCount += 1;
-      setAfricanChampionsLeague(updatedTournament);
-    } else if (hasContinentalTournamentChanged(africanChampionsLeague, recalced)) {
-      continentalRepairGuardRef.current.consecutiveUpdatesCount += 1;
-      setAfricanChampionsLeague(recalced);
-    }
-  }, [currentRound, fixtures, africanChampionsLeague, teams, userClub?.id]);
+    return () => window.clearTimeout(timerId);
+  }, [currentRound, africanChampionsLeague, userClub?.id, season?.seasonNumber]);
 
   // 6. Job Offers & Season End Summary
   const [jobOffers, setJobOffers] = useState<JobOffer[]>(() => {
@@ -3851,7 +3880,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       return;
     }
 
-    // Capture snapshot and immediately stop all match timers + unmount live match view to prevent UI lag or double clicks
+    // Capture snapshot and immediately stop all match timers + yield one frame so loading overlay renders cleanly without black screen freeze
     const activeMatchSnapshot = liveMatch;
     isFinishingMatchRef.current = true;
     isSimulationRunningRef.current = true;
@@ -3863,6 +3892,11 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     setLiveMatch(null);
 
     try {
+      await new Promise<void>(resolve =>
+        requestAnimationFrame(() => {
+          setTimeout(resolve, 16);
+        })
+      );
       console.log('[MatchEndingFlow] Processing match finalization for fixture:', currentFixtureId);
       const { fixture, homeTeam, awayTeam, homeScore, awayScore, events, stats } = activeMatchSnapshot;
       const homeTeamId = homeTeam?.id || fixture?.homeTeamId;
@@ -5192,6 +5226,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     setIsSimulationRunning(true);
 
     try {
+      await new Promise<void>(resolve => setTimeout(resolve, 16));
       // 1. Determine whether today is a Continental/Cup matchday or a League round simulation
       const todayDateRaw = (calendarDate?.rawDateStr || '2026-08-15').trim();
       const todayUserMatches = fixtures.filter(f =>
@@ -5328,16 +5363,19 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             userSimMatchRevenue = fixtureUserRevenue;
           }
 
-          const matchEvents = (matchResult.events || []).filter(e =>
-            e && (
-              e.type === 'goal' ||
-              e.type === 'yellow_card' ||
-              e.type === 'red_card' ||
-              e.type === 'substitution' ||
-              e.type === 'injury' ||
-              (isUserMatch && (e.type === 'save' || e.type === 'chance'))
-            )
-          );
+          const matchEvents = isUserMatch
+            ? (matchResult.events || []).filter(
+                e =>
+                  e &&
+                  (e.type === 'goal' ||
+                    e.type === 'yellow_card' ||
+                    e.type === 'red_card' ||
+                    e.type === 'substitution' ||
+                    e.type === 'injury' ||
+                    e.type === 'save' ||
+                    e.type === 'chance')
+              )
+            : pruneMatchEventsForStorage(matchResult.events || [], true);
 
           const finishedFix: Fixture = {
             ...fix,
@@ -5348,7 +5386,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             winnerTeamId: isKnockout ? (matchResult as any).winnerTeamId : undefined,
             isPlayed: true,
             events: matchEvents,
-            stats: matchResult.stats,
+            stats: isUserMatch ? matchResult.stats : undefined,
             matchRevenue: fixtureUserRevenue || fix.matchRevenue,
             revenueClaimed: isUserMatch ? true : fix.revenueClaimed,
           };
@@ -6314,22 +6352,21 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
     console.log('[MatchEndingFlow] Instant simulate round completed successfully');
 
-    // Synchronously write critical round progress to localStorage immediately
+    // Store only lightweight scalar header fields in localStorage; full state is persisted asynchronously to IndexedDB
     try {
-      localStorage.setItem(`${STORAGE_KEY}_currentRound`, JSON.stringify(nextRoundNumber));
-      localStorage.setItem(`${STORAGE_KEY}_calendarDate`, JSON.stringify(updatedCalendarDate));
-      localStorage.setItem(`${STORAGE_KEY}_season`, JSON.stringify(updatedSeason));
-      localStorage.setItem(`${STORAGE_KEY}_fixtures`, JSON.stringify(updatedFixtures));
-      localStorage.setItem(`${STORAGE_KEY}_standings`, JSON.stringify(updatedStandings));
-      localStorage.setItem(`${STORAGE_KEY}_teams`, JSON.stringify(updatedAllTeams));
-      localStorage.setItem(`${STORAGE_KEY}_manager`, JSON.stringify(updatedManager));
+      const prunedFinalFixtures = pruneFixturesForStorage(updatedFixtures, userClub?.id);
+      updatedFixtures = prunedFinalFixtures;
+      safeLocalStorageSet(`${STORAGE_KEY}_currentRound`, JSON.stringify(nextRoundNumber));
+      safeLocalStorageSet(`${STORAGE_KEY}_calendarDate`, JSON.stringify(updatedCalendarDate));
+      safeLocalStorageSet(`${STORAGE_KEY}_season`, JSON.stringify(updatedSeason));
+      safeLocalStorageSet(`${STORAGE_KEY}_standings`, JSON.stringify(updatedStandings));
+      safeLocalStorageSet(`${STORAGE_KEY}_manager`, JSON.stringify(updatedManager));
       if (updatedContinental) {
-        localStorage.setItem(`${STORAGE_KEY}_africanChampionsLeague`, JSON.stringify(updatedContinental));
         const sNum = updatedContinental.seasonNumber || updatedSeason.seasonNumber || 1;
         const cCode = updatedContinental.competitionId || 'ccl';
-        localStorage.setItem(`${STORAGE_KEY}_contCache_s${sNum}_${cCode}`, JSON.stringify(updatedContinental));
+        saveContinentalCacheToDb(sNum, cCode, updatedContinental);
       }
-      localStorage.removeItem(`${STORAGE_KEY}_active_live_match`);
+      safeLocalStorageRemove(`${STORAGE_KEY}_active_live_match`);
     } catch (lsErr) {
       console.warn('[MatchEndingFlow] Sync storage error:', lsErr);
     }
@@ -9658,6 +9695,11 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     setIsSimulationRunning(true);
 
     try {
+      await new Promise<void>(resolve =>
+        requestAnimationFrame(() => {
+          setTimeout(resolve, 16);
+        })
+      );
       // Master Calendar Gating: If user's club has any unplayed fixture on or before today's calendar date (or active round trigger), block advancement
       if (!forceAdvance && userClub && !seasonFinished) {
         const todayStr = (calendarDate?.rawDateStr || '2026-08-15').trim();
@@ -9719,14 +9761,15 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       const newDate = simResult.nextDate;
       const daysAdvanced = Math.max(1, (newDate.dayIndexInSeason || 1) - (calendarDate?.dayIndexInSeason || 1));
 
-      // Synchronize simulated background AI matches into fixtures and route through Tournament Dispatcher
+      // Synchronize simulated background AI matches into fixtures and route through Tournament Dispatcher in non-blocking batches
       let nextFixtures = [...fixtures];
       if (simResult.simulatedFixtures.length > 0) {
         let nextStandings = [...standings];
         let nextCup = cupTournament;
         let nextContinental = africanChampionsLeague;
 
-        for (const sf of simResult.simulatedFixtures) {
+        for (let idx = 0; idx < simResult.simulatedFixtures.length; idx++) {
+          const sf = simResult.simulatedFixtures[idx];
           const disp = await processMatchResult(sf, {
             standings: nextStandings,
             cupTournament: nextCup,
@@ -9740,6 +9783,9 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           nextCup = disp.updatedCupTournament;
           nextContinental = disp.updatedContinentalTournament;
           nextFixtures = disp.updatedFixtures;
+          if ((idx + 1) % 3 === 0) {
+            await new Promise<void>(resolve => setTimeout(resolve, 0));
+          }
         }
 
         const sNum = season?.seasonNumber || 1;
@@ -10255,10 +10301,10 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       setShowDaySummaryModal(true);
       console.log('[DailyProgression] Day advanced successfully to:', newDate.formattedArabic);
 
-      // Persist advanced calendar date and full game state to disk repository
+      // Persist advanced calendar date and full game state to disk repository (IndexedDB) without blocking main thread with huge localStorage strings
       try {
-        localStorage.setItem(`${STORAGE_KEY}_calendarDate`, JSON.stringify(newDate));
-        localStorage.setItem(`${STORAGE_KEY}_teams`, JSON.stringify(calculatedNextTeams));
+        safeLocalStorageSet(`${STORAGE_KEY}_calendarDate`, JSON.stringify(newDate));
+        const prunedDayFixtures = pruneFixturesForStorage(nextFixtures, userClub?.id);
         gameStateRepository.saveLocalGameState({
           schemaVersion: 2,
           saveVersion: 1,
@@ -10267,7 +10313,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           activeLeague,
           teams: calculatedNextTeams,
           standings,
-          fixtures,
+          fixtures: prunedDayFixtures,
           currentRound,
           manager,
           transferMarket,

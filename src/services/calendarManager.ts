@@ -601,6 +601,11 @@ export class CalendarManager {
 
     const simulatedFixtures: CalendarScheduleItem[] = [];
 
+    const pruneAiEvents = (evs: any[] = []) =>
+      (Array.isArray(evs) ? evs : [])
+        .filter(e => e && (e.type === 'goal' || e.type === 'red_card'))
+        .slice(0, 8);
+
     matchesOnDate.forEach(fix => {
       if (userClubId && (fix.homeTeamId === userClubId || fix.awayTeamId === userClubId)) {
         return;
@@ -626,7 +631,7 @@ export class CalendarManager {
         fix.awayPenalties = res.awayPenalties;
         fix.winnerTeamId = res.winnerTeamId;
         fix.isPlayed = true;
-        fix.events = res.events;
+        fix.events = pruneAiEvents(res.events);
         fix.stats = res.stats;
       } else if (isContinental) {
         const isKnockout = fix.stage !== 'group' && !fix.stageName?.includes('المجموعات');
@@ -638,14 +643,14 @@ export class CalendarManager {
           fix.awayPenalties = res.awayPenalties;
           fix.winnerTeamId = res.winnerTeamId;
           fix.isPlayed = true;
-          fix.events = res.events;
+          fix.events = pruneAiEvents(res.events);
           fix.stats = res.stats;
         } else {
           const res = simulateMatch(home, away, home.tactics || { formation: '4-4-2' }, away.tactics || { formation: '4-4-2' });
           fix.homeScore = res.homeScore;
           fix.awayScore = res.awayScore;
           fix.isPlayed = true;
-          fix.events = res.events;
+          fix.events = pruneAiEvents(res.events);
           fix.stats = res.stats;
         }
       } else {
@@ -653,7 +658,7 @@ export class CalendarManager {
         fix.homeScore = res.homeScore;
         fix.awayScore = res.awayScore;
         fix.isPlayed = true;
-        fix.events = res.events;
+        fix.events = pruneAiEvents(res.events);
         fix.stats = res.stats;
       }
       simulatedFixtures.push(fix);
