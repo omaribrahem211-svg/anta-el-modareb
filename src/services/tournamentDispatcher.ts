@@ -66,45 +66,8 @@ export interface ProcessMatchResultOutput {
   newsContent: string;
 }
 
-/**
- * Normalizes any variation of competition type into the 3 core types:
- * - 'LEAGUE'
- * - 'DOMESTIC_COP'
- * - 'CONTINENTAL_CUP'
- */
-export function normalizeCompetitionType(
-  rawType?: string | CompetitionType
-): 'LEAGUE' | 'DOMESTIC_COP' | 'CONTINENTAL_CUP' {
-  if (!rawType) return 'LEAGUE';
-  const lower = String(rawType).toLowerCase().trim();
-  if (
-    lower.includes('cont') ||
-    lower.includes('ccl') ||
-    lower.includes('ccc') ||
-    lower.includes('ucl') ||
-    lower.includes('uel') ||
-    lower.includes('acl') ||
-    lower.includes('caf') ||
-    lower.includes('uefa') ||
-    lower.includes('europa') ||
-    lower.includes('confed') ||
-    lower.includes('champ') ||
-    lower === 'continental_cup'
-  ) {
-    return 'CONTINENTAL_CUP';
-  }
-  if (
-    lower.includes('cup') ||
-    lower.includes('cop') ||
-    lower.includes('pokal') ||
-    lower.includes('coupe') ||
-    lower === 'domestic_cop' ||
-    lower === 'domestic_cup'
-  ) {
-    return 'DOMESTIC_COP';
-  }
-  return 'LEAGUE';
-}
+import { normalizeCompetitionType } from './calendarManager';
+export { normalizeCompetitionType };
 
 /**
  * Returns human-readable Arabic branding details for any fixture/competition.
@@ -192,10 +155,12 @@ export function resolveMatchWinner(
   if (forcedWinnerTeamId) return forcedWinnerTeamId;
   if (
     homePenalties !== undefined &&
-    awayPenalties !== undefined &&
-    homePenalties !== awayPenalties
+    awayPenalties !== undefined
   ) {
-    return homePenalties > awayPenalties ? homeTeamId : awayTeamId;
+    if (homePenalties !== awayPenalties) {
+      return homePenalties > awayPenalties ? homeTeamId : awayTeamId;
+    }
+    return homeTeamId;
   }
   if (homeScore > awayScore) return homeTeamId;
   if (awayScore > homeScore) return awayTeamId;
@@ -210,10 +175,10 @@ export function resolveMatchWinner(
  * 3. Domestic Cup elimination brackets & round progression
  * 4. Player stats (goals, assists, cards, clean sheets, ratings)
  */
-export function processMatchResult(
+export async function processMatchResult(
   fixtureOrOptions: Fixture | ProcessMatchResultOptions,
   context?: ProcessMatchStateContext
-): ProcessMatchResultOutput {
+): Promise<ProcessMatchResultOutput> {
   let fixture: Fixture;
   let homeScore: number;
   let awayScore: number;
@@ -631,17 +596,73 @@ export function processMatchResult(
   // 3. DOMESTIC CUP PROCESSING (National Cup for All Countries)
   // --------------------------------------------------------------------------
   if (normType === 'DOMESTIC_COP' && updatedCup) {
-    const cupMatchIdx = updatedCup.matches.findIndex(
-      m =>
-        m.id === updatedFixture.id ||
-        (m.homeTeamId === updatedFixture.homeTeamId &&
-          m.awayTeamId === updatedFixture.awayTeamId &&
-          (m.stage === updatedFixture.cupStage || m.stage === updatedFixture.stage || m.stageName === updatedFixture.stageName))
-    );
+    const normFixStage = String(updatedFixture.cupStage || updatedFixture.stage || '').toLowerCase().trim();
+    const fixStageName = String(updatedFixture.stageName || '').trim();
 
-    if (cupMatchIdx !== -1) {
-      updatedCup.matches[cupMatchIdx] = {
-        ...updatedCup.matches[cupMatchIdx],
+    const matchesStage = (m: CupMatch) => {
+      if (!normFixStage && !fixStageName) return true;
+      const mStage = String(m.stage || '').toLowerCase().trim();
+      const mStageName = String(m.stageName || '').trim();
+      if (normFixStage && (mStage === normFixStage || mStage.includes(normFixStage) || normFixStage.includes(mStage))) return true;
+      if (fixStageName && (mStageName === fixStageName || mStageName.includes(fixStageName) || fixStageName.includes(mStageName))) return true;
+      if ((normFixStage.includes('final') || fixStageName.includes('نهائي')) && (mStage.includes('final') || mStageName.includes('نهائي'))) {
+        const isSemi = normFixStage.includes('semi') || fixStageName.includes('نصف');
+        const mIsSemi = mStage.includes('semi') || mStageName.includes('نصف');
+        const isQuarter = normFixStage.includes('quarter') || fixStageName.includes('ربع');
+        const mIsQuarter = mStage.includes('quarter') || mStageName.includes('ربع');
+        return isSemi === mIsSemi && isQuarter === mIsQuarter;
+      }
+      return false;
+    };
+
+    let cupMatchIdx = updatedCup.matches.findIndex(m => m.id === updatedFixture.id);
+    if (cupMatchIdx === -1) {
+      // Direct or inverted teams with stage match
+      cupMatchIdx = updatedCup.matches.findIndex(
+        m =>
+          ((m.homeTeamId === updatedFixture.homeTeamId && m.awayTeamId === updatedFixture.awayTeamId) ||
+           (m.homeTeamId === updatedFixture.awayTeamId && m.awayTeamId === updatedFixture.homeTeamId)) &&
+          matchesStage(m)
+      );
+    }
+    if (cupMatchIdx === -1) {
+      // Fallback: unplayed match between these two teams
+      cupMatchIdx = updatedCup.matches.findIndex(
+        m =>
+          !m.isPlayed &&
+          ((m.homeTeamId === updatedFixture.homeTeamId && m.awayTeamId === updatedFixture.awayTeamId) ||
+           (m.homeTeamId === updatedFixture.awayTeamId && m.awayTeamId === updatedFixture.homeTeamId))
+      );
+    }
+
+    let activeCupIdx = cupMatchIdx;
+    if (activeCupIdx === -1) {
+      console.error('[CupSyncError] Cup fixture not found in cup.matches. Synthesizing match entry to prevent freeze:', {
+        fixtureId: updatedFixture.id,
+        home: updatedFixture.homeTeamId,
+        away: updatedFixture.awayTeamId,
+        cupStage: updatedFixture.cupStage || updatedFixture.stage || updatedFixture.stageName,
+      });
+      const synthStage = (updatedFixture.cupStage || updatedFixture.stage || 'round_of_32') as CupMatch['stage'];
+      const synthMatch: CupMatch = {
+        id: updatedFixture.id,
+        stage: synthStage,
+        stageName: updatedFixture.stageName || 'كأس',
+        roundTrigger: updatedFixture.round || 1,
+        homeTeamId: updatedFixture.homeTeamId,
+        awayTeamId: updatedFixture.awayTeamId,
+        homeScore,
+        awayScore,
+        homePenalties,
+        awayPenalties,
+        winnerTeamId: resolvedWinner,
+        isPlayed: true,
+      };
+      updatedCup.matches.push(synthMatch);
+      activeCupIdx = updatedCup.matches.length - 1;
+    } else {
+      updatedCup.matches[activeCupIdx] = {
+        ...updatedCup.matches[activeCupIdx],
         homeScore,
         awayScore,
         homePenalties,
@@ -659,7 +680,7 @@ export function processMatchResult(
       } else {
         updatedCup.userEliminatedStage =
           updatedFixture.stageName ||
-          updatedCup.matches[cupMatchIdx]?.stageName ||
+          updatedCup.matches[activeCupIdx]?.stageName ||
           branding.stageName ||
           'الكأس الوطنية';
       }
@@ -667,7 +688,7 @@ export function processMatchResult(
 
     const currentStageName =
       updatedFixture.cupStage ||
-      updatedCup.matches[cupMatchIdx]?.stage ||
+      updatedCup.matches[activeCupIdx]?.stage ||
       (updatedFixture.stage as any);
 
     const stageProgressionMap: Record<
@@ -686,8 +707,9 @@ export function processMatchResult(
       const nextInfo = stageProgressionMap[currentStageName];
       const alreadyHasNextStage = updatedCup.matches.some(m => m.stage === nextInfo.nextStage);
 
-      // Resolve any remaining unplayed AI matches of this stage immediately
-      stageMatches.forEach(m => {
+      // Resolve any remaining unplayed AI matches of this stage asynchronously with batch yielding
+      for (let i = 0; i < stageMatches.length; i++) {
+        const m = stageMatches[i];
         if (!m.isPlayed) {
           const homeClub = teams.find(t => t.id === m.homeTeamId) || findClubInWorld(m.homeTeamId) || ({ id: m.homeTeamId, name: 'فريق الكأس' } as any);
           const awayClub = teams.find(t => t.id === m.awayTeamId) || findClubInWorld(m.awayTeamId) || ({ id: m.awayTeamId, name: 'فريق الكأس' } as any);
@@ -711,7 +733,10 @@ export function processMatchResult(
             };
           }
         }
-      });
+        if ((i + 1) % 4 === 0) {
+          await new Promise(r => setTimeout(r, 0));
+        }
+      }
 
       if (stageMatches.length >= 1 && stageMatches.every(m => m.isPlayed) && !alreadyHasNextStage) {
         const winners = stageMatches.map(
@@ -919,4 +944,202 @@ export function processMatchResult(
     newsTitle,
     newsContent,
   };
+}
+
+/**
+ * Self-healing repair for cup matches and bracket progression:
+ * 1. Synchronizes any cup fixture marked isPlayed === true that is unplayed or missing in cupTournament.matches.
+ * 2. If all matches of a completed stage are played, advances the cup bracket to the next stage.
+ * 3. Marks cup completion if the final is played.
+ */
+export function repairOrphanedCupMatches(
+  fixtures: Fixture[] = [],
+  cup: CupTournament | null | undefined
+): { cup: CupTournament | null; fixtures: Fixture[]; repaired: boolean } {
+  if (!cup || !Array.isArray(cup.matches)) {
+    return { cup: cup || null, fixtures, repaired: false };
+  }
+
+  let repaired = false;
+  const updatedCup: CupTournament = {
+    ...cup,
+    matches: cup.matches.map(m => ({ ...m })),
+  };
+  let updatedFixtures = fixtures.map(f => ({ ...f }));
+
+  // 1. Synchronize played cup fixtures into cup.matches
+  for (const f of updatedFixtures) {
+    if (!f || !f.isPlayed || f.homeScore === undefined || f.awayScore === undefined) continue;
+    const norm = normalizeCompetitionType(
+      f.competitionType || f.tournamentId || f.competitionId || (f.cupStage ? 'DOMESTIC_COP' : undefined)
+    );
+    if (norm !== 'DOMESTIC_COP') continue;
+
+    const normFixStage = String(f.cupStage || f.stage || '').toLowerCase().trim();
+    const fixStageName = String(f.stageName || '').trim();
+
+    let mIdx = updatedCup.matches.findIndex(m => m.id === f.id);
+    if (mIdx === -1) {
+      mIdx = updatedCup.matches.findIndex(
+        m =>
+          ((m.homeTeamId === f.homeTeamId && m.awayTeamId === f.awayTeamId) ||
+           (m.homeTeamId === f.awayTeamId && m.awayTeamId === f.homeTeamId)) &&
+          (!normFixStage || String(m.stage || '').toLowerCase() === normFixStage || String(m.stageName || '').includes(fixStageName))
+      );
+    }
+
+    const winner =
+      f.winnerTeamId ||
+      resolveMatchWinner(f.homeTeamId, f.awayTeamId, f.homeScore, f.awayScore, f.homePenalties, f.awayPenalties);
+
+    if (mIdx !== -1) {
+      const match = updatedCup.matches[mIdx];
+      if (!match.isPlayed || match.homeScore !== f.homeScore || match.awayScore !== f.awayScore || match.winnerTeamId !== winner) {
+        match.isPlayed = true;
+        match.homeScore = f.homeScore;
+        match.awayScore = f.awayScore;
+        match.homePenalties = f.homePenalties;
+        match.awayPenalties = f.awayPenalties;
+        match.winnerTeamId = winner;
+        repaired = true;
+      }
+    } else {
+      // Synthesize missing match entry in cup.matches
+      const synthStage = (f.cupStage || f.stage || 'round_of_32') as CupMatch['stage'];
+      updatedCup.matches.push({
+        id: f.id,
+        stage: synthStage,
+        stageName: f.stageName || 'كأس',
+        roundTrigger: f.round || 1,
+        homeTeamId: f.homeTeamId,
+        awayTeamId: f.awayTeamId,
+        homeScore: f.homeScore,
+        awayScore: f.awayScore,
+        homePenalties: f.homePenalties,
+        awayPenalties: f.awayPenalties,
+        winnerTeamId: winner,
+        isPlayed: true,
+      });
+      repaired = true;
+    }
+  }
+
+  // 2. Check stage progressions
+  const stageProgressionMap: Record<
+    string,
+    { nextStage: CupMatch['stage']; nextArabic: string; roundTrigger: number }
+  > = {
+    round_of_64: { nextStage: 'round_of_32', nextArabic: 'دور الـ 32', roundTrigger: 8 },
+    round_of_32: { nextStage: 'round_of_16', nextArabic: 'ثمن النهائي (دور الـ 16)', roundTrigger: 13 },
+    round_of_16: { nextStage: 'quarter', nextArabic: 'ربع النهائي', roundTrigger: 19 },
+    quarter: { nextStage: 'semi', nextArabic: 'نصف النهائي', roundTrigger: 24 },
+    semi: { nextStage: 'final', nextArabic: 'المباراة النهائية 🏆', roundTrigger: 29 },
+  };
+
+  const stagesInOrder: CupMatch['stage'][] = ['round_of_64', 'round_of_32', 'round_of_16', 'quarter', 'semi', 'final'];
+  for (const st of stagesInOrder) {
+    if (st === 'final') {
+      const finalMatch = updatedCup.matches.find(m => m.stage === 'final');
+      if (finalMatch && finalMatch.isPlayed && !updatedCup.isCompleted) {
+        updatedCup.isCompleted = true;
+        updatedCup.winnerClubId =
+          finalMatch.winnerTeamId ||
+          resolveMatchWinner(
+            finalMatch.homeTeamId,
+            finalMatch.awayTeamId,
+            finalMatch.homeScore || 0,
+            finalMatch.awayScore || 0,
+            finalMatch.homePenalties,
+            finalMatch.awayPenalties
+          ) ||
+          finalMatch.homeTeamId;
+        updatedCup.runnerUpClubId =
+          updatedCup.winnerClubId === finalMatch.homeTeamId ? finalMatch.awayTeamId : finalMatch.homeTeamId;
+        repaired = true;
+      }
+      continue;
+    }
+
+    const nextInfo = stageProgressionMap[st];
+    if (!nextInfo) continue;
+
+    const currentMatches = updatedCup.matches.filter(m => m.stage === st);
+    if (currentMatches.length === 0) continue;
+
+    const allPlayed = currentMatches.every(m => m.isPlayed);
+    const hasNext = updatedCup.matches.some(m => m.stage === nextInfo.nextStage);
+
+    if (allPlayed && !hasNext) {
+      const winners = currentMatches.map(
+        m =>
+          resolveMatchWinner(
+            m.homeTeamId,
+            m.awayTeamId,
+            m.homeScore || 0,
+            m.awayScore || 0,
+            m.homePenalties,
+            m.awayPenalties,
+            m.winnerTeamId
+          ) || m.homeTeamId
+      );
+
+      const numNextMatches = Math.floor(winners.length / 2);
+      const cupDef = getDomesticCupDefinitionForCountry(updatedCup.country || 'مصر');
+      const cupDisplayName = updatedCup.name || cupDef.shortName || cupDef.name;
+      const stageDateInfo = CalendarManager.resolveDomesticCupStageDate(
+        nextInfo.nextStage,
+        updatedCup.seasonNumber || 1,
+        cupDisplayName
+      );
+      const existingFixIds = new Set(updatedFixtures.map(f => f?.id).filter(Boolean));
+      const newCupFixtures: Fixture[] = [];
+
+      for (let i = 0; i < numNextMatches; i++) {
+        const homeId = winners[i * 2];
+        const awayId = winners[i * 2 + 1];
+        if (!homeId || !awayId) continue;
+
+        const newCupMatch: CupMatch = {
+          id: `cup_${nextInfo.nextStage}_${i + 1}_s${updatedCup.seasonNumber || 1}`,
+          stage: nextInfo.nextStage,
+          stageName: nextInfo.nextArabic,
+          roundTrigger: nextInfo.roundTrigger,
+          homeTeamId: homeId,
+          awayTeamId: awayId,
+          isPlayed: false,
+        };
+        updatedCup.matches.push(newCupMatch);
+
+        if (!existingFixIds.has(newCupMatch.id)) {
+          newCupFixtures.push({
+            id: newCupMatch.id,
+            round: nextInfo.roundTrigger,
+            homeTeamId: homeId,
+            awayTeamId: awayId,
+            competitionType: 'DOMESTIC_COP',
+            competitionId: updatedCup.id || cupDef.id,
+            tournamentId: 'cup',
+            competitionName: cupDisplayName,
+            tournamentBadge: `🛡️ ${cupDef.shortName || cupDisplayName}`,
+            cupStage: nextInfo.nextStage,
+            stage: nextInfo.nextStage,
+            stageName: stageDateInfo.stageName,
+            date: stageDateInfo.dateStr,
+            timestamp: stageDateInfo.dateObj.getTime(),
+            isPlayed: false,
+          });
+          existingFixIds.add(newCupMatch.id);
+        }
+      }
+
+      if (newCupFixtures.length > 0) {
+        updatedFixtures = [...updatedFixtures, ...newCupFixtures].sort((a, b) =>
+          String(a?.date || '9999-99-99').localeCompare(String(b?.date || '9999-99-99'))
+        );
+      }
+      repaired = true;
+    }
+  }
+
+  return { cup: updatedCup, fixtures: updatedFixtures, repaired };
 }

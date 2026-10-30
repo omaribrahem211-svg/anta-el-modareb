@@ -1622,6 +1622,21 @@ export function simulateKnockoutMatch(
         awayP = Math.max(awayP, homeP + 1);
       }
 
+      // Safety: hard ceiling to guarantee homeP !== awayP and prevent infinite shootout loops
+      let safetyCount = 0;
+      while (homeP === awayP && safetyCount < 500) {
+        safetyCount++;
+        if (Math.random() < homePenWinProb) {
+          homeP += 1;
+        } else {
+          awayP += 1;
+        }
+      }
+      if (homeP === awayP) {
+        // Deterministic fallback to ensure decisive resolution
+        homeP += 1;
+      }
+
       homePenalties = homeP;
       awayPenalties = awayP;
       winnerTeamId = homeP > awayP ? safeHome.id : safeAway.id;

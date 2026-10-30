@@ -7,16 +7,57 @@ import {
   ContinentalMatch,
   CupTournament,
   CalendarDate,
+  CompetitionType,
 } from '../types/game';
 import { simulateMatch } from '../utils/engine';
 import { simulateKnockoutMatch } from '../utils/continentalEngine';
 import { formatCalendarDate, parseDateString, addDaysToDate } from '../utils/calendarEngine';
 import { getDomesticCupDefinitionForCountry } from '../data/competitionsData';
 
+/**
+ * Normalizes any variation of competition type into the 3 core types:
+ * - 'LEAGUE'
+ * - 'DOMESTIC_COP'
+ * - 'CONTINENTAL_CUP'
+ */
+export function normalizeCompetitionType(
+  rawType?: string | CompetitionType
+): 'LEAGUE' | 'DOMESTIC_COP' | 'CONTINENTAL_CUP' {
+  if (!rawType) return 'LEAGUE';
+  const lower = String(rawType).toLowerCase().trim();
+  if (
+    lower.includes('cont') ||
+    lower.includes('ccl') ||
+    lower.includes('ccc') ||
+    lower.includes('ucl') ||
+    lower.includes('uel') ||
+    lower.includes('acl') ||
+    lower.includes('caf') ||
+    lower.includes('uefa') ||
+    lower.includes('europa') ||
+    lower.includes('confed') ||
+    lower.includes('champ') ||
+    lower === 'continental_cup'
+  ) {
+    return 'CONTINENTAL_CUP';
+  }
+  if (
+    lower.includes('cup') ||
+    lower.includes('cop') ||
+    lower.includes('pokal') ||
+    lower.includes('coupe') ||
+    lower === 'domestic_cop' ||
+    lower === 'domestic_cup'
+  ) {
+    return 'DOMESTIC_COP';
+  }
+  return 'LEAGUE';
+}
+
 export interface CalendarScheduleItem extends Fixture {
   date: string; // "YYYY-MM-DD"
   timestamp: number; // ms timestamp
-  tournamentId: 'league' | 'cup' | 'ccl' | 'ccc' | 'ucl' | 'uel' | 'acl' | 'caf_cl';
+  tournamentId: 'league' | 'cup' | 'ccl' | 'ccc' | 'ucl' | 'uel' | 'acl' | 'acl2' | 'caf_cl';
   tournamentBadge: string; // e.g. "🇪🇬 الدوري" | "🏆 دوري أبطال إفريقيا" | "🌍 كأس الكونفدرالية" | "🏆 دوري أبطال أوروبا" | "🟠 الدوري الأوروبي" | "🛡️ كأس مصر"
   stage: string;
 }
@@ -571,11 +612,11 @@ export class CalendarManager {
       const home = getClubObj(fix.homeTeamId) || ({ id: fix.homeTeamId, name: 'فريق', shortName: 'فريق', players: [], reputation: 50, tactics: { formation: '4-4-2' } } as any);
       const away = getClubObj(fix.awayTeamId) || ({ id: fix.awayTeamId, name: 'فريق', shortName: 'فريق', players: [], reputation: 50, tactics: { formation: '4-4-2' } } as any);
 
-      const isCup = fix.competitionType === 'cup' || fix.competitionType === 'DOMESTIC_COP' || fix.tournamentId === 'cup';
-      const isContinental =
-        fix.competitionType === 'continental' ||
-        fix.competitionType === 'CONTINENTAL_CUP' ||
-        ['ccl', 'ccc', 'ucl', 'uel', 'acl', 'caf_cl'].includes(String(fix.tournamentId || ''));
+      const normType = normalizeCompetitionType(
+        fix.competitionType || fix.tournamentId || fix.competitionId || (fix.cupStage ? 'DOMESTIC_COP' : undefined)
+      );
+      const isCup = normType === 'DOMESTIC_COP';
+      const isContinental = normType === 'CONTINENTAL_CUP';
 
       if (isCup) {
         const res = simulateKnockoutMatch(home, away);

@@ -11,7 +11,16 @@ import {
 
 async function startServer() {
   const app = express();
-  const PORT = 3000;
+
+  // Parse CLI args (--port and --host) or fallback to env / 3000
+  const portArgIdx = process.argv.indexOf('--port');
+  const cliPort = portArgIdx !== -1 && process.argv[portArgIdx + 1] ? parseInt(process.argv[portArgIdx + 1], 10) : undefined;
+  const PORT = Number.isFinite(cliPort) && (cliPort as number) > 0 ? (cliPort as number) : (process.env.PORT ? parseInt(process.env.PORT, 10) : 3000);
+
+  const hostArgIdx = process.argv.indexOf('--host');
+  const cliHost = hostArgIdx !== -1 && process.argv[hostArgIdx + 1] ? process.argv[hostArgIdx + 1] : undefined;
+  const HOST = cliHost || process.env.HOST || '0.0.0.0';
+
   const server = http.createServer(app);
 
   app.use(express.json());
@@ -46,7 +55,10 @@ async function startServer() {
   // Vite middleware in development, static files in production
   if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({
-      server: { middlewareMode: true },
+      server: {
+        middlewareMode: true,
+        hmr: process.env.DISABLE_HMR === 'true' ? false : { server },
+      },
       appType: 'spa',
     });
     app.use(vite.middlewares);
@@ -58,9 +70,31 @@ async function startServer() {
     });
   }
 
-  server.listen(PORT, '0.0.0.0', () => {
-    console.log(`[Server] Live on http://0.0.0.0:${PORT} - WebSocket Relay on /ws/challenge`);
+  server.on('error', (err: any) => {
+    if (err.code === 'EADDRINUSE') {
+      console.warn(`[Server] Port ${PORT} is currently in use. Exiting cleanly to allow supervisor restart.`);
+      process.exit(1);
+    } else {
+      console.error('[Server] HTTP Server error:', err);
+    }
   });
+
+  server.listen(PORT, HOST, () => {
+    console.log(`[Server] Live on http://${HOST}:${PORT} - WebSocket Relay on /ws/challenge`);
+  });
+
+  const cleanup = () => {
+    console.log('[Server] Received termination signal, closing server gracefully...');
+    server.close(() => {
+      process.exit(0);
+    });
+  };
+
+  process.on('SIGTERM', cleanup);
+  process.on('SIGINT', cleanup);
 }
 
-startServer();
+startServer().catch((err) => {
+  console.error('[Server] Fatal error during startServer:', err);
+  process.exit(1);
+});

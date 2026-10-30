@@ -200,6 +200,7 @@ import {
   processMatchResult,
   normalizeCompetitionType,
   getCompetitionBranding,
+  repairOrphanedCupMatches,
 } from '../services/tournamentDispatcher';
 import {
   saveWorldStateToDb,
@@ -283,8 +284,8 @@ interface GameContextType {
   setPlayerTrainingFocus: (playerId: string, focus: Player['trainingFocus']) => void;
   
   // Day Progression & Calendar Simulation
-  advanceToNextDay: (skipToMatch?: boolean, forceAdvance?: boolean) => void;
-  advanceDay?: (skipToMatch?: boolean, forceAdvance?: boolean) => void;
+  advanceToNextDay: (skipToMatch?: boolean, forceAdvance?: boolean) => void | Promise<void>;
+  advanceDay?: (skipToMatch?: boolean, forceAdvance?: boolean) => void | Promise<void>;
   advanceCalendarDay: (skipCheck?: boolean) => void;
   forceAdvanceDay: () => void;
   closeDaySummaryModal: () => void;
@@ -978,6 +979,9 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     warned: false,
   });
 
+  const fixturesRef = useRef(fixtures);
+  fixturesRef.current = fixtures;
+
   // Self-heal and guarantee cup progression integrity (ensure user advances to next stage upon winning)
   useEffect(() => {
     if (!cupTournament || !Array.isArray(cupTournament.matches) || cupTournament.matches.length === 0 || !userClub?.id) return;
@@ -999,19 +1003,20 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       cupRepairGuardRef.current.warned = false;
     }
 
-    // Stop repair if 5 consecutive repairs reached for this cup & season
-    if (cupRepairGuardRef.current.consecutiveRepairsCount >= 5) {
+    // Stop repair if consecutive repairs reached for this cup & season
+    if (cupRepairGuardRef.current.consecutiveRepairsCount >= 3) {
       if (!cupRepairGuardRef.current.warned) {
         cupRepairGuardRef.current.warned = true;
         console.warn(
-          `[GameContext] Max consecutive cup repair limit (5) reached for cup ${currentCupId} season ${currentSeasonNum}. Halting repair.`
+          `[GameContext] Max consecutive cup repair limit reached for cup ${currentCupId} season ${currentSeasonNum}. Halting repair loop.`
         );
       }
       return;
     }
 
+    const currentFixtures = fixturesRef.current || [];
     // Calculate cup fixtures count
-    const cupFixturesCount = (fixtures || []).filter(
+    const cupFixturesCount = currentFixtures.filter(
       f =>
         f.competitionType === 'cup' ||
         f.competitionType === 'DOMESTIC_COP' ||
@@ -1033,9 +1038,25 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       return;
     }
 
-    const rep = repairCupProgressionIntegrity(cupTournament, fixtures, userClub.id);
+    const rep = repairCupProgressionIntegrity(cupTournament, currentFixtures, userClub.id);
     if (rep.repaired) {
-      cupRepairGuardRef.current.signature = signature;
+      // Set guard signature to the REPAIRED state to strictly prevent re-render re-triggering
+      const updatedMatchesSig = rep.updatedCup.matches
+        .map(
+          m =>
+            `${m.id}:${m.homeTeamId}:${m.awayTeamId}:${m.isPlayed ? 1 : 0}:${m.homeScore ?? ''}:${m.awayScore ?? ''}:${m.winnerTeamId || ''}`
+        )
+        .join('|');
+      const updatedCupFixturesCount = (rep.updatedFixtures || []).filter(
+        f =>
+          f.competitionType === 'cup' ||
+          f.competitionType === 'DOMESTIC_COP' ||
+          f.competitionType === 'DOMESTIC_CUP' ||
+          f.tournamentId === 'cup'
+      ).length;
+
+      cupRepairGuardRef.current.signature = `${updatedMatchesSig}__#cupFix:${updatedCupFixturesCount}`;
+      cupRepairGuardRef.current.playedMatchesCount = rep.updatedCup.matches.filter(m => m.isPlayed).length;
       cupRepairGuardRef.current.consecutiveRepairsCount += 1;
 
       setCupTournament(rep.updatedCup);
@@ -1063,11 +1084,13 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         return false;
       };
 
-      if (fixturesActuallyChanged(fixtures, rep.updatedFixtures)) {
+      if (fixturesActuallyChanged(currentFixtures, rep.updatedFixtures)) {
         setFixtures(rep.updatedFixtures);
       }
+    } else {
+      cupRepairGuardRef.current.signature = signature;
     }
-  }, [cupTournament, userClub?.id, fixtures]);
+  }, [cupTournament, userClub?.id]);
 
   // Synchronize Domestic National Cup matches into master fixtures list
   useEffect(() => {
@@ -2299,12 +2322,19 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     // Self-healing: Repair any cup qualification/progression integrity issues
     const resolvedUserClubId = migrated.manager?.userClubId || migrated.teams?.find((t: any) => t.isUserClub)?.id;
-    if (migrated.cupTournament && resolvedUserClubId) {
-      const repaired = repairCupProgressionIntegrity(migrated.cupTournament, migrated.fixtures || [], resolvedUserClubId);
-      if (repaired.repaired) {
-        migrated.cupTournament = repaired.updatedCup;
-        if (repaired.updatedFixtures?.length) {
-          migrated.fixtures = repaired.updatedFixtures;
+    if (migrated.cupTournament) {
+      const orphanedRep = repairOrphanedCupMatches(migrated.fixtures || [], migrated.cupTournament);
+      if (orphanedRep.repaired && orphanedRep.cup) {
+        migrated.cupTournament = orphanedRep.cup;
+        migrated.fixtures = orphanedRep.fixtures;
+      }
+      if (resolvedUserClubId) {
+        const repaired = repairCupProgressionIntegrity(migrated.cupTournament, migrated.fixtures || [], resolvedUserClubId);
+        if (repaired.repaired) {
+          migrated.cupTournament = repaired.updatedCup;
+          if (repaired.updatedFixtures?.length) {
+            migrated.fixtures = repaired.updatedFixtures;
+          }
         }
       }
     }
@@ -3659,7 +3689,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     let updatedCupTournament = cupTournament;
     let updatedContinental = africanChampionsLeague;
 
-    const userDispatch = processMatchResult(userFinishedFixture, {
+    const userDispatch = await processMatchResult(userFinishedFixture, {
       standings: updatedStandings,
       cupTournament: updatedCupTournament,
       continentalTournament: updatedContinental,
@@ -3802,7 +3832,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             stats: otherResult.stats,
           };
 
-          const cpuDispatch = processMatchResult(finishedOtherFix, {
+          const cpuDispatch = await processMatchResult(finishedOtherFix, {
             standings: updatedStandings,
             cupTournament: updatedCupTournament,
             continentalTournament: updatedContinental,
@@ -5025,7 +5055,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             (allRoundMatches as any).__userSimAwayName = awayTeam.name;
           }
 
-          const simDispatch = processMatchResult(finishedFix, {
+          const simDispatch = await processMatchResult(finishedFix, {
             standings: updatedStandings,
             cupTournament: updatedCupTournament,
             continentalTournament: updatedContinental,
@@ -9288,7 +9318,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   // DAILY PROGRESSION, CALENDAR SIMULATION & CAREER SYSTEMS
   // ----------------------------------------------------
 
-  const advanceToNextDay = (skipToMatch: boolean = false, forceAdvance: boolean = false) => {
+  const advanceToNextDay = async (skipToMatch: boolean = false, forceAdvance: boolean = false) => {
     if (isSimulationRunningRef.current) return;
     isSimulationRunningRef.current = true;
     setIsSimulationRunning(true);
@@ -9362,8 +9392,8 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         let nextCup = cupTournament;
         let nextContinental = africanChampionsLeague;
 
-        simResult.simulatedFixtures.forEach(sf => {
-          const disp = processMatchResult(sf, {
+        for (const sf of simResult.simulatedFixtures) {
+          const disp = await processMatchResult(sf, {
             standings: nextStandings,
             cupTournament: nextCup,
             continentalTournament: nextContinental,
@@ -9376,7 +9406,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           nextCup = disp.updatedCupTournament;
           nextContinental = disp.updatedContinentalTournament;
           nextFixtures = disp.updatedFixtures;
-        });
+        }
 
         const sNum = season?.seasonNumber || 1;
         if (nextCup && Array.isArray(nextCup.matches)) {

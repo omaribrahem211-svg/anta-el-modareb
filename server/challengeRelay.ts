@@ -239,6 +239,10 @@ export function setupChallengeWebSocketServer(server: HttpServer) {
     path: '/ws/challenge' 
   });
 
+  wss.on('error', (err) => {
+    console.warn('[WS Relay] WebSocket server error (non-fatal):', err);
+  });
+
   console.log('[WS Relay] Online Challenge WebSocket Relay mounted on /ws/challenge');
 
   // Heartbeat interval to detect stale socket connections

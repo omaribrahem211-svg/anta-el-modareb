@@ -1784,18 +1784,52 @@ export function repairCupProgressionIntegrity(
 
     if (!hasActualScores) continue;
 
-    const isUserHomeInMatch = userMatch ? userMatch.homeTeamId === userClubId : userFix?.homeTeamId === userClubId;
-    const hs = userMatch?.homeScore ?? userFix?.homeScore ?? 0;
-    const as = userMatch?.awayScore ?? userFix?.awayScore ?? 0;
-    const hp = userMatch?.homePenalties ?? userFix?.homePenalties;
-    const ap = userMatch?.awayPenalties ?? userFix?.awayPenalties;
+    // Self-healing: if userFix was played but userMatch is missing or unplayed, synchronize it immediately
+    if (userFix && userFix.isPlayed && userFix.homeScore !== undefined && userFix.awayScore !== undefined) {
+      if (!userMatch) {
+        const synthMatch: CupMatch = {
+          id: userFix.id,
+          stage: stage,
+          stageName: userFix.stageName || stageMeta[stage]?.arabic || 'كأس',
+          roundTrigger: userFix.round || stageMeta[stage]?.trigger || 1,
+          homeTeamId: userFix.homeTeamId,
+          awayTeamId: userFix.awayTeamId,
+          homeScore: userFix.homeScore,
+          awayScore: userFix.awayScore,
+          homePenalties: userFix.homePenalties,
+          awayPenalties: userFix.awayPenalties,
+          winnerTeamId: userFix.winnerTeamId,
+          isPlayed: true,
+        };
+        matches.push(synthMatch);
+        repaired = true;
+      } else if (!userMatch.isPlayed || userMatch.homeScore === undefined) {
+        userMatch.isPlayed = true;
+        userMatch.homeScore = userFix.homeScore;
+        userMatch.awayScore = userFix.awayScore;
+        userMatch.homePenalties = userFix.homePenalties;
+        userMatch.awayPenalties = userFix.awayPenalties;
+        userMatch.winnerTeamId = userFix.winnerTeamId;
+        repaired = true;
+      }
+    }
+
+    const activeUserMatch = matches.find(
+      m => m.stage === stage && (m.homeTeamId === userClubId || m.awayTeamId === userClubId)
+    );
+
+    const isUserHomeInMatch = activeUserMatch ? activeUserMatch.homeTeamId === userClubId : userFix?.homeTeamId === userClubId;
+    const hs = activeUserMatch?.homeScore ?? userFix?.homeScore ?? 0;
+    const as = activeUserMatch?.awayScore ?? userFix?.awayScore ?? 0;
+    const hp = activeUserMatch?.homePenalties ?? userFix?.homePenalties;
+    const ap = activeUserMatch?.awayPenalties ?? userFix?.awayPenalties;
     const userPen = isUserHomeInMatch ? hp : ap;
     const oppPen = isUserHomeInMatch ? ap : hp;
     const userGoals = isUserHomeInMatch ? hs : as;
     const oppGoals = isUserHomeInMatch ? as : hs;
 
     const userWonMatch =
-      userMatch?.winnerTeamId === userClubId ||
+      activeUserMatch?.winnerTeamId === userClubId ||
       userFix?.winnerTeamId === userClubId ||
       (userPen !== undefined && oppPen !== undefined && userPen > oppPen) ||
       (userPen === undefined && oppPen === undefined && hs !== as && userGoals > oppGoals);
@@ -1805,7 +1839,7 @@ export function repairCupProgressionIntegrity(
       const stageArabic =
         stage === 'final'
           ? 'وصيف الكأس (المباراة النهائية)'
-          : stageMeta[stage]?.arabic || userMatch?.stageName || userFix?.stageName || 'الكأس الوطنية';
+          : stageMeta[stage]?.arabic || activeUserMatch?.stageName || userFix?.stageName || 'الكأس الوطنية';
       if (!eliminatedStage) {
         eliminatedStage = stageArabic;
         repaired = true;
@@ -1814,9 +1848,9 @@ export function repairCupProgressionIntegrity(
     }
 
     if (userWonMatch) {
-      if (userMatch) {
-        if (userMatch.winnerTeamId !== userClubId) {
-          userMatch.winnerTeamId = userClubId;
+      if (activeUserMatch) {
+        if (activeUserMatch.winnerTeamId !== userClubId) {
+          activeUserMatch.winnerTeamId = userClubId;
           repaired = true;
         }
       }
