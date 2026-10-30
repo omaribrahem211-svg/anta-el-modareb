@@ -178,7 +178,6 @@ export function pruneMatchEventsForStorage(
     if (!e) continue;
     if (e.type === 'goal' || e.type === 'red_card') {
       compact.push({
-        id: e.id || `${e.type}_${e.minute}_${i}`,
         minute: e.minute,
         type: e.type,
         teamId: e.teamId,
@@ -317,8 +316,21 @@ export async function saveActiveLiveMatchToDb(liveMatch: any | null): Promise<vo
       homeBenchPlayerIds: liveMatch.homeTeam?.tactics?.benchPlayerIds || [],
       awayStartingPlayerIds: liveMatch.awayTeam?.tactics?.startingPlayerIds || [],
       awayBenchPlayerIds: liveMatch.awayTeam?.tactics?.benchPlayerIds || [],
-      homeSubstitutions: liveMatch.homeSubstitutions || [],
-      awaySubstitutions: liveMatch.awaySubstitutions || [],
+      homeLineup: liveMatch.homeLineup || [],
+      awayLineup: liveMatch.awayLineup || [],
+      homeXg: liveMatch.homeXg ?? 0,
+      awayXg: liveMatch.awayXg ?? 0,
+      homeDangerousAttacks: liveMatch.homeDangerousAttacks ?? 0,
+      awayDangerousAttacks: liveMatch.awayDangerousAttacks ?? 0,
+      homeYellowedPlayerIds: liveMatch.homeYellowedPlayerIds || [],
+      awayYellowedPlayerIds: liveMatch.awayYellowedPlayerIds || [],
+      homeReddedPlayerIds: liveMatch.homeReddedPlayerIds || [],
+      awayReddedPlayerIds: liveMatch.awayReddedPlayerIds || [],
+      homeFatigueMap: liveMatch.homeFatigueMap || {},
+      awayFatigueMap: liveMatch.awayFatigueMap || {},
+      aiSubstitutionsCount: liveMatch.aiSubstitutionsCount ?? 0,
+      autoSubsEnabled: liveMatch.autoSubsEnabled ?? false,
+      userTacticsSnapshot: liveMatch.userTacticsSnapshot,
       substitutionsCount: liveMatch.substitutionsCount,
       isPlaying: false, // Always persist as paused
       isHalfTime: Boolean(liveMatch.isHalfTime),

@@ -811,6 +811,16 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     userTacticsRef.current = userClub?.tactics;
   }, [userClub?.tactics]);
 
+  const userClubRef = useRef<Club>(userClub);
+  useEffect(() => {
+    userClubRef.current = userClub;
+  }, [userClub]);
+
+  const activeLeagueRef = useRef<LeagueDefinition>(activeLeague);
+  useEffect(() => {
+    activeLeagueRef.current = activeLeague;
+  }, [activeLeague]);
+
   const [standings, setStandings] = useState<LeagueStanding[]>(() => {
     try {
       const saved = localStorage.getItem(`${STORAGE_KEY}_standings`);
@@ -1762,8 +1772,40 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           Array.isArray(candidate.awayTeam.players) &&
           candidate.awayTeam.players.length > 0
         ) {
+          const homeStartingIds: string[] = candidate.homeTeam.tactics?.startingPlayerIds || [];
+          const awayStartingIds: string[] = candidate.awayTeam.tactics?.startingPlayerIds || [];
+          const legacyHomeLineup = Array.isArray(candidate.homeLineup) && candidate.homeLineup.length > 0
+            ? candidate.homeLineup
+            : homeStartingIds.map((id: string) => candidate.homeTeam.players.find((p: any) => p?.id === id)).filter((p: any) => Boolean(p));
+          const legacyAwayLineup = Array.isArray(candidate.awayLineup) && candidate.awayLineup.length > 0
+            ? candidate.awayLineup
+            : awayStartingIds.map((id: string) => candidate.awayTeam.players.find((p: any) => p?.id === id)).filter((p: any) => Boolean(p));
+
+          const defHomeFatigue: Record<string, number> = {};
+          legacyHomeLineup.forEach((p: any) => { if (p?.id) defHomeFatigue[p.id] = 100; });
+          const defAwayFatigue: Record<string, number> = {};
+          legacyAwayLineup.forEach((p: any) => { if (p?.id) defAwayFatigue[p.id] = 100; });
+
           return {
             ...candidate,
+            homeLineup: legacyHomeLineup,
+            awayLineup: legacyAwayLineup,
+            homeFatigueMap: candidate.homeFatigueMap && Object.keys(candidate.homeFatigueMap).length > 0
+              ? candidate.homeFatigueMap
+              : defHomeFatigue,
+            awayFatigueMap: candidate.awayFatigueMap && Object.keys(candidate.awayFatigueMap).length > 0
+              ? candidate.awayFatigueMap
+              : defAwayFatigue,
+            homeYellowedPlayerIds: Array.isArray(candidate.homeYellowedPlayerIds) ? candidate.homeYellowedPlayerIds : [],
+            awayYellowedPlayerIds: Array.isArray(candidate.awayYellowedPlayerIds) ? candidate.awayYellowedPlayerIds : [],
+            homeReddedPlayerIds: Array.isArray(candidate.homeReddedPlayerIds) ? candidate.homeReddedPlayerIds : [],
+            awayReddedPlayerIds: Array.isArray(candidate.awayReddedPlayerIds) ? candidate.awayReddedPlayerIds : [],
+            homeXg: candidate.homeXg ?? 0,
+            awayXg: candidate.awayXg ?? 0,
+            homeDangerousAttacks: candidate.homeDangerousAttacks ?? 0,
+            awayDangerousAttacks: candidate.awayDangerousAttacks ?? 0,
+            aiSubstitutionsCount: candidate.aiSubstitutionsCount ?? 0,
+            speed: candidate.speed || 1,
             isPlaying: false,
           };
         }
@@ -1804,12 +1846,47 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           },
         };
 
+        const homeStartingIds: string[] = restoredHome.tactics?.startingPlayerIds || [];
+        const awayStartingIds: string[] = restoredAway.tactics?.startingPlayerIds || [];
+
+        const resolvedHomeLineup = Array.isArray(candidate.homeLineup) && candidate.homeLineup.length > 0
+          ? candidate.homeLineup
+          : homeStartingIds.map((id: string) => restoredHome.players.find((p: any) => p?.id === id)).filter((p: any) => Boolean(p));
+
+        const resolvedAwayLineup = Array.isArray(candidate.awayLineup) && candidate.awayLineup.length > 0
+          ? candidate.awayLineup
+          : awayStartingIds.map((id: string) => restoredAway.players.find((p: any) => p?.id === id)).filter((p: any) => Boolean(p));
+
+        const defaultHomeFatigue: Record<string, number> = {};
+        resolvedHomeLineup.forEach((p: any) => { if (p?.id) defaultHomeFatigue[p.id] = 100; });
+
+        const defaultAwayFatigue: Record<string, number> = {};
+        resolvedAwayLineup.forEach((p: any) => { if (p?.id) defaultAwayFatigue[p.id] = 100; });
+
         return {
           ...candidate,
           homeTeam: restoredHome,
           awayTeam: restoredAway,
           homeTactics: restoredHome.tactics,
           awayTactics: restoredAway.tactics,
+          homeLineup: resolvedHomeLineup,
+          awayLineup: resolvedAwayLineup,
+          homeFatigueMap: candidate.homeFatigueMap && Object.keys(candidate.homeFatigueMap).length > 0
+            ? candidate.homeFatigueMap
+            : defaultHomeFatigue,
+          awayFatigueMap: candidate.awayFatigueMap && Object.keys(candidate.awayFatigueMap).length > 0
+            ? candidate.awayFatigueMap
+            : defaultAwayFatigue,
+          homeYellowedPlayerIds: Array.isArray(candidate.homeYellowedPlayerIds) ? candidate.homeYellowedPlayerIds : [],
+          awayYellowedPlayerIds: Array.isArray(candidate.awayYellowedPlayerIds) ? candidate.awayYellowedPlayerIds : [],
+          homeReddedPlayerIds: Array.isArray(candidate.homeReddedPlayerIds) ? candidate.homeReddedPlayerIds : [],
+          awayReddedPlayerIds: Array.isArray(candidate.awayReddedPlayerIds) ? candidate.awayReddedPlayerIds : [],
+          homeXg: candidate.homeXg ?? 0,
+          awayXg: candidate.awayXg ?? 0,
+          homeDangerousAttacks: candidate.homeDangerousAttacks ?? 0,
+          awayDangerousAttacks: candidate.awayDangerousAttacks ?? 0,
+          aiSubstitutionsCount: candidate.aiSubstitutionsCount ?? 0,
+          speed: candidate.speed || 1,
           isPlaying: false,
         };
       } catch (err) {
@@ -2904,21 +2981,23 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         }
 
         if (next.currentMinute >= 90 || next.isFinished) {
-          const userIsInFixture = userClub && (next.fixture?.homeTeamId === userClub.id || next.fixture?.awayTeamId === userClub.id);
-          const isUserHome = userClub ? next.fixture?.homeTeamId === userClub.id : true;
+          const currentClub = userClubRef.current;
+          const currentLeague = activeLeagueRef.current;
+          const userIsInFixture = currentClub && (next.fixture?.homeTeamId === currentClub.id || next.fixture?.awayTeamId === currentClub.id);
+          const isUserHome = currentClub ? next.fixture?.homeTeamId === currentClub.id : true;
           const oppClub = isUserHome ? next.awayTeam : next.homeTeam;
           const userScore = isUserHome ? next.homeScore : next.awayScore;
           const oppScore = isUserHome ? next.awayScore : next.homeScore;
 
-          const calculatedRevenue = (userIsInFixture && userClub) ? calculateMatchRevenue({
-            userClub,
+          const calculatedRevenue = (userIsInFixture && currentClub) ? calculateMatchRevenue({
+            userClub: currentClub,
             opponentClub: oppClub,
             isHome: isUserHome,
             userScore,
             opponentScore: oppScore,
-            leagueTier: activeLeague?.tier || 1,
+            leagueTier: currentLeague?.tier || 1,
             isCupMatch: next.fixture?.competitionType === 'cup',
-            customTicketPrice: userClub.facilities?.ticketPrice,
+            customTicketPrice: currentClub.facilities?.ticketPrice,
           }) : undefined;
 
           const finishedNext = {
@@ -2951,7 +3030,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         return next;
       });
     }, intervalTime);
-  }, [userClub, activeLeague]);
+  }, []);
 
   useEffect(() => {
     recreateLiveMatchTimerRef.current = createLiveMatchTimer;
