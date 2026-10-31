@@ -1,31 +1,24 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useGame } from '../context/GameContext';
 import { COACHING_COURSES, CoachingCourse } from '../utils/managerFinancesEngine';
-import { getLicenseTitleArabic, normalizeCoachingLicense, CAREER_CONFIG } from '../utils/careerProgressionEngine';
+import { getLicenseTitleArabic, normalizeCoachingLicense } from '../utils/careerProgressionEngine';
 import { getLocalTrainerProfile } from '../services/trainerProfileService';
 import { ModalPortal } from './common/ModalPortal';
+import { Hero, StatTile, SegTabs, Panel, Meter, Toast, useToast, fmt, fmtShort } from './common/ProUI';
+import { ClubBadge } from './ClubBadge';
 import {
-  UserCheck,
   Award,
   Star,
   Trophy,
-  TrendingUp,
   RotateCcw,
   Check,
   Edit2,
-  Shield,
-  Briefcase,
-  Flame,
-  Target,
-  Sparkles,
   History,
   Building2,
   Globe2,
   ArrowUpRight,
-  ArrowDownRight,
-  Minus,
+  ArrowDownLeft,
   Calendar,
-  DollarSign,
   CheckCircle2,
   AlertTriangle,
   X,
@@ -33,21 +26,38 @@ import {
   Coins,
   GraduationCap,
   Heart,
-  Activity,
   BookOpen,
-  Gift,
-  ArrowDownLeft,
   Receipt,
   PiggyBank,
   ChevronDown,
   ChevronUp,
   Share2,
+  UserCircle2,
+  Landmark,
+  ScrollText,
+  Sparkles,
+  Lock,
 } from 'lucide-react';
 import { CoachCardModal } from './CoachCardModal';
 import { ClubSelectionModal } from './ClubSelectionModal';
 import { CareerProgressionJourney } from './CareerProgressionJourney';
 import { RestartSeasonModal } from './RestartSeasonModal';
 import { WorldDominationCard } from './WorldDominationCard';
+
+type SubTab = 'profile' | 'licenses' | 'finance' | 'record';
+
+const LICENSE_RANK: Record<string, number> = { BASIC: 1, PREMIER: 2, CONTINENTAL: 3, LEGENDARY: 4 };
+
+const TX_LABEL: Record<string, string> = {
+  salary: 'مرتب شهري',
+  trophy_bonus: 'مكافأة بطولة',
+  match_bonus: 'مكافأة مباراة',
+  club_donation: 'دعم للنادي',
+  license_upgrade: 'شراء/ترقية رخصة',
+  license_renewal: 'تجديد سنوي للرخصة',
+  course_license: 'رسوم رخصة/دورة',
+  player_bonus: 'مكافأة لاعب',
+};
 
 export const CareerTab: React.FC = () => {
   const {
@@ -65,35 +75,44 @@ export const CareerTab: React.FC = () => {
     donateToClubFromPersonalWallet,
   } = useGame();
 
+  const { toast, show } = useToast();
+
   const effectiveCoachName = (manager.name && manager.name !== 'الكابتن الجديد' && manager.name !== 'المدرب الجديد')
     ? manager.name
     : (getLocalTrainerProfile()?.name || manager.name || 'المدرب');
 
+  const [subTab, setSubTab] = useState<SubTab>('profile');
   const [isEditingName, setIsEditingName] = useState(false);
   const [newName, setNewName] = useState(effectiveCoachName);
-
-  useEffect(() => {
-    if (effectiveCoachName) {
-      setNewName(effectiveCoachName);
-    }
-  }, [effectiveCoachName]);
   const [showRestartSeasonModal, setShowRestartSeasonModal] = useState(false);
   const [showResetModal, setShowResetModal] = useState(false);
-  const [showResetSuccess, setShowResetSuccess] = useState(false);
   const [showCoachCardModal, setShowCoachCardModal] = useState(false);
   const [showClubSelectModal, setShowClubSelectModal] = useState(false);
-
-  // Financial system state
   const [showDonateModal, setShowDonateModal] = useState(false);
   const [donateAmount, setDonateAmount] = useState<number | string>(50000);
-  const numDonateAmount = typeof donateAmount === 'number' ? donateAmount : (parseInt(donateAmount) || 0);
-  const [financeNotification, setFinanceNotification] = useState<{ text: string; success: boolean } | null>(null);
-  const [activeCourseCategory, setActiveCourseCategory] = useState<'all' | 'license' | 'tactical'>('all');
+  const [courseFilter, setCourseFilter] = useState<'all' | 'license' | 'tactical'>('all');
   const [showAllTransactions, setShowAllTransactions] = useState(false);
 
-  const winRate = manager.matchesManaged > 0 
-    ? Math.round((manager.wins / manager.matchesManaged) * 100) 
-    : 0;
+  useEffect(() => {
+    if (effectiveCoachName) setNewName(effectiveCoachName);
+  }, [effectiveCoachName]);
+
+  const numDonateAmount = typeof donateAmount === 'number' ? donateAmount : (parseInt(donateAmount) || 0);
+  const matches = manager.matchesManaged || 0;
+  const winRate = matches > 0 ? Math.round(((manager.wins || 0) / matches) * 100) : 0;
+  const xpPct = manager.xpToNextLevel > 0 ? Math.min(100, ((manager.xp || 0) / manager.xpToNextLevel) * 100) : 0;
+  const wallet = manager.personalWallet || 0;
+
+  const completedCourses = Array.isArray(manager.completedCourses) ? manager.completedCourses : [];
+  const transactions = Array.isArray(manager.financialTransactions) ? manager.financialTransactions : [];
+  const history = Array.isArray(manager.history) ? manager.history : [];
+  const trophies = Array.isArray(manager.trophies) ? manager.trophies : [];
+
+  const filteredCourses = COACHING_COURSES.filter(c => {
+    if (courseFilter === 'license') return c.category === 'license';
+    if (courseFilter === 'tactical') return c.category !== 'license';
+    return true;
+  });
 
   const handleSaveName = () => {
     if (newName.trim()) {
@@ -103,7 +122,6 @@ export const CareerTab: React.FC = () => {
   };
 
   const handleConfirmReset = () => {
-    // Open club selection screen to allow choosing starting 4th tier club
     setShowResetModal(false);
     setShowClubSelectModal(true);
   };
@@ -111,784 +129,406 @@ export const CareerTab: React.FC = () => {
   const handleClubSelectedForNewCareer = (clubId: string) => {
     resetGame(clubId);
     setShowClubSelectModal(false);
-    setShowResetSuccess(true);
     setNewName('الكابتن الجديد');
-    setTimeout(() => {
-      setShowResetSuccess(false);
-    }, 4500);
+    show('تمت إعادة ضبط اللعبة! بدأت مسيرتك الجديدة من الموسم الأول، بالتوفيق يا كابتن 🎯');
   };
 
   const handleExecuteDonation = () => {
     if (numDonateAmount <= 0) return;
     const res = donateToClubFromPersonalWallet(numDonateAmount);
-    setFinanceNotification({ text: res.message, success: res.success });
-    if (res.success) {
-      setTimeout(() => {
-        setShowDonateModal(false);
-        setFinanceNotification(null);
-      }, 2500);
-    }
+    show(res.message, res.success);
+    if (res.success) setShowDonateModal(false);
   };
 
   const handleEnrollCourse = (course: CoachingCourse) => {
     const res = enrollInCoachingCourse(course.id);
-    setFinanceNotification({ text: res.message, success: res.success });
-    setTimeout(() => {
-      setFinanceNotification(null);
-    }, 3500);
+    show(res.message, res.success);
   };
 
-  const completedCoursesList = Array.isArray(manager.completedCourses) ? manager.completedCourses : [];
-  const transactionsList = Array.isArray(manager.financialTransactions) ? manager.financialTransactions : [];
+  const tabs = [
+    { id: 'profile' as const, label: 'الملف', icon: <UserCircle2 className="w-3.5 h-3.5" /> },
+    { id: 'licenses' as const, label: 'الرخص والتطوير', icon: <GraduationCap className="w-3.5 h-3.5" /> },
+    { id: 'finance' as const, label: 'المالية', icon: <Landmark className="w-3.5 h-3.5" /> },
+    { id: 'record' as const, label: 'السجل', icon: <ScrollText className="w-3.5 h-3.5" /> },
+  ];
 
-  const filteredCourses = COACHING_COURSES.filter(c => {
-    if (activeCourseCategory === 'license') return c.category === 'license';
-    if (activeCourseCategory === 'tactical') return c.category !== 'license';
-    return true;
-  });
+  const tierNumber = activeLeague?.tier ?? 1;
 
   return (
-    <div className="space-y-4 pb-20 animate-fade-in" dir="rtl">
-      
-      {/* Finance / General Notification Toast */}
-      {financeNotification && (
-        <div className={`p-3.5 rounded-2xl text-xs font-bold text-center flex items-center justify-center gap-2 shadow-xl animate-fade-in ${
-          financeNotification.success 
-            ? 'bg-emerald-950 text-emerald-300 border-2 border-emerald-500/80 shadow-emerald-500/10' 
-            : 'bg-red-950 text-red-300 border-2 border-red-500/80'
-        }`}>
-          {financeNotification.success ? <CheckCircle2 className="w-5 h-5 shrink-0" /> : <AlertTriangle className="w-5 h-5 shrink-0" />}
-          <span className="text-sm">{financeNotification.text}</span>
-        </div>
-      )}
+    <div className="space-y-3 pb-20 animate-fade-in" dir="rtl">
+      <Toast toast={toast} />
 
-      {/* Reset Game Success Toast / Banner */}
-      {showResetSuccess && (
-        <div className="bg-gradient-to-r from-emerald-950/90 via-slate-900 to-emerald-950/90 border-2 border-emerald-500/80 p-4 rounded-3xl flex items-center justify-between gap-3 shadow-2xl shadow-emerald-500/10 animate-bounce">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-2xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center font-bold shrink-0">
-              <CheckCircle2 className="w-6 h-6 text-emerald-400" />
-            </div>
-            <div>
-              <h4 className="font-bold text-emerald-300 text-sm">تمت إعادة ضبط اللعبة بنجاح!</h4>
-              <p className="text-xs text-emerald-200/80">بدأت مسيرتك التدريبية الجديدة من الموسم الأول. بالتوفيق يا كابتن!</p>
-            </div>
-          </div>
-          <button
-            onClick={() => setShowResetSuccess(false)}
-            className="p-1.5 rounded-lg text-emerald-400 hover:text-white hover:bg-emerald-900/50"
-          >
-            <X className="w-4 h-4" />
-          </button>
-        </div>
-      )}
-
-      {/* Season Review Shortcut banner if season is finished */}
       {seasonFinished && (
-        <div className="bg-gradient-to-r from-amber-500/20 via-amber-600/20 to-amber-500/20 border border-amber-500/50 p-4 rounded-3xl flex items-center justify-between gap-3 shadow-lg shadow-amber-500/5">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-2xl bg-amber-500/20 text-amber-400 flex items-center justify-center font-bold">
-              🏆
-            </div>
-            <div>
-              <h4 className="font-bold text-amber-300 text-sm">الموسم {season.seasonNumber} انتهى رسمياً</h4>
-              <p className="text-xs text-amber-200/80">انقر لمراجعة الحصيلة، توزيع المكافآت، وبدء الموسم الجديد.</p>
+        <div className="bg-gradient-to-l from-amber-500/20 to-slate-900 border border-amber-500/50 rounded-2xl p-3.5 flex items-center justify-between gap-3">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="text-2xl">🏆</div>
+            <div className="min-w-0">
+              <h4 className="font-black text-amber-200 text-sm">الموسم {season.seasonNumber} انتهى</h4>
+              <p className="text-[11px] text-amber-100/70">راجع الحصيلة وابدأ الموسم الجديد.</p>
             </div>
           </div>
-          <button
-            onClick={openSeasonModal}
-            className="px-4 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs rounded-xl shadow-md cursor-pointer transition-all active:scale-95 shrink-0"
-          >
-            مراجعة الحصيلة 🏁
+          <button onClick={openSeasonModal} className="px-3.5 py-2 bg-amber-400 text-slate-950 font-black text-xs rounded-lg cursor-pointer active:scale-95 shrink-0">
+            مراجعة الحصيلة
           </button>
         </div>
       )}
 
-      {/* Manager Card ID */}
-      <div className="bg-gradient-to-br from-slate-900 via-slate-900 to-purple-950/40 border border-slate-800 p-5 rounded-3xl space-y-4 shadow-2xl relative overflow-hidden">
-        <div className="absolute top-0 right-0 left-0 h-1 bg-gradient-to-r from-purple-500 via-amber-500 to-purple-500" />
-
-        <div className="flex items-start justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-16 h-16 rounded-2xl bg-purple-950 text-purple-300 border-2 border-purple-600/60 flex items-center justify-center font-black text-2xl shadow-xl">
-              {effectiveCoachName.slice(0, 2)}
+      {/* HERO: manager ID card */}
+      <Hero accent="#a855f7">
+        <div className="flex items-start gap-3">
+          <div className="w-16 h-16 shrink-0 rounded-xl bg-gradient-to-br from-violet-600 to-violet-900 border-2 border-violet-400/50 flex items-center justify-center font-black text-2xl text-white shadow-xl">
+            {effectiveCoachName.slice(0, 2)}
+          </div>
+          <div className="min-w-0 flex-1">
+            {isEditingName ? (
+              <div className="flex items-center gap-1.5">
+                <input
+                  type="text"
+                  value={newName}
+                  maxLength={30}
+                  onChange={e => setNewName(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter') handleSaveName(); }}
+                  className="min-w-0 flex-1 bg-slate-950 border border-violet-500 rounded-lg px-2 py-1.5 text-sm text-white focus:outline-none"
+                  autoFocus
+                />
+                <button onClick={handleSaveName} className="bg-emerald-500 text-slate-950 p-1.5 rounded-lg cursor-pointer" aria-label="حفظ الاسم"><Check className="w-4 h-4" /></button>
+              </div>
+            ) : (
+              <div className="flex items-center gap-1.5">
+                <h2 className="font-black text-lg text-white leading-tight truncate">{effectiveCoachName}</h2>
+                <button onClick={() => setIsEditingName(true)} className="text-slate-400 hover:text-white p-1 cursor-pointer" aria-label="تعديل الاسم"><Edit2 className="w-3.5 h-3.5" /></button>
+              </div>
+            )}
+            <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[10px]">
+              <span className="text-slate-400">{manager.age} سنة • {manager.nationality}</span>
+              <span className="bg-amber-500/15 text-amber-300 border border-amber-500/40 px-2 py-0.5 rounded font-black">{getLicenseTitleArabic(manager.license)}</span>
+              <span className="bg-sky-500/15 text-sky-300 border border-sky-500/40 px-2 py-0.5 rounded font-black">الموسم {season.seasonNumber}</span>
             </div>
+          </div>
+          <div className="text-left shrink-0">
+            <div className="flex items-center gap-1 justify-end text-amber-300 font-black font-mono text-xl leading-none">
+              <Star className="w-4 h-4 fill-amber-300" />
+              <span>{manager.reputation}</span>
+            </div>
+            <span className="text-[10px] text-slate-400">السمعة</span>
+          </div>
+        </div>
 
-            <div>
-              <div className="flex items-center gap-2">
-                {isEditingName ? (
-                  <div className="flex items-center gap-1">
-                    <input
-                      type="text"
-                      value={newName}
-                      onChange={(e) => setNewName(e.target.value)}
-                      className="bg-slate-950 border border-purple-500 rounded-lg px-2 py-1 text-xs text-white focus:outline-none"
-                    />
-                    <button 
-                      onClick={handleSaveName}
-                      className="bg-emerald-600 text-white p-1 rounded-lg"
+        <div className="mt-4 space-y-1.5">
+          <div className="flex items-center justify-between text-[11px]">
+            <span className="font-black text-white flex items-center gap-1.5"><Sparkles className="w-3.5 h-3.5 text-violet-300" />المستوى {manager.level}</span>
+            <span className="font-mono text-slate-400">{fmt(manager.xp)} / {fmt(manager.xpToNextLevel)} XP</span>
+          </div>
+          <Meter value={xpPct} tone="violet" height={8} />
+        </div>
+
+        <div className="mt-3 grid grid-cols-3 gap-2">
+          <StatTile label="التصنيف العالمي" tone="amber" icon={<Globe2 className="w-3 h-3" />} value={`#${manager.worldRank || 850}`} />
+          <StatTile label="نقاط التقييم" tone="sky" value={fmtShort(manager.rankingPoints ?? 1200)} />
+          <StatTile label="قوة المدرب" tone="emerald" value={`${userDynamicManagerRating}`} sub="من 99" />
+        </div>
+      </Hero>
+
+      <SegTabs tabs={tabs} value={subTab} onChange={setSubTab} tone="amber" />
+
+      {/* ============ PROFILE ============ */}
+      {subTab === 'profile' && (
+        <div className="space-y-3">
+          <button
+            type="button"
+            onClick={() => setShowCoachCardModal(true)}
+            className="w-full text-right bg-gradient-to-l from-amber-500/15 to-slate-900 border border-amber-400/40 rounded-2xl p-3.5 flex items-center gap-3 cursor-pointer active:scale-[0.99]"
+          >
+            <div className="w-11 h-11 rounded-xl bg-gradient-to-br from-amber-300 to-amber-600 text-slate-950 flex items-center justify-center shrink-0"><Trophy className="w-5 h-5" /></div>
+            <div className="min-w-0 flex-1">
+              <div className="text-sm font-black text-amber-200">كارت المدرب الرسمي</div>
+              <div className="text-[11px] text-slate-400">خصص صورتك وشاركه عبر واتساب</div>
+            </div>
+            <Share2 className="w-4 h-4 text-amber-300 shrink-0" />
+          </button>
+
+          <Panel
+            title="النادي الحالي"
+            icon={<Building2 className="w-4 h-4" />}
+            tone="sky"
+            right={<span className="text-[10px] font-black text-slate-300 bg-slate-800 rounded px-2 py-0.5">الدرجة {tierNumber}</span>}
+          >
+            <div className="flex items-center gap-3">
+              {userClub ? <ClubBadge club={userClub} size="lg" /> : <div className="w-14 h-14 rounded-xl bg-slate-800" />}
+              <div className="min-w-0 flex-1">
+                <div className="font-black text-white truncate">{userClub?.name || 'بدون نادٍ'}</div>
+                <div className="text-[11px] text-slate-400 truncate">{activeLeague?.name || '—'} {activeLeague?.country ? `(${activeLeague.country})` : ''}</div>
+              </div>
+              {userClub && (
+                <span className="text-[10px] font-black text-emerald-300 bg-emerald-500/10 border border-emerald-500/40 rounded px-2 py-1 shrink-0 flex items-center gap-1">
+                  <CheckCircle2 className="w-3 h-3" /> عقد ساري
+                </span>
+              )}
+            </div>
+          </Panel>
+
+          <div className="grid grid-cols-2 gap-2">
+            <StatTile label="المواسم" tone="sky" icon={<Calendar className="w-3 h-3" />} value={manager.totalSeasonsCompleted ?? 0} />
+            <StatTile label="ألقاب الدوري" tone="amber" icon={<Trophy className="w-3 h-3" />} value={manager.leagueTitles ?? 0} />
+            <StatTile label="ألقاب الكأس" tone="violet" icon={<Award className="w-3 h-3" />} value={manager.cupTitles ?? 0} />
+            <StatTile label="مرات الصعود" tone="emerald" icon={<ArrowUpRight className="w-3 h-3" />} value={manager.promotions ?? 0} />
+          </div>
+
+          <WorldDominationCard manager={manager} currentLeagueId={activeLeague?.id} />
+
+          <div className="pt-2 flex flex-col sm:flex-row items-center justify-center gap-2">
+            <button
+              id="btn_restart_season_career_tab"
+              onClick={() => setShowRestartSeasonModal(true)}
+              className="w-full sm:w-auto inline-flex items-center justify-center gap-2 text-xs font-black text-amber-300 bg-amber-500/10 border border-amber-500/40 px-5 py-2.5 rounded-xl cursor-pointer active:scale-95"
+            >
+              <RotateCcw className="w-4 h-4" />
+              <span>إعادة بداية الموسم {season.seasonNumber}</span>
+            </button>
+            <button
+              onClick={() => setShowResetModal(true)}
+              className="w-full sm:w-auto inline-flex items-center justify-center gap-2 text-xs font-black text-rose-300 bg-rose-500/10 border border-rose-500/40 px-5 py-2.5 rounded-xl cursor-pointer active:scale-95"
+            >
+              <RotateCcw className="w-4 h-4" />
+              <span>مسيرة جديدة (مسح التقدم)</span>
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ============ LICENSES ============ */}
+      {subTab === 'licenses' && (
+        <div className="space-y-3">
+          <CareerProgressionJourney />
+
+          <Panel
+            title="أكاديمية التدريب"
+            icon={<GraduationCap className="w-4 h-4" />}
+            tone="violet"
+            right={<span className="text-[10px] font-mono text-violet-300">{completedCourses.length}/{COACHING_COURSES.length}</span>}
+          >
+            <div className="space-y-3">
+              <div className="flex items-center justify-between text-[11px] text-slate-400">
+                <span>محفظتك الشخصية</span>
+                <span className="font-mono font-black text-amber-300">{fmt(wallet)} ج.م</span>
+              </div>
+              <div className="flex gap-1 p-1 bg-slate-950 border border-slate-800 rounded-xl">
+                {([['all', 'الكل'], ['license', 'الرخص'], ['tactical', 'ورش وتكتيك']] as ['all' | 'license' | 'tactical', string][]).map(([id, label]) => (
+                  <button
+                    key={id}
+                    onClick={() => setCourseFilter(id)}
+                    className={`flex-1 py-1.5 rounded-lg text-xs font-black cursor-pointer ${courseFilter === id ? 'bg-violet-500 text-white' : 'text-slate-400'}`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+
+              <ul className="space-y-2.5">
+                {filteredCourses.map(course => {
+                  const currentLicense = normalizeCoachingLicense(manager.license);
+                  const currentRank = LICENSE_RANK[currentLicense] || 1;
+                  const ownedList = ['BASIC', ...(manager.ownedLicenses || []).map(l => normalizeCoachingLicense(l))];
+                  const target = course.grantsLicense ? normalizeCoachingLicense(course.grantsLicense) : null;
+                  const targetRank = target ? (LICENSE_RANK[target] || 0) : 0;
+                  const licenseOwned = target ? (ownedList.includes(target) || currentRank >= targetRank) : false;
+                  const activeLicense = target ? currentLicense === target : false;
+                  const isLicense = course.category === 'license';
+                  const completed = isLicense ? activeLicense : completedCourses.includes(course.id);
+                  const effectiveCost = isLicense && licenseOwned ? 0 : course.cost;
+                  const canAfford = wallet >= effectiveCost;
+                  const req = course.requiredLicense ? normalizeCoachingLicense(course.requiredLicense) : null;
+                  const reqRank = req ? (LICENSE_RANK[req] || 1) : 0;
+                  const hasPrereq = isLicense || !req || currentRank >= reqRank;
+                  const locked = !hasPrereq;
+
+                  return (
+                    <li
+                      key={course.id}
+                      className={`rounded-xl border p-3 ${
+                        completed ? 'border-emerald-500/40 bg-emerald-500/5' : locked ? 'border-slate-800 bg-slate-950/40 opacity-70' : 'border-slate-800 bg-slate-950/60'
+                      }`}
                     >
-                      <Check className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-                ) : (
-                  <>
-                    <h2 className="font-black text-base text-white">{effectiveCoachName}</h2>
-                    <button 
-                      onClick={() => setIsEditingName(true)}
-                      className="text-slate-400 hover:text-white p-1"
-                    >
-                      <Edit2 className="w-3.5 h-3.5" />
-                    </button>
-                  </>
-                )}
-              </div>
+                      <div className="flex items-start gap-2.5">
+                        <div className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 border ${
+                          completed ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/40' : locked ? 'bg-slate-800 text-slate-500 border-slate-700' : 'bg-violet-500/15 text-violet-300 border-violet-500/40'
+                        }`}>
+                          {completed ? <CheckCircle2 className="w-4 h-4" /> : locked ? <Lock className="w-4 h-4" /> : <BookOpen className="w-4 h-4" />}
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <h4 className="font-black text-xs text-white leading-snug">{course.title}</h4>
+                          <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px]">
+                            <span className="font-mono font-black text-amber-300">{course.cost === 0 ? 'مجانية' : `${fmt(course.cost)} ج.م`}</span>
+                            {course.annualRenewalFee !== undefined && course.annualRenewalFee > 0 && (
+                              <span className="font-mono text-cyan-300">تجديد {fmt(course.annualRenewalFee)}/سنة</span>
+                            )}
+                            <span className="text-violet-300">+{course.xpReward} XP</span>
+                            <span className="text-emerald-300">+{course.reputationReward} ⭐</span>
+                          </div>
+                        </div>
+                        {completed ? (
+                          <span className="text-[10px] font-black text-emerald-300 shrink-0">{isLicense ? 'نشطة ✓' : 'مكتملة ✓'}</span>
+                        ) : licenseOwned ? (
+                          <span className="text-[10px] font-black text-amber-300 shrink-0">مملوكة ✓</span>
+                        ) : null}
+                      </div>
 
-              <div className="flex flex-wrap items-center gap-2 mt-1">
-                <span className="text-xs text-slate-400">{manager.age} سنة • {manager.nationality}</span>
-                <span className="text-[10px] bg-amber-950 text-amber-300 border border-amber-700 px-2 py-0.5 rounded-full font-bold">
-                  {getLicenseTitleArabic(manager.license)}
-                </span>
-                <span className="text-[10px] bg-blue-950 text-blue-300 border border-blue-800 px-2 py-0.5 rounded-full font-bold">
-                  الموسم الحالي: {season.seasonNumber}
-                </span>
-              </div>
-            </div>
-          </div>
+                      <p className="text-[11px] text-slate-400 leading-relaxed mt-2">{course.description}</p>
+                      <div className="mt-2 bg-slate-900/80 border border-slate-800 rounded-lg p-2 text-[11px] text-slate-300">
+                        <strong className="text-amber-300">⚡ الامتياز: </strong>{course.specialBenefit}
+                      </div>
 
-          <div className="text-left">
-            <div className="flex items-center gap-1 text-amber-400 font-black text-sm">
-              <Star className="w-4 h-4 fill-amber-400" />
-              <span>{manager.reputation} ⭐</span>
+                      {!completed && (
+                        <button
+                          onClick={() => handleEnrollCourse(course)}
+                          disabled={locked || !canAfford}
+                          className={`mt-2.5 w-full py-2.5 rounded-lg text-xs font-black flex items-center justify-center gap-1.5 transition-all active:scale-[0.98] ${
+                            !locked && canAfford
+                              ? 'bg-gradient-to-b from-violet-400 to-violet-600 text-white cursor-pointer shadow-lg shadow-violet-500/10'
+                              : 'bg-slate-800 text-slate-500 border border-slate-700 cursor-not-allowed'
+                          }`}
+                        >
+                          <GraduationCap className="w-4 h-4" />
+                          <span>
+                            {locked && req
+                              ? `تتطلب ${getLicenseTitleArabic(req)} أولاً`
+                              : !canAfford
+                              ? `ينقصك ${fmt(effectiveCost - wallet)} ج.م`
+                              : licenseOwned
+                              ? 'تفعيل مجاناً'
+                              : `شراء بـ ${fmt(effectiveCost)} ج.م`}
+                          </span>
+                        </button>
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
             </div>
-            <span className="text-[10px] text-slate-400 block mt-0.5">السمعة التدريبية</span>
-          </div>
+          </Panel>
         </div>
+      )}
 
-        {/* Level and XP progress */}
-        <div className="bg-slate-950/70 p-3 rounded-2xl border border-slate-800 space-y-1.5">
-          <div className="flex items-center justify-between text-xs">
-            <span className="font-bold text-white flex items-center gap-1.5">
-              <Sparkles className="w-3.5 h-3.5 text-purple-400" />
-              المستوى التدريبي: {manager.level}
-            </span>
-            <span className="text-slate-400 font-mono text-[11px]">
-              {manager.xp} / {manager.xpToNextLevel} XP
-            </span>
-          </div>
-          
-          <div className="w-full bg-slate-800 h-2.5 rounded-full overflow-hidden">
-            <div 
-              className="h-full bg-gradient-to-r from-purple-500 to-amber-400 rounded-full transition-all"
-              style={{ width: `${Math.min(100, (manager.xp / manager.xpToNextLevel) * 100)}%` }}
-            />
-          </div>
-        </div>
-
-        {/* Global World Ranking & Power Metric */}
-        <div className="bg-gradient-to-r from-indigo-950/80 to-slate-950 p-3 rounded-2xl border border-indigo-500/30 flex items-center justify-between">
-          <div className="flex items-center gap-2.5">
-            <div className="w-9 h-9 rounded-xl bg-indigo-500/20 text-indigo-400 border border-indigo-500/30 flex items-center justify-center font-black">
-              <Globe2 className="w-4 h-4" />
-            </div>
-            <div>
-              <div className="text-xs font-bold text-white flex items-center gap-1.5">
-                <span>التصنيف العالمي للمدربين:</span>
-                <span className="text-amber-400 font-mono font-black">#{manager.worldRank || 850}</span>
-              </div>
-              <div className="text-[11px] text-slate-400">
-                نقاط التقييم: <strong className="text-white font-mono">{manager.rankingPoints?.toLocaleString() || '1,200'}</strong> | القوة التدريبية: <strong className="text-amber-300 font-bold">{userDynamicManagerRating}/99</strong>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Coach Card Button / Trigger */}
-        <button
-          type="button"
-          onClick={() => setShowCoachCardModal(true)}
-          className="w-full py-3 px-4 bg-gradient-to-r from-amber-500/15 via-amber-400/20 to-emerald-500/15 hover:from-amber-500/25 hover:to-emerald-500/25 border border-amber-400/40 rounded-2xl flex items-center justify-between text-right cursor-pointer transition-all active:scale-[0.99] shadow-lg shadow-amber-500/5 group"
-        >
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-amber-400 to-amber-600 text-slate-950 flex items-center justify-center font-black shadow-md shrink-0">
-              <Trophy className="w-5 h-5" />
-            </div>
-            <div>
-              <div className="text-xs font-black text-amber-300 flex items-center gap-1.5">
-                <span>كارت المدرب الرسمي (Coach Card)</span>
-                <span className="text-[10px] bg-amber-500 text-slate-950 px-2 py-0.2 rounded-full font-bold">
-                  أنت المدرب
-                </span>
-              </div>
-              <div className="text-[11px] text-slate-300 mt-0.5">
-                تخصيص صورتك، استعراض بياناتك، ومشاركة الكارت عبر واتساب
-              </div>
-            </div>
-          </div>
-          <div className="flex items-center gap-1.5 text-xs font-bold text-amber-400 group-hover:translate-x-[-3px] transition-transform">
-            <Share2 className="w-4 h-4" />
-            <span>عرض ومشاركة</span>
-          </div>
-        </button>
-      </div>
-
-      {/* 🌍 WORLD DOMINATION PERCENTAGE & CONQUEST MAP (نسبة السيطرة على العالم) */}
-      <WorldDominationCard manager={manager} currentLeagueId={activeLeague?.id} />
-
-      {/* 🚀 COACHING LICENSES & CAREER PROGRESSION JOURNEY */}
-      <CareerProgressionJourney />
-
-      {/* 💼 MANAGER FINANCIAL WEALTH & PERSONAL LEDGER (الذمة المالية والمحفظة الشخصية للمدرب) */}
-      <div className="bg-gradient-to-br from-slate-900 via-slate-900 to-amber-950/30 border-2 border-amber-500/40 rounded-3xl p-5 space-y-4 shadow-xl">
-        <div className="flex items-center justify-between flex-wrap gap-2">
-          <div className="flex items-center gap-2.5">
-            <div className="w-10 h-10 rounded-2xl bg-amber-500/20 text-amber-400 border border-amber-500/40 flex items-center justify-center font-bold shadow-md">
-              <Wallet className="w-5 h-5" />
-            </div>
-            <div>
-              <h3 className="font-black text-sm text-white flex items-center gap-1.5">
-                <span>الذمة المالية والمحفظة الشخصية للمدرب</span>
-                <span className="text-[10px] bg-amber-500/20 text-amber-300 border border-amber-500/30 px-2 py-0.2 rounded-full font-normal">
-                  أموالك الخاصة
-                </span>
-              </h3>
-              <p className="text-[11px] text-slate-400">
-                رواتبك الشهرية من النادي، ومكافآت التتويج، واستثمارها في تطوير قدراتك أو دعم ناديك
-              </p>
-            </div>
+      {/* ============ FINANCE ============ */}
+      {subTab === 'finance' && (
+        <div className="space-y-3">
+          <div className="grid grid-cols-2 gap-2">
+            <StatTile label="محفظتك الخاصة" tone="amber" icon={<Coins className="w-3 h-3" />} value={fmtShort(wallet)} sub={`${fmt(wallet)} ج.م`} />
+            <StatTile label="مرتبك الشهري" tone="sky" icon={<Calendar className="w-3 h-3" />} value={fmtShort(manager.monthlySalary || 35000)} sub="يُصرف مع كل جولة" />
+            <StatTile label="مكافآت وبطولات" tone="emerald" icon={<Trophy className="w-3 h-3" />} value={fmtShort(manager.totalBonusesEarned || 0)} sub="إجمالي" />
+            <StatTile label="دعمك للنادي" tone="rose" icon={<Heart className="w-3 h-3" />} value={fmtShort(manager.totalClubDonations || 0)} sub="إجمالي التبرعات" />
           </div>
 
           <button
             onClick={() => setShowDonateModal(true)}
-            disabled={!userClub || (manager.personalWallet || 0) < 5000}
-            className={`px-3 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 shadow-md ${
-              userClub && (manager.personalWallet || 0) >= 5000
-                ? 'bg-emerald-600 hover:bg-emerald-500 text-white active:scale-95'
-                : 'bg-slate-800 text-slate-500 cursor-not-allowed'
+            disabled={!userClub || wallet < 5000}
+            className={`w-full py-3 rounded-xl text-sm font-black flex items-center justify-center gap-2 transition-all active:scale-[0.98] ${
+              userClub && wallet >= 5000
+                ? 'bg-gradient-to-b from-emerald-400 to-emerald-600 text-slate-950 cursor-pointer shadow-lg shadow-emerald-500/10'
+                : 'bg-slate-800 text-slate-500 border border-slate-700 cursor-not-allowed'
             }`}
           >
-            <PiggyBank className="w-3.5 h-3.5" />
-            <span>مساعدة ودعم النادي 🤝</span>
+            <PiggyBank className="w-4 h-4" />
+            <span>دعم خزينة النادي من محفظتك</span>
           </button>
-        </div>
 
-        {/* 4 Financial Metric Cards */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 text-xs">
-          {/* 1: Personal Wallet Balance */}
-          <div className="bg-slate-950/80 p-3 rounded-2xl border border-amber-500/30">
-            <span className="text-[10px] text-slate-400 flex items-center gap-1">
-              <Coins className="w-3 h-3 text-amber-400" />
-              رصيد محفظتك الخاصة
-            </span>
-            <span className="text-base font-black text-amber-400 font-mono block mt-1">
-              {(manager.personalWallet || 0).toLocaleString()} ج.م
-            </span>
-            <span className="text-[9px] text-emerald-400/90 block mt-0.5">جاهزة للاستخدام الحر</span>
-          </div>
-
-          {/* 2: Monthly Club Salary */}
-          <div className="bg-slate-950/80 p-3 rounded-2xl border border-slate-800">
-            <span className="text-[10px] text-slate-400 flex items-center gap-1">
-              <Calendar className="w-3 h-3 text-blue-400" />
-              مرتبك الشهري من النادي
-            </span>
-            <span className="text-base font-black text-white font-mono block mt-1">
-              {(manager.monthlySalary || 35000).toLocaleString()} ج.م
-            </span>
-            <span className="text-[9px] text-slate-400 block mt-0.5">يُصرف دورياً مع كل جولة</span>
-          </div>
-
-          {/* 3: Total Bonuses Earned */}
-          <div className="bg-slate-950/80 p-3 rounded-2xl border border-slate-800">
-            <span className="text-[10px] text-slate-400 flex items-center gap-1">
-              <Trophy className="w-3 h-3 text-emerald-400" />
-              مكافآت الفوز والبطولات
-            </span>
-            <span className="text-base font-black text-emerald-400 font-mono block mt-1">
-              {(manager.totalBonusesEarned || 0).toLocaleString()} ج.م
-            </span>
-            <span className="text-[9px] text-slate-400 block mt-0.5">جوائز المباريات والألقاب</span>
-          </div>
-
-          {/* 4: Total Donations to Club */}
-          <div className="bg-slate-950/80 p-3 rounded-2xl border border-slate-800">
-            <span className="text-[10px] text-slate-400 flex items-center gap-1">
-              <Heart className="w-3 h-3 text-rose-400" />
-              مساعداتك لناديك
-            </span>
-            <span className="text-base font-black text-rose-300 font-mono block mt-1">
-              {(manager.totalClubDonations || 0).toLocaleString()} ج.م
-            </span>
-            <span className="text-[9px] text-slate-400 block mt-0.5">تبرعات لدعم الخزينة</span>
-          </div>
-        </div>
-      </div>
-
-      {/* 🎓 COACHING ACADEMY & LICENSES (أكاديمية التدريب والتطوير المهني والرخص) */}
-      <div className="bg-slate-900 border border-slate-800 rounded-3xl p-5 space-y-4 shadow-xl">
-        <div className="flex items-center justify-between flex-wrap gap-2">
-          <div className="flex items-center gap-2.5">
-            <div className="w-10 h-10 rounded-2xl bg-purple-500/20 text-purple-400 border border-purple-500/40 flex items-center justify-center font-bold">
-              <GraduationCap className="w-5 h-5" />
-            </div>
-            <div>
-              <h3 className="font-black text-sm text-white flex items-center gap-1.5">
-                <span>أكاديمية التدريب ورخص الاتحاد القاري والدولي</span>
-                <span className="text-[10px] bg-purple-500/20 text-purple-300 border border-purple-500/30 px-2 py-0.2 rounded-full font-mono">
-                  {completedCoursesList.length} / {COACHING_COURSES.length} مكتملة
-                </span>
-              </h3>
-              <p className="text-[11px] text-slate-400">
-                استثمر أموالك الخاصة في اجتياز الرخص الرسمية وورش العمل التكتيكية لرفع سمعتك وتطوير لاعبيك
-              </p>
-            </div>
-          </div>
-
-          {/* Filter Pills */}
-          <div className="flex items-center gap-1 bg-slate-950 p-1 rounded-xl border border-slate-800 text-xs">
-            <button
-              onClick={() => setActiveCourseCategory('all')}
-              className={`px-2.5 py-1 rounded-lg font-bold transition-all ${
-                activeCourseCategory === 'all' ? 'bg-purple-600 text-white' : 'text-slate-400 hover:text-white'
-              }`}
-            >
-              الكل ({COACHING_COURSES.length})
-            </button>
-            <button
-              onClick={() => setActiveCourseCategory('license')}
-              className={`px-2.5 py-1 rounded-lg font-bold transition-all ${
-                activeCourseCategory === 'license' ? 'bg-purple-600 text-white' : 'text-slate-400 hover:text-white'
-              }`}
-            >
-              الرخص الرسمية
-            </button>
-            <button
-              onClick={() => setActiveCourseCategory('tactical')}
-              className={`px-2.5 py-1 rounded-lg font-bold transition-all ${
-                activeCourseCategory === 'tactical' ? 'bg-purple-600 text-white' : 'text-slate-400 hover:text-white'
-              }`}
-            >
-              تكتيك ومعايشات
-            </button>
-          </div>
-        </div>
-
-        {/* Courses & Official Licenses Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-          {filteredCourses.map(course => {
-            const licenseRankMap: Record<string, number> = {
-              'BASIC': 1,
-              'PREMIER': 2,
-              'CONTINENTAL': 3,
-              'LEGENDARY': 4,
-            };
-            const currentLicense = normalizeCoachingLicense(manager.license);
-            const currentRank = licenseRankMap[currentLicense] || 1;
-            const ownedList = ['BASIC', ...(manager.ownedLicenses || []).map(l => normalizeCoachingLicense(l))];
-
-            const targetLicense = course.grantsLicense ? normalizeCoachingLicense(course.grantsLicense) : null;
-            const courseGrantsRank = targetLicense ? (licenseRankMap[targetLicense] || 0) : 0;
-            const isLicenseOwned = targetLicense ? (ownedList.includes(targetLicense) || currentRank >= courseGrantsRank) : false;
-            const isActiveLicense = targetLicense ? currentLicense === targetLicense : false;
-
-            const isCompleted = course.category === 'license'
-              ? isActiveLicense
-              : completedCoursesList.includes(course.id);
-
-            const effectiveCost = (course.category === 'license' && isLicenseOwned) ? 0 : course.cost;
-            const canAfford = (manager.personalWallet || 0) >= effectiveCost;
-            const reqLicenseNorm = course.requiredLicense ? normalizeCoachingLicense(course.requiredLicense) : null;
-            const requiredRank = reqLicenseNorm ? (licenseRankMap[reqLicenseNorm] || 1) : 0;
-            const hasPrerequisite = course.category === 'license' || !reqLicenseNorm || (currentRank >= requiredRank);
-
-            return (
-              <div
-                key={course.id}
-                className={`p-4 rounded-2xl border transition-all flex flex-col justify-between space-y-3 ${
-                  isCompleted
-                    ? 'bg-emerald-950/20 border-emerald-500/40'
-                    : hasPrerequisite
-                    ? 'bg-slate-950/70 border-slate-800 hover:border-purple-500/50'
-                    : 'bg-slate-950/30 border-slate-900 opacity-60'
-                }`}
-              >
-                <div className="space-y-2">
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="flex items-center gap-2">
-                      <div className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 ${
-                        isCompleted
-                          ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40'
-                          : 'bg-purple-500/20 text-purple-400 border border-purple-500/40'
-                      }`}>
-                        {isCompleted ? <CheckCircle2 className="w-4 h-4" /> : <BookOpen className="w-4 h-4" />}
+          <Panel
+            title="سجل الحركات المالية"
+            icon={<Receipt className="w-4 h-4" />}
+            tone="sky"
+            right={
+              transactions.length > 5 ? (
+                <button onClick={() => setShowAllTransactions(v => !v)} className="text-[11px] font-black text-sky-300 flex items-center gap-1 cursor-pointer">
+                  <span>{showAllTransactions ? 'أقل' : `الكل (${transactions.length})`}</span>
+                  {showAllTransactions ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                </button>
+              ) : undefined
+            }
+          >
+            {transactions.length === 0 ? (
+              <div className="text-center py-6 text-xs text-slate-500">لا توجد حركات بعد. ستظهر هنا رواتبك ومكافآتك بعد أول مباراة.</div>
+            ) : (
+              <ul className="space-y-1.5">
+                {(showAllTransactions ? transactions : transactions.slice(0, 5)).map(tx => {
+                  const positive = ['salary', 'trophy_bonus', 'match_bonus'].includes(tx.type);
+                  return (
+                    <li key={tx.id} className="flex items-center gap-2.5 bg-slate-950/60 border border-slate-800 rounded-xl p-2.5 text-xs">
+                      <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${positive ? 'bg-emerald-500/15 text-emerald-300' : 'bg-rose-500/15 text-rose-300'}`}>
+                        {positive ? <ArrowDownLeft className="w-4 h-4" /> : <ArrowUpRight className="w-4 h-4" />}
                       </div>
-                      <div>
-                        <h4 className="font-bold text-xs text-white">{course.title}</h4>
-                        <div className="flex flex-wrap items-center gap-1.5 text-[10px] mt-0.5">
-                          <span className="text-amber-400 font-mono font-bold">
-                            {course.cost === 0 ? 'مجانية (0$)' : `${course.cost.toLocaleString()}$`}
-                          </span>
-                          {course.annualRenewalFee !== undefined && (
-                            <>
-                              <span className="text-slate-500">•</span>
-                              <span className="text-cyan-400 font-mono">
-                                تجديد سنوي: {course.annualRenewalFee === 0 ? '0$' : `${course.annualRenewalFee.toLocaleString()}$`}
-                              </span>
-                            </>
-                          )}
-                          <span className="text-slate-500">•</span>
-                          <span className="text-purple-300">+{course.xpReward} XP</span>
-                          <span className="text-slate-500">•</span>
-                          <span className="text-emerald-400">+{course.reputationReward} ⭐ سمعة</span>
-                        </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="font-bold text-white truncate">{tx.description}</div>
+                        <div className="text-[10px] text-slate-500">{tx.date} • {TX_LABEL[tx.type] || 'حركة مالية'}</div>
                       </div>
-                    </div>
-
-                    {isCompleted ? (
-                      <span className="text-[10px] bg-emerald-950 text-emerald-300 border border-emerald-700 px-2 py-0.5 rounded-full font-bold shrink-0">
-                        {course.category === 'license' ? 'رخصتك النشطة ✓' : 'مكتملة ومُعتمدة ✓'}
+                      <span className={`font-mono font-black shrink-0 ${positive ? 'text-emerald-300' : 'text-rose-300'}`}>
+                        {positive ? '+' : '-'}{fmt(tx.amount)}
                       </span>
-                    ) : isLicenseOwned ? (
-                      <span className="text-[10px] bg-amber-950 text-amber-300 border border-amber-700 px-2 py-0.5 rounded-full font-bold shrink-0">
-                        مملوكة مسبقاً ✓
-                      </span>
-                    ) : !hasPrerequisite && reqLicenseNorm ? (
-                      <span className="text-[10px] bg-slate-800 text-slate-400 border border-slate-700 px-2 py-0.5 rounded-full font-bold shrink-0">
-                        تتطلب {getLicenseTitleArabic(reqLicenseNorm)}
-                      </span>
-                    ) : null}
-                  </div>
-
-                  <p className="text-xs text-slate-400 leading-relaxed">
-                    {course.description}
-                  </p>
-
-                  <div className="bg-slate-900/90 p-2.5 rounded-xl border border-slate-800/80 text-[11px] text-slate-300">
-                    <strong className="text-amber-300 font-bold block mb-0.5">⚡ الصلاحيات والامتياز الفني:</strong>
-                    <span>{course.specialBenefit}</span>
-                  </div>
-                </div>
-
-                {!isCompleted && (
-                  <button
-                    onClick={() => handleEnrollCourse(course)}
-                    disabled={!hasPrerequisite || !canAfford}
-                    className={`w-full py-2.5 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 shadow-md ${
-                      hasPrerequisite && canAfford
-                        ? 'bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white active:scale-98 cursor-pointer'
-                        : 'bg-slate-800 text-slate-500 cursor-not-allowed border border-slate-700/50'
-                    }`}
-                  >
-                    <GraduationCap className="w-4 h-4" />
-                    <span>
-                      {!hasPrerequisite && reqLicenseNorm
-                        ? `تتطلب أولاً الحصول على ${getLicenseTitleArabic(reqLicenseNorm)}`
-                        : !canAfford
-                        ? `الرصيد الشخصي غير كافٍ (ناقص ${(effectiveCost - (manager.personalWallet || 0)).toLocaleString()}$)`
-                        : isLicenseOwned
-                        ? `تفعيل ${course.title} مجاناً`
-                        : `شراء وسداد ${effectiveCost.toLocaleString()}$ من ميزانيتك الشخصية`}
-                    </span>
-                  </button>
-                )}
-              </div>
-            );
-          })}
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </Panel>
         </div>
-      </div>
+      )}
 
-      {/* 📜 FINANCIAL TRANSACTION LEDGER (سجل المعاملات والتحويلات المالية للمدرب) */}
-      <div className="bg-slate-900 border border-slate-800 rounded-3xl p-5 space-y-3.5 shadow-xl">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2.5">
-            <div className="w-9 h-9 rounded-2xl bg-blue-500/20 text-blue-400 border border-blue-500/40 flex items-center justify-center font-bold">
-              <Receipt className="w-4 h-4" />
-            </div>
-            <div>
-              <h3 className="font-bold text-sm text-white">سجل الحركات المالية للمدرب</h3>
-              <p className="text-[11px] text-slate-400">كشف حساب الرواتب، المكافآت، رسوم الرخص، والتبرعات للنادي</p>
-            </div>
-          </div>
-
-          {transactionsList.length > 5 && (
-            <button
-              onClick={() => setShowAllTransactions(!showAllTransactions)}
-              className="text-xs font-bold text-blue-400 hover:text-blue-300 flex items-center gap-1"
-            >
-              <span>{showAllTransactions ? 'عرض أقل' : `عرض الكل (${transactionsList.length})`}</span>
-              {showAllTransactions ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
-            </button>
-          )}
-        </div>
-
-        {transactionsList.length === 0 ? (
-          <div className="text-center py-6 text-xs text-slate-500 bg-slate-950/40 rounded-2xl border border-slate-800/80">
-            لا توجد حركات مالية مسجلة حتى الآن. ستظهر هنا رواتبك الدورية ومكافآتك بعد أول جولة ومباراة!
-          </div>
-        ) : (
-          <div className="space-y-2">
-            {(showAllTransactions ? transactionsList : transactionsList.slice(0, 5)).map((tx) => {
-              const isPositive = ['salary', 'trophy_bonus', 'match_bonus'].includes(tx.type);
-
-              return (
-                <div
-                  key={tx.id}
-                  className="bg-slate-950/70 hover:bg-slate-950 border border-slate-800/80 p-3 rounded-2xl flex items-center justify-between gap-3 text-xs transition-all"
-                >
-                  <div className="flex items-center gap-2.5 min-w-0">
-                    <div className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 font-bold ${
-                      isPositive
-                        ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40'
-                        : 'bg-rose-500/20 text-rose-400 border border-rose-500/40'
-                    }`}>
-                      {isPositive ? <ArrowDownLeft className="w-4 h-4" /> : <ArrowUpRight className="w-4 h-4" />}
-                    </div>
-                    <div className="min-w-0">
-                      <div className="font-bold text-white truncate">{tx.description}</div>
-                      <div className="text-[10px] text-slate-400 flex items-center gap-1 mt-0.5">
-                        <span>{tx.date}</span>
-                        <span>•</span>
-                        <span className="text-slate-300">
-                          {tx.type === 'salary'
-                            ? 'مرتب شهري'
-                            : tx.type === 'trophy_bonus'
-                            ? 'مكافأة بطولة'
-                            : tx.type === 'match_bonus'
-                            ? 'مكافأة مباراة'
-                            : tx.type === 'club_donation'
-                            ? 'مساهمة للنادي'
-                            : tx.type === 'license_upgrade'
-                            ? 'شراء/ترقية رخصة تدريبية'
-                            : tx.type === 'license_renewal'
-                            ? 'تجديد سنوي للرخصة'
-                            : tx.type === 'course_license'
-                            ? 'رسوم رخصة/دورة'
-                            : 'مكافأة لاعب'}
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="text-left shrink-0">
-                    <span className={`font-mono font-black text-sm block ${
-                      isPositive ? 'text-emerald-400' : 'text-rose-400'
-                    }`}>
-                      {isPositive ? '+' : '-'}{tx.amount.toLocaleString()} ج.م
-                    </span>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </div>
-
-      {/* Career Milestones Summary Badges */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
-        <div className="bg-slate-900 border border-slate-800 p-3 rounded-2xl text-center">
-          <div className="text-xs text-slate-400 flex items-center justify-center gap-1 mb-1">
-            <Calendar className="w-3.5 h-3.5 text-blue-400" /> عدد المواسم
-          </div>
-          <div className="text-lg font-black text-white">{manager.totalSeasonsCompleted} مكتمل</div>
-        </div>
-
-        <div className="bg-slate-900 border border-slate-800 p-3 rounded-2xl text-center">
-          <div className="text-xs text-slate-400 flex items-center justify-center gap-1 mb-1">
-            <Trophy className="w-3.5 h-3.5 text-amber-400" /> ألقاب الدوري
-          </div>
-          <div className="text-lg font-black text-amber-400">{manager.leagueTitles} بطولات</div>
-        </div>
-
-        <div className="bg-slate-900 border border-slate-800 p-3 rounded-2xl text-center">
-          <div className="text-xs text-slate-400 flex items-center justify-center gap-1 mb-1">
-            <Award className="w-3.5 h-3.5 text-purple-400" /> ألقاب الكأس
-          </div>
-          <div className="text-lg font-black text-purple-400">{manager.cupTitles} كؤوس</div>
-        </div>
-
-        <div className="bg-slate-900 border border-slate-800 p-3 rounded-2xl text-center">
-          <div className="text-xs text-slate-400 flex items-center justify-center gap-1 mb-1">
-            <ArrowUpRight className="w-3.5 h-3.5 text-emerald-400" /> مرات الصعود
-          </div>
-          <div className="text-lg font-black text-emerald-400">{manager.promotions} مرات</div>
-        </div>
-      </div>
-
-      {/* Current Club & Contract Overview */}
-      <div className="bg-slate-900 border border-slate-800 rounded-3xl p-4 space-y-3">
-        <div className="flex items-center justify-between">
-          <h3 className="font-bold text-sm text-white flex items-center gap-2">
-            <Building2 className="w-4 h-4 text-amber-400" />
-            <span>النادي الحالي والمسابقة</span>
-          </h3>
-          <span className="text-xs bg-slate-800 text-slate-300 px-2.5 py-1 rounded-xl border border-slate-700">
-            الدرجة {activeLeague?.divisionTier || 1}
-          </span>
-        </div>
-
-        <div className="bg-slate-950/70 p-3.5 rounded-2xl border border-slate-800 flex items-center justify-between gap-3">
-          <div className="flex items-center gap-3">
-            <div
-              className="w-11 h-11 rounded-xl flex items-center justify-center font-bold text-white shadow-md border border-white/10"
-              style={{ backgroundColor: userClub?.primaryColor || '#059669' }}
-            >
-              {(userClub?.name || 'نادي').slice(0, 2)}
-            </div>
-            <div>
-              <div className="font-bold text-slate-100 text-sm">{userClub?.name || 'فريقك الحالي'}</div>
-              <div className="text-xs text-slate-400">{activeLeague?.name || 'الدوري الممتاز'} ({activeLeague?.country || 'مصر'})</div>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-2">
-            <span className="px-3 py-1 bg-emerald-950/80 border border-emerald-700/60 text-emerald-400 rounded-xl text-xs font-bold flex items-center gap-1">
-              <CheckCircle2 className="w-3.5 h-3.5" /> عقد سارٍ
-            </span>
-          </div>
-        </div>
-      </div>
-
-      {/* Career Record Grid */}
-      <div className="bg-slate-900 border border-slate-800 rounded-3xl p-4 space-y-3">
-        <h3 className="font-bold text-sm text-white flex items-center gap-2">
-          <Award className="w-4 h-4 text-emerald-400" />
-          <span>السجل التدريبي الشامل</span>
-        </h3>
-
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center text-xs">
-          <div className="bg-slate-950/60 p-2.5 rounded-2xl border border-slate-800">
-            <span className="text-[10px] text-slate-400 block">المباريات المقادة</span>
-            <span className="text-lg font-black text-white font-mono">{manager.matchesManaged}</span>
-          </div>
-
-          <div className="bg-slate-950/60 p-2.5 rounded-2xl border border-slate-800">
-            <span className="text-[10px] text-slate-400 block">نسبة الفوز</span>
-            <span className="text-lg font-black text-emerald-400 font-mono">{winRate}%</span>
-          </div>
-
-          <div className="bg-slate-950/60 p-2.5 rounded-2xl border border-slate-800">
-            <span className="text-[10px] text-slate-400 block">فوز / تعادل / خسارة</span>
-            <span className="text-xs font-black text-amber-400 font-mono mt-1 block">
-              {manager.wins}ف / {manager.draws}ت / {manager.losses}خ
-            </span>
-          </div>
-
-          <div className="bg-slate-950/60 p-2.5 rounded-2xl border border-slate-800">
-            <span className="text-[10px] text-slate-400 block">الأهداف (له / عليه)</span>
-            <span className="text-xs font-black text-blue-400 font-mono mt-1 block">
-              {manager.goalsScored} / {manager.goalsConceded}
-            </span>
-          </div>
-        </div>
-      </div>
-
-      {/* Season-by-Season Career History Log Table */}
-      <div className="bg-slate-900 border border-slate-800 rounded-3xl p-4 space-y-3">
-        <h3 className="font-bold text-sm text-white flex items-center gap-2">
-          <History className="w-4 h-4 text-blue-400" />
-          <span>سجل المواسم السابقة في المسيرة</span>
-        </h3>
-
-        {(!manager.history || manager.history.length === 0) ? (
-          <div className="text-center py-6 text-xs text-slate-500 bg-slate-950/40 rounded-2xl border border-slate-800/80">
-            أنت حالياً في موسمك الأول! سيتم تسجيل إحصائيات وإنجازات كل موسم تلقائياً في هذا السجل التاريخي عند ختامه.
-          </div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-right text-xs">
-              <thead className="text-[11px] text-slate-400 border-b border-slate-800 pb-2">
-                <tr>
-                  <th className="py-2 px-2">الموسم</th>
-                  <th className="py-2 px-2">النادي</th>
-                  <th className="py-2 px-2">الدوري</th>
-                  <th className="py-2 px-2">الترتيب</th>
-                  <th className="py-2 px-2">النقاط</th>
-                  <th className="py-2 px-2">النتيجة</th>
-                  <th className="py-2 px-2">الكؤوس</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-800/60">
-                {(manager.history || []).map((hist, idx) => (
-                  <tr key={idx} className="hover:bg-slate-850/50 transition-colors">
-                    <td className="py-2.5 px-2 font-bold text-amber-400">م {hist.seasonNumber}</td>
-                    <td className="py-2.5 px-2 font-semibold text-slate-200">{hist.clubName}</td>
-                    <td className="py-2.5 px-2 text-slate-400">{hist.leagueName}</td>
-                    <td className="py-2.5 px-2 font-bold text-slate-200">#{hist.finalPosition}</td>
-                    <td className="py-2.5 px-2 font-mono text-emerald-400">{hist.points}</td>
-                    <td className="py-2.5 px-2">
-                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                        hist.outcome === 'champion'
-                          ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
-                          : hist.outcome === 'promoted'
-                          ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
-                          : hist.outcome === 'relegated'
-                          ? 'bg-rose-500/20 text-rose-400 border border-rose-500/30'
-                          : 'bg-slate-800 text-slate-300'
-                      }`}>
-                        {hist.outcome === 'champion' ? 'بطل 🏆' : hist.outcome === 'promoted' ? 'صعود ⬆️' : hist.outcome === 'relegated' ? 'هبوط ⬇️' : 'بقاء'}
-                      </span>
-                    </td>
-                    <td className="py-2.5 px-2 text-slate-400">
-                      {hist.trophiesWon && hist.trophiesWon.length > 0 ? (
-                        <div className="flex items-center gap-1">
-                          {hist.trophiesWon.map((tr, tIdx) => (
-                            <span key={tIdx} className="text-amber-400" title={tr}>🏆</span>
-                          ))}
-                        </div>
-                      ) : (
-                        '-'
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
-
-      {/* Trophy Cabinet */}
-      <div className="bg-slate-900 border border-slate-800 rounded-3xl p-4 space-y-3">
-        <h3 className="font-bold text-sm text-white flex items-center gap-2">
-          <Trophy className="w-4 h-4 text-amber-400" />
-          <span>خزينة البطولات والإنجازات</span>
-        </h3>
-
-        {(!manager.trophies || manager.trophies.length === 0) ? (
-          <div className="text-center py-6 text-xs text-slate-500 bg-slate-950/40 rounded-2xl border border-slate-800/80">
-            🏆 الخزينة في انتظار أول تتويج لك! نافس على الصدارة والكأس لحصد الألقاب وإضافتها لمجدك التدريبي.
-          </div>
-        ) : (
+      {/* ============ RECORD ============ */}
+      {subTab === 'record' && (
+        <div className="space-y-3">
           <div className="grid grid-cols-2 gap-2">
-            {(manager.trophies || []).map((trophy, idx) => (
-              <div key={idx} className="bg-amber-950/40 border border-amber-700/60 p-3 rounded-2xl flex items-center gap-2 text-xs">
-                <Trophy className="w-5 h-5 text-amber-400 shrink-0" />
-                <span className="font-bold text-amber-200">{trophy}</span>
-              </div>
-            ))}
+            <StatTile label="مباريات مقادة" tone="slate" value={matches} />
+            <StatTile label="نسبة الفوز" tone="emerald" value={`${winRate}%`} />
+            <StatTile label="ف / ت / خ" tone="amber" value={<span className="text-base">{manager.wins || 0} / {manager.draws || 0} / {manager.losses || 0}</span>} />
+            <StatTile label="الأهداف (له/عليه)" tone="sky" value={<span className="text-base">{manager.goalsScored || 0} / {manager.goalsConceded || 0}</span>} />
           </div>
-        )}
-      </div>
 
-      {/* Reset & Season Operations */}
-      <div className="pt-4 flex flex-col sm:flex-row items-center justify-center gap-3">
-        <button
-          id="btn_restart_season_career_tab"
-          onClick={() => setShowRestartSeasonModal(true)}
-          className="w-full sm:w-auto inline-flex items-center justify-center gap-2 text-xs text-amber-300 hover:text-amber-200 bg-amber-950/40 hover:bg-amber-950/70 border border-amber-800/80 px-5 py-2.5 rounded-2xl transition-all cursor-pointer shadow-lg active:scale-95 font-bold"
-        >
-          <RotateCcw className="w-4 h-4 text-amber-400" />
-          <span>إعادة بداية الموسم {season.seasonNumber}</span>
-        </button>
+          <Panel title="خزينة البطولات" icon={<Trophy className="w-4 h-4" />} tone="amber" right={<span className="text-[10px] font-mono text-amber-300">{trophies.length}</span>}>
+            {trophies.length === 0 ? (
+              <div className="text-center py-5 text-xs text-slate-500">🏆 الخزينة بانتظار أول تتويج لك!</div>
+            ) : (
+              <div className="grid grid-cols-2 gap-2">
+                {trophies.map((t, i) => (
+                  <div key={i} className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-2.5 flex items-center gap-2 text-xs">
+                    <Trophy className="w-4 h-4 text-amber-300 shrink-0" />
+                    <span className="font-black text-amber-100">{t}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </Panel>
 
-        <button
-          onClick={() => setShowResetModal(true)}
-          className="w-full sm:w-auto inline-flex items-center justify-center gap-2 text-xs text-red-400 hover:text-red-300 bg-red-950/40 hover:bg-red-950/70 border border-red-900/80 px-5 py-2.5 rounded-2xl transition-all cursor-pointer shadow-lg active:scale-95 font-bold"
-        >
-          <RotateCcw className="w-4 h-4 text-red-400" />
-          <span>إعادة ضبط اللعبة (مسيرة جديدة)</span>
-        </button>
-      </div>
+          <Panel title="المواسم السابقة" icon={<History className="w-4 h-4" />} tone="sky">
+            {history.length === 0 ? (
+              <div className="text-center py-5 text-xs text-slate-500">أنت في موسمك الأول! ستُسجَّل هنا نتائج كل موسم عند ختامه.</div>
+            ) : (
+              <ul className="space-y-2">
+                {[...history].reverse().map((h, i) => (
+                  <li key={i} className="bg-slate-950/60 border border-slate-800 rounded-xl p-3 text-xs">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-black text-amber-300">الموسم {h.seasonNumber}</span>
+                      <span className={`text-[10px] font-black px-2 py-0.5 rounded ${
+                        h.outcome === 'champion' ? 'bg-amber-500/20 text-amber-300'
+                        : h.outcome === 'promoted' ? 'bg-emerald-500/20 text-emerald-300'
+                        : h.outcome === 'relegated' ? 'bg-rose-500/20 text-rose-300'
+                        : 'bg-slate-800 text-slate-300'
+                      }`}>
+                        {h.outcome === 'champion' ? 'بطل 🏆' : h.outcome === 'promoted' ? 'صعود ⬆️' : h.outcome === 'relegated' ? 'هبوط ⬇️' : 'بقاء'}
+                      </span>
+                    </div>
+                    <div className="mt-1 font-bold text-slate-100">{h.clubName}</div>
+                    <div className="text-[11px] text-slate-400 flex flex-wrap gap-x-3">
+                      <span>{h.leagueName}</span>
+                      <span>المركز <b className="text-white">#{h.finalPosition}</b></span>
+                      <span>النقاط <b className="text-emerald-300 font-mono">{h.points}</b></span>
+                      {h.trophiesWon && h.trophiesWon.length > 0 && <span title={h.trophiesWon.join('، ')}>{h.trophiesWon.map(() => '🏆').join('')}</span>}
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </Panel>
+        </div>
+      )}
 
       {/* 🤝 DONATE TO CLUB MODAL (دعم ومساعدة النادي من أموالك الخاصة) */}
       {showDonateModal && (
@@ -1076,5 +716,3 @@ export const CareerTab: React.FC = () => {
     </div>
   );
 };
-
-

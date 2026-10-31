@@ -91,8 +91,8 @@ const BASIC_LICENSE_DEF: LicenseConfigItem = {
   },
   perks: [
     'تدريب أندية الدرجة الثانية وما دونها في الدوريات العربية فقط',
-    'سعر الشراء لمرة واحدة: مجانية (0$)',
-    'رسوم التجديد السنوية: مجانية (0$)',
+    'سعر الشراء لمرة واحدة: مجانية (0 ج.م)',
+    'رسوم التجديد السنوية: مجانية (0 ج.م)',
   ],
 };
 
@@ -122,8 +122,8 @@ const PREMIER_LICENSE_DEF: LicenseConfigItem = {
   },
   perks: [
     'تدريب جميع أندية الدوريات الممتازة العربية دون قيود',
-    'سعر الشراء لمرة واحدة: 2,500,000$ (من الميزانية الشخصية للمدرب)',
-    'رسوم التجديد السنوية: 250,000$ (تُخصم مع بداية كل موسم جديد)',
+    'سعر الشراء لمرة واحدة: 2,500,000 ج.م (من الميزانية الشخصية للمدرب)',
+    'رسوم التجديد السنوية: 250,000 ج.م (تُخصم مع بداية كل موسم جديد)',
   ],
 };
 
@@ -153,8 +153,8 @@ const CONTINENTAL_LICENSE_DEF: LicenseConfigItem = {
   },
   perks: [
     'التدريب في أوروبا وبقية قارات العالم (باستثناء فرق النخبة والقمة)',
-    'سعر الشراء لمرة واحدة: 6,000,000$ (من الميزانية الشخصية للمدرب)',
-    'رسوم التجديد السنوية: 600,000$ (تُخصم مع بداية كل موسم جديد)',
+    'سعر الشراء لمرة واحدة: 6,000,000 ج.م (من الميزانية الشخصية للمدرب)',
+    'رسوم التجديد السنوية: 600,000 ج.م (تُخصم مع بداية كل موسم جديد)',
   ],
 };
 
@@ -184,8 +184,8 @@ const LEGENDARY_LICENSE_DEF: LicenseConfigItem = {
   },
   perks: [
     'تدريب كبرى فرق النخبة والعمالقة في أوروبا والعالم دون أي قيود',
-    'سعر الشراء لمرة واحدة: 15,000,000$ (من الميزانية الشخصية للمدرب)',
-    'رسوم التجديد السنوية: 1,500,000$ (تُخصم مع بداية كل موسم جديد)',
+    'سعر الشراء لمرة واحدة: 15,000,000 ج.م (من الميزانية الشخصية للمدرب)',
+    'رسوم التجديد السنوية: 1,500,000 ج.م (تُخصم مع بداية كل موسم جديد)',
   ],
 };
 
@@ -796,9 +796,9 @@ export function settleEndOfSeasonLicenseAndBonus(
         type: 'license_renewal',
         description: `خصم رسوم التجديد السنوية لـ ${previousConfig.arabicTitle}`,
       });
-      messageArabic = `تم إيداع مكافأة نهاية الموسم (${bonusToDeposit.toLocaleString()}$) وتجديد ${previousConfig.arabicTitle} بنجاح مقابل ${renewalDeducted.toLocaleString()}$.`;
+      messageArabic = `تم إيداع مكافأة نهاية الموسم (${bonusToDeposit.toLocaleString()} ج.م) وتجديد ${previousConfig.arabicTitle} بنجاح مقابل ${renewalDeducted.toLocaleString()} ج.م.`;
     } else {
-      messageArabic = `تم إيداع مكافأة نهاية الموسم (${bonusToDeposit.toLocaleString()}$). ${previousConfig.arabicTitle} مجانية ومفعّلة للموسم الجديد.`;
+      messageArabic = `تم إيداع مكافأة نهاية الموسم (${bonusToDeposit.toLocaleString()} ج.م). ${previousConfig.arabicTitle} مجانية ومفعّلة للموسم الجديد.`;
     }
   } else {
     // Insufficient balance -> downgrade to highest license whose renewal fee is covered by walletAfterBonus
@@ -827,7 +827,7 @@ export function settleEndOfSeasonLicenseAndBonus(
       });
     }
 
-    messageArabic = `⚠️ تحذير مالي: رصيد ميزانيتك الشخصية (${walletAfterBonus.toLocaleString()}$) لم يكفِ لسداد رسوم التجديد السنوية لـ ${previousConfig.arabicTitle} (${renewalRequired.toLocaleString()}$). تم خفض رخصتك تلقائياً إلى ${activeConfig.arabicTitle}${renewalDeducted > 0 ? ` وخصم ${renewalDeducted.toLocaleString()}$` : ' (المجانية)'}.`;
+    messageArabic = `⚠️ تحذير مالي: رصيد ميزانيتك الشخصية (${walletAfterBonus.toLocaleString()} ج.م) لم يكفِ لسداد رسوم التجديد السنوية لـ ${previousConfig.arabicTitle} (${renewalRequired.toLocaleString()} ج.م). تم خفض رخصتك تلقائياً إلى ${activeConfig.arabicTitle}${renewalDeducted > 0 ? ` وخصم ${renewalDeducted.toLocaleString()} ج.م` : ' (المجانية)'}.`;
   }
 
   const walletAfterSettlement = Math.max(0, walletAfterBonus - renewalDeducted);
@@ -934,20 +934,20 @@ export function evaluateLicenseEligibility(
     {
       key: 'purchase_cost',
       label: 'سعر الشراء لمرة واحدة (من الميزانية الشخصية للمدرب)',
-      current: `${wallet.toLocaleString()}$`,
-      target: `${cost.toLocaleString()}$`,
-      displayCurrent: `${wallet.toLocaleString()}$`,
-      displayTarget: `${cost.toLocaleString()}$`,
+      current: `${wallet.toLocaleString()} ج.م`,
+      target: `${cost.toLocaleString()} ج.م`,
+      displayCurrent: `${wallet.toLocaleString()} ج.م`,
+      displayTarget: `${cost.toLocaleString()} ج.م`,
       isMet: hasEnoughCash,
       progressPercent: walletProgress,
     },
     {
       key: 'annual_renewal_info',
       label: 'رسوم التجديد السنوية (تُخصم بداية كل موسم جديد)',
-      current: `${config.annualRenewalFee.toLocaleString()}$ / موسم`,
-      target: `${config.annualRenewalFee.toLocaleString()}$`,
-      displayCurrent: `${config.annualRenewalFee.toLocaleString()}$`,
-      displayTarget: `${config.annualRenewalFee.toLocaleString()}$`,
+      current: `${config.annualRenewalFee.toLocaleString()} ج.م / موسم`,
+      target: `${config.annualRenewalFee.toLocaleString()} ج.م`,
+      displayCurrent: `${config.annualRenewalFee.toLocaleString()} ج.م`,
+      displayTarget: `${config.annualRenewalFee.toLocaleString()} ج.م`,
       isMet: true,
       progressPercent: 100,
     },

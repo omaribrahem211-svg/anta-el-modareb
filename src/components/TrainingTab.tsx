@@ -1,39 +1,59 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { useGame } from '../context/GameContext';
 import { Player } from '../types/game';
 import { YouthAcademyModal } from './YouthAcademyModal';
 import { StaffManagementCard } from './StaffManagementCard';
-import { getPositionArabic, getPositionBadgeClass } from '../utils/positionHelper';
+import { getPositionArabic } from '../utils/positionHelper';
+import { Hero, StatTile, SegTabs, Panel, Meter, LevelPips, RatingPlate, Toast, useToast, type Tone } from './common/ProUI';
 import {
   Dumbbell,
   Zap,
-  Target,
-  Shield,
   Activity,
-  Award,
   Sparkles,
   Heart,
   TrendingUp,
-  CheckCircle2,
   GraduationCap,
   Calendar,
   Play,
-  Filter,
   Search,
-  Users,
   Flame,
-  ShieldAlert,
   HeartPulse,
-  Info,
-  ChevronDown,
-  ChevronUp,
-  ArrowRight,
-  Clock
+  Clock,
+  Users,
+  ClipboardList,
+  Wand2,
 } from 'lucide-react';
 
 interface TrainingTabProps {
   onSelectPlayer: (player: Player) => void;
 }
+
+type SubTab = 'today' | 'squad' | 'staff';
+type PosFilter = 'ALL' | 'GK' | 'DEF' | 'MID' | 'FWD' | 'U21';
+type Focus = NonNullable<Player['trainingFocus']>;
+
+const FOCUS_OPTIONS: { id: Focus; label: string; icon: string }[] = [
+  { id: 'general', label: 'شامل', icon: '🔄' },
+  { id: 'fitness', label: 'لياقة', icon: '🏃' },
+  { id: 'shooting', label: 'تسديد', icon: '🎯' },
+  { id: 'passing', label: 'تمرير', icon: '⚽' },
+  { id: 'dribbling', label: 'مراوغة', icon: '🎨' },
+  { id: 'defending', label: 'دفاع', icon: '🛡️' },
+  { id: 'goalkeeping', label: 'حراسة', icon: '🧤' },
+];
+
+const INTENSITIES: { id: 'recovery' | 'normal' | 'high'; label: string; desc: string; tone: Tone; icon: React.ReactNode; note: string }[] = [
+  { id: 'recovery', label: 'استشفاء', desc: 'راحة واستعادة اللياقة', tone: 'sky', icon: <Heart className="w-5 h-5" />, note: 'تطور أبطأ • إصابات أقل' },
+  { id: 'normal', label: 'متوازن', desc: 'تطور فني وبدني مستقر', tone: 'emerald', icon: <Activity className="w-5 h-5" />, note: 'الخيار الآمن' },
+  { id: 'high', label: 'مكثف', desc: 'تطور سريع بإجهاد أعلى', tone: 'rose', icon: <Flame className="w-5 h-5" />, note: 'تطور أسرع • خطر إجهاد' },
+];
+
+const ratingTone = (r: number): Tone => (r >= 80 ? 'amber' : r >= 70 ? 'emerald' : r >= 60 ? 'sky' : 'slate');
+const fitnessTone = (f: number): Tone => (f > 80 ? 'emerald' : f > 65 ? 'amber' : 'rose');
+
+const DEF_POS = ['CB', 'LB', 'RB', 'LWB', 'RWB'];
+const MID_POS = ['CDM', 'CM', 'CAM', 'LM', 'RM'];
+const FWD_POS = ['RW', 'LW', 'ST', 'CF'];
 
 export const TrainingTab: React.FC<TrainingTabProps> = ({ onSelectPlayer }) => {
   const {
@@ -44,7 +64,6 @@ export const TrainingTab: React.FC<TrainingTabProps> = ({ onSelectPlayer }) => {
     setTrainingIntensity,
     developmentPoints,
     boostPlayerOverall,
-    boostPlayerPotential,
     dayAdvanceSummary,
     advanceToNextDay,
     calendarDate,
@@ -52,19 +71,36 @@ export const TrainingTab: React.FC<TrainingTabProps> = ({ onSelectPlayer }) => {
     daysUntilNextMatch,
   } = useGame();
 
-  const [notification, setNotification] = useState<string | null>(null);
-  const [isYouthAcademyOpen, setIsYouthAcademyOpen] = useState<boolean>(false);
-  const [positionFilter, setPositionFilter] = useState<'ALL' | 'GK' | 'DEF' | 'MID' | 'FWD' | 'U21'>('ALL');
-  const [searchQuery, setSearchQuery] = useState<string>('');
-  const [isDailyReportExpanded, setIsDailyReportExpanded] = useState<boolean>(true);
-  const [dailyTheme, setDailyTheme] = useState<'balanced' | 'tactical' | 'physical' | 'setpieces' | 'recovery'>('balanced');
+  const { toast, show } = useToast();
+  const [subTab, setSubTab] = useState<SubTab>('today');
+  const [isYouthAcademyOpen, setIsYouthAcademyOpen] = useState(false);
+  const [positionFilter, setPositionFilter] = useState<PosFilter>('ALL');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+
+  const players: Player[] = Array.isArray(userClub?.players) ? (userClub!.players as Player[]) : [];
+
+  const filteredPlayers = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    return players
+      .filter(p => {
+        if (q && !(p.name || '').toLowerCase().includes(q) && !(p.nickname || '').toLowerCase().includes(q)) return false;
+        switch (positionFilter) {
+          case 'GK': return p.position === 'GK';
+          case 'DEF': return DEF_POS.includes(p.position);
+          case 'MID': return MID_POS.includes(p.position);
+          case 'FWD': return FWD_POS.includes(p.position);
+          case 'U21': return p.age <= 21;
+          default: return true;
+        }
+      })
+      .sort((a, b) => (b.overallRating || 0) - (a.overallRating || 0));
+  }, [players, searchQuery, positionFilter]);
 
   if (!userClub || manager.isUnemployed) {
     return (
       <div className="space-y-4 pb-20 animate-fade-in text-center py-16 px-4" dir="rtl">
-        <div className="w-16 h-16 rounded-3xl bg-amber-500/20 text-amber-400 flex items-center justify-center font-bold text-2xl mx-auto border border-amber-500/40 shadow-xl">
-          🏋️‍♂️
-        </div>
+        <div className="w-16 h-16 rounded-3xl bg-amber-500/20 text-amber-400 flex items-center justify-center font-bold text-2xl mx-auto border border-amber-500/40 shadow-xl">🏋️</div>
         <h2 className="text-lg font-black text-white mt-4">أنت حالياً مدرب حر (بدون نادٍ)</h2>
         <p className="text-xs text-slate-400 max-w-md mx-auto leading-relaxed mt-1">
           لا توجد منشآت تدريبية أو لاعبين تحت إشرافك حالياً. اختر نادياً من الشواغر التدريبية في تبويب المسيرة لبدء تطوير مواهبه!
@@ -73,619 +109,385 @@ export const TrainingTab: React.FC<TrainingTabProps> = ({ onSelectPlayer }) => {
     );
   }
 
-  const handleApplyTeamProgram = (intensity: 'normal' | 'high' | 'recovery') => {
-    setTrainingIntensity(intensity);
-    setNotification(
-      intensity === 'high' 
-        ? 'تم تفعيل حمل تدريبي شاق ومكثف! سيتطور اللاعبون أسرع مع زيادة الإجهاد البدني.'
-        : intensity === 'recovery'
-        ? 'تم تفعيل برنامج استشفاء خفيف لتفادي الإجهاد والإصابات واستعادة الجاهزية.'
-        : 'تم تطبيق برنامج تدريبي متوازن ومستقر للفريق.'
+  const dev = Number(developmentPoints) || 0;
+  const trainingLevel = userClub.facilities?.trainingGroundLevel || 1;
+  const growthReports = dayAdvanceSummary?.trainingReports?.filter(r => r.type === 'growth') || [];
+  const otherReports = dayAdvanceSummary?.trainingReports?.filter(r => r.type !== 'growth') || [];
+  const injuries = dayAdvanceSummary?.injuryUpdates || [];
+  const hasReports = growthReports.length > 0 || otherReports.length > 0 || injuries.length > 0;
+  const growthIds = new Set(growthReports.map(r => r.playerId));
+  const avgFitness = players.length
+    ? Math.round(players.reduce((s, p) => s + (typeof p.fitness === 'number' ? p.fitness : 100), 0) / players.length)
+    : 100;
+  const injuredCount = players.filter(p => p.isInjured || (p.injury && p.injury.daysRemaining > 0)).length;
+
+  const applyIntensity = (id: 'recovery' | 'normal' | 'high') => {
+    setTrainingIntensity(id);
+    show(
+      id === 'high'
+        ? 'تم تفعيل حمل تدريبي مكثف: تطور أسرع مع زيادة الإجهاد.'
+        : id === 'recovery'
+        ? 'تم تفعيل برنامج استشفاء لاستعادة الجاهزية وتقليل الإصابات.'
+        : 'تم تطبيق برنامج تدريبي متوازن.'
     );
-    setTimeout(() => setNotification(null), 3500);
   };
 
-  const handleExecuteDailySession = () => {
+  const runSession = () => {
     if (isMatchDay) {
-      setNotification('⚠️ اليوم موعد مباراة رسمية! توجه لتبويب المباريات لخوض اللقاء أولاً.');
-      setTimeout(() => setNotification(null), 3500);
+      show('⚠️ اليوم موعد مباراة رسمية! توجه لتبويب المباريات لخوض اللقاء أولاً.', false);
       return;
     }
     advanceToNextDay(false);
-    setNotification('✅ تم إجراء الحصة التدريبية بنجاح وتحديث التقرير اليومي!');
-    setTimeout(() => setNotification(null), 3500);
+    show('✅ تم إجراء الحصة التدريبية وتحديث التقرير.');
   };
 
-  const handleAutoAssignAllFocus = () => {
-    if (!userClub?.players) return;
-    let count = 0;
-    userClub.players.forEach(p => {
-      let focus: Player['trainingFocus'] = 'general';
+  const autoAssign = () => {
+    let changed = 0;
+    players.forEach(p => {
+      let focus: Focus = 'general';
       if (p.position === 'GK') focus = 'goalkeeping';
-      else if (['CB', 'LB', 'RB', 'LWB', 'RWB'].includes(p.position)) focus = 'defending';
+      else if (DEF_POS.includes(p.position)) focus = 'defending';
       else if (['CM', 'CDM'].includes(p.position)) focus = 'passing';
-      else if (['CAM', 'RW', 'LW'].includes(p.position)) focus = 'dribbling';
-      else if (['ST'].includes(p.position)) focus = 'shooting';
-
-      // If low fitness (< 70), switch to fitness/recovery
-      if (p.fitness < 70) {
-        focus = 'fitness';
+      else if (['CAM', 'RW', 'LW', 'LM', 'RM'].includes(p.position)) focus = 'dribbling';
+      else if (['ST', 'CF'].includes(p.position)) focus = 'shooting';
+      if ((typeof p.fitness === 'number' ? p.fitness : 100) < 70) focus = 'fitness';
+      if ((p.trainingFocus || 'general') !== focus) {
+        setPlayerTrainingFocus(p.id, focus);
+        changed++;
       }
-
-      setPlayerTrainingFocus(p.id, focus);
-      count++;
     });
-    setNotification(`تم تعيين التخصص التدريبي المثالي تلقائياً لـ ${count} لاعباً وفق مراكزهم واحتياجاتهم!`);
-    setTimeout(() => setNotification(null), 3500);
+    show(changed > 0 ? `تم ضبط التخصص الأمثل تلقائياً لـ ${changed} لاعباً حسب مراكزهم وجاهزيتهم.` : 'التخصصات مضبوطة بالفعل بشكل مثالي.');
   };
 
-  const handleQuickBoost = (player: Player) => {
-    if ((developmentPoints || 0) < 50) {
-      setNotification(`تحتاج إلى 50 نقطة تطوير على الأقل لترقية التقييم العام (لديك ${developmentPoints || 0} نقطة)`);
-      setTimeout(() => setNotification(null), 3500);
+  const quickBoost = (p: Player) => {
+    if (dev < 50) {
+      show(`تحتاج 50 نقطة تطوير على الأقل (لديك ${dev}).`, false);
       return;
     }
-    const res = boostPlayerOverall(player.id);
-    setNotification(res.message);
-    setTimeout(() => setNotification(null), 3500);
+    const res = boostPlayerOverall(p.id);
+    show(res.message, res.success);
   };
 
-  const getRatingColor = (rating: number) => {
-    if (rating >= 80) return 'text-amber-400 border-amber-500 bg-amber-950/60';
-    if (rating >= 70) return 'text-emerald-400 border-emerald-500 bg-emerald-950/50';
-    if (rating >= 60) return 'text-cyan-400 border-cyan-500 bg-cyan-950/50';
-    if (rating >= 53) return 'text-blue-400 border-blue-500 bg-blue-950/50';
-    return 'text-slate-300 border-slate-500 bg-slate-800/50';
-  };
-
-  // Filter players
-  const filteredPlayers = (userClub.players || []).filter(player => {
-    const matchesSearch = !searchQuery || player.name.toLowerCase().includes(searchQuery.toLowerCase()) || (player.nickname && player.nickname.toLowerCase().includes(searchQuery.toLowerCase()));
-    if (!matchesSearch) return false;
-
-    if (positionFilter === 'ALL') return true;
-    if (positionFilter === 'GK') return player.position === 'GK';
-    if (positionFilter === 'DEF') return ['CB', 'LB', 'RB', 'LWB', 'RWB'].includes(player.position);
-    if (positionFilter === 'MID') return ['CDM', 'CM', 'CAM', 'LM', 'RM'].includes(player.position);
-    if (positionFilter === 'FWD') return ['RW', 'LW', 'ST'].includes(player.position);
-    if (positionFilter === 'U21') return player.age <= 21;
-    return true;
-  });
-
-  const dailyGrowthReports = dayAdvanceSummary?.trainingReports?.filter(r => r.type === 'growth') || [];
-  const dailyOtherReports = dayAdvanceSummary?.trainingReports?.filter(r => r.type !== 'growth') || [];
-  const dailyInjuries = dayAdvanceSummary?.injuryUpdates || [];
-  const hasDailyReports = (dayAdvanceSummary?.trainingReports && dayAdvanceSummary.trainingReports.length > 0) || dailyInjuries.length > 0;
+  const tabs = [
+    { id: 'today' as const, label: 'حصة اليوم', icon: <ClipboardList className="w-3.5 h-3.5" /> },
+    { id: 'squad' as const, label: 'اللاعبون', icon: <Users className="w-3.5 h-3.5" />, badge: players.length },
+    { id: 'staff' as const, label: 'الجهاز والأكاديمية', icon: <GraduationCap className="w-3.5 h-3.5" /> },
+  ];
 
   return (
-    <div className="space-y-4 pb-20 animate-fade-in" dir="rtl">
-      
-      {/* Header Banner */}
-      <div className="bg-slate-900 border border-slate-800 p-4 sm:p-5 rounded-3xl space-y-4 shadow-xl">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          <div className="flex items-center gap-3">
-            <div className="w-12 h-12 rounded-2xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center font-bold border border-emerald-500/40 shrink-0 shadow-lg">
-              <Dumbbell className="w-6 h-6" />
-            </div>
-            <div>
-              <h2 className="font-black text-lg text-white">مركز التدريب وتطوير اللاعبين اليومي</h2>
-              <span className="text-xs text-slate-400">إدارة الحصص التدريبية، التخصصات الفردية، وتنمية قدرات الفريق</span>
+    <div className="space-y-3 pb-20 animate-fade-in" dir="rtl">
+      <Toast toast={toast} />
+
+      {/* HERO */}
+      <Hero accent="#10b981">
+        <div className="flex items-center gap-3">
+          <div className="w-12 h-12 rounded-xl bg-emerald-500/15 border border-emerald-500/40 text-emerald-300 flex items-center justify-center shrink-0">
+            <Dumbbell className="w-6 h-6" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <h2 className="font-black text-lg text-white leading-tight">مركز التدريب</h2>
+            <div className="mt-1 flex items-center gap-2 text-[11px] text-slate-400">
+              <span>ملاعب التدريب</span>
+              <LevelPips level={trainingLevel} tone="emerald" />
+              <span className="font-mono text-emerald-300">{trainingLevel}/5</span>
             </div>
           </div>
-
-          <div className="flex items-center gap-2 self-start sm:self-center">
-            <div className="bg-slate-800/90 px-3 py-1.5 rounded-xl text-xs font-bold text-amber-400 border border-slate-700">
-              منشآت التدريب: {userClub.facilities.trainingGroundLevel} / 5 🏟️
+          <div className="text-left shrink-0">
+            <div className="flex items-center gap-1 justify-end text-amber-300 font-black font-mono text-xl leading-none">
+              <Zap className="w-4 h-4" />
+              <span>{dev}</span>
             </div>
-          </div>
-        </div>
-
-        {/* Development Points Banner (Tournament & Cup Rewards) */}
-        <div className="bg-gradient-to-r from-amber-500/15 via-emerald-500/10 to-blue-500/15 border border-amber-500/30 p-3.5 rounded-2xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
-          <div className="flex items-center gap-2.5">
-            <div className="w-9 h-9 rounded-xl bg-amber-500/25 border border-amber-500/40 flex items-center justify-center text-amber-300 font-bold shrink-0">
-              <Zap className="w-5 h-5" />
-            </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <span className="font-bold text-xs text-white">رصيد نقاط تطوير اللاعبين المكتسبة:</span>
-                <span className="font-black text-sm text-amber-400 bg-amber-950/80 px-2 py-0.5 rounded-lg border border-amber-500/40">
-                  {developmentPoints || 0} ⚡ نقطة
-                </span>
-              </div>
-              <p className="text-[11px] text-slate-300 mt-0.5">
-                تُمنح عبر حسم مباريات الكؤوس ومكافآت الترتيب لتطوير المهارات الفردية مباشرة (+1) بدون انتظار التطور التدريجي!
-              </p>
-            </div>
+            <span className="text-[10px] text-slate-400">نقاط التطوير</span>
           </div>
         </div>
 
-        {/* Daily Training Program & Execution Panel (آلية يومية لاختيار نوع التدريب) */}
-        <div className="bg-slate-950/80 border border-slate-800 p-4 rounded-2xl space-y-3.5">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800 pb-3">
-            <div className="flex items-center gap-2">
-              <Calendar className="w-4 h-4 text-emerald-400" />
-              <span className="text-xs font-bold text-slate-200">برنامج المران اليومي للفريق:</span>
-              <span className="text-xs font-bold text-emerald-400 bg-emerald-950/60 px-2 py-0.5 rounded-lg border border-emerald-800/40">
-                {calendarDate?.formattedArabic || 'اليوم الحالي'}
-              </span>
-            </div>
+        <div className="mt-4 grid grid-cols-2 sm:grid-cols-4 gap-2">
+          <StatTile
+            label="المباراة القادمة"
+            tone={isMatchDay ? 'amber' : 'sky'}
+            icon={<Clock className="w-3 h-3" />}
+            value={isMatchDay ? 'اليوم' : `${daysUntilNextMatch ?? '-'} يوم`}
+          />
+          <StatTile label="متوسط الجاهزية" tone={fitnessTone(avgFitness)} icon={<Activity className="w-3 h-3" />} value={`${avgFitness}%`} />
+          <StatTile label="المصابون" tone={injuredCount > 0 ? 'rose' : 'emerald'} icon={<HeartPulse className="w-3 h-3" />} value={injuredCount} sub={injuredCount > 0 ? 'يحتاجون رعاية' : 'الجميع جاهز'} />
+          <StatTile label="التاريخ" tone="slate" icon={<Calendar className="w-3 h-3" />} value={<span className="text-sm">{calendarDate?.formattedArabic || '—'}</span>} />
+        </div>
+      </Hero>
 
-            {/* Match Day indicator / Countdown */}
-            <div className="flex items-center gap-2 text-xs">
-              {isMatchDay ? (
-                <span className="font-bold text-amber-300 bg-amber-950/80 border border-amber-600 px-2.5 py-1 rounded-xl flex items-center gap-1.5 animate-pulse">
-                  <span>⚽</span>
-                  <span>اليوم موعد مباراة رسمية</span>
-                </span>
-              ) : (
-                <span className="text-slate-400 flex items-center gap-1">
-                  <Clock className="w-3.5 h-3.5 text-blue-400" />
-                  <span>متبقي <strong className="text-blue-300">{daysUntilNextMatch}</strong> أيام حتى موعد المباراة القادمة</span>
-                </span>
-              )}
-            </div>
-          </div>
+      <SegTabs tabs={tabs} value={subTab} onChange={setSubTab} tone="emerald" />
 
-          {/* Training Intensity Selection */}
-          <div className="space-y-1.5">
-            <div className="flex items-center justify-between text-xs">
-              <span className="font-bold text-slate-300">مستوى الحمل التدريبي البدني:</span>
-              <span className="text-[11px] text-slate-400">يؤثر مباشرة على سرعة التطور ومخاطر الإجهاد</span>
-            </div>
-            <div className="grid grid-cols-3 gap-2 text-center text-xs">
-              {[
-                { id: 'recovery', label: 'استشفاء وتأهيل', desc: 'راحة واستعادة لياقة', icon: Heart, color: 'border-blue-500/40 text-blue-300' },
-                { id: 'normal', label: 'تدريب متوازن', desc: 'تطور فني وبدني مستقر', icon: Activity, color: 'border-emerald-500/40 text-emerald-300' },
-                { id: 'high', label: 'حمل شاق ومكثف', desc: 'تطور مضاعف وسريع', icon: Flame, color: 'border-rose-500/40 text-rose-300' },
-              ].map(prog => (
-                <button
-                  key={prog.id}
-                  onClick={() => handleApplyTeamProgram(prog.id as any)}
-                  className={`p-3 rounded-2xl border text-center transition-all cursor-pointer ${
-                    trainingIntensity === prog.id
-                      ? 'bg-emerald-950/90 border-emerald-500 text-emerald-300 shadow-md ring-1 ring-emerald-500/50'
-                      : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-white hover:bg-slate-800/80'
-                  }`}
-                >
-                  <div className="font-black text-xs sm:text-sm flex items-center justify-center gap-1.5">
-                    <prog.icon className="w-3.5 h-3.5 shrink-0" />
-                    <span>{prog.label}</span>
-                  </div>
-                  <div className="text-[10px] text-slate-400 mt-1">{prog.desc}</div>
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* Daily Training Session Execution Button */}
-          <div className="pt-2 flex flex-col sm:flex-row items-center justify-between gap-3">
-            <div className="text-[11px] text-slate-400 flex items-center gap-1.5">
-              <Info className="w-4 h-4 text-emerald-400 shrink-0" />
-              <span>إجراء الحصة التدريبية يطور مهارات اللاعبين تدريجياً ويزيد من الانسجام واللياقة.</span>
+      {/* TODAY */}
+      {subTab === 'today' && (
+        <div className="space-y-3">
+          <Panel title="مستوى الحمل التدريبي" icon={<Flame className="w-4 h-4" />} tone="emerald">
+            <div className="grid grid-cols-3 gap-2">
+              {INTENSITIES.map(opt => {
+                const active = trainingIntensity === opt.id;
+                return (
+                  <button
+                    key={opt.id}
+                    onClick={() => applyIntensity(opt.id)}
+                    aria-pressed={active}
+                    className={`p-3 rounded-xl border text-center transition-all cursor-pointer active:scale-95 ${
+                      active
+                        ? 'border-emerald-400 bg-emerald-500/15 ring-1 ring-emerald-400/50 shadow-lg shadow-emerald-500/10'
+                        : 'border-slate-800 bg-slate-950/60 hover:border-slate-600'
+                    }`}
+                  >
+                    <div className={`mx-auto mb-1.5 ${active ? 'text-emerald-300' : 'text-slate-400'} flex justify-center`}>{opt.icon}</div>
+                    <div className={`font-black text-sm ${active ? 'text-white' : 'text-slate-300'}`}>{opt.label}</div>
+                    <div className="text-[10px] text-slate-400 mt-0.5 leading-snug">{opt.desc}</div>
+                    <div className="text-[9px] mt-1.5 text-slate-500">{opt.note}</div>
+                  </button>
+                );
+              })}
             </div>
 
             <button
-              onClick={handleExecuteDailySession}
+              onClick={runSession}
               disabled={isMatchDay}
-              className={`w-full sm:w-auto px-5 py-2.5 rounded-2xl font-black text-xs flex items-center justify-center gap-2 transition-all cursor-pointer shadow-lg active:scale-95 ${
+              className={`mt-4 w-full py-3.5 rounded-xl font-black text-sm flex items-center justify-center gap-2 transition-all active:scale-[0.98] ${
                 isMatchDay
                   ? 'bg-slate-800 text-slate-500 cursor-not-allowed border border-slate-700'
-                  : 'bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-slate-950 shadow-emerald-950/50'
+                  : 'bg-gradient-to-b from-emerald-400 to-emerald-600 text-slate-950 shadow-lg shadow-emerald-500/20 cursor-pointer'
               }`}
             >
               <Play className="w-4 h-4 fill-current" />
-              <span>{isMatchDay ? 'اليوم يوم مباراة (توجه للمباريات)' : 'إجراء الحصة التدريبية لليوم ⏱️'}</span>
+              <span>{isMatchDay ? 'اليوم يوم مباراة — توجه للمباريات' : 'إجراء حصة اليوم'}</span>
             </button>
-          </div>
-        </div>
+            <p className="mt-2 text-[11px] text-slate-500 text-center">الحصة تُنهي اليوم وتطور مهارات اللاعبين تدريجياً وتزيد الانسجام.</p>
+          </Panel>
 
-        {/* Youth Academy Direct Access */}
-        <div>
-          <button
-            onClick={() => setIsYouthAcademyOpen(true)}
-            className="w-full bg-gradient-to-r from-amber-500/10 via-amber-500/20 to-amber-500/10 hover:bg-amber-500/25 border border-amber-500/40 p-3.5 rounded-2xl flex items-center justify-between transition-all cursor-pointer"
+          <Panel
+            title="تقرير آخر حصة"
+            icon={<Sparkles className="w-4 h-4" />}
+            tone="amber"
+            right={<span className="text-[10px] text-slate-400">{dayAdvanceSummary?.formattedArabicDate || 'لا يوجد تقرير بعد'}</span>}
           >
-            <div className="flex items-center gap-2.5 text-right">
-              <div className="w-9 h-9 rounded-xl bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-amber-400 font-bold shrink-0">
-                <GraduationCap className="w-5 h-5" />
-              </div>
-              <div>
-                <div className="font-bold text-xs sm:text-sm text-amber-300">أكاديمية قطاع الناشئين والمواهب الصاعدة 🌟</div>
-                <div className="text-[11px] text-slate-400">
-                  {userClub.youthAcademyProspects?.length || 0} مواهب صاعدة تحت المراقبة • تصعيد للفريق الأول أو بيع الحقوق
+            {hasReports ? (
+              <div className="space-y-3">
+                <div className="grid grid-cols-3 gap-2">
+                  <StatTile label="تطورات (+1)" tone="emerald" icon={<TrendingUp className="w-3 h-3" />} value={growthReports.length} />
+                  <StatTile label="الحمل" tone="sky" icon={<Activity className="w-3 h-3" />} value={<span className="text-sm">{trainingIntensity === 'recovery' ? 'استشفاء' : trainingIntensity === 'high' ? 'مكثف' : 'متوازن'}</span>} />
+                  <StatTile label="إصابات" tone={injuries.length ? 'rose' : 'emerald'} icon={<HeartPulse className="w-3 h-3" />} value={injuries.length} />
                 </div>
+
+                {growthReports.length > 0 && (
+                  <ul className="space-y-1.5">
+                    {growthReports.map((rep, i) => (
+                      <li key={i} className="flex items-center justify-between gap-2 bg-emerald-500/5 border border-emerald-500/30 rounded-xl px-3 py-2 text-xs">
+                        <span className="text-slate-100 font-bold break-words min-w-0">🌟 {rep.changeText}</span>
+                        <span className="text-[10px] font-black text-emerald-300 shrink-0">ترقية ⚡</span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+
+                {injuries.length > 0 && (
+                  <ul className="space-y-1.5">
+                    {injuries.map((inj, i) => (
+                      <li
+                        key={i}
+                        className={`flex items-center justify-between gap-2 rounded-xl px-3 py-2 text-xs border ${
+                          inj.recovered ? 'bg-emerald-500/5 border-emerald-500/30 text-emerald-200' : 'bg-rose-500/5 border-rose-500/30 text-rose-200'
+                        }`}
+                      >
+                        <span className="font-bold min-w-0 break-words">{inj.recovered ? '🩹' : '🏥'} {inj.text}</span>
+                        <span className="text-[10px] font-black shrink-0">{inj.recovered ? 'تعافى' : 'تحت العلاج'}</span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+
+                {otherReports.length > 0 && (
+                  <ul className="space-y-1">
+                    {otherReports.map((rep, i) => (
+                      <li key={i} className="text-[11px] text-slate-300 bg-slate-950/60 border border-slate-800 rounded-lg px-3 py-2">{rep.changeText}</li>
+                    ))}
+                  </ul>
+                )}
               </div>
-            </div>
-
-            <span className="text-xs font-bold text-amber-300 bg-amber-950 border border-amber-800 px-3 py-1.5 rounded-xl shrink-0">
-              إدارة الأكاديمية ↗
-            </span>
-          </button>
-        </div>
-      </div>
-
-      {notification && (
-        <div className="bg-emerald-950 border border-emerald-600 text-emerald-200 text-xs font-bold p-3.5 rounded-2xl flex items-center justify-center gap-2 shadow-lg animate-fade-in">
-          <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-          <span>{notification}</span>
+            ) : (
+              <div className="text-center py-6 space-y-1.5">
+                <div className="text-3xl">📋</div>
+                <div className="font-black text-sm text-white">جاهز للحصة الأولى</div>
+                <p className="text-[11px] text-slate-400 max-w-xs mx-auto">اختر مستوى الحمل ثم اضغط «إجراء حصة اليوم» لتظهر تفاصيل التطور هنا.</p>
+              </div>
+            )}
+          </Panel>
         </div>
       )}
 
-      {/* Daily Training Report Summary (عرض ملخص التقرير اليومي) */}
-      <div className="bg-slate-900 border border-slate-800 rounded-3xl p-4 sm:p-5 space-y-3.5 shadow-xl">
-        <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-          <div className="flex items-center gap-2.5">
-            <div className="w-9 h-9 rounded-xl bg-amber-500/20 text-amber-400 flex items-center justify-center font-bold border border-amber-500/40">
-              <Sparkles className="w-4 h-4" />
+      {/* SQUAD */}
+      {subTab === 'squad' && (
+        <Panel
+          title="التخصص الفردي"
+          icon={<Users className="w-4 h-4" />}
+          tone="emerald"
+          right={
+            <button
+              onClick={autoAssign}
+              className="flex items-center gap-1.5 text-[11px] font-black text-emerald-300 bg-emerald-500/10 border border-emerald-500/40 rounded-lg px-2.5 py-1.5 cursor-pointer active:scale-95"
+            >
+              <Wand2 className="w-3.5 h-3.5" />
+              <span>توزيع ذكي</span>
+            </button>
+          }
+        >
+          <div className="space-y-3">
+            <div className="flex flex-col sm:flex-row gap-2">
+              <div className="flex gap-1 p-1 bg-slate-950 border border-slate-800 rounded-xl overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden flex-1">
+                {([
+                  ['ALL', 'الكل'], ['GK', 'حراس'], ['DEF', 'دفاع'], ['MID', 'وسط'], ['FWD', 'هجوم'], ['U21', '≤21'],
+                ] as [PosFilter, string][]).map(([id, label]) => (
+                  <button
+                    key={id}
+                    onClick={() => setPositionFilter(id)}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-black whitespace-nowrap cursor-pointer ${
+                      positionFilter === id ? 'bg-emerald-500 text-slate-950' : 'text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+              <div className="relative">
+                <Search className="w-3.5 h-3.5 text-slate-500 absolute right-3 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  value={searchQuery}
+                  onChange={e => setSearchQuery(e.target.value)}
+                  placeholder="بحث باسم اللاعب..."
+                  className="w-full sm:w-44 bg-slate-950 border border-slate-800 rounded-xl pr-8 pl-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500"
+                />
+              </div>
             </div>
-            <div>
-              <h3 className="font-black text-sm sm:text-base text-white">ملخص تقرير الحصة التدريبية الأخيرة</h3>
-              <span className="text-[11px] text-slate-400">
-                {dayAdvanceSummary?.formattedArabicDate ? `تقرير حصة: ${dayAdvanceSummary.formattedArabicDate}` : 'بانتظار تنفيذ أول حصة تدريبية اليوم'}
-              </span>
-            </div>
-          </div>
 
-          <button
-            onClick={() => setIsDailyReportExpanded(!isDailyReportExpanded)}
-            className="text-xs font-bold text-slate-400 hover:text-white bg-slate-800/80 px-2.5 py-1.5 rounded-xl border border-slate-700 flex items-center gap-1 transition-all"
-          >
-            <span>{isDailyReportExpanded ? 'طي التقرير' : 'عرض التقرير'}</span>
-            {isDailyReportExpanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
-          </button>
-        </div>
+            {filteredPlayers.length === 0 ? (
+              <div className="text-center py-10 text-xs text-slate-400">لا يوجد لاعبون يطابقون البحث.</div>
+            ) : (
+              <ul className="space-y-2">
+                {filteredPlayers.map(p => {
+                  const focus: Focus = p.trainingFocus || 'general';
+                  const fitness = typeof p.fitness === 'number' ? p.fitness : 100;
+                  const morale = typeof p.morale === 'number' ? p.morale : 85;
+                  const progress = Math.min(100, Math.round(p.trainingProgress || 0));
+                  const grew = growthIds.has(p.id);
+                  const open = expandedId === p.id;
+                  const focusMeta = FOCUS_OPTIONS.find(f => f.id === focus) || FOCUS_OPTIONS[0];
+                  const injured = p.isInjured || Boolean(p.injury && p.injury.daysRemaining > 0);
 
-        {isDailyReportExpanded && (
-          <div className="space-y-3 animate-fade-in text-xs">
-            {hasDailyReports ? (
-              <>
-                {/* Highlights Counter Chips */}
-                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                  <div className="bg-emerald-950/40 border border-emerald-800/60 p-2.5 rounded-xl flex items-center gap-2.5">
-                    <TrendingUp className="w-5 h-5 text-emerald-400 shrink-0" />
-                    <div>
-                      <span className="text-[10px] text-slate-400 block">تطورات مهارية (+1)</span>
-                      <strong className="text-emerald-300 font-bold text-xs sm:text-sm">
-                        {dailyGrowthReports.length} لاعبين
-                      </strong>
-                    </div>
-                  </div>
-
-                  <div className="bg-blue-950/40 border border-blue-800/60 p-2.5 rounded-xl flex items-center gap-2.5">
-                    <Activity className="w-5 h-5 text-blue-400 shrink-0" />
-                    <div>
-                      <span className="text-[10px] text-slate-400 block">تحديثات بدنية</span>
-                      <strong className="text-blue-300 font-bold text-xs sm:text-sm">
-                        {trainingIntensity === 'recovery' ? 'استشفاء إيجابي' : trainingIntensity === 'high' ? 'حمل شاق' : 'جاهزية متوازنة'}
-                      </strong>
-                    </div>
-                  </div>
-
-                  <div className="bg-rose-950/40 border border-rose-800/60 p-2.5 rounded-xl flex items-center gap-2.5 col-span-2 sm:col-span-1">
-                    <HeartPulse className="w-5 h-5 text-rose-400 shrink-0" />
-                    <div>
-                      <span className="text-[10px] text-slate-400 block">التقرير الطبي والإصابات</span>
-                      <strong className="text-rose-300 font-bold text-xs sm:text-sm">
-                        {dailyInjuries.length > 0 ? `${dailyInjuries.length} حالات مسجلة` : 'لا توجد إصابات جديدة'}
-                      </strong>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Growth and Progression Reports */}
-                {dailyGrowthReports.length > 0 && (
-                  <div className="space-y-1.5 pt-1">
-                    <span className="font-bold text-amber-400 flex items-center gap-1.5 text-xs">
-                      <Sparkles className="w-3.5 h-3.5" />
-                      <span>قفزات وتطور في تقييمات اللاعبين (+1):</span>
-                    </span>
-                    <div className="space-y-1.5">
-                      {dailyGrowthReports.map((rep, idx) => (
-                        <div
-                          key={idx}
-                          className="bg-slate-950/80 border border-emerald-600/40 p-3 rounded-2xl flex items-center justify-between gap-3"
-                        >
-                          <div className="flex items-center gap-2 min-w-0">
-                            <span className="text-sm">🌟</span>
-                            <span className="text-slate-200 font-bold break-words">{rep.changeText}</span>
+                  return (
+                    <li
+                      key={p.id}
+                      className={`rounded-xl border bg-slate-950/70 transition-colors ${grew ? 'border-emerald-500/60' : 'border-slate-800'}`}
+                    >
+                      <div className="flex items-center gap-3 p-2.5">
+                        <RatingPlate value={p.overallRating} label={p.position} tone={ratingTone(p.overallRating)} />
+                        <button onClick={() => onSelectPlayer(p)} className="min-w-0 flex-1 text-right cursor-pointer">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span className="font-black text-sm text-white break-words leading-tight">{p.name}</span>
+                            {grew && <span className="text-[9px] font-black text-emerald-300 bg-emerald-500/10 border border-emerald-500/40 rounded px-1.5">تطور ⭐</span>}
+                            {injured && <span className="text-[9px] font-black text-rose-300 bg-rose-500/10 border border-rose-500/40 rounded px-1.5">مصاب</span>}
                           </div>
-                          <span className="text-emerald-300 font-black text-xs bg-emerald-950 border border-emerald-600/60 px-2.5 py-1 rounded-xl shrink-0">
-                            ترقية تقييم ⚡
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {/* Medical & Recovery Updates */}
-                {dailyInjuries.length > 0 && (
-                  <div className="space-y-1.5 pt-1">
-                    <span className="font-bold text-rose-400 flex items-center gap-1.5 text-xs">
-                      <ShieldAlert className="w-3.5 h-3.5" />
-                      <span>تحديثات العيادة الطبية والتأهيل:</span>
-                    </span>
-                    <div className="space-y-1.5">
-                      {dailyInjuries.map((inj, idx) => (
-                        <div
-                          key={idx}
-                          className={`p-3 rounded-2xl border flex items-center justify-between gap-2.5 ${
-                            inj.recovered
-                              ? 'bg-emerald-950/60 border-emerald-700 text-emerald-200'
-                              : 'bg-rose-950/70 border-rose-700 text-rose-200'
+                          <div className="text-[10px] text-slate-400 mt-0.5">
+                            {getPositionArabic(p.position)} • {p.age} سنة • سقف <span className="text-emerald-400 font-bold">{p.potentialRating || p.overallRating}</span>
+                          </div>
+                          <div className="mt-1.5 flex items-center gap-2">
+                            <div className="flex-1"><Meter value={progress} tone="emerald" height={4} /></div>
+                            <span className="text-[9px] font-mono text-slate-400">{progress}%</span>
+                          </div>
+                        </button>
+                        <button
+                          onClick={() => setExpandedId(open ? null : p.id)}
+                          aria-expanded={open}
+                          className={`shrink-0 text-[11px] font-black px-2.5 py-2 rounded-lg border cursor-pointer ${
+                            open ? 'bg-emerald-500 text-slate-950 border-emerald-400' : 'bg-slate-900 text-emerald-300 border-slate-700'
                           }`}
                         >
-                          <div className="flex items-center gap-2">
-                            <span className="text-sm">{inj.recovered ? '🩹' : '🏥'}</span>
-                            <span className="font-bold">{inj.text}</span>
-                          </div>
-                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-lg border border-current shrink-0">
-                            {inj.recovered ? 'تعافى تماماً' : 'تحت العلاج'}
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
+                          {focusMeta.icon} {focusMeta.label}
+                        </button>
+                      </div>
 
-                {/* Other Training Reports */}
-                {dailyOtherReports.length > 0 && (
-                  <div className="space-y-1 pt-1">
-                    <div className="space-y-1">
-                      {dailyOtherReports.map((rep, idx) => (
-                        <div
-                          key={idx}
-                          className="bg-slate-950/60 border border-slate-800 p-2.5 rounded-xl text-slate-300 flex items-center justify-between text-xs"
-                        >
-                          <span>{rep.changeText}</span>
+                      {open && (
+                        <div className="border-t border-slate-800 p-3 space-y-3 bg-slate-900/40">
+                          <div className="grid grid-cols-2 gap-2 text-[11px]">
+                            <div>
+                              <div className="flex justify-between text-slate-400 mb-1"><span>الجاهزية</span><span className={`font-mono font-bold ${fitnessTone(fitness) === 'emerald' ? 'text-emerald-400' : fitnessTone(fitness) === 'amber' ? 'text-amber-400' : 'text-rose-400'}`}>{fitness}%</span></div>
+                              <Meter value={fitness} tone={fitnessTone(fitness)} />
+                            </div>
+                            <div>
+                              <div className="flex justify-between text-slate-400 mb-1"><span>المعنويات</span><span className="font-mono font-bold text-white">{morale}%</span></div>
+                              <Meter value={morale} tone="violet" />
+                            </div>
+                          </div>
+
+                          <div>
+                            <div className="text-[11px] font-bold text-slate-300 mb-1.5">التخصص الفردي</div>
+                            <div className="flex flex-wrap gap-1.5">
+                              {FOCUS_OPTIONS.filter(f => f.id !== 'goalkeeping' || p.position === 'GK').map(f => (
+                                <button
+                                  key={f.id}
+                                  onClick={() => setPlayerTrainingFocus(p.id, f.id)}
+                                  aria-pressed={focus === f.id}
+                                  className={`px-2.5 py-1.5 rounded-lg text-[11px] font-black border cursor-pointer active:scale-95 ${
+                                    focus === f.id
+                                      ? 'bg-emerald-500 text-slate-950 border-emerald-300'
+                                      : 'bg-slate-950 text-slate-300 border-slate-700 hover:border-slate-500'
+                                  }`}
+                                >
+                                  {f.icon} {f.label}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+
+                          <button
+                            onClick={() => quickBoost(p)}
+                            className={`w-full py-2.5 rounded-lg text-xs font-black flex items-center justify-center gap-2 border cursor-pointer active:scale-[0.98] ${
+                              dev >= 50
+                                ? 'bg-amber-500/15 text-amber-200 border-amber-500/50'
+                                : 'bg-slate-900 text-slate-500 border-slate-800'
+                            }`}
+                            title="ترقية التقييم العام (+1) مقابل 50 نقطة تطوير"
+                          >
+                            <Zap className="w-3.5 h-3.5" />
+                            <span>ترقية فورية (+1)</span>
+                            <span className="font-mono text-[10px] opacity-80">50 ⚡</span>
+                          </button>
                         </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </>
-            ) : (
-              <div className="bg-slate-950/60 border border-slate-800/80 p-5 rounded-2xl text-center space-y-2">
-                <div className="w-10 h-10 rounded-2xl bg-slate-800 text-emerald-400 flex items-center justify-center font-bold text-lg mx-auto">
-                  📋
-                </div>
-                <h4 className="font-bold text-white text-xs sm:text-sm">جاهز لإجراء الحصة التدريبية اليومية</h4>
-                <p className="text-[11px] text-slate-400 max-w-md mx-auto">
-                  اختر تخصصات لاعبيك ومستوى الحمل التدريبي في الأعلى، ثم اضغط على زر (إجراء الحصة التدريبية لليوم) لمشاهدة تفاصيل التقرير وتطور المهارات.
-                </p>
-              </div>
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
             )}
           </div>
-        )}
-      </div>
+        </Panel>
+      )}
 
-      {/* Club Staff & Technical Department Management */}
-      <StaffManagementCard />
-
-      {/* Individual Training Focus Assignment List (مكونات التدريب الفردي المحسنة مع ظهور الأسماء كاملاً) */}
-      <div className="bg-slate-900 border border-slate-800 rounded-3xl p-4 sm:p-5 space-y-4 shadow-xl">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 border-b border-slate-800 pb-3">
-          <div>
-            <h3 className="font-black text-sm sm:text-base text-white flex items-center gap-2">
-              <Sparkles className="w-4 h-4 text-amber-400" />
-              <span>التخصص والتركيز الفردي لكل لاعب</span>
-            </h3>
-            <span className="text-[11px] text-slate-400">
-              تحديد التخصص اليومي لتطوير مهارات كل لاعب بدقة وزيادة كفاءته التكتيكية
-            </span>
-          </div>
-
-          {/* Smart Auto-Assign Button */}
+      {/* STAFF */}
+      {subTab === 'staff' && (
+        <div className="space-y-3">
           <button
-            onClick={handleAutoAssignAllFocus}
-            className="self-start md:self-auto bg-gradient-to-r from-emerald-500/20 to-teal-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/40 px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer shadow-sm active:scale-95"
+            onClick={() => setIsYouthAcademyOpen(true)}
+            className="w-full text-right bg-gradient-to-l from-amber-500/10 to-slate-900 border border-amber-500/40 rounded-2xl p-4 flex items-center gap-3 cursor-pointer active:scale-[0.99]"
           >
-            <Zap className="w-3.5 h-3.5 text-emerald-400" />
-            <span>🎯 توزيع التخصصات الذكي حسب المراكز</span>
-          </button>
-        </div>
-
-        {/* Filter & Search Bar */}
-        <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2 text-xs">
-          {/* Position Category Tabs */}
-          <div className="flex flex-wrap items-center gap-1 bg-slate-950 p-1 rounded-2xl border border-slate-800">
-            {[
-              { id: 'ALL', label: 'الجميع' },
-              { id: 'GK', label: 'حراس' },
-              { id: 'DEF', label: 'دفاع' },
-              { id: 'MID', label: 'وسط' },
-              { id: 'FWD', label: 'هجوم' },
-              { id: 'U21', label: 'مواهب (≤21)' },
-            ].map(tab => (
-              <button
-                key={tab.id}
-                onClick={() => setPositionFilter(tab.id as any)}
-                className={`px-3 py-1.5 rounded-xl font-bold transition-all cursor-pointer ${
-                  positionFilter === tab.id
-                    ? 'bg-emerald-500 text-slate-950 shadow-sm'
-                    : 'text-slate-400 hover:text-white'
-                }`}
-              >
-                {tab.label}
-              </button>
-            ))}
-          </div>
-
-          {/* Search Box */}
-          <div className="relative">
-            <Search className="w-3.5 h-3.5 text-slate-400 absolute right-3 top-2.5" />
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="بحث باسم اللاعب..."
-              className="w-full sm:w-48 bg-slate-950 border border-slate-800 rounded-xl pr-8 pl-3 py-1.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500"
-            />
-          </div>
-        </div>
-
-        {/* Players Individual Training Cards List */}
-        <div className="space-y-3 max-h-[650px] overflow-y-auto custom-scrollbar pr-1">
-          {filteredPlayers.length === 0 ? (
-            <div className="text-center py-12 text-slate-400 text-xs">
-              لا يوجد لاعبون يطابقون خيارات البحث أو التصفية الحالية.
+            <div className="w-11 h-11 rounded-xl bg-amber-500/15 border border-amber-500/40 text-amber-300 flex items-center justify-center shrink-0">
+              <GraduationCap className="w-5 h-5" />
             </div>
-          ) : (
-            filteredPlayers.map(player => {
-              const currentFocus = player.trainingFocus || 'general';
-              const progressPct = player.trainingProgress ? Math.min(100, Math.round(player.trainingProgress)) : 0;
-              const hasGrowthToday = dailyGrowthReports.some(r => r.playerId === player.id);
+            <div className="min-w-0 flex-1">
+              <div className="font-black text-sm text-amber-200">أكاديمية الناشئين</div>
+              <div className="text-[11px] text-slate-400">{userClub.youthAcademyProspects?.length || 0} مواهب تحت المراقبة • تصعيد أو بيع</div>
+            </div>
+            <span className="text-[11px] font-black text-amber-300 shrink-0">دخول ↗</span>
+          </button>
 
-              return (
-                <div
-                  key={player.id}
-                  className={`bg-slate-950/80 border rounded-2xl p-3.5 sm:p-4 space-y-3 transition-all hover:border-slate-700 ${
-                    hasGrowthToday ? 'border-emerald-500/60 shadow-md ring-1 ring-emerald-500/20' : 'border-slate-800'
-                  }`}
-                >
-                  {/* Top Row: Rating, Full Clear Player Name, Position, Age, Potential */}
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="flex items-start gap-3 min-w-0 flex-1">
-                      {/* Overall Rating Box */}
-                      <div className={`w-12 h-12 rounded-2xl border-2 flex flex-col items-center justify-center font-black shrink-0 ${getRatingColor(player.overallRating)}`}>
-                        <span className="text-base leading-none">{player.overallRating}</span>
-                        <span className="text-[9px] uppercase font-bold tracking-wider">{player.position}</span>
-                      </div>
-
-                      {/* Full Name & Information - NO HARSH TRUNCATION */}
-                      <div className="min-w-0 flex-1">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <button
-                            onClick={() => onSelectPlayer(player)}
-                            className="font-black text-sm sm:text-base text-white hover:text-emerald-400 transition-colors text-right break-words leading-tight cursor-pointer"
-                          >
-                            {player.name}
-                          </button>
-                          {player.number && (
-                            <span className="text-[10px] text-slate-400 font-mono bg-slate-900 border border-slate-800 px-1.5 py-0.5 rounded-md">
-                              #{player.number}
-                            </span>
-                          )}
-                          {hasGrowthToday && (
-                            <span className="text-[10px] bg-emerald-950 text-emerald-300 border border-emerald-700 px-2 py-0.5 rounded-full font-bold">
-                              تطور اليوم ⭐
-                            </span>
-                          )}
-                        </div>
-
-                        {player.nickname && (
-                          <div className="text-[11px] text-amber-400 font-medium mt-0.5">
-                            "{player.nickname}"
-                          </div>
-                        )}
-
-                        <div className="flex flex-wrap items-center gap-2 mt-1 text-[11px] text-slate-400">
-                          <span className={`px-2 py-0.2 rounded-md font-bold text-[10px] border ${getPositionBadgeClass(player.position)}`}>
-                            {getPositionArabic(player.position)} ({player.position})
-                          </span>
-                          <span>{player.age} سنة</span>
-                          <span>•</span>
-                          <span>سقف الإمكانات: <strong className="text-emerald-400 font-bold">{player.potentialRating || player.overallRating}</strong></span>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Profile Link Button */}
-                    <button
-                      onClick={() => onSelectPlayer(player)}
-                      className="p-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-white border border-slate-800 text-xs font-bold transition-all shrink-0 cursor-pointer"
-                      title="معاينة الملف الشامل للاعب"
-                    >
-                      الملف ↗
-                    </button>
-                  </div>
-
-                  {/* Indicators Row: Fitness, Morale, Training Progress Bar */}
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 bg-slate-900/70 p-2.5 rounded-xl border border-slate-800/80 text-xs">
-                    {/* Fitness */}
-                    <div className="flex items-center justify-between sm:justify-start gap-2">
-                      <span className="text-slate-400 flex items-center gap-1 text-[11px]">
-                        <Activity className="w-3.5 h-3.5 text-emerald-400" />
-                        الجاهزية:
-                      </span>
-                      <strong className={`font-mono text-xs ${player.fitness > 80 ? 'text-emerald-400' : player.fitness > 65 ? 'text-amber-400' : 'text-rose-400'}`}>
-                        {player.fitness || 100}%
-                      </strong>
-                    </div>
-
-                    {/* Morale */}
-                    <div className="flex items-center justify-between sm:justify-start gap-2">
-                      <span className="text-slate-400 flex items-center gap-1 text-[11px]">
-                        <Heart className="w-3.5 h-3.5 text-red-400" />
-                        المعنويات:
-                      </span>
-                      <strong className="font-mono text-xs text-white">
-                        {player.morale || 85}%
-                      </strong>
-                    </div>
-
-                    {/* Natural Training Progress towards +1 */}
-                    <div className="flex flex-col justify-center">
-                      <div className="flex items-center justify-between text-[10px] text-slate-400 mb-1">
-                        <span>التقدم التدريبي نحو الترقية (+1):</span>
-                        <span className="text-emerald-400 font-bold font-mono">{progressPct}%</span>
-                      </div>
-                      <div className="w-full bg-slate-800 h-1.5 rounded-full overflow-hidden">
-                        <div
-                          className="h-full bg-gradient-to-r from-emerald-500 to-teal-400 rounded-full transition-all duration-300"
-                          style={{ width: `${progressPct}%` }}
-                        />
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Individual Focus Selector & Quick Boost Controls */}
-                  <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5 pt-1">
-                    <div className="flex items-center gap-2 flex-1">
-                      <label className="text-[11px] font-bold text-slate-300 shrink-0">التخصص الفردي:</label>
-                      <select
-                        value={currentFocus}
-                        onChange={(e) => setPlayerTrainingFocus(player.id, e.target.value as Player['trainingFocus'])}
-                        className="flex-1 bg-slate-900 border border-slate-700 hover:border-slate-600 rounded-xl px-3 py-2 text-xs text-emerald-300 font-bold focus:outline-none focus:border-emerald-500 cursor-pointer"
-                      >
-                        <option value="general">🔄 تدريب شامل متوازن</option>
-                        <option value="fitness">🏃‍♂️ لياقة وسرعة وبدنية</option>
-                        <option value="shooting">🎯 تسديد وإنهاء الهجمات</option>
-                        <option value="passing">⚽ تمرير ورؤية وصناعة</option>
-                        <option value="dribbling">🎨 مراوغة وتحكم فردي</option>
-                        <option value="defending">🛡️ تمركز دفاعي وافتكاك</option>
-                        {player.position === 'GK' && (
-                          <option value="goalkeeping">🧤 حراسة المرمى والتصدي</option>
-                        )}
-                      </select>
-                    </div>
-
-                    {/* Quick Boost Button */}
-                    <button
-                      onClick={() => handleQuickBoost(player)}
-                      title="ترقية التقييم العام (+1) باستخدام 50 نقطة تطوير"
-                      className="px-3.5 py-2 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 text-xs font-bold flex items-center justify-center gap-1.5 transition-all active:scale-95 cursor-pointer shrink-0 shadow-sm"
-                    >
-                      <Zap className="w-3.5 h-3.5 text-amber-400" />
-                      <span>ترقية فورية (+1)</span>
-                      <span className="text-[10px] text-amber-400/80 font-mono">(50 ⚡)</span>
-                    </button>
-                  </div>
-                </div>
-              );
-            })
-          )}
+          <StaffManagementCard />
         </div>
-      </div>
+      )}
 
-      {/* Youth Academy Modal */}
-      <YouthAcademyModal
-        isOpen={isYouthAcademyOpen}
-        onClose={() => setIsYouthAcademyOpen(false)}
-      />
-
+      <YouthAcademyModal isOpen={isYouthAcademyOpen} onClose={() => setIsYouthAcademyOpen(false)} />
     </div>
   );
 };
-

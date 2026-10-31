@@ -6206,7 +6206,12 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const upgradeFacility = (facilityKey: keyof ClubFacilities, cost: number): { success: boolean; message: string } => {
     if (!userClub) return { success: false, message: 'أنت غير مرتبط بنادٍ!' };
 
-    if (userClub.budget < cost) {
+    const existingLevel = (userClub.facilities as any)?.[facilityKey];
+    if (typeof existingLevel === 'number' && existingLevel >= 5) {
+      return { success: false, message: 'هذه المنشأة وصلت بالفعل إلى المستوى الأقصى.' };
+    }
+
+    if ((userClub.budget || 0) < cost) {
       return { success: false, message: 'الميزانية لا تكفي لإجراء هذا التطوير!' };
     }
 

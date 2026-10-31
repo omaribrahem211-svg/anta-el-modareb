@@ -114,7 +114,7 @@ export const CareerProgressionJourney: React.FC = () => {
                 </span>
               </h3>
               <p className="text-[11px] text-slate-400">
-                تُخصم جميع عمليات شراء الرخص وتجديدها السنوي حصراً من ميزانيتك الشخصية ({(manager.personalWallet || 0).toLocaleString()}$) وليس من ميزانية النادي.
+                تُخصم جميع عمليات شراء الرخص وتجديدها السنوي حصراً من ميزانيتك الشخصية ({(manager.personalWallet || 0).toLocaleString()} ج.م) وليس من ميزانية النادي.
               </p>
             </div>
           </div>
@@ -189,13 +189,13 @@ export const CareerProgressionJourney: React.FC = () => {
                     <div className="bg-slate-900/90 p-2 rounded-xl border border-slate-800">
                       <span className="text-slate-400 block text-[10px]">سعر الشراء (لمرة واحدة)</span>
                       <span className="font-mono font-black text-amber-400">
-                        {licConfig.purchaseCost === 0 ? 'مجانية (0$)' : `${licConfig.purchaseCost.toLocaleString()}$`}
+                        {licConfig.purchaseCost === 0 ? 'مجانية (0$)' : `${licConfig.purchaseCost.toLocaleString()} ج.م`}
                       </span>
                     </div>
                     <div className="bg-slate-900/90 p-2 rounded-xl border border-slate-800">
                       <span className="text-slate-400 block text-[10px]">رسوم التجديد السنوية</span>
                       <span className="font-mono font-black text-cyan-400">
-                        {licConfig.annualRenewalFee === 0 ? 'مجانية (0$)' : `${licConfig.annualRenewalFee.toLocaleString()}$`}
+                        {licConfig.annualRenewalFee === 0 ? 'مجانية (0$)' : `${licConfig.annualRenewalFee.toLocaleString()} ج.م`}
                       </span>
                     </div>
                   </div>
@@ -219,8 +219,8 @@ export const CareerProgressionJourney: React.FC = () => {
                       {isOwned
                         ? `تفعيل ${licConfig.titleArabic} مجاناً`
                         : canAfford
-                        ? `شراء وترقية إلى ${licConfig.titleArabic} (${licConfig.purchaseCost.toLocaleString()}$)`
-                        : `الرصيد الشخصي غير كافٍ (${licConfig.purchaseCost.toLocaleString()}$)`}
+                        ? `شراء وترقية إلى ${licConfig.titleArabic} (${licConfig.purchaseCost.toLocaleString()} ج.م)`
+                        : `الرصيد الشخصي غير كافٍ (${licConfig.purchaseCost.toLocaleString()} ج.م)`}
                     </span>
                   </button>
                 )}
