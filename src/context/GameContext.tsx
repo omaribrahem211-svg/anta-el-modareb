@@ -940,6 +940,18 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     return club;
   }, [teams, manager?.currentClubId]);
 
+  // Invariant: exactly the club the manager coaches carries isUserClub. Many actions (facility upgrades,
+  // training, tactics...) locate "my club" by that flag; when it drifted (job changes, old saves) they
+  // silently changed nothing while the money was still spent.
+  useEffect(() => {
+    const id = manager?.currentClubId;
+    if (!id || manager?.isUnemployed || !Array.isArray(teams)) return;
+    if (!teams.some(t => t && t.id === id)) return;
+    const drifted = teams.some(t => t && t.id && ((t.id === id) !== !!t.isUserClub));
+    if (!drifted) return;
+    setTeams(prev => prev.map(t => (t && t.id && ((t.id === id) !== !!t.isUserClub)) ? { ...t, isUserClub: t.id === id } : t));
+  }, [teams, manager?.currentClubId, manager?.isUnemployed]);
+
   const teamsRef = useRef<Club[]>(teams);
   useEffect(() => {
     teamsRef.current = teams;
@@ -6295,8 +6307,14 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const upgradeFacility = (facilityKey: keyof ClubFacilities, cost: number): { success: boolean; message: string } => {
     if (!userClub) return { success: false, message: 'أنت غير مرتبط بنادٍ!' };
 
-    const existingLevel = (userClub.facilities as any)?.[facilityKey];
-    if (typeof existingLevel === 'number' && existingLevel >= 5) {
+    // A missing / non-numeric level (old saves, partial objects) counts as level 1. Before, such a
+    // facility took the money but kept an undefined level, so the screen kept showing level 1.
+    const levelOf = (f: any): number => {
+      const n = Number(f?.[facilityKey]);
+      return Number.isFinite(n) && n >= 1 ? Math.min(5, Math.round(n)) : 1;
+    };
+    const existingLevel = levelOf(userClub.facilities);
+    if (existingLevel >= 5) {
       return { success: false, message: 'هذه المنشأة وصلت بالفعل إلى المستوى الأقصى.' };
     }
 
@@ -6304,20 +6322,29 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       return { success: false, message: 'الميزانية لا تكفي لإجراء هذا التطوير!' };
     }
 
+    // Apply to exactly the club the screen shows (userClub), not to whatever carries the isUserClub flag
+    const targetId = userClub.id;
     setTeams(prev => prev.map(t => {
-      if (!t.isUserClub) return t;
-      const currentVal = t.facilities[facilityKey];
-      if (typeof currentVal === 'number' && currentVal >= 5) {
-        return t;
-      }
+      if (t.id !== targetId) return t;
+      const current = levelOf(t.facilities);
+      if (current >= 5) return t;
+      const capacity = Number(t.facilities?.stadiumCapacity);
       return {
         ...t,
-        budget: t.budget - cost,
+        budget: (t.budget || 0) - cost,
         facilities: {
-          ...t.facilities,
-          [facilityKey]: typeof currentVal === 'number' ? currentVal + 1 : currentVal,
-          stadiumCapacity: facilityKey === 'stadiumLevel' ? t.facilities.stadiumCapacity + 600 : t.facilities.stadiumCapacity,
-        }
+          ...(t.facilities || ({} as ClubFacilities)),
+          stadiumName: t.facilities?.stadiumName || t.name,
+          stadiumCapacity: Number.isFinite(capacity) && capacity > 0
+            ? (facilityKey === 'stadiumLevel' ? capacity + 600 : capacity)
+            : (facilityKey === 'stadiumLevel' ? 5600 : 5000),
+          stadiumLevel: facilityKey === 'stadiumLevel' ? current + 1 : Math.max(1, Number(t.facilities?.stadiumLevel) || 1),
+          medicalCenterLevel: facilityKey === 'medicalCenterLevel' ? current + 1 : Math.max(1, Number(t.facilities?.medicalCenterLevel) || 1),
+          trainingGroundLevel: facilityKey === 'trainingGroundLevel' ? current + 1 : Math.max(1, Number(t.facilities?.trainingGroundLevel) || 1),
+          youthAcademyLevel: facilityKey === 'youthAcademyLevel' ? current + 1 : Math.max(1, Number(t.facilities?.youthAcademyLevel) || 1),
+          scoutingNetworkLevel: facilityKey === 'scoutingNetworkLevel' ? current + 1 : Math.max(1, Number(t.facilities?.scoutingNetworkLevel) || 1),
+          ...(t.facilities?.ticketPrice !== undefined ? { ticketPrice: t.facilities.ticketPrice } : {}),
+        },
       };
     }));
 
@@ -6328,7 +6355,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       currentSeasonNetProfit: prev.currentSeasonNetProfit - cost,
     }));
 
-    return { success: true, message: 'تمت ترقية وتطوير المنشأة بنجاح!' };
+    return { success: true, message: `تمت الترقية إلى المستوى ${existingLevel + 1} بنجاح!` };
   };
 
   const treatPlayerInHospital = (

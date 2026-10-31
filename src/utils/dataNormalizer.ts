@@ -129,15 +129,20 @@ export function normalizeClub(t: any): Club {
     })(),
     players,
     sponsors: Array.isArray(t.sponsors) ? t.sponsors : [],
-    facilities: t.facilities || {
-      stadiumName: `${t.name || 'ملعب الفريق'}`,
-      stadiumCapacity: 5000,
-      stadiumLevel: 1,
-      medicalCenterLevel: 1,
-      trainingGroundLevel: 1,
-      youthAcademyLevel: 1,
-      scoutingNetworkLevel: 1,
-    },
+    facilities: (() => {
+      const f: any = t.facilities || {};
+      const lvl = (v: any) => { const n = Number(v); return Number.isFinite(n) && n >= 1 ? Math.min(5, Math.round(n)) : 1; };
+      return {
+        ...f,
+        stadiumName: f.stadiumName || `${t.name || 'ملعب الفريق'}`,
+        stadiumCapacity: Number.isFinite(Number(f.stadiumCapacity)) && Number(f.stadiumCapacity) > 0 ? Number(f.stadiumCapacity) : 5000,
+        stadiumLevel: lvl(f.stadiumLevel),
+        medicalCenterLevel: lvl(f.medicalCenterLevel),
+        trainingGroundLevel: lvl(f.trainingGroundLevel),
+        youthAcademyLevel: lvl(f.youthAcademyLevel),
+        scoutingNetworkLevel: lvl(f.scoutingNetworkLevel),
+      };
+    })(),
     wageBudgetMonthly: typeof t.wageBudgetMonthly === 'number' ? t.wageBudgetMonthly : 0,
     tactics: {
       ...(t.tactics || {}),

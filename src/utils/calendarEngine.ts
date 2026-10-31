@@ -342,7 +342,7 @@ export function simulateDailySquadTraining(
     }
 
     // Base gain per day (0.5 to 2.5 progress points towards the 100 threshold)
-    let progressGain = 1.2 + (trainingFacilityLevel - 1) * 0.25;
+    let progressGain = 3.0 + (trainingFacilityLevel - 1) * 0.5;
     if (intensity === 'high') progressGain *= 1.35;
     if (intensity === 'recovery') progressGain *= 0.6;
 
@@ -392,7 +392,7 @@ export function simulateDailySquadTraining(
     else if (currentRating >= 75) ratingDampening = 0.70;
 
     const headroom = Math.max(0, potential - currentRating);
-    const headroomFactor = Math.min(1.0, Math.max(0.12, headroom / 10));
+    const headroomFactor = Math.min(1.0, Math.max(0.3, headroom / 8));
 
     // Calculate final daily progress gain
     const dailyGain = progressGain * ageMultiplier * ratingDampening * headroomFactor;

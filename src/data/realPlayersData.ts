@@ -3086,16 +3086,12 @@ export const REAL_SQUADS_BY_CLUB_ID: Record<string, RealPlayerTemplate[]> = {
   'esp1_madrid': REAL_MADRID_SQUAD_2026,
 
   // FC Barcelona
-  'fc_barcelona': BARCELONA_SQUAD,
-  'esp1_barca': BARCELONA_SQUAD,
 
   // Atletico Madrid
   'atletico_madrid': ATLETICO_SQUAD,
   'esp1_atletico': ATLETICO_SQUAD,
 
   // Manchester City
-  'man_city': MAN_CITY_SQUAD,
-  'eng1_city': MAN_CITY_SQUAD,
 
   // Liverpool
   'liverpool': LIVERPOOL_SQUAD,

@@ -378,7 +378,7 @@ const MarketPlayerCard = React.memo<MarketPlayerCardProps>(
         : {
             box: 'bg-slate-900 border-slate-700 text-slate-300',
             accent: '#64748b',
-            tierLabel: 'صاعد',
+            tierLabel: 'عادي',
           };
 
     const posColor =
