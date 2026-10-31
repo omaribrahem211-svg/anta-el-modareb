@@ -172,6 +172,25 @@ let isSavingToStorage = false;
 let pendingSavePayload: LocalGameSavePayload | null = null;
 let saveResolveQueue: Array<() => void> = [];
 let hasEvictedLegacyHeavyKeys = false;
+let lastSaveStartedAt = 0;
+// Minimum gap between full saves (they are coalesced: only the latest payload is written)
+const MIN_SAVE_INTERVAL_MS = 1500;
+
+function waitMs(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+// Wait until the browser is idle so a heavy save never blocks a frame (match ticks, tab switches)
+function waitForIdle(): Promise<void> {
+  return new Promise(resolve => {
+    const ric = typeof window !== 'undefined' ? (window as any).requestIdleCallback : undefined;
+    if (typeof ric === 'function') {
+      ric(() => resolve(), { timeout: 1500 });
+    } else {
+      setTimeout(resolve, 50);
+    }
+  });
+}
 
 /**
  * Prunes verbose timeline commentary, old round events, and oversized arrays before persisting.
@@ -223,13 +242,16 @@ async function executeSave(payload: LocalGameSavePayload): Promise<void> {
     console.warn('[GameStateRepo] Notice writing to IndexedDB (state safely held in memory cache):', err);
   }
 
-  // 4. Mirror essential career state to localStorage with try/catch protection so cold restarts never lose division/club progress
+  // 4. Lightweight header-only metadata sync to localStorage (never write heavy teams/fixtures/market arrays!)
+  // activeLeague is mirrored WITHOUT its teams array so cold restarts still resolve the correct division
+  // while keeping the synchronous localStorage write tiny (no main-thread stall, no quota errors).
   setTimeout(() => {
     try {
       safeLocalStorageSet(`${LEGACY_STORAGE_PREFIX}_meta_save_version`, String(timestampedPayload.saveVersion));
       safeLocalStorageSet(`${LEGACY_STORAGE_PREFIX}_meta_save_time`, String(timestampedPayload.lastLocalSaveAt));
       if (timestampedPayload.activeLeague) {
-        safeLocalStorageSet(`${LEGACY_STORAGE_PREFIX}_activeLeague`, JSON.stringify(timestampedPayload.activeLeague));
+        const { teams: _omitTeams, ...slimLeague } = timestampedPayload.activeLeague as any;
+        safeLocalStorageSet(`${LEGACY_STORAGE_PREFIX}_activeLeague`, JSON.stringify(slimLeague));
       }
       if (timestampedPayload.manager) {
         safeLocalStorageSet(`${LEGACY_STORAGE_PREFIX}_manager`, JSON.stringify(timestampedPayload.manager));
@@ -252,25 +274,10 @@ async function executeSave(payload: LocalGameSavePayload): Promise<void> {
       if (timestampedPayload.boardSystem) {
         safeLocalStorageSet(`${LEGACY_STORAGE_PREFIX}_boardSystem`, JSON.stringify(timestampedPayload.boardSystem));
       }
-      if (Array.isArray(timestampedPayload.teams) && timestampedPayload.teams.length > 0) {
-        safeLocalStorageSet(`${LEGACY_STORAGE_PREFIX}_teams`, JSON.stringify(timestampedPayload.teams));
-      }
-      if (Array.isArray(timestampedPayload.fixtures) && timestampedPayload.fixtures.length > 0) {
-        safeLocalStorageSet(`${LEGACY_STORAGE_PREFIX}_fixtures`, JSON.stringify(timestampedPayload.fixtures));
-      }
-      if (Array.isArray(timestampedPayload.transferMarket)) {
-        safeLocalStorageSet(`${LEGACY_STORAGE_PREFIX}_transferMarket`, JSON.stringify(timestampedPayload.transferMarket));
-      }
-      if (Array.isArray(timestampedPayload.transferHistory)) {
-        safeLocalStorageSet(`${LEGACY_STORAGE_PREFIX}_transferHistory`, JSON.stringify(timestampedPayload.transferHistory));
-      }
-      if (Array.isArray(timestampedPayload.activeNegotiations)) {
-        safeLocalStorageSet(`${LEGACY_STORAGE_PREFIX}_activeNegotiations`, JSON.stringify(timestampedPayload.activeNegotiations));
-      }
     } catch (mirrorErr) {
       console.warn('[GameStateRepo] Deferred header metadata sync notice:', mirrorErr);
     }
-  }, 20);
+  }, 50);
 }
 
 export const gameStateRepository = {
@@ -291,8 +298,21 @@ export const gameStateRepository = {
 
       const processQueue = async () => {
         while (pendingSavePayload) {
+          // When the app is going to background, save right away; otherwise throttle + wait for idle time.
+          // Newer payloads overwrite pendingSavePayload while we wait, so only the latest state is written.
+          const isHidden = typeof document !== 'undefined' && document.visibilityState === 'hidden';
+          if (!isHidden) {
+            const sinceLast = Date.now() - lastSaveStartedAt;
+            if (sinceLast < MIN_SAVE_INTERVAL_MS) {
+              await waitMs(MIN_SAVE_INTERVAL_MS - sinceLast);
+            }
+            await waitForIdle();
+          }
+
           const toSave = pendingSavePayload;
           pendingSavePayload = null;
+          if (!toSave) break;
+          lastSaveStartedAt = Date.now();
 
           try {
             await executeSave(toSave);
