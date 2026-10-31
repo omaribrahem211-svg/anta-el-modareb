@@ -873,6 +873,7 @@ export interface ManagerProfile {
   personalWallet?: number; // الذمة المالية والمحفظة الشخصية للمدرب
   financialTransactions?: ManagerTransaction[]; // سجل المعاملات المالية
   completedCourses?: string[]; // الدورات والرخص التدريبية الحاصل عليها
+  seasonCourseAccess?: Record<string, number>; // دورات مفتوحة بإعلان حتى نهاية الموسم المذكور (courseId -> رقم الموسم)
   ownedLicenses?: CoachingLicenseTier[]; // الرخص التي قام المدرب بشرائها سابقاً
   lastSettledSeasonNumber?: number; // رقم الموسم الأخير الذي تمت تسوية مكافأته وتجديد رخصته
   totalClubDonations?: number; // إجمالي المبالغ المتبرع بها للنادي

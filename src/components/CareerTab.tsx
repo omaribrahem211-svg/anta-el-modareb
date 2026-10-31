@@ -1,6 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { useGame } from '../context/GameContext';
-import { COACHING_COURSES, CoachingCourse } from '../utils/managerFinancesEngine';
+import { COACHING_COURSES, CoachingCourse, getCourseAccess } from '../utils/managerFinancesEngine';
+import { ALL_FORMATIONS, ALL_TACTICAL_STYLES } from '../utils/tacticalKnowledgeEngine';
+import { AdManager } from '../services/adManager';
 import { getLicenseTitleArabic, normalizeCoachingLicense } from '../utils/careerProgressionEngine';
 import { getLocalTrainerProfile } from '../services/trainerProfileService';
 import { ModalPortal } from './common/ModalPortal';
@@ -72,6 +74,7 @@ export const CareerTab: React.FC = () => {
     worldRankings,
     userDynamicManagerRating,
     enrollInCoachingCourse,
+    unlockCourseForSeason,
     donateToClubFromPersonalWallet,
   } = useGame();
 
@@ -90,7 +93,8 @@ export const CareerTab: React.FC = () => {
   const [showClubSelectModal, setShowClubSelectModal] = useState(false);
   const [showDonateModal, setShowDonateModal] = useState(false);
   const [donateAmount, setDonateAmount] = useState<number | string>(50000);
-  const [courseFilter, setCourseFilter] = useState<'all' | 'license' | 'tactical'>('all');
+  const [courseFilter, setCourseFilter] = useState<'all' | 'license' | 'tactic' | 'dev'>('all');
+  const [adLoadingId, setAdLoadingId] = useState<string | null>(null);
   const [showAllTransactions, setShowAllTransactions] = useState(false);
 
   useEffect(() => {
@@ -110,7 +114,8 @@ export const CareerTab: React.FC = () => {
 
   const filteredCourses = COACHING_COURSES.filter(c => {
     if (courseFilter === 'license') return c.category === 'license';
-    if (courseFilter === 'tactical') return c.category !== 'license';
+    if (courseFilter === 'tactic') return c.category === 'tactic';
+    if (courseFilter === 'dev') return c.category !== 'license' && c.category !== 'tactic';
     return true;
   });
 
@@ -143,6 +148,40 @@ export const CareerTab: React.FC = () => {
   const handleEnrollCourse = (course: CoachingCourse) => {
     const res = enrollInCoachingCourse(course.id);
     show(res.message, res.success);
+  };
+
+  // Rewarded ad -> course open until the end of the current season
+  const handleUnlockWithAd = async (course: CoachingCourse) => {
+    if (adLoadingId) return;
+    setAdLoadingId(course.id);
+    const safety = setTimeout(() => setAdLoadingId(null), 12000);
+    try {
+      const started = await AdManager.showRewardedForAction({
+        actionType: 'unlock_course',
+        onUserEarnedReward: () => {
+          const res = unlockCourseForSeason(course.id);
+          show(res.message, res.success);
+        },
+        onDismiss: (earned) => {
+          clearTimeout(safety);
+          setAdLoadingId(null);
+          if (!earned) show('لم تكتمل مشاهدة الإعلان، لم يتم فتح الدورة.', false);
+        },
+        onFailure: () => {
+          clearTimeout(safety);
+          setAdLoadingId(null);
+          show('تعذر تشغيل الإعلان حالياً، حاول لاحقاً.', false);
+        },
+      });
+      if (!started) {
+        clearTimeout(safety);
+        setAdLoadingId(null);
+      }
+    } catch {
+      clearTimeout(safety);
+      setAdLoadingId(null);
+      show('حدث خطأ أثناء تشغيل الإعلان.', false);
+    }
   };
 
   const tabs = [
@@ -313,11 +352,11 @@ export const CareerTab: React.FC = () => {
                 <span className="font-mono font-black text-amber-300">{fmt(wallet)} ج.م</span>
               </div>
               <div className="flex gap-1 p-1 bg-slate-950 border border-slate-800 rounded-xl">
-                {([['all', 'الكل'], ['license', 'الرخص'], ['tactical', 'ورش وتكتيك']] as ['all' | 'license' | 'tactical', string][]).map(([id, label]) => (
+                {([['all', 'الكل'], ['license', 'الرخص'], ['tactic', 'ورش التكتيك'], ['dev', 'تطوير']] as ['all' | 'license' | 'tactic' | 'dev', string][]).map(([id, label]) => (
                   <button
                     key={id}
                     onClick={() => setCourseFilter(id)}
-                    className={`flex-1 py-1.5 rounded-lg text-xs font-black cursor-pointer ${courseFilter === id ? 'bg-violet-500 text-white' : 'text-slate-400'}`}
+                    className={`flex-1 py-1.5 rounded-lg text-[11px] font-black cursor-pointer whitespace-nowrap ${courseFilter === id ? 'bg-violet-500 text-white' : 'text-slate-400'}`}
                   >
                     {label}
                   </button>
@@ -334,7 +373,10 @@ export const CareerTab: React.FC = () => {
                   const licenseOwned = target ? (ownedList.includes(target) || currentRank >= targetRank) : false;
                   const activeLicense = target ? currentLicense === target : false;
                   const isLicense = course.category === 'license';
-                  const completed = isLicense ? activeLicense : completedCourses.includes(course.id);
+                  const seasonNo = season?.seasonNumber || 1;
+                  const access = isLicense ? 'none' : getCourseAccess(manager, course.id, seasonNo);
+                  const seasonOnly = access === 'season';
+                  const completed = isLicense ? activeLicense : access === 'owned';
                   const effectiveCost = isLicense && licenseOwned ? 0 : course.cost;
                   const canAfford = wallet >= effectiveCost;
                   const req = course.requiredLicense ? normalizeCoachingLicense(course.requiredLicense) : null;
@@ -367,7 +409,7 @@ export const CareerTab: React.FC = () => {
                           </div>
                         </div>
                         {completed ? (
-                          <span className="text-[10px] font-black text-emerald-300 shrink-0">{isLicense ? 'نشطة ✓' : 'مكتملة ✓'}</span>
+                          <span className="text-[10px] font-black text-emerald-300 shrink-0">{isLicense ? 'نشطة ✓' : course.unlocks ? 'دائمة ✓' : 'مكتملة ✓'}</span>
                         ) : licenseOwned ? (
                           <span className="text-[10px] font-black text-amber-300 shrink-0">مملوكة ✓</span>
                         ) : null}
@@ -377,6 +419,33 @@ export const CareerTab: React.FC = () => {
                       <div className="mt-2 bg-slate-900/80 border border-slate-800 rounded-lg p-2 text-[11px] text-slate-300">
                         <strong className="text-amber-300">⚡ الامتياز: </strong>{course.specialBenefit}
                       </div>
+
+                      {course.unlocks && (
+                        <div className="mt-2 flex flex-wrap gap-1">
+                          {(course.unlocks.formations || []).map(f => (
+                            <span key={f} className="text-[10px] font-mono font-black text-emerald-300 bg-emerald-500/10 border border-emerald-500/30 rounded px-1.5 py-0.5" title={ALL_FORMATIONS[f]?.nameArabic}>📐 {f}</span>
+                          ))}
+                          {(course.unlocks.styles || []).map(st => (
+                            <span key={st} className="text-[10px] font-black text-sky-300 bg-sky-500/10 border border-sky-500/30 rounded px-1.5 py-0.5">⚡ {ALL_TACTICAL_STYLES[st]?.nameArabic || st}</span>
+                          ))}
+                        </div>
+                      )}
+
+                      {seasonOnly && (
+                        <div className="mt-2 text-[11px] font-black text-violet-200 bg-violet-500/10 border border-violet-500/30 rounded-lg px-2.5 py-1.5">
+                          🎓 مفتوحة حتى نهاية الموسم {seasonNo} — اشترِها لتبقى معك دائماً
+                        </div>
+                      )}
+
+                      {course.adUnlockable && !completed && !seasonOnly && !locked && (
+                        <button
+                          onClick={() => handleUnlockWithAd(course)}
+                          disabled={adLoadingId !== null}
+                          className="mt-2.5 w-full py-2.5 rounded-lg text-xs font-black flex items-center justify-center gap-1.5 bg-gradient-to-b from-amber-300 to-amber-500 text-slate-950 shadow-lg shadow-amber-500/10 disabled:opacity-60 cursor-pointer active:scale-[0.98]"
+                        >
+                          <span>{adLoadingId === course.id ? '...جاري تحميل الإعلان' : '▶ شاهد إعلاناً لفتحها حتى نهاية الموسم'}</span>
+                        </button>
+                      )}
 
                       {!completed && (
                         <button
@@ -396,6 +465,8 @@ export const CareerTab: React.FC = () => {
                               ? `ينقصك ${fmt(effectiveCost - wallet)} ج.م`
                               : licenseOwned
                               ? 'تفعيل مجاناً'
+                              : course.adUnlockable
+                              ? `شراء دائم بـ ${fmt(effectiveCost)} ج.م`
                               : `شراء بـ ${fmt(effectiveCost)} ج.م`}
                           </span>
                         </button>

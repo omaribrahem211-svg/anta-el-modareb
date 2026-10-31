@@ -11,6 +11,7 @@ import {
   ManagerProfile,
   Club,
 } from '../types/game';
+import { getActiveCourseUnlocks, findCoursesUnlocking } from './managerFinancesEngine';
 
 // ============================================================================
 // 1. FORMATION DEFINITIONS & LICENSING SPECIFICATION (26 Formations)
@@ -696,6 +697,58 @@ export function isTacticalItemUnlocked(
   const currentRank = getLicenseRankValue(managerLicense);
   const reqRank = getLicenseRankValue(itemRequiredLicense);
   return currentRank >= reqRank;
+}
+
+export type TacticalAccess = 'license' | 'course' | 'locked';
+
+/** Is a formation open to this coach: through the license, or through an active course (bought or season ad access)? */
+export function getFormationAccess(
+  formationId: FormationType,
+  manager: Pick<ManagerProfile, 'license' | 'completedCourses' | 'seasonCourseAccess'>,
+  seasonNumber: number
+): TacticalAccess {
+  const def = ALL_FORMATIONS[formationId];
+  if (!def) return 'license';
+  if (isTacticalItemUnlocked(def.minLicense, manager.license)) return 'license';
+  return getActiveCourseUnlocks(manager, seasonNumber).formations.has(formationId) ? 'course' : 'locked';
+}
+
+export function getStyleAccess(
+  styleId: TacticalStyle,
+  manager: Pick<ManagerProfile, 'license' | 'completedCourses' | 'seasonCourseAccess'>,
+  seasonNumber: number
+): TacticalAccess {
+  const def = ALL_TACTICAL_STYLES[styleId];
+  if (!def) return 'license';
+  if (isTacticalItemUnlocked(def.minLicense, manager.license)) return 'license';
+  return getActiveCourseUnlocks(manager, seasonNumber).styles.has(styleId) ? 'course' : 'locked';
+}
+
+export { findCoursesUnlocking };
+
+/**
+ * If the coach's current formation / style is no longer open (season-long course ended, or the license dropped),
+ * returns a safe replacement. `changed*` tell the caller whether the lineup has to be re-picked.
+ */
+export function sanitizeTacticsForManager(
+  tactics: TeamTactics,
+  manager: Pick<ManagerProfile, 'license' | 'completedCourses' | 'seasonCourseAccess'>,
+  seasonNumber: number
+): { tactics: TeamTactics; formationChanged: boolean; styleChanged: boolean } {
+  let formationChanged = false;
+  let styleChanged = false;
+  let next = tactics;
+
+  if (tactics.formation && getFormationAccess(tactics.formation, manager, seasonNumber) === 'locked') {
+    const fallback = (['4-3-3', '4-4-2', '4-5-1'] as FormationType[]).find(f => getFormationAccess(f, manager, seasonNumber) !== 'locked') || '4-4-2';
+    next = { ...next, formation: fallback };
+    formationChanged = true;
+  }
+  if (tactics.tacticalStyle && getStyleAccess(tactics.tacticalStyle, manager, seasonNumber) === 'locked') {
+    next = { ...next, tacticalStyle: 'total_football' };
+    styleChanged = true;
+  }
+  return { tactics: next, formationChanged, styleChanged };
 }
 
 export function getLicenseTacticalUnlocks(license: CoachingLicenseTier) {

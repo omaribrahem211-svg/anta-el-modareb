@@ -41,6 +41,7 @@ import {
 } from './careerProgressionEngine';
 import { getDomesticCupDefinitionForCountry } from '../data/competitionsData';
 import { CalendarManager } from '../services/calendarManager';
+import { calculateManagerSeasonBonus } from './managerFinancesEngine';
 import { parseDateString } from './calendarEngine';
 import { pruneMatchEventsForStorage } from './storage/indexedDbStorage';
 
@@ -2637,7 +2638,7 @@ export function processNewSeasonAdvancement(
   const alreadySettledThisSeason = manager.lastSettledSeasonNumber === currentSeason.seasonNumber || !!summary.licenseSettlement;
   let settledManagerState = manager;
   if (!alreadySettledThisSeason) {
-    const seasonBonusFallback = Math.round(summary.prizeMoney * 0.15) + ((manager.personalSalary || 15000) * 12);
+    const seasonBonusFallback = calculateManagerSeasonBonus(summary, manager);
     const settlementResult = settleEndOfSeasonLicenseAndBonus(manager, seasonBonusFallback, currentSeason.seasonNumber);
     settledManagerState = settlementResult.updatedManager;
   }

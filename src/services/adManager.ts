@@ -887,7 +887,7 @@ class AdManagerService {
    * Action-specific Rewarded Ads (e.g. heal injured player, cancel suspension, double match revenue, redeem promo code)
    */
   public async showRewardedForAction(params: {
-    actionType: 'heal_player' | 'cancel_suspension' | 'double_match_revenue' | 'rematch_match' | 'world_star_loan' | 'redeem_promo_code';
+    actionType: 'heal_player' | 'cancel_suspension' | 'double_match_revenue' | 'rematch_match' | 'world_star_loan' | 'redeem_promo_code' | 'unlock_course';
     onUserEarnedReward: () => void;
     onDismiss?: (rewardEarned: boolean) => void;
     onFailure?: (error: any) => void;
@@ -903,6 +903,8 @@ class AdManagerService {
         ? 'التعاقد مع نجم عالمي لمباراة واحدة'
         : params.actionType === 'redeem_promo_code'
         ? 'استرداد أموال كود الهدية'
+        : params.actionType === 'unlock_course'
+        ? 'فتح الدورة التدريبية حتى نهاية الموسم'
         : 'إلغاء عقوبة إيقاف اللاعب';
 
     return this.executeRewardedAd({

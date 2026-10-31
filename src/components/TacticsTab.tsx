@@ -11,7 +11,9 @@ import { getPositionArabic } from '../utils/positionHelper';
 import {
   ALL_FORMATIONS,
   ALL_TACTICAL_STYLES,
-  isTacticalItemUnlocked,
+  getFormationAccess,
+  getStyleAccess,
+  findCoursesUnlocking,
 } from '../utils/tacticalKnowledgeEngine';
 import {
   isPlayerInjured,
@@ -77,7 +79,8 @@ function getLicenseNameAr(tier: CoachingLicenseTier | string): string {
 }
 
 export const TacticsTab: React.FC<TacticsTabProps> = ({ onSelectPlayer }) => {
-  const { userClub, manager, updateTactics, setFormation, updateStartingLineup } = useGame();
+  const { userClub, manager, season, updateTactics, setFormation, updateStartingLineup } = useGame();
+  const seasonNum = season?.seasonNumber || 1;
 
   // جميع الـ Hooks في الأعلى قبل أي return شرطي
   const [activeSubTab, setActiveSubTab] = useState<SubTabType>('lineup');
@@ -360,10 +363,12 @@ export const TacticsTab: React.FC<TacticsTabProps> = ({ onSelectPlayer }) => {
   // اختيار التشكيلة مع منع التشكيلات المقفلة
   const handleSelectFormation = (formationId: FormationType) => {
     const def = ALL_FORMATIONS[formationId];
-    const unlocked = def ? isTacticalItemUnlocked(def.minLicense, manager.license) : true;
+    const unlocked = def ? getFormationAccess(formationId, manager, seasonNum) !== 'locked' : true;
     if (!unlocked) {
       const reqLicense = def ? getLicenseNameAr(def.minLicense) : 'رخصة متقدمة';
-      showToast(`🔒 التشكيلة ${formationId} مقفلة — مطلوب ${reqLicense}`, 3200);
+      const courses = findCoursesUnlocking('formation', formationId);
+      const via = courses.length ? ` أو دورة «${courses[0].title}» من تبويب المسيرة` : '';
+      showToast(`🔒 التشكيلة ${formationId} مقفلة — مطلوب ${reqLicense}${via}`, 4200);
       return;
     }
     setFormation(formationId);
@@ -374,10 +379,12 @@ export const TacticsTab: React.FC<TacticsTabProps> = ({ onSelectPlayer }) => {
   // اختيار الهوية التكتيكية مع منع الأنماط المقفلة
   const handleSelectTacticalStyle = (styleId: TacticalStyle) => {
     const def = ALL_TACTICAL_STYLES[styleId];
-    const unlocked = def ? isTacticalItemUnlocked(def.minLicense, manager.license) : true;
+    const unlocked = def ? getStyleAccess(styleId, manager, seasonNum) !== 'locked' : true;
     if (!unlocked) {
       const reqLicense = def ? getLicenseNameAr(def.minLicense) : 'رخصة متقدمة';
-      showToast(`🔒 أسلوب "${def?.nameArabic || styleId}" مقفل — مطلوب ${reqLicense}`, 3200);
+      const courses = findCoursesUnlocking('style', styleId);
+      const via = courses.length ? ` أو دورة «${courses[0].title}» من تبويب المسيرة` : '';
+      showToast(`🔒 أسلوب "${def?.nameArabic || styleId}" مقفل — مطلوب ${reqLicense}${via}`, 4200);
       return;
     }
     updateTactics({ ...tactics, tacticalStyle: styleId });
@@ -1092,7 +1099,8 @@ export const TacticsTab: React.FC<TacticsTabProps> = ({ onSelectPlayer }) => {
 
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 max-h-60 overflow-y-auto pr-0.5">
               {Object.values(ALL_TACTICAL_STYLES).map((style) => {
-                const unlocked = isTacticalItemUnlocked(style.minLicense, manager.license);
+                const access = getStyleAccess(style.id, manager, seasonNum);
+                const unlocked = access !== 'locked';
                 const isSelected = (tactics.tacticalStyle || 'total_football') === style.id;
                 const reqLicenseName = getLicenseNameAr(style.minLicense);
 
@@ -1118,7 +1126,12 @@ export const TacticsTab: React.FC<TacticsTabProps> = ({ onSelectPlayer }) => {
                     </p>
                     {!unlocked && (
                       <span className="mt-1.5 inline-block text-[9px] font-bold text-amber-300 bg-amber-950/60 border border-amber-800/50 px-1.5 py-0.5 rounded">
-                        مطلوب {reqLicenseName}
+                        مطلوب {reqLicenseName} أو دورة 🎓
+                      </span>
+                    )}
+                    {access === 'course' && (
+                      <span className="mt-1.5 inline-block text-[9px] font-bold text-violet-300 bg-violet-950/60 border border-violet-700/50 px-1.5 py-0.5 rounded">
+                        مفتوح بدورة 🎓
                       </span>
                     )}
                   </button>
@@ -1436,7 +1449,8 @@ export const TacticsTab: React.FC<TacticsTabProps> = ({ onSelectPlayer }) => {
               {/* شبكة التشكيلات مع معاينة مصغرة لنقاط الـ 11 لاعباً */}
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 overflow-y-auto pr-0.5 flex-1">
                 {filteredFormationDefinitions.map((fDef) => {
-                  const unlocked = isTacticalItemUnlocked(fDef.minLicense, manager.license);
+                  const fAccess = getFormationAccess(fDef.id, manager, seasonNum);
+                  const unlocked = fAccess !== 'locked';
                   const isCurrent = currentFormation === fDef.id;
                   const fSlots = FORMATION_SLOTS[fDef.id] || FORMATION_SLOTS['4-3-3'];
                   const reqLicenseName = getLicenseNameAr(fDef.minLicense);
@@ -1480,7 +1494,11 @@ export const TacticsTab: React.FC<TacticsTabProps> = ({ onSelectPlayer }) => {
 
                       {!unlocked ? (
                         <span className="text-[9px] font-bold text-amber-300 bg-amber-950/70 border border-amber-800/50 px-1.5 py-0.5 rounded block text-center">
-                          مطلوب {reqLicenseName}
+                          مطلوب {reqLicenseName} أو دورة 🎓
+                        </span>
+                      ) : fAccess === 'course' ? (
+                        <span className="text-[9px] font-bold text-violet-300 bg-violet-950/60 border border-violet-700/50 px-1.5 py-0.5 rounded block text-center">
+                          مفتوحة بدورة 🎓
                         </span>
                       ) : (
                         <span className="text-[9px] text-slate-400 truncate block">

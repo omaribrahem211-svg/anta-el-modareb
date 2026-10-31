@@ -58,7 +58,8 @@ import {
 } from '../services/sponsorshipService';
 import { hireStaffMember, getClubStaffBonuses } from '../utils/staffEngine';
 import { processPostMatchPlayerUpdates, buildMatchStatsMap } from '../utils/playerFatigueEngine';
-import { reorderStartingIdsForFormation } from '../utils/lineupSlots';
+import { reorderStartingIdsForFormation, pickBestLineupForFormation } from '../utils/lineupSlots';
+import { sanitizeTacticsForManager } from '../utils/tacticalKnowledgeEngine';
 import { simulateMultipleLeagueRounds } from '../utils/batchSimulationEngine';
 import {
   applyAttributeUpgrade,
@@ -202,6 +203,9 @@ import {
   calculateInitialPlayerSavings,
   COACHING_COURSES,
   ManagerTransaction,
+  calculateManagerSeasonBonus,
+  calculateWinBonus,
+  getCourseAccess,
 } from '../utils/managerFinancesEngine';
 import { CalendarManager, CalendarScheduleItem } from '../services/calendarManager';
 import { SeasonTransitionManager } from '../services/seasonTransitionManager';
@@ -357,6 +361,7 @@ interface GameContextType {
   // Manager Personal Wealth & Development
   donateToClubFromPersonalWallet: (amount: number) => { success: boolean; message: string };
   enrollInCoachingCourse: (courseId: string) => { success: boolean; message: string };
+  unlockCourseForSeason: (courseId: string) => { success: boolean; message: string };
 
   // Club & Facilities
   upgradeFacility: (facilityKey: keyof ClubFacilities, cost: number) => { success: boolean; message: string };
@@ -800,7 +805,8 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         ? parsed.financialTransactions
         : INITIAL_MANAGER.financialTransactions,
       completedCourses: Array.isArray(parsed?.completedCourses) ? parsed.completedCourses : [],
-      license: (parsed?.license && ['D', 'C', 'B', 'A', 'PRO', 'ELITE'].includes(parsed.license)) ? parsed.license : 'D',
+      license: normalizeCoachingLicense(parsed?.license),
+      seasonCourseAccess: (parsed?.seasonCourseAccess && typeof parsed.seasonCourseAccess === 'object') ? parsed.seasonCourseAccess : {},
       totalClubDonations: parsed?.totalClubDonations ?? 0,
       totalBonusesEarned: parsed?.totalBonusesEarned ?? 0,
       matchesManaged: matches,
@@ -3765,8 +3771,8 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const updatedRankingPoints = Math.max(100, (manager.rankingPoints || 1200) + managerPointsDelta);
 
     const roundSalary = Math.round((manager.monthlySalary || 25000) / 4);
-    // Single-match bonus cancelled in favor of 5-consecutive wins streak reward
-    const matchBonus = 0;
+    // Win bonus: paid on top of the weekly salary
+    const matchBonus = isUserWin ? calculateWinBonus(manager.monthlySalary, activeLeague.tier || 1) : 0;
     const managerCupBonusCut = cupBonusPrize > 0 ? Math.round(cupBonusPrize * 0.15) : 0;
     const totalManagerIncome = roundSalary + matchBonus + managerCupBonusCut;
 
@@ -4079,7 +4085,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       }
 
       if (updatedManager.lastSettledSeasonNumber !== season.seasonNumber) {
-        const endOfSeasonManagerBonus = Math.round(summary.prizeMoney * 0.15) + ((updatedManager.personalSalary || 15000) * 12);
+        const endOfSeasonManagerBonus = calculateManagerSeasonBonus(summary, updatedManager);
         const settlementRes = settleEndOfSeasonLicenseAndBonus(updatedManager, endOfSeasonManagerBonus, season.seasonNumber);
         updatedManager = settlementRes.updatedManager;
         summary.licenseSettlement = settlementRes.settlement;
@@ -4685,8 +4691,8 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         const updatedRankingPoints = Math.max(100, (manager.rankingPoints || 1200) + managerPointsDelta);
 
         const simManagerSalary = Math.round((manager.monthlySalary || 25000) / 4);
-        // Single-match bonus cancelled in favor of 5-consecutive wins streak reward
-        const simMatchBonus = 0;
+        // Win bonus: paid on top of the weekly salary
+        const simMatchBonus = isUserWin ? calculateWinBonus(manager.monthlySalary, activeLeague.tier || 1) : 0;
         const simCupBonusCut = simCupBonusPrize > 0 ? Math.round(simCupBonusPrize * 0.15) : 0;
         const simTotalEarned = simManagerSalary + simMatchBonus + simCupBonusCut;
 
@@ -4962,7 +4968,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       }
 
       if (updatedManager.lastSettledSeasonNumber !== season.seasonNumber) {
-        const endOfSeasonManagerBonus = Math.round(summary.prizeMoney * 0.15) + ((updatedManager.personalSalary || 15000) * 12);
+        const endOfSeasonManagerBonus = calculateManagerSeasonBonus(summary, updatedManager);
         const settlementRes = settleEndOfSeasonLicenseAndBonus(updatedManager, endOfSeasonManagerBonus, season.seasonNumber);
         updatedManager = settlementRes.updatedManager;
         summary.licenseSettlement = settlementRes.settlement;
@@ -5369,7 +5375,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           africanChampionsLeague
         );
         if (activeMgr.lastSettledSeasonNumber !== season.seasonNumber) {
-          const endOfSeasonManagerBonus = Math.round(summary.prizeMoney * 0.15) + ((activeMgr.personalSalary || 15000) * 12);
+          const endOfSeasonManagerBonus = calculateManagerSeasonBonus(summary, activeMgr);
           const settlementRes = settleEndOfSeasonLicenseAndBonus(activeMgr, endOfSeasonManagerBonus, season.seasonNumber);
           activeMgr = settlementRes.updatedManager;
           summary.licenseSettlement = settlementRes.settlement;
@@ -7356,7 +7362,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         africanChampionsLeague
       );
       if (activeMgr.lastSettledSeasonNumber !== season.seasonNumber) {
-        const endOfSeasonManagerBonus = Math.round(summary.prizeMoney * 0.15) + ((activeMgr.personalSalary || 15000) * 12);
+        const endOfSeasonManagerBonus = calculateManagerSeasonBonus(summary, activeMgr);
         const settlementRes = settleEndOfSeasonLicenseAndBonus(activeMgr, endOfSeasonManagerBonus, season.seasonNumber);
         activeMgr = settlementRes.updatedManager;
         summary.licenseSettlement = settlementRes.settlement;
@@ -7593,7 +7599,23 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         1,
         targetUserClubId
       ));
-      const finalNextTeams = freeAgencyAndAiResult.updatedTeams;
+      // Season-long course access ends with the season: if the coach's formation / style is no longer open
+      // (course expired or license dropped) switch to a safe one and re-pick the lineup for it.
+      const finalNextTeams = freeAgencyAndAiResult.updatedTeams.map(t => {
+        if (!t.isUserClub || !t.tactics) return t;
+        try {
+          const fix = sanitizeTacticsForManager(t.tactics, result.updatedManager, result.nextSeason.seasonNumber);
+          if (!fix.formationChanged && !fix.styleChanged) return t;
+          let nt = { ...t, tactics: fix.tactics };
+          if (fix.formationChanged) {
+            const best = pickBestLineupForFormation(nt, fix.tactics.formation);
+            nt = { ...nt, tactics: { ...nt.tactics, startingPlayerIds: best.startingIds, benchPlayerIds: best.benchIds } };
+          }
+          return nt;
+        } catch (_) {
+          return t;
+        }
+      });
       const updatedMarketAfterWindow = freeAgencyAndAiResult.updatedTransferMarket;
       const nextTransferHistory = [
         ...freeAgencyAndAiResult.newTransferHistory,
@@ -8382,7 +8404,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         }
 
         if (activeMgr.lastSettledSeasonNumber !== season.seasonNumber) {
-          const endOfSeasonManagerBonus = Math.round(summary.prizeMoney * 0.15) + ((activeMgr.personalSalary || 15000) * 12);
+          const endOfSeasonManagerBonus = calculateManagerSeasonBonus(summary, activeMgr);
           const settlementRes = settleEndOfSeasonLicenseAndBonus(activeMgr, endOfSeasonManagerBonus, season.seasonNumber);
           activeMgr = settlementRes.updatedManager;
           summary.licenseSettlement = settlementRes.settlement;
@@ -9635,6 +9657,51 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       success: true,
       message: `تهانينا! أتممت بنجاح "${course.title}". ${course.specialBenefit} 🎓🏆`,
     };
+  };
+
+  /**
+   * Opens an ad-unlockable course (tactic workshop) until the end of the CURRENT season.
+   * Called after the rewarded ad was completed. It never charges money and grants no XP/dev points
+   * (those belong to the permanent purchase), so it cannot be farmed.
+   */
+  const unlockCourseForSeason = (courseId: string): { success: boolean; message: string } => {
+    const course = COACHING_COURSES.find(c => c.id === courseId);
+    if (!course || !course.adUnlockable) {
+      return { success: false, message: 'هذه الدورة لا تُفتح بالإعلانات.' };
+    }
+    const seasonNum = season?.seasonNumber || 1;
+    const access = getCourseAccess(manager, courseId, seasonNum);
+    if (access === 'owned') return { success: false, message: 'هذه الدورة مملوكة لك بشكل دائم بالفعل.' };
+    if (access === 'season') return { success: false, message: 'هذه الدورة مفتوحة لك بالفعل حتى نهاية الموسم.' };
+
+    if (course.requiredLicense) {
+      const ranks: Record<string, number> = { BASIC: 1, PREMIER: 2, CONTINENTAL: 3, LEGENDARY: 4 };
+      const reqNorm = normalizeCoachingLicense(course.requiredLicense);
+      const cur = normalizeCoachingLicense(manager.license);
+      if ((ranks[cur] || 1) < (ranks[reqNorm] || 1)) {
+        return { success: false, message: `تتطلب هذه الدورة الحصول أولاً على (${getLicenseTitleArabic(reqNorm)}).` };
+      }
+    }
+
+    setManager(prev => ({
+      ...prev,
+      seasonCourseAccess: { ...(prev.seasonCourseAccess || {}), [courseId]: seasonNum },
+    }));
+
+    setInbox(prev => [
+      {
+        id: `msg_course_season_${Date.now()}`,
+        title: `🎓 تم فتح "${course.title}" حتى نهاية الموسم ${seasonNum}`,
+        sender: 'أكاديمية إعداد القادة والمدربين',
+        date: `الجولة ${currentRound}`,
+        type: 'news',
+        content: `${course.specialBenefit}\n\nالدورة مفتوحة لك حتى نهاية الموسم ${seasonNum}، وبعدها تُغلق ما لم تشترِها بشكل دائم.`,
+        read: false,
+      } as InboxMessage,
+      ...prev,
+    ]);
+
+    return { success: true, message: `تم فتح "${course.title}" حتى نهاية الموسم ${seasonNum}! ${course.specialBenefit}` };
   };
 
   const resetGame = (startingClubId?: string) => {
@@ -10992,6 +11059,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         addBonusToAllPlayers,
         donateToClubFromPersonalWallet,
         enrollInCoachingCourse,
+        unlockCourseForSeason,
         upgradeFacility,
         treatPlayerInHospital,
         healPlayerWithAd,
