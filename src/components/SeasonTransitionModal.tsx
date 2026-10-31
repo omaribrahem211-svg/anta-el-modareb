@@ -52,9 +52,19 @@ export const SeasonTransitionModal: React.FC = () => {
   useEffect(() => {
     if (!showSeasonTransitionModal || !seasonEndSummary) return;
     const st = seasonEndSummary.resultStatus;
-    if (st === 'champion' || st === 'promoted') {
+    if (st !== 'champion' && st !== 'promoted') return;
+
+    // Confetti is a canvas overlay: skip it on weak devices and delay it until the modal has painted
+    const nav: any = typeof navigator !== 'undefined' ? navigator : {};
+    const weakDevice =
+      (typeof nav.hardwareConcurrency === 'number' && nav.hardwareConcurrency < 6) ||
+      (typeof nav.deviceMemory === 'number' && nav.deviceMemory < 4);
+    if (weakDevice) return;
+
+    const timer = setTimeout(() => {
       fireLightweightCelebration(st === 'champion' ? 'championship' : 'cup_win');
-    }
+    }, 700);
+    return () => clearTimeout(timer);
   }, [showSeasonTransitionModal, seasonEndSummary?.resultStatus]);
 
   if (!showSeasonTransitionModal || !seasonEndSummary) return null;
@@ -74,9 +84,11 @@ export const SeasonTransitionModal: React.FC = () => {
   const isRelegated = seasonEndSummary.resultStatus === 'relegated';
 
   const leagueList = Array.isArray(allLeagues) ? allLeagues : Object.values(allLeagues || {});
-  const evaluatedLeagues = leagueList.map(lg =>
-    evaluateLeagueEligibilityForManager(lg, activeLicense)
-  );
+  // Only evaluate every league when the league-selection view is actually open (it is not needed for the summary view)
+  const evaluatedLeagues =
+    activeView === 'league_selection'
+      ? leagueList.map(lg => evaluateLeagueEligibilityForManager(lg, activeLicense))
+      : [];
   const displayedLeagues = hideLockedLeagues
     ? evaluatedLeagues.filter(item => item.isUnlocked)
     : evaluatedLeagues;
@@ -90,12 +102,12 @@ export const SeasonTransitionModal: React.FC = () => {
   return (
     <div
       id="season_transition_modal_backdrop"
-      className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-black/85 backdrop-blur-md overflow-y-auto"
+      className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-slate-950/95 overflow-y-auto"
       dir="rtl"
     >
       <div
         id="season_transition_modal_container"
-        className="relative w-full max-w-4xl bg-slate-900 border border-slate-700/80 rounded-3xl shadow-2xl overflow-hidden my-auto animate-in fade-in zoom-in-95 duration-200"
+        className="relative w-full max-w-4xl bg-slate-900 border border-slate-700/80 rounded-3xl shadow-2xl overflow-hidden my-auto"
       >
         {/* Header Hero Banner */}
         <div
@@ -115,7 +127,7 @@ export const SeasonTransitionModal: React.FC = () => {
           {/* Trophy / Status Icon */}
           <div className="inline-flex items-center justify-center w-20 h-20 sm:w-24 sm:h-24 rounded-3xl bg-gradient-to-tr from-slate-900 to-slate-800 border-2 border-white/20 shadow-2xl mb-4 relative">
             {isChampion ? (
-              <Trophy className="w-12 h-12 sm:w-14 sm:h-14 text-amber-400 animate-bounce" />
+              <Trophy className="w-12 h-12 sm:w-14 sm:h-14 text-amber-400" />
             ) : isPromoted ? (
               <ArrowUpRight className="w-12 h-12 sm:w-14 sm:h-14 text-emerald-400" />
             ) : isRelegated ? (
@@ -296,7 +308,7 @@ export const SeasonTransitionModal: React.FC = () => {
                 <div className="bg-gradient-to-r from-amber-500/20 via-yellow-500/25 to-amber-600/20 p-4 sm:p-5 rounded-3xl border-2 border-amber-400/50 shadow-2xl relative overflow-hidden">
                   <div className="flex items-center justify-between mb-3">
                     <div className="flex items-center gap-2">
-                      <span className="text-2xl animate-bounce">🏆</span>
+                      <span className="text-2xl">🏆</span>
                       <h4 className="text-base sm:text-lg font-black text-amber-300">
                         سجل بطولات الموسم الذهبية ({seasonEndSummary.seasonNumber})
                       </h4>

@@ -154,6 +154,7 @@ import { ensureClubSquadIntegrity, calibrateRealisticPlayerRating } from '../uti
 import { useAuth } from './AuthContext';
 import { getLocalTrainerProfile, saveLocalTrainerProfile, generateTrainerId } from '../services/trainerProfileService';
 import { gameStateRepository } from '../services/gameStateRepository';
+import { timed, runWhenIdle } from '../utils/perfLog';
 import { migrateSavePayload, CURRENT_SAVE_FORMAT_VERSION } from '../services/saveBackupService';
 import { smartSyncManager, SmartSyncInput } from '../services/smartSyncManager';
 import { canPlayerJoinClub, DEFAULT_ECONOMY_CONFIG, calculateClubMonthlyIncome, calculateClubTotalMonthlyWages, validateTransferFinancials } from '../services/economyService';
@@ -1095,6 +1096,22 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   });
 
   const [showSeasonTransitionModal, setShowSeasonTransitionModal] = useState<boolean>(false);
+
+  // Season-end heavy work (job offers) and the full-screen modal are deferred a few hundred ms so the
+  // match-result commit renders first. Opening everything in one tick froze low-end Android WebViews.
+  const seasonEndScheduleRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const scheduleSeasonEndOffersAndModal = (buildOffers: () => ReturnType<typeof generateSeasonJobOffers>) => {
+    if (seasonEndScheduleRef.current) clearTimeout(seasonEndScheduleRef.current);
+    seasonEndScheduleRef.current = setTimeout(() => {
+      seasonEndScheduleRef.current = null;
+      try {
+        setJobOffers(timed('generateSeasonJobOffers', buildOffers));
+      } catch (offersErr) {
+        console.warn('[SeasonEnd] Job offers generation failed:', offersErr);
+      }
+      setShowSeasonTransitionModal(true);
+    }, 400);
+  };
   const [liveMatch, setLiveMatch] = useState<LiveMatchState | null>(null);
 
   const clearMatchSimulationTimers = useCallback(() => {
@@ -1612,6 +1629,11 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     return false;
   }, [season.status, allLeagueFixturesPlayed, leagueFixtures.length, cupCompleted, continentalCompleted, userHasUnplayedMatches]);
   const unreadMessagesCount = inbox.filter(m => !m.read).length;
+
+  // Warm the season-snapshot cache so "restart season" can read it synchronously after an app reload
+  useEffect(() => {
+    gameStateRepository.loadSeasonSnapshot(season?.seasonNumber || 1).catch(() => {});
+  }, [season?.seasonNumber]);
 
   // World Rankings & Squad Strength Computation
   const userSquadStrength = useMemo(() => calculateSquadStrength(userClub), [userClub]);
@@ -4075,16 +4097,11 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         }
       }
 
-      const generatedOffers = generateSeasonJobOffers(
-        updatedManager,
-        summaryClub,
-        activeLeague,
-        summary.finalPosition
-      );
-
+      const offersManager = updatedManager;
       setSeasonEndSummary(summary);
-      setJobOffers(generatedOffers);
-      setShowSeasonTransitionModal(true);
+      scheduleSeasonEndOffersAndModal(() =>
+        generateSeasonJobOffers(offersManager, summaryClub, activeLeague, summary.finalPosition)
+      );
 
       newInboxMsgs.unshift({
         id: `msg_season_end_${season.seasonNumber}_${Date.now()}`,
@@ -4963,16 +4980,11 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         }
       }
 
-      const generatedOffers = generateSeasonJobOffers(
-        updatedManager,
-        summaryClub,
-        activeLeague,
-        summary.finalPosition
-      );
-
+      const offersManager = updatedManager;
       setSeasonEndSummary(summary);
-      setJobOffers(generatedOffers);
-      setShowSeasonTransitionModal(true);
+      scheduleSeasonEndOffersAndModal(() =>
+        generateSeasonJobOffers(offersManager, summaryClub, activeLeague, summary.finalPosition)
+      );
 
       newInboxMsgs.unshift({
         id: `msg_season_end_${season.seasonNumber}_${Date.now()}`,
@@ -5363,15 +5375,11 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           summary.licenseSettlement = settlementRes.settlement;
           setManager(activeMgr);
         }
-        const generatedOffers = generateSeasonJobOffers(
-          activeMgr,
-          summaryClub,
-          activeLeague,
-          summary.finalPosition
-        );
+        const offersMgrC = activeMgr;
         setSeasonEndSummary(summary);
-        setJobOffers(generatedOffers);
-        setShowSeasonTransitionModal(true);
+        scheduleSeasonEndOffersAndModal(() =>
+          generateSeasonJobOffers(offersMgrC, summaryClub, activeLeague, summary.finalPosition)
+        );
         setSeason(prev => ({ ...prev, status: 'completed' }));
       }
 
@@ -7353,6 +7361,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       }
       setSeasonEndSummary(summary);
       if (summaryClub && summary.trophiesWonList && summary.trophiesWonList.length > 0) {
+        runWhenIdle(() => {
         loadWorldStateFromDb().then(ws => {
           if (ws) {
             const formattedTrophies = summary.trophiesWonList!.map(t => ({
@@ -7364,6 +7373,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             saveWorldStateToDb(updatedWs);
           }
         }).catch(() => {});
+        });
       }
       if (!jobOffers || jobOffers.length === 0) {
         setJobOffers(generateSeasonJobOffers(activeMgr, summaryClub, activeLeague, summary.finalPosition));
@@ -7552,14 +7562,14 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         ? safeJobOffers.find(o => o.id === chosenOfferId)
         : safeJobOffers.find(o => o.status === 'accepted');
 
-      const result = processNewSeasonAdvancement(
+      const result = timed('processNewSeasonAdvancement', () => processNewSeasonAdvancement(
         season,
         summary,
         summaryClub,
         manager,
         teams,
         acceptedOffer
-      );
+      ));
 
       const overriddenNextTeams = applyWorldOverridesToClubs(result.nextTeams);
       const targetUserClubId = result.updatedManager.currentClubId;
@@ -7571,13 +7581,13 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       });
 
       // 1. Process Free Agents (contractYears === 0) & AI Club Transfers for the new season
-      const freeAgencyAndAiResult = processFreeAgentsAndAiTransfers(
+      const freeAgencyAndAiResult = timed('startNextSeason.processFreeAgentsAndAiTransfers', () => processFreeAgentsAndAiTransfers(
         baseNextTeams,
         transferMarket,
         result.nextSeason.seasonNumber,
         1,
         targetUserClubId
-      );
+      ));
       const finalNextTeams = freeAgencyAndAiResult.updatedTeams;
       const updatedMarketAfterWindow = freeAgencyAndAiResult.updatedTransferMarket;
       const nextTransferHistory = [
@@ -7596,14 +7606,14 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       setAfricanChampionsLeague(null);
 
       // Build unified Master Schedule (League Only) cleanly from scratch
-      const nextFixturesWithContinental = generateMasterSeasonAgenda(
+      const nextFixturesWithContinental = timed('startNextSeason.generateMasterSeasonAgenda', () => generateMasterSeasonAgenda(
         result.nextSeason.seasonNumber,
         result.nextActiveLeague,
         finalNextTeams,
         null,
         null,
         nextUserClubObj
-      );
+      ));
 
       // 3. Archive finished season history locally
       let updatedSeasonArchives: any[] = [];
@@ -7745,20 +7755,15 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           deletedMessageIds,
         } as any);
 
-        // Save initial snapshot for this new season to allow clean restart
-        try {
-          const nextSnapKey = `${STORAGE_KEY}_season_${result.nextSeason.seasonNumber}_snapshot`;
-          localStorage.setItem(nextSnapKey, JSON.stringify({
-            teams: finalNextTeams,
-            clubBudget: nextUserClubObj?.budget || 250000,
-            manager: result.updatedManager,
-            calendarDate: newSeasonInitialDate,
-            activeLeagueId: result.nextActiveLeague.id,
-            seasonNumber: result.nextSeason.seasonNumber,
-          }));
-        } catch (snapErr) {
-          console.warn('Failed to store season start snapshot:', snapErr);
-        }
+        // Save initial snapshot for this new season to allow clean restart (IndexedDB + memory cache, never localStorage)
+        gameStateRepository.saveSeasonSnapshot(result.nextSeason.seasonNumber, {
+          teams: finalNextTeams,
+          clubBudget: nextUserClubObj?.budget || 250000,
+          manager: result.updatedManager,
+          calendarDate: newSeasonInitialDate,
+          activeLeagueId: result.nextActiveLeague.id,
+          seasonNumber: result.nextSeason.seasonNumber,
+        });
       } catch (saveErr) {
         console.warn('Immediate save on season transition:', saveErr);
       }
@@ -7846,8 +7851,11 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       const snapshotKey = `${STORAGE_KEY}_season_${currentSeasonNum}_snapshot`;
       let savedSnapshot: any = null;
       try {
-        const raw = localStorage.getItem(snapshotKey);
-        if (raw) savedSnapshot = JSON.parse(raw);
+        savedSnapshot = gameStateRepository.getSeasonSnapshotSync(currentSeasonNum);
+        if (!savedSnapshot) {
+          const raw = localStorage.getItem(snapshotKey);
+          if (raw) savedSnapshot = JSON.parse(raw);
+        }
       } catch (e) {
         console.warn('[RestartSeason] Error reading season snapshot:', e);
       }
@@ -7968,21 +7976,19 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         });
 
         // Save this pristine baseline as season snapshot for subsequent restarts
-        try {
-          localStorage.setItem(snapshotKey, JSON.stringify({
-            teams: restoredTeams,
-            clubBudget: restoredBudget,
-            manager: {
-              ...manager,
-              matchesManaged: manager.matchesManaged,
-              wins: manager.wins,
-              draws: manager.draws,
-              losses: manager.losses,
-            },
-            activeLeagueId: activeLeague.id,
-            seasonNumber: currentSeasonNum,
-          }));
-        } catch {}
+        gameStateRepository.saveSeasonSnapshot(currentSeasonNum, {
+          teams: restoredTeams,
+          clubBudget: restoredBudget,
+          manager: {
+            ...manager,
+            matchesManaged: manager.matchesManaged,
+            wins: manager.wins,
+            draws: manager.draws,
+            losses: manager.losses,
+          },
+          activeLeagueId: activeLeague.id,
+          seasonNumber: currentSeasonNum,
+        });
       }
 
       // 2. Restore Transfer Market
@@ -8378,6 +8384,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         }
 
         if (summary.trophiesWonList && summary.trophiesWonList.length > 0 && summaryClub) {
+          runWhenIdle(() => {
           loadWorldStateFromDb().then(ws => {
             if (ws) {
               const formattedTrophies = summary.trophiesWonList!.map(t => ({
@@ -8389,13 +8396,15 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
               saveWorldStateToDb(updatedWs);
             }
           }).catch(() => {});
+          });
         }
 
-        const generatedOffers = generateSeasonJobOffers(activeMgr, summaryClub, activeLeague, summary.finalPosition);
+        const offersMgrD = activeMgr;
         setSeason(prev => ({ ...prev, status: 'completed' }));
         setSeasonEndSummary(summary);
-        setJobOffers(generatedOffers);
-        setShowSeasonTransitionModal(true);
+        scheduleSeasonEndOffersAndModal(() =>
+          generateSeasonJobOffers(offersMgrD, summaryClub, activeLeague, summary.finalPosition)
+        );
         setCupTournament(null);
         setAfricanChampionsLeague(null);
         setManager(activeMgr);
@@ -9705,21 +9714,19 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     setRetiredPlayers([]);
     setScoutedOpponents({});
 
-    try {
-      localStorage.setItem(`${STORAGE_KEY}_season_1_snapshot`, JSON.stringify({
-        teams: freshTeams,
-        clubBudget: chosenUserClub.budget || 85000,
-        manager: {
-          ...INITIAL_MANAGER,
-          currentClubId: chosenUserClub.id,
-          clubsManaged: [chosenUserClub.name],
-        },
-        transferMarket: freshMarket,
-        calendarDate: getInitialSeasonDate(1),
-        activeLeagueId: EGYPT_TIER_4_LEAGUE.id,
-        seasonNumber: 1,
-      }));
-    } catch {}
+    gameStateRepository.saveSeasonSnapshot(1, {
+      teams: freshTeams,
+      clubBudget: chosenUserClub.budget || 85000,
+      manager: {
+        ...INITIAL_MANAGER,
+        currentClubId: chosenUserClub.id,
+        clubsManaged: [chosenUserClub.name],
+      },
+      transferMarket: freshMarket,
+      calendarDate: getInitialSeasonDate(1),
+      activeLeagueId: EGYPT_TIER_4_LEAGUE.id,
+      seasonNumber: 1,
+    });
   };
 
   const selectStartingClub = (clubId: string): boolean => {
@@ -9748,20 +9755,18 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }));
     setBoardSystem(generateInitialBoardSystem(target, 4, updatedTeams.length, updatedTeams, false));
 
-    try {
-      localStorage.setItem(`${STORAGE_KEY}_season_1_snapshot`, JSON.stringify({
-        teams: updatedTeams,
-        clubBudget: target.budget,
-        manager: {
-          ...manager,
-          currentClubId: target.id,
-          clubsManaged: Array.from(new Set([...(manager.clubsManaged || []), target.name])),
-        },
-        calendarDate: getInitialSeasonDate(1),
-        activeLeagueId: activeLeague.id,
-        seasonNumber: season.seasonNumber || 1,
-      }));
-    } catch {}
+    gameStateRepository.saveSeasonSnapshot(season.seasonNumber || 1, {
+      teams: updatedTeams,
+      clubBudget: target.budget,
+      manager: {
+        ...manager,
+        currentClubId: target.id,
+        clubsManaged: Array.from(new Set([...(manager.clubsManaged || []), target.name])),
+      },
+      calendarDate: getInitialSeasonDate(1),
+      activeLeagueId: activeLeague.id,
+      seasonNumber: season.seasonNumber || 1,
+    });
 
     return true;
   };

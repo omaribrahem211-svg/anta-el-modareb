@@ -25,6 +25,8 @@ const STORE_NAME = 'game_state_store';
 const IDB_KEYVAL_SAVE_KEY = 'anta_el_modareb_idb_current_save_v2';
 export const LEGACY_STORAGE_PREFIX = 'anta_el_modareb_save_v1';
 
+const seasonSnapshotCache = new Map<number, any>();
+
 export interface LocalGameSavePayload {
   schemaVersion: number;
   saveVersion: number;
@@ -415,17 +417,32 @@ export const gameStateRepository = {
   },
 
   /**
-   * Save or load season archive snapshot in IndexedDB (instead of bloating localStorage)
+   * Save or load season archive snapshot in IndexedDB (instead of bloating localStorage).
+   * The snapshot is kept in a small in-memory cache so "restart season" can read it synchronously,
+   * and the (large) IndexedDB write is deferred so it never competes with the season-transition frame.
    */
   async saveSeasonSnapshot(seasonNum: number, snapshot: any): Promise<void> {
+    seasonSnapshotCache.set(seasonNum, snapshot);
+    for (const k of Array.from(seasonSnapshotCache.keys())) {
+      if (k < seasonNum - 1) seasonSnapshotCache.delete(k);
+    }
     try {
+      await new Promise<void>(resolve => setTimeout(resolve, 1200));
       await idbSet(`season_${seasonNum}_snapshot`, snapshot);
     } catch {}
   },
 
+  getSeasonSnapshotSync(seasonNum: number): any | null {
+    return seasonSnapshotCache.get(seasonNum) ?? null;
+  },
+
   async loadSeasonSnapshot(seasonNum: number): Promise<any | null> {
+    const cached = seasonSnapshotCache.get(seasonNum);
+    if (cached) return cached;
     try {
-      return await idbGet(`season_${seasonNum}_snapshot`);
+      const snap = await idbGet<any>(`season_${seasonNum}_snapshot`);
+      if (snap) seasonSnapshotCache.set(seasonNum, snap);
+      return snap;
     } catch {
       return null;
     }

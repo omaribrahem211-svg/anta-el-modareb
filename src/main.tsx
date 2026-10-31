@@ -4,6 +4,9 @@ import './utils/diagnosticLogger';
 import App from './App.tsx';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import './index.css';
+import { installGlobalErrorLogging } from './utils/errorLog';
+
+installGlobalErrorLogging();
 
 // Prevent uncaught async promise rejections or bridge errors from crashing the WebView thread
 window.addEventListener('unhandledrejection', (event) => {
