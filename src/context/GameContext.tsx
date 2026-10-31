@@ -4065,7 +4065,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       if (latestUserClub) {
         const aiBidsResult = generateIncomingAiBids(updatedAllTeams, latestUserClub, currentRound, season.seasonNumber);
         if (aiBidsResult.bids.length > 0) {
-          setIncomingBids(prev => [...aiBidsResult.bids, ...prev]);
+          setIncomingBids(prev => [...aiBidsResult.bids, ...prev].slice(0, 40));
           newInboxMsgs.unshift(...aiBidsResult.inboxMessages);
         }
 
@@ -4981,7 +4981,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     if (latestUserClubSim) {
       const aiBidsResult = generateIncomingAiBids(updatedAllTeams, latestUserClubSim, currentRound, season.seasonNumber);
       if (aiBidsResult.bids.length > 0) {
-        setIncomingBids(prev => [...aiBidsResult.bids, ...prev]);
+        setIncomingBids(prev => [...aiBidsResult.bids, ...prev].slice(0, 40));
         newInboxMsgs.unshift(...aiBidsResult.inboxMessages);
       }
 
