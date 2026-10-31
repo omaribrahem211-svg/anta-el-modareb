@@ -399,7 +399,7 @@ export class CalendarManager {
         const normType = normalizeCompetitionType(
           f.competitionType || f.tournamentId || f.competitionId || (f.cupStage ? 'DOMESTIC_COP' : undefined)
         );
-        return normType === 'LEAGUE' || normType === 'DOMESTIC_COP';
+        return normType === 'LEAGUE' || normType === 'DOMESTIC_COP' || normType === 'CONTINENTAL_CUP';
       })
       .sort((a, b) => {
         const dateA = String(a?.date || '');
@@ -493,12 +493,21 @@ export class CalendarManager {
       const normType = normalizeCompetitionType(
         f.competitionType || f.tournamentId || f.competitionId || (f.cupStage ? 'DOMESTIC_COP' : undefined)
       );
-      return normType === 'LEAGUE' || normType === 'DOMESTIC_COP';
+      return normType === 'LEAGUE' || normType === 'DOMESTIC_COP' || normType === 'CONTINENTAL_CUP';
     });
+    // Cup and continental ties follow their own dates (never tied to a league round number)
     const isCupItem = (f: CalendarScheduleItem): boolean =>
       normalizeCompetitionType(
         f.competitionType || f.tournamentId || f.competitionId || (f.cupStage ? 'DOMESTIC_COP' : undefined)
-      ) === 'DOMESTIC_COP';
+      ) !== 'LEAGUE';
+    // Knockout ties (domestic cup, or continental stages after the groups) are settled by penalties on a draw
+    const isKnockoutItem = (f: CalendarScheduleItem): boolean => {
+      const t = normalizeCompetitionType(
+        f.competitionType || f.tournamentId || f.competitionId || (f.cupStage ? 'DOMESTIC_COP' : undefined)
+      );
+      if (t === 'DOMESTIC_COP') return true;
+      return t === 'CONTINENTAL_CUP' && (f.stage || 'group') !== 'group';
+    };
 
     const { endDateStr } = this.getSeasonDateRange(seasonNumber);
     const getClubObj = (clubId: string): Club => {
@@ -566,7 +575,7 @@ export class CalendarManager {
       const res = simulateMatch(home, away, home.tactics || { formation: '4-4-2' }, away.tactics || { formation: '4-4-2' });
       fix.homeScore = res.homeScore;
       fix.awayScore = res.awayScore;
-      if (isCupItem(fix)) {
+      if (isKnockoutItem(fix)) {
         // Knockout: a draw after 90 minutes is settled by an instant penalty shootout (never blocks the bracket)
         const shoot = res.homeScore === res.awayScore ? simulatePenaltyShootout(home, away, home.tactics, away.tactics) : undefined;
         const settled = settleCupResult(res.homeScore, res.awayScore, fix.homeTeamId, fix.awayTeamId, shoot);

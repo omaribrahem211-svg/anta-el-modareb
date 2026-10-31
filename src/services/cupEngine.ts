@@ -50,8 +50,8 @@ function winnerOf(f: Fixture): string | undefined {
   return f.homeTeamId;
 }
 
-/** Rounds of the league season after which each cup stage is played (always a Tuesday, before the last league round). */
-function cupStageDate(stage: CupStage, seasonNumber: number, totalLeagueRounds: number): Date {
+/** League rounds after which each cup stage is played (strictly increasing, final strictly before the last league round). */
+export function cupStageRounds(totalLeagueRounds: number): Record<CupStage, number> {
   const R = Math.max(10, totalLeagueRounds || 38);
   const raw: Record<CupStage, number> = {
     round_of_64: Math.ceil(R * 0.08),
@@ -61,18 +61,23 @@ function cupStageDate(stage: CupStage, seasonNumber: number, totalLeagueRounds: 
     semi: Math.ceil(R * 0.76),
     final: R - 1,
   };
-  // keep strictly increasing and the final strictly before the last league round
   let prev = 0;
-  const ordered: Record<string, number> = {};
+  const ordered = {} as Record<CupStage, number>;
   STAGE_ORDER.forEach(st => {
-    const v = st === 'final' ? Math.max(raw.final, prev + 1) : Math.max(raw[st], prev + 1);
+    const v = Math.max(raw[st], prev + 1);
     ordered[st] = Math.min(v, R - 1);
     prev = ordered[st];
   });
+  return ordered;
+}
+
+/** Tuesday after the league round that precedes the cup stage. */
+function cupStageDate(stage: CupStage, seasonNumber: number, totalLeagueRounds: number): Date {
+  const ordered = cupStageRounds(totalLeagueRounds);
   const { startYear } = CalendarManager.getSeasonDateRange(seasonNumber);
   const leagueStart = new Date(startYear, 7, 15); // same anchor used by the league schedule (Saturday rounds)
   const d = new Date(leagueStart);
-  d.setDate(leagueStart.getDate() + (ordered[stage] - 1) * 7 + 3); // Tuesday after that league round
+  d.setDate(leagueStart.getDate() + (ordered[stage] - 1) * 7 + 3);
   return d;
 }
 

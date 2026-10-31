@@ -21,6 +21,7 @@ import {
 } from 'lucide-react';
 import { fetchDailyManagersLeaderboard, DailyManagerLeaderboardEntry } from '../services/managerRankingService';
 import { getClubDisplayName } from '../data/leaguesData';
+import { AfricanChampionsLeagueView } from './continental/AfricanChampionsLeagueView';
 import { getDomesticCupDefinitionForCountry } from '../data/competitionsData';
 import { isEuropeanCountry } from '../utils/continentalEngine';
 import { ClubBadge } from './ClubBadge';
@@ -181,7 +182,7 @@ export const LeagueTab: React.FC = () => {
         </div>
 
         {/* Sub-Tab Navigation */}
-        <div className="grid grid-cols-2 sm:grid-cols-5 gap-1.5 bg-slate-950/80 p-1.5 rounded-2xl border border-slate-800">
+        <div className="grid grid-cols-2 sm:grid-cols-6 gap-1.5 bg-slate-950/80 p-1.5 rounded-2xl border border-slate-800">
           <button
             onClick={() => setActiveSubTab('standings')}
             className={`py-2 text-xs font-bold rounded-xl transition-all cursor-pointer ${
@@ -200,6 +201,17 @@ export const LeagueTab: React.FC = () => {
           >
             <Shield className="w-3.5 h-3.5" />
             <span className="truncate">{cupTitle} 🛡️</span>
+          </button>
+          <button
+            onClick={() => setActiveSubTab('continental')}
+            className={`py-2 text-xs font-bold rounded-xl transition-all cursor-pointer flex items-center justify-center gap-1 ${
+              activeSubTab === 'continental'
+                ? 'bg-gradient-to-r from-red-600 via-amber-600 to-amber-500 text-white shadow-md'
+                : 'text-slate-400 hover:text-white'
+            }`}
+          >
+            <Globe className="w-3.5 h-3.5 text-amber-300" />
+            <span className="truncate">{continentalTitle} 🌍</span>
           </button>
           <button
             onClick={() => setActiveSubTab('daily_managers')}
@@ -371,6 +383,8 @@ export const LeagueTab: React.FC = () => {
       )}
 
       {/* VIEW 2: Domestic National Cup */}
+      {activeSubTab === 'continental' && <AfricanChampionsLeagueView />}
+
       {activeSubTab === 'domestic_cup' && (
         <div className="space-y-4">
           <div className="bg-gradient-to-r from-slate-900 via-rose-950/30 to-slate-900 border border-rose-500/40 rounded-3xl p-4 sm:p-5 space-y-3 shadow-xl">

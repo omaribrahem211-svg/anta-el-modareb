@@ -42,6 +42,7 @@ import {
 import { getDomesticCupDefinitionForCountry } from '../data/competitionsData';
 import { CalendarManager } from '../services/calendarManager';
 import { buildCupFirstRound } from '../services/cupEngine';
+import { buildContinentalFixtures, defaultContinentalSetup, type ContinentalSetup } from '../services/continentalFixtures';
 import { parseDateString } from './calendarEngine';
 import { pruneMatchEventsForStorage } from './storage/indexedDbStorage';
 
@@ -1238,9 +1239,23 @@ export function generateMasterSeasonAgenda(
     userClub,
     totalLeagueRounds,
   });
-  if (cupFixtures.length === 0) return leagueSchedule;
 
-  return [...leagueSchedule, ...cupFixtures].sort((a, b) => {
+  // Continental tournament (group stage only here; knockouts are appended by progressContinentalFixtures()).
+  // The 5th argument carries the qualification setup decided at the end of the previous season.
+  const continentalSetup: ContinentalSetup =
+    _continentalTournament && (_continentalTournament as any).primaryCode
+      ? (_continentalTournament as ContinentalSetup)
+      : defaultContinentalSetup(userClub, activeLeague);
+  const continentalFixtures = buildContinentalFixtures({
+    seasonNumber,
+    teams: leagueTeams,
+    userClub,
+    setup: continentalSetup,
+    totalLeagueRounds,
+  });
+  if (cupFixtures.length === 0 && continentalFixtures.length === 0) return leagueSchedule;
+
+  return [...leagueSchedule, ...cupFixtures, ...continentalFixtures].sort((a, b) => {
     const dateA = String(a?.date || '');
     const dateB = String(b?.date || '');
     if (dateA !== dateB) return dateA.localeCompare(dateB);
