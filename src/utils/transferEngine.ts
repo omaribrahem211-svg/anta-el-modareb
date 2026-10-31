@@ -102,6 +102,11 @@ export function isEuropeanEliteClub(club?: Club): boolean {
  * - 4 seasons: 4/3 of the 3-season price (e.g., 120M)
  * - 5 seasons: 5/3 of the 3-season price (e.g., 150M)
  */
+export function contractYearsFactor(years: number): number {
+  const y = Math.max(0, Math.min(5, Math.round(years || 0)));
+  return [0.25, 0.6, 0.82, 1, 1.1, 1.18][y];
+}
+
 export function calculateContractDurationTransferFee(
   threeSeasonBasePrice: number,
   contractYears: number,
@@ -109,8 +114,41 @@ export function calculateContractDurationTransferFee(
 ): number {
   if (isFreeAgent || threeSeasonBasePrice <= 0) return 0;
   const safeYears = Math.max(1, Math.min(5, Math.round(contractYears || 3)));
-  const proRated = Math.round((threeSeasonBasePrice * safeYears) / 3);
-  return Math.max(8000, proRated);
+  return Math.max(8000, Math.round((threeSeasonBasePrice * contractYearsFactor(safeYears)) / 1000) * 1000);
+}
+
+/**
+ * How the selling club answers a bid. The club has a hidden reservation price below the asking price:
+ * stars / key players get no discount, surplus or listed players can be bargained down a little.
+ * - bid >= reservation  -> accept
+ * - bid >= 75% of asking -> counter (club meets the buyer halfway between reservation and asking)
+ * - bid >= 50% of asking -> firm counter at full asking price
+ * - below 50%           -> insulting offer, talks collapse
+ */
+export function judgeTransferBid(
+  bid: number,
+  asking: number,
+  player: Pick<Player, 'overallRating' | 'age' | 'potentialRating' | 'isListedForTransfer' | 'contractYears'>,
+  sellingClub?: Club
+): { decision: 'accept' | 'counter' | 'insult'; demandedFee: number; reservationFee: number; note: string } {
+  const ovr = player.overallRating || 60;
+  let discount = 0.05; // normal squad player: ~5% room
+  let note = '';
+  if (player.isListedForTransfer) { discount = 0.12; note = 'اللاعب معروض للبيع فالنادي مرن قليلاً.'; }
+  if ((player.contractYears ?? 3) <= 1) { discount = Math.max(discount, 0.15); note = 'عقد اللاعب يقترب من نهايته فالنادي يقبل بسعر أقل.'; }
+  if (sellingClub && Array.isArray(sellingClub.players) && sellingClub.players.length > 0) {
+    const better = sellingClub.players.filter(p => p && (p.overallRating || 0) > ovr).length;
+    if (better < 3 && !player.isListedForTransfer) { discount = 0; note = 'اللاعب من الركائز الأساسية للنادي ولا يقبل التخفيض.'; }
+  }
+  if ((player.age || 25) <= 22 && (player.potentialRating || ovr) - ovr >= 8 && !player.isListedForTransfer) {
+    discount = 0; note = 'موهبة شابة يتمسك بها النادي ولن يخفض سعرها.';
+  }
+  const reservationFee = Math.round(asking * (1 - discount));
+  const ratio = asking > 0 ? bid / asking : 1;
+  if (bid >= reservationFee) return { decision: 'accept', demandedFee: bid, reservationFee, note };
+  if (ratio < 0.5) return { decision: 'insult', demandedFee: asking, reservationFee, note: 'العرض أقل بكثير من قيمة اللاعب واعتبرته الإدارة مهيناً.' };
+  if (ratio < 0.75) return { decision: 'counter', demandedFee: asking, reservationFee, note: 'العرض بعيد عن قيمة اللاعب والنادي متمسك بالسعر المعلن.' };
+  return { decision: 'counter', demandedFee: Math.round((asking + reservationFee) / 2 / 1000) * 1000 || reservationFee, reservationFee, note };
 }
 
 /**
@@ -1179,7 +1217,7 @@ export function generateIncomingAiBids(
     if (!biddingClub || !biddingClub.id) continue;
 
     // Fixed non-negotiable price: AI bid is strictly the player's fixed marketValue
-    const baseMarketVal = Math.max(25000, targetPlayer.marketValue || 50000);
+    const baseMarketVal = Math.max(25000, Math.round((targetPlayer.marketValue || 50000) * Math.min(1, contractYearsFactor(targetPlayer.contractYears ?? 3))));
     if (biddingClub.budget < baseMarketVal || maxAffordableFee < baseMarketVal) continue;
     const bidAmount = baseMarketVal;
 

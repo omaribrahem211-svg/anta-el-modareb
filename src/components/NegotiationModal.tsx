@@ -158,6 +158,10 @@ export const NegotiationModal: React.FC<NegotiationModalProps> = ({
     : calculateContractDurationTransferFee(baseThreeSeasonPrice, years, isFreeAgent);
   const fixedSalary = Math.max(1000, targetPlayer?.salary || fairVal.recommendedMonthlyWage || 2500);
 
+  // Buyer's own bid: starts at the asking price, can be lowered to haggle (the club may counter or refuse)
+  const [offerFee, setOfferFee] = useState<number | null>(null);
+  const bidFee = isFreeAgent ? 0 : offerFee !== null ? Math.max(0, Math.round(offerFee)) : fixedPrice;
+
   useEffect(() => {
     if (existingNegotiation) {
       setYears(Math.max(1, Math.min(5, existingNegotiation.contractYears || 3)));
@@ -166,6 +170,7 @@ export const NegotiationModal: React.FC<NegotiationModalProps> = ({
       setYears(3);
       setRole('first_team');
     }
+    setOfferFee(null);
   }, [targetPlayer?.id, existingNegotiation?.id, isFreeAgent]);
 
   if (!isOpen || (!player && !existingNegotiation) || !targetPlayer) {
@@ -179,7 +184,7 @@ export const NegotiationModal: React.FC<NegotiationModalProps> = ({
   const safePlayerAge = targetPlayer.age || existingNegotiation?.playerAge || 24;
   const safePlayerPosition = targetPlayer.position || existingNegotiation?.playerPosition || 'CM';
 
-  const numFee = fixedPrice;
+  const numFee = bidFee;
   const numSalary = fixedSalary;
   const isFeeExceedingBudget = !isFreeAgent && userClub ? numFee > (userClub.budget || 0) : false;
 
@@ -520,16 +525,37 @@ export const NegotiationModal: React.FC<NegotiationModalProps> = ({
                       <Calendar className="w-3.5 h-3.5 text-blue-400" />
                       <span>مدة العقد واحتساب السعر</span>
                     </label>
+                    {!isFreeAgent && (
+                      <div className="mb-3">
+                        <div className="text-xs font-bold text-slate-300 mb-1">عرضك لنادي اللاعب (السعر المعلن {fixedPrice.toLocaleString()} ج.م)</div>
+                        <input
+                          type="number"
+                          min={0}
+                          value={bidFee}
+                          onChange={e => setOfferFee(Number(e.target.value) || 0)}
+                          className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-white font-bold focus:outline-none focus:border-emerald-500"
+                        />
+                        <div className="flex gap-2 mt-2">
+                          {[0.95, 0.9, 0.8].map(m => (
+                            <button type="button" key={m} onClick={() => setOfferFee(Math.round(fixedPrice * m))} className="flex-1 text-[11px] font-bold bg-slate-800 border border-slate-700 rounded-lg py-1 text-slate-200">
+                              -{Math.round((1 - m) * 100)}%
+                            </button>
+                          ))}
+                          <button type="button" onClick={() => setOfferFee(null)} className="flex-1 text-[11px] font-bold bg-emerald-900/40 border border-emerald-700 rounded-lg py-1 text-emerald-300">السعر المعلن</button>
+                        </div>
+                        <div className="text-[11px] text-slate-400 mt-1">كل ناد له حد أدنى خفي، والعروض المنخفضة جدا تُرفض والمتوسطة تُقابَل بعرض مضاد.</div>
+                      </div>
+                    )}
                     <select
                       value={years}
                       onChange={e => setYears(Number(e.target.value))}
                       className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-white font-bold focus:outline-none focus:border-blue-500"
                     >
                       <option value={1}>
-                        موسم واحد فقط ({isFreeAgent ? 'مجاني' : `${calculateContractDurationTransferFee(baseThreeSeasonPrice, 1, false).toLocaleString()} ج.م - ⅓ السعر`})
+                        موسم واحد فقط ({isFreeAgent ? 'مجاني' : `${calculateContractDurationTransferFee(baseThreeSeasonPrice, 1, false).toLocaleString()} ج.م - مدة قصيرة`})
                       </option>
                       <option value={2}>
-                        موسمان ({isFreeAgent ? 'مجاني' : `${calculateContractDurationTransferFee(baseThreeSeasonPrice, 2, false).toLocaleString()} ج.م - ⅔ السعر`})
+                        موسمان ({isFreeAgent ? 'مجاني' : `${calculateContractDurationTransferFee(baseThreeSeasonPrice, 2, false).toLocaleString()} ج.م - مدة قصيرة`})
                       </option>
                       <option value={3}>
                         3 مواسم ({isFreeAgent ? 'مجاني' : `${baseThreeSeasonPrice.toLocaleString()} ج.م - السعر الكامل`})

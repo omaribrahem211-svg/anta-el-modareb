@@ -19,6 +19,7 @@ import {
   isEuropeanEliteClub,
   isTopEuropeanLeague,
   calculateContractDurationTransferFee,
+  judgeTransferBid,
   syncPlayerMarketValueWithRating,
 } from './transferEngine';
 import { generateInitialBoardSystem as generateInitialBoardSystemFromBoardEngine } from './boardEngine';
@@ -591,7 +592,7 @@ export function simulateDailyNegotiations(
         }
 
         // Pro-rated transfer price check based on contract duration (1 season = 1/3, 2 seasons = 2/3, 3 seasons = full)
-        if (current.bidFee >= requiredContractFee * 0.98) {
+        if (!targetPlayer || judgeTransferBid(current.bidFee, requiredContractFee, targetPlayer, targetClub).decision === 'accept') {
           current.stage = 'player_terms';
           current.daysRemainingInStage = 1;
           current.statusMessage = `وافق نادي ${current.playerClubName} على سعر شراء عقد اللاعب لمدة ${contractDurationYears} ${contractDurationYears === 1 ? 'موسم' : contractDurationYears === 2 ? 'موسمين' : 'مواسم'} (${current.bidFee.toLocaleString()} ج.م). يتم الآن مراجعة الراتب الشهري (${(current.offeredSalary || 0).toLocaleString()} ج.م) مع اللاعب.`;

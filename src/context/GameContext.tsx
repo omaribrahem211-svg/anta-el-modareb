@@ -172,6 +172,8 @@ import { STAR_RATINGS_OVERRIDES } from '../data/starRatingsOverrides';
 import {
   calculatePlayerFairValue,
   calculateContractDurationTransferFee,
+  judgeTransferBid,
+  contractYearsFactor,
   syncPlayerMarketValueWithRating,
   evaluateTransferOffer,
   executeAtomicTransfer,
@@ -5901,7 +5903,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         const { club: buyerClub } = eligibleBuyers[Math.floor(Math.random() * eligibleBuyers.length)];
 
         // Fixed, non-negotiable player price
-        const offerFee = Math.max(25000, Math.round(targetPlayer.marketValue || 100000));
+        const offerFee = Math.max(25000, Math.round((targetPlayer.marketValue || 100000) * Math.min(1, contractYearsFactor(targetPlayer.contractYears ?? 3))));
 
         if (offerFee <= 0 || offerFee > buyerClub.budget) {
           return {
@@ -9087,6 +9089,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       const offeredWage = Math.max(1000, proposal.monthlySalary || requiredPlayerWage);
 
       const joinCheck = canPlayerJoinClub(targetPlayer, userClub);
+      const bidVerdict = isFreeAgent ? null : judgeTransferBid(effectiveTransferFee, requiredClubFee, targetPlayer, sellingClub || resolvedClub.club);
 
       let initialStage: ActiveNegotiation['stage'] = 'player_terms';
       let demandedFee: number | undefined = undefined;
@@ -9098,11 +9101,15 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         initialStage = 'rejected';
         actionRequired = false;
         statusMessage = joinCheck.reason || `رفض ${targetPlayer.name} العرض لعدم تناسب طموحاته مع الدرجة الحالية لناديك.`;
-      } else if (!isFreeAgent && effectiveTransferFee < Math.round(requiredClubFee * 0.85)) {
+      } else if (!isFreeAgent && bidVerdict && bidVerdict.decision === 'insult') {
+        initialStage = 'rejected';
+        actionRequired = false;
+        statusMessage = `رفضت إدارة ${displaySellingClubName} عرضك (${effectiveTransferFee.toLocaleString()} ج.م) بشكل قاطع؛ ${bidVerdict.note} السعر المعلن ${requiredClubFee.toLocaleString()} ج.م.`;
+      } else if (!isFreeAgent && bidVerdict && bidVerdict.decision === 'counter') {
         initialStage = 'club_counter';
-        demandedFee = requiredClubFee;
+        demandedFee = bidVerdict.demandedFee;
         actionRequired = true;
-        statusMessage = `عرض مقابل من ${displaySellingClubName}: تطلب الإدارة مبلغ ${requiredClubFee.toLocaleString()} ج.م للموافقة الفورية على انتقال ${targetPlayer.name}.`;
+        statusMessage = `عرض مقابل من ${displaySellingClubName}: تطلب الإدارة ${bidVerdict.demandedFee.toLocaleString()} ج.م للموافقة على انتقال ${targetPlayer.name}. ${bidVerdict.note}`;
       } else if (offeredWage < Math.round(requiredPlayerWage * 0.85)) {
         initialStage = 'player_counter';
         demandedSalary = requiredPlayerWage;
