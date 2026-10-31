@@ -1212,7 +1212,7 @@ export const OnlineMatchPitch3D: React.FC<OnlineMatchPitch3DProps> = ({
         </div>
 
         <div className="flex flex-col items-center shrink-0 px-1">
-          <div className="flex items-center gap-2.5 font-black text-[26px] leading-none font-mono tabular-nums" dir="ltr">
+          <div className="flex items-center gap-2.5 font-black text-[26px] leading-none font-mono tabular-nums" dir="rtl">
             <span className={homeScore > awayScore ? 'text-emerald-400' : 'text-white'}>{homeScore}</span>
             <span className="text-[#4b5d78] text-lg">:</span>
             <span className={awayScore > homeScore ? 'text-emerald-400' : 'text-white'}>{awayScore}</span>
@@ -1225,7 +1225,7 @@ export const OnlineMatchPitch3D: React.FC<OnlineMatchPitch3DProps> = ({
             </span>
           </div>
           {homePenalties !== undefined && awayPenalties !== undefined && (
-            <span className="text-[10px] font-black text-amber-300 font-mono mt-0.5" dir="ltr">
+            <span className="text-[10px] font-black text-amber-300 font-mono mt-0.5" dir="rtl">
               ({homePenalties} - {awayPenalties}) PEN
             </span>
           )}
