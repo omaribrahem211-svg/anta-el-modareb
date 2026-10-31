@@ -516,7 +516,7 @@ export const ClubTab: React.FC = () => {
         </div>
 
         <p className="text-xs text-slate-400 leading-relaxed">
-          يمكنك تحويل جزء من سيولة النادي النقدية لزيادة سقف الرواتب الشهرية لإبرام صفقات مع نجوم برواتب أعلى (كل 12,000 ج.م سيولة نقدية تضيف 1,000 ج.م شهرياً لسقف الرواتب)، أو استعادة الفائض للميزانية النقدية.
+          يمكنك تحويل جزء من سيولة النادي النقدية لزيادة سقف الرواتب المتاح فوراً وبنفس القيمة (1:1) لإبرام صفقات مع نجوم برواتب أعلى، أو استعادة الفائض للميزانية النقدية.
         </p>
 
         {/* Mode Selector */}
@@ -585,9 +585,9 @@ export const ClubTab: React.FC = () => {
             </div>
 
             <div className="p-2.5 bg-emerald-950/40 border border-emerald-800/60 rounded-xl flex items-center justify-between text-xs">
-              <span className="text-slate-300">الزيادة الناتجة في سقف الرواتب الشهري:</span>
+              <span className="text-slate-300">الزيادة المباشرة في سقف الرواتب المتاح:</span>
               <strong className="text-emerald-400 font-mono text-sm">
-                +{Math.round(numCashAmount / 12).toLocaleString()} ج.م/شهرياً
+                +{Math.round(numCashAmount).toLocaleString()} ج.م
               </strong>
             </div>
 
@@ -645,7 +645,7 @@ export const ClubTab: React.FC = () => {
             <div className="p-2.5 bg-cyan-950/40 border border-cyan-800/60 rounded-xl flex items-center justify-between text-xs">
               <span className="text-slate-300">السيولة النقدية المستردة لميزانية النادي:</span>
               <strong className="text-cyan-400 font-mono text-sm">
-                +{(numWageAmount * 12).toLocaleString()} ج.م
+                +{(numWageAmount).toLocaleString()} ج.م
               </strong>
             </div>
 

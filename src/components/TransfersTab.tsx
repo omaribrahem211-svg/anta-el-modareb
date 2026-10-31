@@ -31,6 +31,10 @@ import { calibrateRealisticPlayerRating } from '../utils/playerGenerator';
 import { loadWorldStateFromDb } from '../utils/storage/indexedDbStorage';
 import { PlayerAvatar } from './PlayerAvatar';
 import { ClubBadge } from './ClubBadge';
+import {
+  calculateClubMonthlyIncome,
+  calculateClubTotalMonthlyWages,
+} from '../services/economyService';
 
 export interface TransferRumor {
   id: string;
@@ -728,10 +732,8 @@ export const TransfersTab: React.FC<TransfersTabProps> = ({
     []
   );
 
-  const currentWageBill = userClub
-    ? (userClub.players || []).reduce((acc, p) => acc + (p?.salary || 0), 0)
-    : 0;
-  const wageBudget = (userClub as any)?.wageBudget || 500000;
+  const currentWageBill = userClub ? calculateClubTotalMonthlyWages(userClub) : 0;
+  const wageBudget = userClub ? calculateClubMonthlyIncome(userClub) : 500000;
   const remainingWageBudget = Math.max(0, wageBudget - currentWageBill);
   const wageUsagePercent = Math.min(100, Math.round((currentWageBill / Math.max(1, wageBudget)) * 100));
   const clubTransferBudget = userClub ? userClub.budget : (budget || 500000);

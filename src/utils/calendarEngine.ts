@@ -310,20 +310,20 @@ export function simulateDailySquadTraining(
       return updatedPlayer;
     }
 
-    // 3. Fitness & Fatigue Management
+    // 3. Fitness & Fatigue Management (Fast daily recovery so squad stays fresh for upcoming matches)
     let currentFatigue = updatedPlayer.fatigue ?? 20;
-    let currentFitness = updatedPlayer.fitness;
+    let currentFitness = updatedPlayer.fitness ?? 90;
 
     if (intensity === 'recovery') {
-      currentFatigue = Math.max(0, currentFatigue - 15);
-      currentFitness = Math.min(100, currentFitness + 8);
+      currentFatigue = Math.max(0, currentFatigue - 22);
+      currentFitness = Math.min(100, currentFitness + 16);
     } else if (intensity === 'normal') {
-      currentFatigue = Math.min(100, Math.max(0, currentFatigue - 5));
-      currentFitness = Math.min(100, currentFitness + 4);
+      currentFatigue = Math.min(100, Math.max(0, currentFatigue - 12));
+      currentFitness = Math.min(100, currentFitness + 10);
     } else {
       // High intensity
-      currentFatigue = Math.min(100, currentFatigue + 12);
-      currentFitness = Math.min(100, currentFitness + 2);
+      currentFatigue = Math.min(100, currentFatigue + 6);
+      currentFitness = Math.min(100, currentFitness + 6);
     }
 
     updatedPlayer.fatigue = currentFatigue;

@@ -67,22 +67,11 @@ export const PlayerAvatar: React.FC<PlayerAvatarProps> = React.memo(({
     >
       <svg
         viewBox="0 0 100 115"
-        className="w-full h-full drop-shadow-sm"
+        className="w-full h-full"
         xmlns="http://www.w3.org/2000/svg"
       >
-        <defs>
-          <linearGradient id={`bgGrad_${player.id}`} x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="#1e293b" stopOpacity="0.4" />
-            <stop offset="100%" stopColor="#0f172a" stopOpacity="0.8" />
-          </linearGradient>
-          <linearGradient id={`jerseyGrad_${player.id}`} x1="0" y1="0" x2="1" y2="0">
-            <stop offset="0%" stopColor={traits.jerseyPrimary} />
-            <stop offset="100%" stopColor={traits.jerseySecondary} />
-          </linearGradient>
-        </defs>
-
         {/* Ambient background circle */}
-        <circle cx="50" cy="50" r="46" fill={`url(#bgGrad_${player.id})`} />
+        <circle cx="50" cy="50" r="46" fill="#0f172a" fillOpacity="0.65" />
 
         {/* Athletic Torso / Jersey */}
         <path

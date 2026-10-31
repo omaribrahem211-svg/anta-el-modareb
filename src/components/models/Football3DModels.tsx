@@ -65,27 +65,14 @@ export const PlayerKit3DModel: React.FC<{
       {/* Sculpted 3D SVG Football Jersey */}
       <svg
         viewBox="0 0 64 64"
-        className={`w-full h-full drop-shadow-[0_4px_6px_rgba(0,0,0,0.65)] transition-transform ${
+        className={`w-full h-full transition-transform ${
           isSelected ? 'scale-110' : ''
         }`}
       >
-        <defs>
-          <linearGradient id={`kitGrad_${mainKit.replace('#', '')}_${position}`} x1="0%" y1="0%" x2="100%" y2="100%">
-            <stop offset="0%" stopColor={mainKit} stopOpacity="1" />
-            <stop offset="55%" stopColor={mainKit} stopOpacity="0.92" />
-            <stop offset="100%" stopColor="#090d16" stopOpacity="0.65" />
-          </linearGradient>
-          <linearGradient id="kitGloss" x1="0%" y1="0%" x2="0%" y2="100%">
-            <stop offset="0%" stopColor="#ffffff" stopOpacity="0.32" />
-            <stop offset="45%" stopColor="#ffffff" stopOpacity="0.06" />
-            <stop offset="100%" stopColor="#000000" stopOpacity="0.22" />
-          </linearGradient>
-        </defs>
-
         {/* Jersey Torso & Sleeves Silhouette */}
         <path
           d="M20 10 L26 8 C28 12 36 12 38 8 L44 10 L57 20 L51 31 L44 27 L44 54 C44 55.5 42.5 57 41 57 L23 57 C21.5 57 20 55.5 20 54 L20 27 L13 31 L7 20 Z"
-          fill={`url(#kitGrad_${mainKit.replace('#', '')}_${position})`}
+          fill={mainKit}
           stroke={isSelected ? '#fde047' : 'rgba(255,255,255,0.65)'}
           strokeWidth={isSelected ? '2.4' : '1.4'}
           strokeLinejoin="round"
@@ -110,10 +97,11 @@ export const PlayerKit3DModel: React.FC<{
           strokeWidth="0.8"
         />
 
-        {/* 3D Specular Gloss Overlay */}
+        {/* Top Specular Highlight Overlay (No url(#id) gradient collision) */}
         <path
-          d="M20 10 L26 8 C28 12 36 12 38 8 L44 10 L57 20 L51 31 L44 27 L44 54 L20 54 L20 27 L13 31 L7 20 Z"
-          fill="url(#kitGloss)"
+          d="M20 10 L26 8 C28 12 36 12 38 8 L44 10 L57 20 L51 31 L44 27 L20 27 L13 31 L7 20 Z"
+          fill="#ffffff"
+          fillOpacity="0.12"
         />
 
         {/* Jersey Squad Number */}
@@ -122,10 +110,12 @@ export const PlayerKit3DModel: React.FC<{
           y="39"
           textAnchor="middle"
           fill="#ffffff"
+          stroke="#0f172a"
+          strokeWidth="1.2"
+          paintOrder="stroke"
           fontSize={size === 'lg' ? '18' : '16'}
           fontWeight="900"
           fontFamily="monospace"
-          style={{ filter: 'drop-shadow(0px 1.5px 2px rgba(0,0,0,0.9))' }}
         >
           {number}
         </text>
@@ -244,7 +234,7 @@ export const PitchPlayerFigurine3D: React.FC<PitchPlayerFigurineProps> = (props)
           width="22"
           height="26"
           viewBox="0 0 28 34"
-          className="overflow-visible drop-shadow-[0_2px_2.5px_rgba(0,0,0,0.85)]"
+          className="overflow-visible"
         >
           {/* Head & Hair with 3D Shading */}
           <circle cx="14" cy="6.5" r="4.5" fill="#f1c27d" stroke="#1e293b" strokeWidth="0.8" />
@@ -291,10 +281,12 @@ export const PitchPlayerFigurine3D: React.FC<PitchPlayerFigurineProps> = (props)
             y="18.2"
             textAnchor="middle"
             fill="#ffffff"
+            stroke="#0f172a"
+            strokeWidth="0.8"
+            paintOrder="stroke"
             fontSize="7.2"
             fontWeight="900"
             fontFamily="monospace"
-            style={{ filter: 'drop-shadow(0px 0.8px 1px rgba(0,0,0,0.95))' }}
           >
             {resolvedNumber}
           </text>
@@ -568,17 +560,11 @@ export const ClubCrest3DShield: React.FC<{
 
   return (
     <div className={`relative ${dim} flex items-center justify-center shrink-0 select-none`}>
-      <svg viewBox="0 0 64 64" className="w-full h-full drop-shadow-[0_6px_10px_rgba(0,0,0,0.7)]">
-        <defs>
-          <linearGradient id={`shield_${primaryColor.replace('#', '')}`} x1="0%" y1="0%" x2="100%" y2="100%">
-            <stop offset="0%" stopColor={primaryColor} />
-            <stop offset="100%" stopColor="#0f172a" />
-          </linearGradient>
-        </defs>
+      <svg viewBox="0 0 64 64" className="w-full h-full">
         {/* Outer Metallic Shield Frame */}
         <path
           d="M32 4 L56 12 L56 32 C56 47 44 56 32 60 C20 56 8 47 8 32 L8 12 Z"
-          fill={`url(#shield_${primaryColor.replace('#', '')})`}
+          fill={primaryColor}
           stroke="#fbbf24"
           strokeWidth="2.5"
           strokeLinejoin="round"
@@ -602,9 +588,11 @@ export const ClubCrest3DShield: React.FC<{
           y="39"
           textAnchor="middle"
           fill="#ffffff"
+          stroke="#0f172a"
+          strokeWidth="1.2"
+          paintOrder="stroke"
           fontSize="20"
           fontWeight="900"
-          style={{ filter: 'drop-shadow(0px 2px 3px rgba(0,0,0,0.85))' }}
         >
           {initial}
         </text>

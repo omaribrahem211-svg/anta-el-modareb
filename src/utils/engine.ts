@@ -2364,43 +2364,43 @@ export function simulateMatchStep(
     }
   }
 
-  // 4. Tactical Stamina Drain (Influenced by pressing, tempo, natural player physicality, and crowd boost)
+  // 4. Tactical Stamina Drain (Balanced so players finish 90 mins with healthy 80-86% stamina)
   const updatedHomeFatigue = { ...prevState.homeFatigueMap };
   const updatedAwayFatigue = { ...prevState.awayFatigueMap };
   
-  let baseHomeDrain = 0.24 * homeSynergy.staminaDrainMult;
-  if (currentHomeTactics.pressingIntensity === 'gegenpress') baseHomeDrain = 0.40 * homeSynergy.staminaDrainMult;
-  else if (currentHomeTactics.pressingIntensity === 'high') baseHomeDrain = 0.33 * homeSynergy.staminaDrainMult;
-  else if (currentHomeTactics.pressingIntensity === 'low') baseHomeDrain = 0.17 * homeSynergy.staminaDrainMult;
-  if (currentHomeTactics.tempo === 'fast') baseHomeDrain += 0.04;
-  else if (currentHomeTactics.tempo === 'slow') baseHomeDrain -= 0.03;
+  let baseHomeDrain = 0.13 * homeSynergy.staminaDrainMult;
+  if (currentHomeTactics.pressingIntensity === 'gegenpress') baseHomeDrain = 0.21 * homeSynergy.staminaDrainMult;
+  else if (currentHomeTactics.pressingIntensity === 'high') baseHomeDrain = 0.17 * homeSynergy.staminaDrainMult;
+  else if (currentHomeTactics.pressingIntensity === 'low') baseHomeDrain = 0.10 * homeSynergy.staminaDrainMult;
+  if (currentHomeTactics.tempo === 'fast') baseHomeDrain += 0.02;
+  else if (currentHomeTactics.tempo === 'slow') baseHomeDrain -= 0.02;
 
-  let baseAwayDrain = 0.24 * awaySynergy.staminaDrainMult;
-  if (currentAwayTactics.pressingIntensity === 'gegenpress') baseAwayDrain = 0.40 * awaySynergy.staminaDrainMult;
-  else if (currentAwayTactics.pressingIntensity === 'high') baseAwayDrain = 0.33 * awaySynergy.staminaDrainMult;
-  else if (currentAwayTactics.pressingIntensity === 'low') baseAwayDrain = 0.17 * awaySynergy.staminaDrainMult;
-  if (currentAwayTactics.tempo === 'fast') baseAwayDrain += 0.04;
-  else if (currentAwayTactics.tempo === 'slow') baseAwayDrain -= 0.03;
+  let baseAwayDrain = 0.13 * awaySynergy.staminaDrainMult;
+  if (currentAwayTactics.pressingIntensity === 'gegenpress') baseAwayDrain = 0.21 * awaySynergy.staminaDrainMult;
+  else if (currentAwayTactics.pressingIntensity === 'high') baseAwayDrain = 0.17 * awaySynergy.staminaDrainMult;
+  else if (currentAwayTactics.pressingIntensity === 'low') baseAwayDrain = 0.10 * awaySynergy.staminaDrainMult;
+  if (currentAwayTactics.tempo === 'fast') baseAwayDrain += 0.02;
+  else if (currentAwayTactics.tempo === 'slow') baseAwayDrain -= 0.02;
 
-  const homePressingDrain = Math.max(0.12, baseHomeDrain * (1 - homeStaffBonuses.staminaDrainReduction - crowdAdvantage.staminaBuffer));
-  const awayPressingDrain = Math.max(0.14, baseAwayDrain * (1 - awayStaffBonuses.staminaDrainReduction));
+  const homePressingDrain = Math.max(0.07, baseHomeDrain * (1 - homeStaffBonuses.staminaDrainReduction - crowdAdvantage.staminaBuffer));
+  const awayPressingDrain = Math.max(0.08, baseAwayDrain * (1 - awayStaffBonuses.staminaDrainReduction));
 
   activeHomeLineup.forEach(id => {
     const pObj = prevState.homeTeam?.players?.find(p => p && p.id === id);
     const isGK = pObj?.positionCategory === 'GK';
     const physicalStaminaBonus = ((pObj?.attributes?.physical || 65) - 65) * 0.002;
-    const drain = isGK ? 0.04 : Math.max(0.10, homePressingDrain - physicalStaminaBonus);
+    const drain = isGK ? 0.03 : Math.max(0.06, homePressingDrain - physicalStaminaBonus);
     const currentVal = updatedHomeFatigue[id] ?? pObj?.fitness ?? 95;
-    updatedHomeFatigue[id] = Math.max(25, Number((currentVal - drain).toFixed(1)));
+    updatedHomeFatigue[id] = Math.max(45, Number((currentVal - drain).toFixed(1)));
   });
 
   activeAwayLineup.forEach(id => {
     const pObj = prevState.awayTeam?.players?.find(p => p && p.id === id);
     const isGK = pObj?.positionCategory === 'GK';
     const physicalStaminaBonus = ((pObj?.attributes?.physical || 65) - 65) * 0.002;
-    const drain = isGK ? 0.04 : Math.max(0.12, awayPressingDrain - physicalStaminaBonus);
+    const drain = isGK ? 0.03 : Math.max(0.07, awayPressingDrain - physicalStaminaBonus);
     const currentVal = updatedAwayFatigue[id] ?? pObj?.fitness ?? 95;
-    updatedAwayFatigue[id] = Math.max(25, Number((currentVal - drain).toFixed(1)));
+    updatedAwayFatigue[id] = Math.max(45, Number((currentVal - drain).toFixed(1)));
   });
 
   return {

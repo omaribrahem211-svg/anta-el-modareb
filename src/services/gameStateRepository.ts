@@ -223,11 +223,14 @@ async function executeSave(payload: LocalGameSavePayload): Promise<void> {
     console.warn('[GameStateRepo] Notice writing to IndexedDB (state safely held in memory cache):', err);
   }
 
-  // 4. Lightweight header-only metadata sync to localStorage (never write heavy teams/fixtures/market arrays!)
+  // 4. Mirror essential career state to localStorage with try/catch protection so cold restarts never lose division/club progress
   setTimeout(() => {
     try {
       safeLocalStorageSet(`${LEGACY_STORAGE_PREFIX}_meta_save_version`, String(timestampedPayload.saveVersion));
       safeLocalStorageSet(`${LEGACY_STORAGE_PREFIX}_meta_save_time`, String(timestampedPayload.lastLocalSaveAt));
+      if (timestampedPayload.activeLeague) {
+        safeLocalStorageSet(`${LEGACY_STORAGE_PREFIX}_activeLeague`, JSON.stringify(timestampedPayload.activeLeague));
+      }
       if (timestampedPayload.manager) {
         safeLocalStorageSet(`${LEGACY_STORAGE_PREFIX}_manager`, JSON.stringify(timestampedPayload.manager));
       }
@@ -246,10 +249,28 @@ async function executeSave(payload: LocalGameSavePayload): Promise<void> {
       if (timestampedPayload.standings) {
         safeLocalStorageSet(`${LEGACY_STORAGE_PREFIX}_standings`, JSON.stringify(timestampedPayload.standings));
       }
+      if (timestampedPayload.boardSystem) {
+        safeLocalStorageSet(`${LEGACY_STORAGE_PREFIX}_boardSystem`, JSON.stringify(timestampedPayload.boardSystem));
+      }
+      if (Array.isArray(timestampedPayload.teams) && timestampedPayload.teams.length > 0) {
+        safeLocalStorageSet(`${LEGACY_STORAGE_PREFIX}_teams`, JSON.stringify(timestampedPayload.teams));
+      }
+      if (Array.isArray(timestampedPayload.fixtures) && timestampedPayload.fixtures.length > 0) {
+        safeLocalStorageSet(`${LEGACY_STORAGE_PREFIX}_fixtures`, JSON.stringify(timestampedPayload.fixtures));
+      }
+      if (Array.isArray(timestampedPayload.transferMarket)) {
+        safeLocalStorageSet(`${LEGACY_STORAGE_PREFIX}_transferMarket`, JSON.stringify(timestampedPayload.transferMarket));
+      }
+      if (Array.isArray(timestampedPayload.transferHistory)) {
+        safeLocalStorageSet(`${LEGACY_STORAGE_PREFIX}_transferHistory`, JSON.stringify(timestampedPayload.transferHistory));
+      }
+      if (Array.isArray(timestampedPayload.activeNegotiations)) {
+        safeLocalStorageSet(`${LEGACY_STORAGE_PREFIX}_activeNegotiations`, JSON.stringify(timestampedPayload.activeNegotiations));
+      }
     } catch (mirrorErr) {
       console.warn('[GameStateRepo] Deferred header metadata sync notice:', mirrorErr);
     }
-  }, 50);
+  }, 20);
 }
 
 export const gameStateRepository = {
@@ -297,7 +318,7 @@ export const gameStateRepository = {
     // 1. Try loading from IndexedDB first
     try {
       const idbSave = await idbGet<LocalGameSavePayload>('current_save');
-      if (idbSave && idbSave.manager && idbSave.teams) {
+      if (idbSave && idbSave.manager && Array.isArray(idbSave.teams) && idbSave.teams.length > 0) {
         inMemorySaveCache = idbSave;
         evictHeavyLocalStorageKeys(LEGACY_STORAGE_PREFIX);
         return idbSave;
@@ -307,7 +328,7 @@ export const gameStateRepository = {
     }
 
     // 2. Try in-memory cache
-    if (inMemorySaveCache && inMemorySaveCache.manager && inMemorySaveCache.teams) {
+    if (inMemorySaveCache && inMemorySaveCache.manager && Array.isArray(inMemorySaveCache.teams) && inMemorySaveCache.teams.length > 0) {
       return inMemorySaveCache;
     }
 
@@ -339,7 +360,7 @@ export const gameStateRepository = {
         transferMarket: safeParse('transferMarket', []),
         incomingBids: safeParse('incomingBids', []),
         inbox: safeParse('inbox', []),
-        cupTournament: safeParse('cupTournament', null),
+        cupTournament: null,
         jobOffers: safeParse('jobOffers', []),
         seasonEndSummary: safeParse('seasonEndSummary', null),
         transferHistory: safeParse('transferHistory', []),

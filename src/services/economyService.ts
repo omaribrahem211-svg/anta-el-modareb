@@ -279,7 +279,13 @@ export function calculateClubMonthlyIncome(club: Club): number {
   const tvCommercial = tvAndCommercialByTier[tier] || 15000;
 
   // 5. User-transferred wage budget supplement (المحول من الخزينة النقدية)
-  const wageBonus = Math.max(0, club.wageBudgetMonthly || 0);
+  const wageBonus = Math.max(
+    0,
+    (typeof club.wageBudgetMonthly === 'number' ? club.wageBudgetMonthly : 0) +
+      (typeof (club as any).wageBudget === 'number' && (club as any).wageBudget !== club.wageBudgetMonthly
+        ? (club as any).wageBudget
+        : 0)
+  );
 
   return guaranteedPayrollFloor + estimatedTicketIncome + tvCommercial + wageBonus;
 }

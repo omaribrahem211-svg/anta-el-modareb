@@ -129,26 +129,30 @@ export function processPostMatchPlayerUpdates(
     }
 
     if (isStarter) {
-      // 1. STARTER: Stamina decay mitigated by fitness coach
-      const baseDrain = Math.floor(Math.random() * 6 + 11); // 11 to 16 (realistic drain)
-      const actualDrain = Math.max(6, Math.round(baseDrain * (1 - staffBonuses.staminaDrainReduction)));
-      const newFitness = Math.max(35, Math.min(100, (p.fitness ?? 90) - actualDrain));
+      // 1. STARTER: Gentle net post-match stamina adjustment (reflecting post-match recovery + week rest before next round)
+      const currentFit = p.fitness ?? 92;
+      const baseDrain = Math.floor(Math.random() * 4 + 4); // 4 to 7% net drain
+      const actualDrain = Math.max(3, Math.round(baseDrain * (1 - staffBonuses.staminaDrainReduction)));
+      // If starter was already low (< 82%), give them partial recovery toward 85% so they don't stay exhausted across consecutive rounds
+      const newFitness = currentFit < 82
+        ? Math.min(92, currentFit + Math.floor(Math.random() * 6 + 8))
+        : Math.max(65, Math.min(100, currentFit - actualDrain));
 
-      // 2. Realistic, low injury risk ONLY if playing while severely exhausted (< 45 fitness) and squad has < 2 injuries
+      // 2. Realistic, low injury risk ONLY if playing while severely exhausted (< 42 fitness) and squad has < 1 injury
       let isInjured = false;
       let injuryType: string | undefined = undefined;
       let injuryWeeks: number | undefined = undefined;
       let injuryObj: Player['injury'] = null;
 
       if (
-        (p.fitness ?? 90) < 42 &&
+        currentFit < 42 &&
         activeInjuredCount < 1 &&
         newInjuriesThisMatch < 1
       ) {
-        const injuryChance = 0.012 * (1 - staffBonuses.injuryRiskReduction);
+        const injuryChance = 0.008 * (1 - staffBonuses.injuryRiskReduction);
         if (Math.random() < injuryChance) {
           const isMinorKnock = Math.random() < 0.85;
-          const durationDays = isMinorKnock ? Math.floor(Math.random() * 2) + 2 : Math.floor(Math.random() * 3) + 4; // 85% minor knock (2-3 days)
+          const durationDays = isMinorKnock ? Math.floor(Math.random() * 2) + 2 : Math.floor(Math.random() * 3) + 4;
           isInjured = true;
           injuryType = isMinorKnock ? 'كدمة خفيفة وإجهاد بسيط' : 'شد عضلي خفيف نتيجة الإرهاق';
           injuryWeeks = 1;
@@ -179,7 +183,7 @@ export function processPostMatchPlayerUpdates(
 
       // Starter morale boost on win, reset bench unhappiness
       const moraleDelta = isTeamWin ? +6 : isTeamDraw ? +2 : -2;
-      const newMorale = Math.min(100, Math.max(30, (p.morale ?? 75) + moraleDelta));
+      const newMorale = Math.min(100, Math.max(35, (p.morale ?? 75) + moraleDelta));
 
       updatedPlayers.push({
         ...p,
@@ -193,13 +197,16 @@ export function processPostMatchPlayerUpdates(
         disgruntled: false,
       });
     } else if (isSub) {
-      // 2. SUBSTITUTE: Played partial match, light stamina drain, good morale boost
-      const baseSubDrain = Math.floor(Math.random() * 4 + 6); // 6 to 9
-      const actualSubDrain = Math.max(4, Math.round(baseSubDrain * (1 - staffBonuses.staminaDrainReduction)));
-      const newFitness = Math.max(40, Math.min(100, (p.fitness ?? 90) - actualSubDrain));
+      // 2. SUBSTITUTE: Played partial match, very light stamina drain or net recovery
+      const currentFit = p.fitness ?? 92;
+      const baseSubDrain = Math.floor(Math.random() * 3 + 2); // 2 to 4%
+      const actualSubDrain = Math.max(2, Math.round(baseSubDrain * (1 - staffBonuses.staminaDrainReduction)));
+      const newFitness = currentFit < 85
+        ? Math.min(95, currentFit + 8)
+        : Math.max(72, Math.min(100, currentFit - actualSubDrain));
 
-      const subMoraleDelta = isTeamWin ? +5 : isTeamDraw ? +3 : +1; // Happy to get minutes
-      const newMorale = Math.min(100, Math.max(40, (p.morale ?? 75) + subMoraleDelta));
+      const subMoraleDelta = isTeamWin ? +5 : isTeamDraw ? +3 : +1;
+      const newMorale = Math.min(100, Math.max(45, (p.morale ?? 75) + subMoraleDelta));
 
       updatedPlayers.push({
         ...p,
@@ -213,13 +220,13 @@ export function processPostMatchPlayerUpdates(
         disgruntled: false,
       });
     } else {
-      // 3. BENCH / RESERVES: Rest recovery boosted by fitness coach
-      const baseGain = Math.floor(Math.random() * 6 + 16); // 16 to 21
+      // 3. BENCH / RESERVES: Fast rest recovery boosted by fitness coach (+22 to +30%)
+      const baseGain = Math.floor(Math.random() * 9 + 22); // 22 to 30
       const actualGain = Math.round(baseGain * (1 + staffBonuses.restRecoveryBonus));
-      const newFitness = Math.min(100, (p.fitness ?? 80) + actualGain);
+      const newFitness = Math.min(100, (p.fitness ?? 85) + actualGain);
 
       // 4. Morale for sitting on bench: Rested players maintain good morale and recover full fitness
-      const newMorale = Math.max(65, Math.min(100, (p.morale ?? 80)));
+      const newMorale = Math.max(68, Math.min(100, (p.morale ?? 80)));
 
       updatedPlayers.push({
         ...p,

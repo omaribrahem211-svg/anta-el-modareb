@@ -2080,7 +2080,7 @@ export function processNewSeasonAdvancement(
     if (currentCountry === 'ويلز' || currentCountry === 'WAL' || currentCountry.includes('ويلز')) {
       currentCountry = 'إنجلترا';
     }
-    const oldDivisionTier = userClub?.division ?? currentLeague.tier;
+    const oldDivisionTier = summary.divisionTier || currentLeague.tier;
     const newDivisionTier = summary.nextDivisionTier ?? oldDivisionTier;
 
     if (newDivisionTier === oldDivisionTier) {
@@ -2098,7 +2098,7 @@ export function processNewSeasonAdvancement(
   // Apply promotion/relegation to universe FIRST, regardless of whether manager accepts a job offer!
   if (userClub) {
     const currentLeague = getLeagueById(summary.leagueId || currentSeason.leagueId);
-    const oldDivisionTier = userClub.division ?? currentLeague.tier;
+    const oldDivisionTier = summary.divisionTier || currentLeague.tier;
     const newDivisionTier = summary.nextDivisionTier ?? oldDivisionTier;
 
     // If tier changed (promoted or relegated):
@@ -2617,9 +2617,12 @@ export function processNewSeasonAdvancement(
     seasonEarnings: summary.prizeMoney + (summary.wins * 2000),
   };
 
+  const alreadyAwardedTrophiesThisSeason = (manager as any).lastTrophyAwardedSeasonNumber === currentSeason.seasonNumber;
   const allClubsManaged = Array.from(new Set([...(manager.clubsManaged || []), summary.clubName, nextUserClub.name]));
   const allCountriesManaged = Array.from(new Set([...(manager.countriesManaged || []), effectiveUserClub?.country || 'مصر', nextActiveLeague.country]));
-  const allTrophies = [...(manager.trophies || []), ...trophiesWonThisSeason];
+  const allTrophies = alreadyAwardedTrophiesThisSeason
+    ? [...(manager.trophies || [])]
+    : [...(manager.trophies || []), ...trophiesWonThisSeason];
 
   // Conquered Leagues & World Domination calculation
   const prevConquered = manager.conqueredLeagues || [];
@@ -2648,10 +2651,10 @@ export function processNewSeasonAdvancement(
     age: settledManagerState.age + 1,
     reputation: Math.min(100, Math.max(1, settledManagerState.reputation + summary.reputationChange)),
     totalSeasons: settledManagerState.totalSeasons + 1,
-    leagueTitles: settledManagerState.leagueTitles + (summary.resultStatus === 'champion' ? 1 : 0),
-    cupTitles: settledManagerState.cupTitles + (summary.cupTrophyAwarded ? 1 : 0),
-    promotions: settledManagerState.promotions + (summary.resultStatus === 'promoted' || (summary.resultStatus === 'champion' && summary.divisionTier > 1) ? 1 : 0),
-    relegations: settledManagerState.relegations + (summary.resultStatus === 'relegated' ? 1 : 0),
+    leagueTitles: settledManagerState.leagueTitles + (!alreadyAwardedTrophiesThisSeason && summary.resultStatus === 'champion' ? 1 : 0),
+    cupTitles: settledManagerState.cupTitles + (!alreadyAwardedTrophiesThisSeason && summary.cupTrophyAwarded ? 1 : 0),
+    promotions: settledManagerState.promotions + (!alreadyAwardedTrophiesThisSeason && (summary.resultStatus === 'promoted' || (summary.resultStatus === 'champion' && summary.divisionTier > 1)) ? 1 : 0),
+    relegations: settledManagerState.relegations + (!alreadyAwardedTrophiesThisSeason && summary.resultStatus === 'relegated' ? 1 : 0),
     clubsManaged: allClubsManaged,
     countriesManaged: allCountriesManaged,
     highestLeagueReached: settledManagerState.highestLeagueReached ? `${settledManagerState.highestLeagueReached}, ${nextActiveLeague.name}` : nextActiveLeague.name,
@@ -2659,7 +2662,7 @@ export function processNewSeasonAdvancement(
     highestReputation: Math.max(settledManagerState.highestReputation, settledManagerState.reputation + summary.reputationChange),
     developmentPoints: (settledManagerState.developmentPoints || 0) + (summary.developmentPointsEarned || 0),
     trophies: allTrophies,
-    careerEarnings: settledManagerState.careerEarnings + summary.prizeMoney,
+    careerEarnings: settledManagerState.careerEarnings + (alreadyAwardedTrophiesThisSeason ? 0 : summary.prizeMoney),
     personalWallet: settledManagerState.personalWallet || 0,
     totalBonusesEarned: settledManagerState.totalBonusesEarned || 0,
     conqueredLeagues: newConqueredLeagues,

@@ -519,7 +519,28 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       const saved = localStorage.getItem(`${STORAGE_KEY}_activeLeague`);
       const parsed = saved ? JSON.parse(saved) : null;
       if (parsed && typeof parsed === 'object' && parsed.id) {
-        return parsed;
+        return getLeagueById(parsed.id) || parsed;
+      }
+      // Fallback 1: Resolve from saved season leagueId so promoted players never drop back to Division 4
+      const savedSeasonRaw = localStorage.getItem(`${STORAGE_KEY}_season`);
+      if (savedSeasonRaw) {
+        const parsedSeason = JSON.parse(savedSeasonRaw);
+        if (parsedSeason?.leagueId) {
+          const bySeasonLeague = getLeagueById(parsedSeason.leagueId);
+          if (bySeasonLeague) return bySeasonLeague;
+        }
+      }
+      // Fallback 2: Resolve from saved manager currentClubId across GLOBAL_LEAGUES
+      const savedMgrRaw = localStorage.getItem(`${STORAGE_KEY}_manager`);
+      if (savedMgrRaw) {
+        const parsedMgr = JSON.parse(savedMgrRaw);
+        if (parsedMgr?.currentClubId) {
+          for (const league of Object.values(GLOBAL_LEAGUES)) {
+            if ((league.teams || []).some(t => t && t.id === parsedMgr.currentClubId)) {
+              return league;
+            }
+          }
+        }
       }
       return EGYPT_TIER_4_LEAGUE;
     } catch {
@@ -697,12 +718,20 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         youthAcademyLevel: 1,
         scoutingNetworkLevel: 1,
       },
+      wageBudgetMonthly: typeof t.wageBudgetMonthly === 'number' ? t.wageBudgetMonthly : 0,
       tactics: {
+        ...(t.tactics || {}),
         formation: t.tactics?.formation || '4-3-3',
+        tacticalStyle: t.tactics?.tacticalStyle || (t.tactics as any)?.playStyle || 'total_football',
         mentality: t.tactics?.mentality || 'balanced',
         passingStyle: t.tactics?.passingStyle || 'short',
         pressingIntensity: t.tactics?.pressingIntensity || 'balanced',
         tempo: t.tactics?.tempo || 'balanced',
+        defensiveBlock: t.tactics?.defensiveBlock || 'mid_block',
+        buildUpStyle: t.tactics?.buildUpStyle || 'mixed',
+        pressingTrap: t.tactics?.pressingTrap || 'none',
+        fullbackRole: t.tactics?.fullbackRole || 'balanced',
+        strikerRole: t.tactics?.strikerRole || 'poacher',
         startingPlayerIds: Array.isArray(startingPlayerIds) ? startingPlayerIds : [],
         benchPlayerIds: Array.isArray(benchPlayerIds) ? benchPlayerIds : [],
         captainId: t.tactics?.captainId || players[0]?.id || '',
@@ -837,7 +866,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       const savedMarketRaw = localStorage.getItem(`${STORAGE_KEY}_transferMarket`);
       const savedMarket = savedMarketRaw ? JSON.parse(savedMarketRaw) : INITIAL_TRANSFER_MARKET;
 
-      let rawTeams = INITIAL_TEAMS;
+      let rawTeams = (activeLeague?.teams && activeLeague.teams.length > 0) ? activeLeague.teams : INITIAL_TEAMS;
       if (saved) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed) && parsed.length > 0) {
@@ -855,8 +884,9 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       const validated = validateCareerState(manager, overriddenTeams, GLOBAL_LEAGUES);
       return validated.teams;
     } catch {
+      const fallbackLeagueTeams = (activeLeague?.teams && activeLeague.teams.length > 0) ? activeLeague.teams : INITIAL_TEAMS;
       const activeLeagueId = activeLeague?.id || 'egy_tier_4';
-      const migrationResult = runOneTimeWorldMigration(INITIAL_TEAMS, INITIAL_TRANSFER_MARKET, activeLeagueId);
+      const migrationResult = runOneTimeWorldMigration(fallbackLeagueTeams, INITIAL_TRANSFER_MARKET, activeLeagueId);
       const normalizedTeams = migrationResult.teams.map(normalizeClub);
       const overriddenTeams = applyWorldOverridesToClubs(normalizedTeams);
       const validated = validateCareerState(manager, overriddenTeams, GLOBAL_LEAGUES);
@@ -1632,8 +1662,9 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   const careerStateValidationGuardRef = useRef<string>('');
 
-  // Self-healing invariant: Ensure manager is actively linked to their club in state
+  // Self-healing invariant: Ensure manager is actively linked to their club in state (only after initial hydration completes)
   useEffect(() => {
+    if (!isInitialLoadDoneRef.current) return;
     const validated = validateCareerState(manager, teams, GLOBAL_LEAGUES);
     const targetSig = `${validated.manager.currentClubId || ''}_${validated.manager.isUnemployed ? 1 : 0}`;
     const hasUserClubInTeams = (Array.isArray(teams) ? teams : []).some(
@@ -2047,8 +2078,46 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     };
   }, [user?.uid, applyLoadedSave]);
 
-  // Persist game state (Local-First: IndexedDB + localStorage mirror, debounced to avoid UI freezing)
+  // Persist game state (Local-First: IndexedDB + localStorage mirror, debounced + immediate flush on tab change / page hide)
   const saveTimeoutRef = useRef<any>(null);
+  const flushLocalSaveImmediate = useCallback((overrides?: Partial<any>) => {
+    if (!isInitialLoadDoneRef.current) return;
+    try {
+      gameStateRepository.saveLocalGameState({
+        schemaVersion: 2,
+        saveVersion: 1,
+        lastLocalSaveAt: Date.now(),
+        season,
+        activeLeague,
+        teams,
+        standings,
+        fixtures,
+        currentRound,
+        manager,
+        transferMarket,
+        incomingBids,
+        inbox,
+        cupTournament: null,
+        africanChampionsLeague: null,
+        jobOffers,
+        seasonEndSummary,
+        transferHistory,
+        clubEconomy,
+        calendarDate,
+        activeNegotiations,
+        boardSystem,
+        dailyNews,
+        retiredPlayers,
+        worldRankings,
+        scoutedOpponents,
+        deletedMessageIds,
+        ...(overrides || {}),
+      });
+    } catch (err) {
+      console.warn('Failed immediate flush to local state repository:', err);
+    }
+  }, [season, activeLeague, teams, standings, fixtures, currentRound, manager, transferMarket, incomingBids, inbox, jobOffers, seasonEndSummary, transferHistory, clubEconomy, calendarDate, activeNegotiations, boardSystem, dailyNews, retiredPlayers, worldRankings, scoutedOpponents, deletedMessageIds]);
+
   useEffect(() => {
     if (!isInitialLoadDoneRef.current) return;
 
@@ -2057,52 +2126,40 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
 
     saveTimeoutRef.current = setTimeout(() => {
-      try {
-        gameStateRepository.saveLocalGameState({
-          schemaVersion: 2,
-          saveVersion: 1,
-          lastLocalSaveAt: Date.now(),
-          season,
-          activeLeague,
-          teams,
-          standings,
-          fixtures,
-          currentRound,
-          manager,
-          transferMarket,
-          incomingBids,
-          inbox,
-          cupTournament,
-          africanChampionsLeague,
-          jobOffers,
-          seasonEndSummary,
-          transferHistory,
-          clubEconomy,
-          calendarDate,
-          activeNegotiations,
-          boardSystem,
-          dailyNews,
-          retiredPlayers,
-          worldRankings,
-          scoutedOpponents,
-          deletedMessageIds,
-        });
-
-        // Queue coalesced debounced background cloud sync
-        if (user?.uid) {
-          smartSyncManager.queueDebouncedSync(getSyncInput());
-        }
-      } catch (err) {
-        console.warn('Failed to save to local state repository:', err);
+      flushLocalSaveImmediate();
+      if (user?.uid) {
+        smartSyncManager.queueDebouncedSync(getSyncInput());
       }
-    }, 1000);
+    }, 350);
 
     return () => {
       if (saveTimeoutRef.current) {
         clearTimeout(saveTimeoutRef.current);
       }
     };
-  }, [season, activeLeague, teams, standings, fixtures, currentRound, manager, transferMarket, incomingBids, inbox, cupTournament, africanChampionsLeague, jobOffers, seasonEndSummary, transferHistory, clubEconomy, calendarDate, activeNegotiations, boardSystem, dailyNews, retiredPlayers, worldRankings, scoutedOpponents, deletedMessageIds, user?.uid, getSyncInput]);
+  }, [season, activeLeague, teams, standings, fixtures, currentRound, manager, transferMarket, incomingBids, inbox, cupTournament, africanChampionsLeague, jobOffers, seasonEndSummary, transferHistory, clubEconomy, calendarDate, activeNegotiations, boardSystem, dailyNews, retiredPlayers, worldRankings, scoutedOpponents, deletedMessageIds, user?.uid, getSyncInput, flushLocalSaveImmediate]);
+
+  // Flush save immediately on screen/tab switch, app backgrounding, or window close
+  useEffect(() => {
+    const handleImmediateSaveTrigger = () => {
+      flushLocalSaveImmediate();
+    };
+    window.addEventListener('set-active-tab', handleImmediateSaveTrigger);
+    window.addEventListener('pagehide', handleImmediateSaveTrigger);
+    window.addEventListener('beforeunload', handleImmediateSaveTrigger);
+    const handleVisChange = () => {
+      if (document.visibilityState === 'hidden') {
+        flushLocalSaveImmediate();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisChange);
+    return () => {
+      window.removeEventListener('set-active-tab', handleImmediateSaveTrigger);
+      window.removeEventListener('pagehide', handleImmediateSaveTrigger);
+      window.removeEventListener('beforeunload', handleImmediateSaveTrigger);
+      document.removeEventListener('visibilitychange', handleVisChange);
+    };
+  }, [flushLocalSaveImmediate]);
 
   // Cloud Synchronization with Firestore (Delegated to SmartSyncManager with Dirty & Quota Protections)
   const saveToCloud = useCallback(async (isManual: boolean = false): Promise<{ success: boolean; message: string }> => {
@@ -2432,39 +2489,68 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   // Actions
   const updateTactics = (tactics: TeamTactics) => {
-    setTeams(prev => prev.map(t => t.isUserClub ? { ...t, tactics } : t));
+    const targetId = userClub?.id || manager?.currentClubId;
+    setTeams(prev => {
+      const next = prev.map(t =>
+        (t.isUserClub || (targetId && t.id === targetId))
+          ? {
+              ...t,
+              isUserClub: true,
+              tactics: {
+                ...(t.tactics || {}),
+                ...tactics,
+                tacticalStyle: tactics.tacticalStyle || (tactics as any).playStyle || t.tactics?.tacticalStyle || 'total_football',
+              },
+            }
+          : t
+      );
+      flushLocalSaveImmediate({ teams: next });
+      return next;
+    });
     try {
       challengesManager.recordTacticsAdjusted();
     } catch (_) {}
   };
 
   const setFormation = (formation: FormationType) => {
-    setTeams(prev => prev.map(t => {
-      if (!t.isUserClub || !t.tactics) return t;
-      const reorderedStarters = reorderStartingIdsForFormation(t, formation);
-      return {
-        ...t,
-        tactics: {
-          ...t.tactics,
-          formation,
-          startingPlayerIds: reorderedStarters,
-        }
-      };
-    }));
+    const targetId = userClub?.id || manager?.currentClubId;
+    setTeams(prev => {
+      const next = prev.map(t => {
+        if ((!t.isUserClub && (!targetId || t.id !== targetId)) || !t.tactics) return t;
+        const reorderedStarters = reorderStartingIdsForFormation(t, formation);
+        return {
+          ...t,
+          isUserClub: true,
+          tactics: {
+            ...t.tactics,
+            formation,
+            startingPlayerIds: reorderedStarters,
+          },
+        };
+      });
+      flushLocalSaveImmediate({ teams: next });
+      return next;
+    });
   };
 
   const updateStartingLineup = (startingIds: string[], benchIds: string[]) => {
-    setTeams(prev => prev.map(t => {
-      if (!t.isUserClub || !t.tactics) return t;
-      return {
-        ...t,
-        tactics: {
-          ...t.tactics,
-          startingPlayerIds: startingIds,
-          benchPlayerIds: benchIds,
-        }
-      };
-    }));
+    const targetId = userClub?.id || manager?.currentClubId;
+    setTeams(prev => {
+      const next = prev.map(t => {
+        if ((!t.isUserClub && (!targetId || t.id !== targetId)) || !t.tactics) return t;
+        return {
+          ...t,
+          isUserClub: true,
+          tactics: {
+            ...t.tactics,
+            startingPlayerIds: startingIds,
+            benchPlayerIds: benchIds,
+          },
+        };
+      });
+      flushLocalSaveImmediate({ teams: next });
+      return next;
+    });
   };
 
   const swapPlayers = (sourcePlayerId: string, targetPlayerId: string) => {
@@ -2516,16 +2602,22 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   const setCaptainAndSetPieces = (roles: { captainId?: string; penaltyTakerId?: string; freeKickTakerId?: string; cornerTakerId?: string }) => {
-    setTeams(prev => prev.map(t => {
-      if (!t.isUserClub || !t.tactics) return t;
-      return {
-        ...t,
-        tactics: {
-          ...t.tactics,
-          ...roles,
-        }
-      };
-    }));
+    const targetId = userClub?.id || manager?.currentClubId;
+    setTeams(prev => {
+      const next = prev.map(t => {
+        if ((!t.isUserClub && (!targetId || t.id !== targetId)) || !t.tactics) return t;
+        return {
+          ...t,
+          isUserClub: true,
+          tactics: {
+            ...t.tactics,
+            ...roles,
+          },
+        };
+      });
+      flushLocalSaveImmediate({ teams: next });
+      return next;
+    });
   };
 
   const setPlayerTrainingFocus = (playerId: string, focus: Player['trainingFocus']) => {
@@ -3947,11 +4039,23 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         africanChampionsLeague
       );
 
-      // End-of-Season Execution Order:
-      // 1) Calculate season bonus & salary -> deposit to manager.personalWallet
-      // 2) Deduct annual license renewal fee from manager.personalWallet
-      // 3) Auto-downgrade license if insufficient funds with warning notification
-      // 4) Open League Selection Screen based on settled active license
+      // Immediately record League Trophy & Promotion in manager.trophies so Trophy Cabinet updates right away
+      if ((updatedManager as any).lastTrophyAwardedSeasonNumber !== season.seasonNumber) {
+        const newTrophiesList = [...(updatedManager.trophies || [])];
+        if (summary.leagueTrophyAwarded && !newTrophiesList.includes(summary.leagueTrophyAwarded)) {
+          newTrophiesList.push(summary.leagueTrophyAwarded);
+        }
+        updatedManager = {
+          ...updatedManager,
+          trophies: newTrophiesList,
+          leagueTitles: (updatedManager.leagueTitles || 0) + (summary.resultStatus === 'champion' ? 1 : 0),
+          promotions: (updatedManager.promotions || 0) + (summary.resultStatus === 'promoted' || (summary.resultStatus === 'champion' && summary.divisionTier > 1) ? 1 : 0),
+          relegations: (updatedManager.relegations || 0) + (summary.resultStatus === 'relegated' ? 1 : 0),
+          careerEarnings: (updatedManager.careerEarnings || 0) + (summary.prizeMoney || 0),
+          lastTrophyAwardedSeasonNumber: season.seasonNumber,
+        } as any;
+      }
+
       if (updatedManager.lastSettledSeasonNumber !== season.seasonNumber) {
         const endOfSeasonManagerBonus = Math.round(summary.prizeMoney * 0.15) + ((updatedManager.personalSalary || 15000) * 12);
         const settlementRes = settleEndOfSeasonLicenseAndBonus(updatedManager, endOfSeasonManagerBonus, season.seasonNumber);
@@ -4823,6 +4927,22 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         updatedManager,
         africanChampionsLeague
       );
+
+      if ((updatedManager as any).lastTrophyAwardedSeasonNumber !== season.seasonNumber) {
+        const newTrophiesList = [...(updatedManager.trophies || [])];
+        if (summary.leagueTrophyAwarded && !newTrophiesList.includes(summary.leagueTrophyAwarded)) {
+          newTrophiesList.push(summary.leagueTrophyAwarded);
+        }
+        updatedManager = {
+          ...updatedManager,
+          trophies: newTrophiesList,
+          leagueTitles: (updatedManager.leagueTitles || 0) + (summary.resultStatus === 'champion' ? 1 : 0),
+          promotions: (updatedManager.promotions || 0) + (summary.resultStatus === 'promoted' || (summary.resultStatus === 'champion' && summary.divisionTier > 1) ? 1 : 0),
+          relegations: (updatedManager.relegations || 0) + (summary.resultStatus === 'relegated' ? 1 : 0),
+          careerEarnings: (updatedManager.careerEarnings || 0) + (summary.prizeMoney || 0),
+          lastTrophyAwardedSeasonNumber: season.seasonNumber,
+        } as any;
+      }
 
       if (updatedManager.lastSettledSeasonNumber !== season.seasonNumber) {
         const endOfSeasonManagerBonus = Math.round(summary.prizeMoney * 0.15) + ((updatedManager.personalSalary || 15000) * 12);
@@ -6632,25 +6752,30 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       };
     }
 
-    // 12 months wage distribution: 12 EGP of cash budget allocates 1 EGP/month of permanent wage capacity
-    const monthlyWageBonus = Math.round(cashAmount / 12);
-    if (monthlyWageBonus < 100) {
+    // 1:1 Direct conversion into wage cap so the exact amount transferred is immediately available for player salaries
+    const monthlyWageBonus = Math.round(cashAmount);
+    if (monthlyWageBonus < 500) {
       return {
         success: false,
-        message: 'الحد الأدنى للتحويل هو 1,200 ج.م لإضافة 100 ج.م شهرياً لسقف الرواتب.',
+        message: 'الحد الأدنى للتحويل هو 500 ج.م لزيادة سقف الرواتب.',
       };
     }
 
     const targetClubId = userClub.id;
-    setTeams(prev => prev.map(t => {
-      const isMatch = t.id === targetClubId || Boolean(t.isUserClub && (!targetClubId || t.id === targetClubId));
-      if (!isMatch) return t;
-      return {
-        ...t,
-        budget: Math.max(0, t.budget - cashAmount),
-        wageBudgetMonthly: (t.wageBudgetMonthly || 0) + monthlyWageBonus,
-      };
-    }));
+    setTeams(prev => {
+      const next = prev.map(t => {
+        const isMatch = t.id === targetClubId || Boolean(t.isUserClub && (!targetClubId || t.id === targetClubId));
+        if (!isMatch) return t;
+        const newWageBonus = (t.wageBudgetMonthly || 0) + monthlyWageBonus;
+        return {
+          ...t,
+          budget: Math.max(0, t.budget - cashAmount),
+          wageBudgetMonthly: newWageBonus,
+        };
+      });
+      flushLocalSaveImmediate({ teams: next });
+      return next;
+    });
 
     setClubEconomy(prev => ({
       ...prev,
@@ -6659,7 +6784,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     return {
       success: true,
-      message: `تم تحويل ${cashAmount.toLocaleString()} ج.م من ميزانية النادي إلى ميزانية الرواتب بنجاح (+${monthlyWageBonus.toLocaleString()} ج.م شهرياً لسقف الرواتب)!`,
+      message: `تم تحويل ${cashAmount.toLocaleString()} ج.م من ميزانية النادي إلى سقف الرواتب بنجاح (+${monthlyWageBonus.toLocaleString()} ج.م متاحة فوراً للتعاقدات)!`,
     };
   };
 
@@ -6669,14 +6794,14 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
 
     if (monthlyAmount <= 0) {
-      return { success: false, message: 'يرجى إدخال مبلغ شهري صحيح للتحويل!' };
+      return { success: false, message: 'يرجى إدخال مبلغ صحيح للتحويل!' };
     }
 
     const currentWageBonus = userClub.wageBudgetMonthly || 0;
     if (currentWageBonus < monthlyAmount) {
       return {
         success: false,
-        message: `فائض ميزانية الرواتب المخصص للتحويل حالياً هو (${currentWageBonus.toLocaleString()} ج.م/شهرياً) فقط!`,
+        message: `فائض ميزانية الرواتب المخصص للتحويل حالياً هو (${currentWageBonus.toLocaleString()} ج.م) فقط!`,
       };
     }
 
@@ -6694,18 +6819,22 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       };
     }
 
-    const cashGain = monthlyAmount * 12;
+    const cashGain = Math.round(monthlyAmount);
     const targetClubId = userClub.id;
 
-    setTeams(prev => prev.map(t => {
-      const isMatch = t.id === targetClubId || Boolean(t.isUserClub && (!targetClubId || t.id === targetClubId));
-      if (!isMatch) return t;
-      return {
-        ...t,
-        budget: t.budget + cashGain,
-        wageBudgetMonthly: Math.max(0, currentWageBonus - monthlyAmount),
-      };
-    }));
+    setTeams(prev => {
+      const next = prev.map(t => {
+        const isMatch = t.id === targetClubId || Boolean(t.isUserClub && (!targetClubId || t.id === targetClubId));
+        if (!isMatch) return t;
+        return {
+          ...t,
+          budget: t.budget + cashGain,
+          wageBudgetMonthly: Math.max(0, currentWageBonus - monthlyAmount),
+        };
+      });
+      flushLocalSaveImmediate({ teams: next });
+      return next;
+    });
 
     setClubEconomy(prev => ({
       ...prev,
@@ -6714,7 +6843,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     return {
       success: true,
-      message: `تم تحويل ${monthlyAmount.toLocaleString()} ج.م شهرياً من الرواتب إلى ميزانية النادي بنجاح (+${cashGain.toLocaleString()} ج.م للميزانية النقدية)!`,
+      message: `تم استرداد ${cashGain.toLocaleString()} ج.م من فائض سقف الرواتب إلى الميزانية النقدية للنادي بنجاح!`,
     };
   };
 
@@ -7538,18 +7667,14 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         setBoardSystem(initialBoard);
       }
 
-      const qualSummaryText = quals.qualificationNotes.length > 0
-        ? `\n\n🌍 المتأهلون للبطولات القارية هذا الموسم (بعد القرعة الجديدة للمجموعات):\n• ${quals.qualificationNotes.join('\n• ')}`
-        : '';
-
       const startMsg: InboxMessage = {
         id: `msg_new_season_${result.nextSeason.seasonNumber}_${Date.now()}`,
         title: `انطلاق الموسم الجديد ${result.nextSeason.seasonNumber} في ${result.nextActiveLeague.name}! 🚀`,
-        sender: 'رابطة الأندية المحترفة والاتحاد القاري',
+        sender: 'رابطة الأندية المحترفة',
         date: 'الجولة الأولى',
         type: 'news',
         read: false,
-        content: `أهلاً بك في الموسم ${result.nextSeason.seasonNumber}. تم إجراء قرعة المجموعات القارية الجديدة وإعداد جدول المباريات وجاهزية الفريق بنسبة 100%.${qualSummaryText}`,
+        content: `أهلاً بك في الموسم ${result.nextSeason.seasonNumber} ضمن منافسات ${result.nextActiveLeague.name}. تم إعداد جدول مباريات الدوري للموسم الجديد وجاهزية الفريق بنسبة 100%.`,
       };
 
       const nextClubPlayerIds = new Set((nextUserClubObj?.players || []).map(p => p.id));
@@ -7604,8 +7729,8 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           transferMarket: updatedMarketAfterWindow,
           incomingBids: [],
           inbox: newInbox,
-          cupTournament: result.nextCup,
-          africanChampionsLeague: activeNextContinental,
+          cupTournament: null,
+          africanChampionsLeague: null,
           seasonArchives: updatedSeasonArchives,
           jobOffers: [],
           seasonEndSummary: null,
@@ -8217,41 +8342,63 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       const isSeasonEndReached = (simResult.seasonFinished || newDate.rawDateStr >= seasonDateRange.endDateStr) && allLeagueFixturesPlayed && !userHasUnplayedMatches;
 
       if (isSeasonEndReached && !seasonFinished) {
-        const transResult = SeasonTransitionManager.executeSeasonTransition({
-          currentSeason: season,
+        const summaryClub = userClub || teams.find(t => t.isUserClub) || teams[0];
+        let activeMgr = manager;
+        const summary = calculateSeasonEndSummary(
+          { ...season, status: 'completed', totalRounds },
           standings,
+          summaryClub,
           activeLeague,
-          teams,
-          userClub,
-          manager,
-          cupTournament: null,
-          continentalTournament: null,
-        });
+          null,
+          activeMgr,
+          null
+        );
 
-        // Record trophies into persistent universe state in IndexedDB
-        if (transResult.seasonEndSummary.trophiesWonList && transResult.seasonEndSummary.trophiesWonList.length > 0 && userClub) {
+        if ((activeMgr as any).lastTrophyAwardedSeasonNumber !== season.seasonNumber) {
+          const newTrophiesList = [...(activeMgr.trophies || [])];
+          if (summary.leagueTrophyAwarded && !newTrophiesList.includes(summary.leagueTrophyAwarded)) {
+            newTrophiesList.push(summary.leagueTrophyAwarded);
+          }
+          activeMgr = {
+            ...activeMgr,
+            trophies: newTrophiesList,
+            leagueTitles: (activeMgr.leagueTitles || 0) + (summary.resultStatus === 'champion' ? 1 : 0),
+            promotions: (activeMgr.promotions || 0) + (summary.resultStatus === 'promoted' || (summary.resultStatus === 'champion' && summary.divisionTier > 1) ? 1 : 0),
+            relegations: (activeMgr.relegations || 0) + (summary.resultStatus === 'relegated' ? 1 : 0),
+            careerEarnings: (activeMgr.careerEarnings || 0) + (summary.prizeMoney || 0),
+            lastTrophyAwardedSeasonNumber: season.seasonNumber,
+          } as any;
+        }
+
+        if (activeMgr.lastSettledSeasonNumber !== season.seasonNumber) {
+          const endOfSeasonManagerBonus = Math.round(summary.prizeMoney * 0.15) + ((activeMgr.personalSalary || 15000) * 12);
+          const settlementRes = settleEndOfSeasonLicenseAndBonus(activeMgr, endOfSeasonManagerBonus, season.seasonNumber);
+          activeMgr = settlementRes.updatedManager;
+          summary.licenseSettlement = settlementRes.settlement;
+        }
+
+        if (summary.trophiesWonList && summary.trophiesWonList.length > 0 && summaryClub) {
           loadWorldStateFromDb().then(ws => {
             if (ws) {
-              const formattedTrophies = transResult.seasonEndSummary.trophiesWonList!.map(t => ({
+              const formattedTrophies = summary.trophiesWonList!.map(t => ({
                 name: t,
                 season: season.seasonNumber,
                 year: `الموسم ${season.seasonNumber}`,
               }));
-              const updatedWs = recordClubTrophiesInWorld(ws, userClub.id, formattedTrophies);
+              const updatedWs = recordClubTrophiesInWorld(ws, summaryClub.id, formattedTrophies);
               saveWorldStateToDb(updatedWs);
             }
           }).catch(() => {});
         }
 
-        setSeason(transResult.nextSeason);
-        setSeasonEndSummary(transResult.seasonEndSummary);
+        const generatedOffers = generateSeasonJobOffers(activeMgr, summaryClub, activeLeague, summary.finalPosition);
+        setSeason(prev => ({ ...prev, status: 'completed' }));
+        setSeasonEndSummary(summary);
+        setJobOffers(generatedOffers);
         setShowSeasonTransitionModal(true);
         setCupTournament(null);
         setAfricanChampionsLeague(null);
-        setFixtures(transResult.nextMasterSchedule);
-        setStandings(transResult.nextStandings);
-        setManager(transResult.updatedManager);
-        setInbox(prev => [transResult.announcementInboxMessage, ...(prev || [])]);
+        setManager(activeMgr);
       }
 
       // 1. Simulate Daily Squad Training & Recovery across the days advanced

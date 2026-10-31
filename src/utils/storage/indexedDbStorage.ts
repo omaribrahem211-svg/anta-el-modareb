@@ -36,18 +36,11 @@ const memoryFallbackStore = new Map<string, any>();
  */
 const HEAVY_LOCAL_STORAGE_SUFFIXES = [
   '_active_live_match',
-  '_teams',
-  '_fixtures',
-  '_transferMarket',
-  '_transferHistory',
   '_cupTournament',
   '_africanChampionsLeague',
   '_seasonArchives',
   '_retiredPlayers',
-  '_worldRankings',
   '_scoutedOpponents',
-  '_dailyNews',
-  '_inbox',
 ];
 
 /**

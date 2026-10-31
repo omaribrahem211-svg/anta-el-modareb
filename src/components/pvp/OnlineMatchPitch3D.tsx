@@ -396,14 +396,14 @@ export const OnlineMatchPitch3D: React.FC<OnlineMatchPitch3DProps> = ({
   // Immediately halted when match ends or enters halftime break to free CPU/GPU resources
   const [animTick, setAnimTick] = useState<number>(0);
   useEffect(() => {
-    if (isFullTimeFinished || isHalfTimeBreak) {
+    if (isFullTimeFinished || isHalfTimeBreak || status !== 'playing') {
       return;
     }
     const interval = setInterval(() => {
       setAnimTick((t) => (t + 1) % 10000);
-    }, 700);
+    }, 850);
     return () => clearInterval(interval);
-  }, [isFullTimeFinished, isHalfTimeBreak]);
+  }, [isFullTimeFinished, isHalfTimeBreak, status]);
 
   // Audio triggers for important match events (Goal Roar & Referee Whistle)
   useEffect(() => {
@@ -1579,7 +1579,6 @@ export const OnlineMatchPitch3D: React.FC<OnlineMatchPitch3DProps> = ({
                 top: `${player.y}%`,
                 transform: 'translate(-50%, -50%)',
                 transition: 'left 0.7s cubic-bezier(0.25, 1, 0.5, 1), top 0.7s cubic-bezier(0.25, 1, 0.5, 1)',
-                willChange: 'left, top',
               }}
               className="absolute z-10 pointer-events-none select-none"
             >
@@ -1601,7 +1600,6 @@ export const OnlineMatchPitch3D: React.FC<OnlineMatchPitch3DProps> = ({
                 top: `${player.y}%`,
                 transform: 'translate(-50%, -50%)',
                 transition: 'left 0.7s cubic-bezier(0.25, 1, 0.5, 1), top 0.7s cubic-bezier(0.25, 1, 0.5, 1)',
-                willChange: 'left, top',
               }}
               className="absolute z-10 pointer-events-none select-none"
             >
@@ -1621,7 +1619,6 @@ export const OnlineMatchPitch3D: React.FC<OnlineMatchPitch3DProps> = ({
               top: `${ballPos.y}%`,
               transform: 'translate(-50%, -50%)',
               transition: 'left 0.45s cubic-bezier(0.25, 1, 0.5, 1), top 0.45s cubic-bezier(0.25, 1, 0.5, 1)',
-              willChange: 'left, top',
             }}
             className="absolute z-20 pointer-events-none"
           >

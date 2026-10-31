@@ -51,14 +51,19 @@ export function validateCareerState(
     }
   }
 
-  // If still not matched, check allLeagues
+  // If still not matched, check allLeagues and adopt the correct league's teams so we NEVER reset a promoted manager back to Division 4!
+  let effectiveTeams = teams;
   if (matchedClubIndex === -1 && allLeagues && manager.currentClubId) {
     for (const league of Object.values(allLeagues)) {
-      const found = (league?.teams || []).find(t => t && t.id === manager.currentClubId);
-      if (found && found.id) {
-        const idx = teams.findIndex(t => t && t.id === found.id);
-        if (idx !== -1) {
-          matchedClubIndex = idx;
+      const leagueTeams = Array.isArray(league?.teams) ? league.teams : [];
+      const foundIdx = leagueTeams.findIndex(t => t && t.id === manager.currentClubId);
+      if (foundIdx !== -1) {
+        const idxInCurrent = effectiveTeams.findIndex(t => t && t.id === manager.currentClubId);
+        if (idxInCurrent !== -1) {
+          matchedClubIndex = idxInCurrent;
+        } else {
+          effectiveTeams = leagueTeams.filter(t => t && t.id).map(t => ({ ...t }));
+          matchedClubIndex = effectiveTeams.findIndex(t => t && t.id === manager.currentClubId);
         }
         break;
       }
@@ -66,13 +71,13 @@ export function validateCareerState(
   }
 
   // Fallback: If still not matched, default to the first team in the active league
-  if (matchedClubIndex === -1 && teams.length > 0 && teams[0]?.id) {
+  if (matchedClubIndex === -1 && effectiveTeams.length > 0 && effectiveTeams[0]?.id) {
     matchedClubIndex = 0;
-    manager.currentClubId = teams[0].id;
+    manager.currentClubId = effectiveTeams[0].id;
   }
 
   // Update teams array so only the matched club is marked isUserClub: true
-  const updatedTeams = teams.map((t, idx) => ({
+  const updatedTeams = effectiveTeams.map((t, idx) => ({
     ...t,
     isUserClub: idx === matchedClubIndex && matchedClubIndex !== -1,
   }));
