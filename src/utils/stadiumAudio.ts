@@ -24,18 +24,37 @@ class StadiumAudioEngine {
     }
   }
 
+  private lastPlayed: Record<string, number> = {};
+
+  /** Returns a running AudioContext, or null when sound should be skipped.
+   *  IMPORTANT: one shared context is reused forever. The old code created a brand-new
+   *  AudioContext every time the previous one was "suspended" (WebView / background / no gesture),
+   *  which leaked contexts and audio threads and froze the app after a few matches. */
   private initCtx(): AudioContext | null {
     if (this.muted) return null;
-    if (!this.ctx || this.ctx.state === 'suspended') {
-      const AudioCtxClass = window.AudioContext || (window as any).webkitAudioContext;
-      if (AudioCtxClass) {
+    if (typeof document !== 'undefined' && document.hidden) return null;
+    try {
+      if (!this.ctx || this.ctx.state === 'closed') {
+        const AudioCtxClass = window.AudioContext || (window as any).webkitAudioContext;
+        if (!AudioCtxClass) return null;
         this.ctx = new AudioCtxClass();
       }
+      if (this.ctx.state === 'suspended') {
+        this.ctx.resume().catch(() => {});
+      }
+    } catch {
+      return null;
     }
-    if (this.ctx && this.ctx.state === 'suspended') {
-      this.ctx.resume().catch(() => {});
-    }
-    return this.ctx;
+    // Do not queue nodes on a suspended context: they would all fire at once when it resumes
+    return this.ctx && this.ctx.state === 'running' ? this.ctx : null;
+  }
+
+  /** Drops sounds that are triggered too quickly after the same sound (e.g. skipping matches). */
+  private throttled(key: string, minGapMs: number): boolean {
+    const now = Date.now();
+    if (now - (this.lastPlayed[key] || 0) < minGapMs) return true;
+    this.lastPlayed[key] = now;
+    return false;
   }
 
   public isMuted(): boolean {
@@ -61,6 +80,7 @@ class StadiumAudioEngine {
    * Realistic Fox 40 referee whistle (two high frequencies beating together)
    */
   public playWhistle() {
+    if (this.throttled('whistle', 700)) return;
     const ctx = this.initCtx();
     if (!ctx) return;
 
@@ -180,6 +200,7 @@ class StadiumAudioEngine {
    * Massive stadium crowd goal roar & celebration
    */
   public playGoalRoar() {
+    if (this.throttled('roar', 2500)) return;
     const ctx = this.initCtx();
     if (!ctx) return;
 
