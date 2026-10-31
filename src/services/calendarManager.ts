@@ -9,7 +9,9 @@ import {
   CalendarDate,
   CompetitionType,
 } from '../types/game';
-import { simulateMatch } from '../utils/engine';
+import { simulateMatch, simulatePenaltyShootout } from '../utils/engine';
+import { findClubInWorld } from '../data/leaguesData';
+import { settleCupResult } from './cupResult';
 import { simulateKnockoutMatch } from '../utils/continentalEngine';
 import { formatCalendarDate, parseDateString, addDaysToDate } from '../utils/calendarEngine';
 import { getDomesticCupDefinitionForCountry } from '../data/competitionsData';
@@ -387,7 +389,7 @@ export class CalendarManager {
   }
 
   /**
-   * Filters the master schedule to show ONLY the user's club League matches in exact chronological order.
+   * Filters the master schedule to show the user's club League + Domestic Cup matches in exact chronological order.
    */
   static getUserClubSchedule(userClubId: string | undefined, masterSchedule: CalendarScheduleItem[]): CalendarScheduleItem[] {
     if (!userClubId || !Array.isArray(masterSchedule)) return [];
@@ -397,17 +399,17 @@ export class CalendarManager {
         const normType = normalizeCompetitionType(
           f.competitionType || f.tournamentId || f.competitionId || (f.cupStage ? 'DOMESTIC_COP' : undefined)
         );
-        return normType === 'LEAGUE';
+        return normType === 'LEAGUE' || normType === 'DOMESTIC_COP';
       })
       .sort((a, b) => {
-        const roundDiff = (Number(a?.round) || 0) - (Number(b?.round) || 0);
-        if (roundDiff !== 0) return roundDiff;
         const dateA = String(a?.date || '');
         const dateB = String(b?.date || '');
         if (dateA !== dateB) {
           return dateA.localeCompare(dateB);
         }
-        return (Number(a?.timestamp) || 0) - (Number(b?.timestamp) || 0);
+        const tsDiff = (Number(a?.timestamp) || 0) - (Number(b?.timestamp) || 0);
+        if (tsDiff !== 0) return tsDiff;
+        return (Number(a?.round) || 0) - (Number(b?.round) || 0);
       });
   }
 
@@ -485,17 +487,22 @@ export class CalendarManager {
       skipDirectlyToNextUserMatch = false,
     } = params;
 
+    // League + domestic cup fixtures share the same date-driven pipeline (continental is not scheduled yet).
     const leagueSchedule = (Array.isArray(masterSchedule) ? masterSchedule : []).filter(f => {
       if (!f) return false;
       const normType = normalizeCompetitionType(
         f.competitionType || f.tournamentId || f.competitionId || (f.cupStage ? 'DOMESTIC_COP' : undefined)
       );
-      return normType === 'LEAGUE';
+      return normType === 'LEAGUE' || normType === 'DOMESTIC_COP';
     });
+    const isCupItem = (f: CalendarScheduleItem): boolean =>
+      normalizeCompetitionType(
+        f.competitionType || f.tournamentId || f.competitionId || (f.cupStage ? 'DOMESTIC_COP' : undefined)
+      ) === 'DOMESTIC_COP';
 
     const { endDateStr } = this.getSeasonDateRange(seasonNumber);
     const getClubObj = (clubId: string): Club => {
-      return teams.find(t => t.id === clubId) || ({
+      return teams.find(t => t.id === clubId) || findClubInWorld(clubId) || ({
         id: clubId,
         name: 'فريق منافس',
         shortName: 'منافس',
@@ -527,9 +534,12 @@ export class CalendarManager {
     const isSeasonFinished = targetDateStr >= endDateStr;
     const nextDateObj = formatCalendarDate(parseDateString(targetDateStr), dayIndexInSeason + daysToAdvance);
 
-    const matchesOnDate = leagueSchedule.filter(
-      f => f && !f.isPlayed && f.date && f.date >= currentDateStr && f.date <= targetDateStr
-    );
+    // League rounds only inside the advanced window; cup ties that are already due (even overdue) are always picked up
+    const matchesOnDate = leagueSchedule.filter(f => {
+      if (!f || f.isPlayed || !f.date) return false;
+      if (isCupItem(f)) return f.date <= targetDateStr;
+      return f.date >= currentDateStr && f.date <= targetDateStr;
+    });
 
     const userMatchToday = userClubId
       ? matchesOnDate.find(m => m.homeTeamId === userClubId || m.awayTeamId === userClubId) || null
@@ -556,6 +566,14 @@ export class CalendarManager {
       const res = simulateMatch(home, away, home.tactics || { formation: '4-4-2' }, away.tactics || { formation: '4-4-2' });
       fix.homeScore = res.homeScore;
       fix.awayScore = res.awayScore;
+      if (isCupItem(fix)) {
+        // Knockout: a draw after 90 minutes is settled by an instant penalty shootout (never blocks the bracket)
+        const shoot = res.homeScore === res.awayScore ? simulatePenaltyShootout(home, away, home.tactics, away.tactics) : undefined;
+        const settled = settleCupResult(res.homeScore, res.awayScore, fix.homeTeamId, fix.awayTeamId, shoot);
+        fix.homePenalties = settled.homePenalties;
+        fix.awayPenalties = settled.awayPenalties;
+        fix.winnerTeamId = settled.winnerTeamId;
+      }
       fix.isPlayed = true;
       fix.events = pruneAiEvents(res.events);
       fix.stats = res.stats;

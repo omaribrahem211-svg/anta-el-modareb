@@ -41,6 +41,7 @@ import {
 } from './careerProgressionEngine';
 import { getDomesticCupDefinitionForCountry } from '../data/competitionsData';
 import { CalendarManager } from '../services/calendarManager';
+import { buildCupFirstRound } from '../services/cupEngine';
 import { parseDateString } from './calendarEngine';
 import { pruneMatchEventsForStorage } from './storage/indexedDbStorage';
 
@@ -1220,13 +1221,30 @@ export function generateMasterSeasonAgenda(
   _continentalTournament?: any,
   userClub?: Club | null
 ): Fixture[] {
-  return CalendarManager.generateMasterSchedule({
+  const leagueSchedule = CalendarManager.generateMasterSchedule({
     seasonNumber,
     activeLeague,
     teams: leagueTeams,
     userClub,
     cupTournament: null,
     continentalTournament: null,
+  });
+
+  // Domestic cup: only the first round is created here; later rounds are appended by progressCupFixtures().
+  const totalLeagueRounds = leagueSchedule.reduce((max, f) => (typeof f?.round === 'number' && f.round > max ? f.round : max), 0);
+  const cupFixtures = buildCupFirstRound({
+    seasonNumber,
+    country: activeLeague?.country || userClub?.country || 'مصر',
+    userClub,
+    totalLeagueRounds,
+  });
+  if (cupFixtures.length === 0) return leagueSchedule;
+
+  return [...leagueSchedule, ...cupFixtures].sort((a, b) => {
+    const dateA = String(a?.date || '');
+    const dateB = String(b?.date || '');
+    if (dateA !== dateB) return dateA.localeCompare(dateB);
+    return (Number(a?.timestamp) || 0) - (Number(b?.timestamp) || 0);
   });
 }
 
