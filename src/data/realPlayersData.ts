@@ -1,4 +1,5 @@
 import { Player, Position, PositionCategory, PreferredFoot, PlayerPersonality } from '../types/game';
+import { COMPACT_REAL_SQUADS } from './squads';
 
 export interface RealPlayerTemplate {
   id: string;
@@ -3192,6 +3193,11 @@ export const REAL_SQUADS_BY_CLUB_ID: Record<string, RealPlayerTemplate[]> = {
 /**
  * Checks whether a given club ID corresponds to a recognized real-world club with a predefined real squad.
  */
+// Compact real squads (core squads; depth is topped up in createClub)
+Object.entries(COMPACT_REAL_SQUADS).forEach(([id, squad]) => {
+  if (!REAL_SQUADS_BY_CLUB_ID[id]) REAL_SQUADS_BY_CLUB_ID[id] = squad;
+});
+
 export function isRealClub(clubId: string): boolean {
   if (!clubId) return false;
   const canonicalId = clubId.toLowerCase();
