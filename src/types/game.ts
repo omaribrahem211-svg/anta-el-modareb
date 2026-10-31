@@ -981,6 +981,8 @@ export interface WorldRankingsData {
   lastUpdatedMonth: string; // e.g. '2026-08'
   /** World transfer ledger (playerId -> latest move). Stored here so it saves/resets with the rankings. */
   worldMoves?: Record<string, WorldMoveRecord>;
+  /** Number of finished world seasons (static clubs aged / retired / youth added). Replayed on load. */
+  worldEra?: number;
   rankingMonth?: string;
   managers: ClubManager[];
   clubs: WorldClubRankingItem[];

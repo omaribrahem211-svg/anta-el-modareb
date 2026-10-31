@@ -199,7 +199,7 @@ import {
   calculateMatchRankingPoints,
 } from '../utils/rankingsEngine';
 import { enrichClubsWithManagers } from '../data/worldManagersData';
-import { simulateWorldTransferDay, getTransferWindow, applyWorldMoves, resetWorldTransfers } from '../utils/worldTransferEngine';
+import { simulateWorldTransferDay, getTransferWindow, applyWorldMoves, resetWorldTransfers, advanceWorldEra, applyWorldEras, pruneWorldMoves } from '../utils/worldTransferEngine';
 import { generateYouthAcademyBatch, promoteYouthProspectToSquad } from '../utils/youthAcademyEngine';
 import {
   calculateInitialPlayerSavings,
@@ -2094,6 +2094,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     if (migrated.worldRankings) {
       if (typeof migrated.worldRankings === 'object' && !Array.isArray(migrated.worldRankings) && Array.isArray(migrated.worldRankings.managers) && Array.isArray(migrated.worldRankings.clubs)) {
         resetWorldTransfers();
+        applyWorldEras(migrated.worldRankings.worldEra);
         applyWorldMoves(migrated.worldRankings.worldMoves);
         setWorldRankings(migrated.worldRankings);
       } else {
@@ -7811,6 +7812,27 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       ];
       setInbox(newInbox);
 
+      // العالم الثابت (باقي الدوريات): كبر سن + اعتزال + جيل جديد، ويُحفظ كعدّاد مواسم يُعاد تشغيله عند التحميل
+      try {
+        const nextEra = (worldRankings?.worldEra || 0) + 1;
+        const eraReport = advanceWorldEra(nextEra);
+        setWorldRankings(prev => ({ ...prev, worldEra: nextEra, worldMoves: pruneWorldMoves(prev?.worldMoves, teams, season?.seasonNumber || nextEra) }));
+        const eraDate = calendarDate?.rawDateStr || new Date().toISOString().slice(0, 10);
+        const eraNews: DailyNewsItem[] = eraReport.retiredStars.slice(0, 4).map((r, i) => ({
+          id: `era_ret_${nextEra}_${i}`,
+          dateStr: eraDate,
+          title: `اعتزال ${r.name} (${r.age} عاماً) رسمياً`,
+          content: `أعلن ${r.name} نجم ${r.clubName} اعتزال كرة القدم بعد مسيرة حافلة، وكان تصنيفه ${r.rating}.`,
+          category: 'milestone',
+          importance: 'medium',
+          icon: '🏅',
+          source: 'عالم الكرة',
+        } as DailyNewsItem));
+        if (eraNews.length > 0) setDailyNews(prev => [...eraNews, ...(prev || [])].slice(0, 40));
+      } catch (e) {
+        console.warn('[worldEra] failed', e);
+      }
+
       let nextRetired = retiredPlayers;
       if (Array.isArray(result.newRetiredPlayers) && result.newRetiredPlayers.length > 0) {
         nextRetired = [...result.newRetiredPlayers, ...retiredPlayers].slice(0, 150);
@@ -9819,7 +9841,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     localStorage.removeItem(`${STORAGE_KEY}_retiredPlayers`);
     localStorage.removeItem(`${STORAGE_KEY}_worldRankings`);
     resetWorldTransfers();
-    setWorldRankings(prev => ({ ...prev, worldMoves: undefined }));
+    setWorldRankings(prev => ({ ...prev, worldMoves: undefined, worldEra: undefined }));
     localStorage.removeItem(`${STORAGE_KEY}_scoutedOpponents`);
     localStorage.removeItem(`${STORAGE_KEY}_deletedMessageIds`);
 

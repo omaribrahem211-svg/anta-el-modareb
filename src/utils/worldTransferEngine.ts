@@ -1,6 +1,7 @@
 import type { Club, Player, PositionCategory } from '../types/game';
 import { GLOBAL_LEAGUES, EGYPT_TIER_4_LEAGUE } from '../data/leaguesData';
 import { pickLineup } from '../data/realClubsData';
+import { generatePlayer, calculatePlayerValuation, withSeededRandom } from './playerGenerator';
 
 /**
  * World transfer engine.
@@ -409,4 +410,202 @@ function refreshLineupOn(club: Club) {
     benchPlayerIds,
     captainId: club.tactics?.captainId && club.players.some(p => p.id === club.tactics!.captainId) ? club.tactics.captainId : startingPlayerIds[0] || '',
   } as Club['tactics'];
+}
+
+
+/* ----------------------------- world eras (ageing / retirement / youth) -----------------------------
+ * One "era" = one finished season of the world. Every outcome is a pure function of (playerId, era)
+ * or (clubId, era), never of where a player currently plays, so ageing commutes with transfers:
+ * a save only stores the era counter and the replay (reset -> eras 1..N -> moves) rebuilds the
+ * exact same world.
+ */
+
+function hash32(str: string): number {
+  let h = 2166136261;
+  for (let i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 16777619); }
+  return h >>> 0;
+}
+function rngFor(seed: string): () => number {
+  let a = hash32(seed);
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+const YOUTH_POSITIONS: Player['position'][] = ['CB', 'CM', 'ST', 'RB', 'LW', 'CDM', 'CAM', 'LB', 'RW', 'GK'];
+const YOUTH_PER_CLUB = 2;
+const MIN_SQUAD_FOR_ERAS = 16;
+
+export interface WorldEraReport {
+  era: number;
+  retired: number;
+  youth: number;
+  retiredStars: { name: string; age: number; rating: number; clubName: string }[];
+  risingStars: { name: string; age: number; rating: number; clubName: string }[];
+}
+
+/** Age one player by a year. Returns null when he retires. */
+function agePlayer(p: Player, era: number, club: Club): Player | null {
+  const r = rngFor(`${p.id}:era${era}`);
+  const age = (p.age || 25) + 1;
+  const ovr0 = p.overallRating || 65;
+  const pot = Math.max(ovr0, p.potentialRating || ovr0);
+  const isGK = p.position === 'GK';
+
+  if (age >= 40) return null;
+  if (age >= 35) {
+    let prob = age === 35 ? 0.18 : age === 36 ? 0.3 : age === 37 ? 0.48 : age === 38 ? 0.7 : 0.88;
+    if (ovr0 < 72) prob += 0.12;
+    if (r() < prob) return null;
+  }
+
+  let delta = 0;
+  if (age <= 23 && ovr0 < pot) delta = Math.min(pot - ovr0, Math.floor(r() * 3) + 1);
+  else if (age <= 27 && ovr0 < pot) delta = Math.min(pot - ovr0, Math.floor(r() * 2) + (r() < 0.65 ? 1 : 0));
+  else if (age <= 30) delta = ovr0 < pot && r() < 0.35 ? 1 : 0;
+  else if (age <= 32) delta = isGK ? 0 : (r() < 0.5 ? -1 : 0);
+  else if (age <= 34) delta = isGK ? (r() < 0.5 ? -1 : 0) : -(Math.floor(r() * 2) + 1);
+  else delta = isGK ? -(Math.floor(r() * 2) + 1) : -(Math.floor(r() * 3) + 1);
+  delta = Math.max(-3, Math.min(3, delta));
+  const ovr = Math.min(99, Math.max(Math.min(ovr0, 58), ovr0 + delta));
+  const real = ovr - ovr0;
+
+  const a: any = p.attributes || null;
+  const adj = (v: any, w: number) => (Number.isFinite(Number(v)) ? Math.min(99, Math.max(25, Math.round(Number(v) + real * w))) : v);
+  const attributes = a ? {
+    ...a,
+    pace: adj(a.pace, real < 0 ? 1.15 : 0.9),
+    shooting: adj(a.shooting, real < 0 ? 0.65 : 1),
+    passing: adj(a.passing, real < 0 ? 0.55 : 1),
+    dribbling: adj(a.dribbling, real < 0 ? 0.85 : 1),
+    defending: adj(a.defending, real < 0 ? 0.7 : 1),
+    physical: adj(a.physical, real < 0 ? 1.1 : 0.9),
+    ...(a.goalkeeping !== undefined ? { goalkeeping: adj(a.goalkeeping, real < 0 ? 0.6 : 1) } : {}),
+  } : p.attributes;
+
+  const nextPot = Math.max(ovr, pot - (age >= 24 ? 1 : 0));
+  const out: Player = { ...p, age, overallRating: ovr, potentialRating: nextPot, attributes } as Player;
+  if (real !== 0 || age >= 30) {
+    try {
+      const v = calculatePlayerValuation(ovr, nextPot, age, p.positionCategory, 70);
+      out.marketValue = Math.max(10000, Math.round(v.marketValue));
+    } catch { /* keep old value */ }
+  }
+  out.contractYears = Math.max(1, (p.contractYears || 1) - (r() < 0.5 ? 1 : 0)) || 1;
+  if ((out.contractYears || 0) <= 1 && r() < 0.6) out.contractYears = 2 + Math.floor(r() * 3); // clubs renew
+  out.stats = { appearances: 0, starts: 0, minutes: 0, goals: 0, assists: 0, cleanSheets: 0, yellowCards: 0, redCards: 0, shots: 0, shotsOnTarget: 0, passes: 0, tackles: 0, saves: 0, averageRating: 7.0, motm: 0 } as any;
+  return out;
+}
+
+function makeYouth(club: Club, era: number, k: number): Player {
+  const id = `${club.id}_y${era}_${k + 1}`;
+  const pos = YOUTH_POSITIONS[(era * YOUTH_PER_CLUB + k) % YOUTH_POSITIONS.length];
+  const cat: PositionCategory = pos === 'GK' ? 'GK' : ['CB', 'RB', 'LB'].includes(pos) ? 'DEF' : ['CM', 'CDM', 'CAM'].includes(pos) ? 'MID' : 'FWD';
+  const base = Math.max(45, Math.round(((club as any).baseSquadLevel ?? (club.reputation || 50) * 0.85) - 9));
+  const countryCode = club.countryCode || 'EGY';
+  const p = withSeededRandom(`youth:${id}`, () => generatePlayer({
+    countryId: countryCode,
+    clubId: club.id,
+    leagueId: club.leagueId,
+    clubReputation: club.reputation || 50,
+    baseLevel: base,
+    position: pos,
+    positionCategory: cat,
+    ageMin: 17,
+    ageMax: 19,
+  }));
+  p.id = id;
+  p.currentClubId = club.id;
+  p.currentLeagueId = club.leagueId || p.currentLeagueId;
+  p.isListedForTransfer = false;
+  // Quality is tied to the club's own level (its original top-16), so talent is replenished at a
+  // steady rate: the ratings of the world neither inflate nor decay over many seasons.
+  const home = originalSquads.get(club.id);
+  const top = [...(home?.players || [])].sort((a, b) => b.overallRating - a.overallRating).slice(0, 16);
+  const level = top.length ? top.reduce((s, x) => s + x.overallRating, 0) / top.length : base + 9;
+  const r = rngFor(`youthq:${id}`);
+  const ovr = Math.max(42, Math.min(80, Math.round(level - 19 + r() * 7)));
+  const pot = Math.max(ovr + 2, Math.min(94, Math.round(level + 1 + (r() - 0.45) * 18)));
+  p.overallRating = ovr;
+  p.potentialRating = pot;
+  try {
+    const v = calculatePlayerValuation(ovr, pot, p.age, cat, 70);
+    p.marketValue = Math.max(10000, Math.round(v.marketValue));
+  } catch { /* keep generated value */ }
+  return p;
+}
+
+/** Apply one world era to every static club. Deterministic; safe to replay. */
+export function advanceWorldEra(era: number): WorldEraReport {
+  ensureIndex();
+  const report: WorldEraReport = { era, retired: 0, youth: 0, retiredStars: [], risingStars: [] };
+  staticClubs!.forEach(club => {
+    const squad = club.players || [];
+    if (squad.length === 0) return;
+    const kept: Player[] = [];
+    for (const p of squad) {
+      if (!p) continue;
+      const next = agePlayer(p, era, club);
+      if (!next) {
+        report.retired++;
+        staticHolder!.delete(p.id);
+        if (p.overallRating >= 80 && report.retiredStars.length < 12) {
+          report.retiredStars.push({ name: p.name, age: (p.age || 35) + 1, rating: p.overallRating, clubName: club.name });
+        }
+        continue;
+      }
+      if (next.overallRating - p.overallRating >= 3 && next.overallRating >= 82 && report.risingStars.length < 8) {
+        report.risingStars.push({ name: p.name, age: next.age, rating: next.overallRating, clubName: club.name });
+      }
+      kept.push(next);
+    }
+    const home = originalSquads.get(club.id);
+    if (home && home.players.length >= MIN_SQUAD_FOR_ERAS) {
+      for (let k = 0; k < YOUTH_PER_CLUB; k++) {
+        const y = makeYouth(club, era, k);
+        y.number = freeNumber(kept, y.number);
+        kept.push(y);
+        staticHolder!.set(y.id, club.id);
+        report.youth++;
+      }
+    }
+    club.players = kept;
+    refreshLineup(club);
+  });
+  return report;
+}
+
+/** Rebuild eras 1..era on top of a freshly reset static database (call before applyWorldMoves). */
+export function applyWorldEras(era: number | undefined | null): void {
+  const n = Math.max(0, Math.min(200, Math.floor(Number(era) || 0)));
+  for (let e = 1; e <= n; e++) advanceWorldEra(e);
+}
+
+
+/**
+ * Keep the saved ledger small: drop moves of players who no longer exist anywhere (retired or
+ * released) and slim down moves older than a season to the fields the replay really needs.
+ */
+export function pruneWorldMoves(moves: WorldMoves | undefined, liveTeams: Club[], currentSeason: number): WorldMoves {
+  ensureIndex();
+  const liveIds = new Set<string>();
+  (liveTeams || []).forEach(c => (c?.players || []).forEach(p => p?.id && liveIds.add(p.id)));
+  const out: WorldMoves = {};
+  Object.entries(moves || {}).forEach(([pid, mv]) => {
+    if (!mv) return;
+    const exists = staticHolder!.has(pid) || liveIds.has(pid);
+    if (!exists && mv.toClubId !== FREE_AGENT) return;
+    if (mv.toClubId === FREE_AGENT && !staticHolder!.has(pid) && !liveIds.has(pid)) {
+      // a released player stays released; only keep it while he could still be re-created by a replay
+      if ((currentSeason - (mv.seasonNumber || 0)) > 25) return;
+    }
+    out[pid] = (currentSeason - (mv.seasonNumber || 0)) <= 1
+      ? mv
+      : { fromClubId: '', toClubId: mv.toClubId, fee: 0, salary: mv.salary, contractYears: mv.contractYears, seasonNumber: mv.seasonNumber, dateStr: '', playerName: '' };
+  });
+  return out;
 }
