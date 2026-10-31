@@ -97,7 +97,11 @@ export const OnlinePvPTab: React.FC = () => {
     }
   }, []);
 
-  // Fetch ranking when switching to ranking tab or mounting
+  // Fetch ranking when switching to the ranking tab (and when coming back from a match)
+  useEffect(() => {
+    if (activeView === 'lobby' && activeLobbyTab === 'ranking') loadDailyRanking();
+  }, [loadDailyRanking, activeLobbyTab, activeView]);
+
   useEffect(() => {
     loadDailyRanking();
   }, [loadDailyRanking]);
@@ -123,10 +127,17 @@ export const OnlinePvPTab: React.FC = () => {
         setIsSearchingMatch(false);
         if (data.room) setRoomState(data.room);
         setActiveView('playing');
-        setFeedback({
-          type: 'success',
-          message: `تم العثور على منافس أونلاين! [${data.opponent?.clubName || 'المنافس'}] - انطلقت المباراة الآن!`
-        });
+        setFeedback(data.isBot
+          ? {
+              type: 'success',
+              message: data.botReason === 'timeout'
+                ? 'مفيش مدرب حقيقي متاح دلوقتي، فبدأنا مباراة تدريبية ضد مدرب آلي. المباريات التدريبية مش بتحسب في الترتيب اليومي.'
+                : 'بدأت مباراة تدريبية ضد مدرب آلي (مش بتحسب في الترتيب اليومي).'
+            }
+          : {
+              type: 'success',
+              message: `لقينا منافس حقيقي! [${data.opponent?.playerName || 'المدرب'} - ${data.opponent?.clubName || 'المنافس'}] - انطلقت المباراة الآن!`
+            });
       } else if (data.type === 'matchmaking_searching') {
         setIsSearchingMatch(true);
         if (typeof data.queueSize === 'number') setQueueSize(data.queueSize);
@@ -164,20 +175,38 @@ export const OnlinePvPTab: React.FC = () => {
     return () => {
       unsubStatus();
       unsubMessages();
+      // leaving the page must never leave us sitting in the matchmaking queue
+      challengeClient.cancelMatchmaking();
     };
   }, []);
 
   // Prepare current user's participant data
   const getParticipantPayload = useCallback(() => {
     const squad = Array.isArray(userClub?.players) ? userClub.players : [];
+    const ovr = (p: any) => Number(p?.overallRating ?? p?.rating ?? 65) || 65;
+
+    // The real XI and bench the coach picked (falls back to the best players if no lineup is saved)
+    const byId = new Map(squad.map(p => [p.id, p]));
+    const startIds: string[] = Array.isArray(userClub?.tactics?.startingPlayerIds) ? userClub!.tactics!.startingPlayerIds : [];
+    const benchIds: string[] = Array.isArray(userClub?.tactics?.benchPlayerIds) ? userClub!.tactics!.benchPlayerIds : [];
+    let starters = startIds.map(id => byId.get(id)).filter(Boolean) as typeof squad;
+    if (starters.length < 11) {
+      const rest = [...squad].filter(p => !starters.includes(p)).sort((a, b) => ovr(b) - ovr(a));
+      starters = [...starters, ...rest].slice(0, 11);
+    }
+    let bench = benchIds.map(id => byId.get(id)).filter(p => p && !starters.includes(p)) as typeof squad;
+    if (bench.length < 7) {
+      const rest = [...squad].filter(p => !starters.includes(p) && !bench.includes(p)).sort((a, b) => ovr(b) - ovr(a));
+      bench = [...bench, ...rest].slice(0, 9);
+    }
     const clubRating = Math.round(
-      squad.length > 0
-        ? squad.slice(0, 11).reduce((sum, p) => sum + (p.rating || 65), 0) / Math.min(11, squad.length)
-        : 70
+      starters.length > 0 ? starters.reduce((sum, p) => sum + ovr(p), 0) / starters.length : 70
     );
 
+    // Big base64 photos would bloat every room document (1MB limit) - only share light URLs
     const storedCoachPhoto = typeof window !== 'undefined' ? localStorage.getItem('anta_elmodareb_coach_photo_v1') : null;
-    const coachAvatar = storedCoachPhoto || user?.photoURL || '';
+    const candidate = storedCoachPhoto || user?.photoURL || '';
+    const coachAvatar = candidate && candidate.length < 4000 ? candidate : (user?.photoURL || '');
 
     return {
       playerName: manager?.name || user?.displayName || 'المدرب',
@@ -193,18 +222,8 @@ export const OnlinePvPTab: React.FC = () => {
         pressingIntensity: 'balanced',
         tempo: 'balanced',
       },
-      squadSummary: squad.slice(0, 11).map((p) => ({
-        id: p.id,
-        name: p.name,
-        position: p.position,
-        rating: p.rating || 65,
-      })),
-      benchSummary: squad.slice(11, 22).map((p) => ({
-        id: p.id,
-        name: p.name,
-        position: p.position,
-        rating: p.rating || 65,
-      })),
+      squadSummary: starters.map((p) => ({ id: p.id, name: p.name, position: p.position, rating: ovr(p) })),
+      benchSummary: bench.map((p) => ({ id: p.id, name: p.name, position: p.position, rating: ovr(p) })),
     };
   }, [userClub, manager, user]);
 
@@ -687,7 +706,7 @@ export const OnlinePvPTab: React.FC = () => {
             <div className="space-y-2">
               <h3 className="text-xl font-black text-white">جارِ البحث عن منافس أونلاين...</h3>
               <p className="text-xs text-slate-400 leading-relaxed">
-                يتم البحث الآن في قائمة الانتظار الحية عبر خادم اللعبة لمطابقتك مع مدرب آخر متاح.
+                بندوّر دلوقتي على مدرب حقيقي تاني بيدوّر على مباراة. لو ملقيناش حد خلال حوالي 18 ثانية هنعرض عليك مباراة تدريبية ضد مدرب آلي.
               </p>
             </div>
 
@@ -707,7 +726,7 @@ export const OnlinePvPTab: React.FC = () => {
             {searchSeconds >= 6 && (
               <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-2xl space-y-2 animate-in fade-in">
                 <p className="text-[11px] text-amber-300 font-bold">
-                  لم يظهر منافس فوري؟ يمكنك خوض مواجهة سريعة الآن ضد مدرب آلي موازٍ!
+                  مش عايز تستنى؟ ممكن تلعب مباراة تدريبية ضد مدرب آلي (مش بتحسب في الترتيب).
                 </p>
                 <button
                   type="button"
@@ -715,7 +734,7 @@ export const OnlinePvPTab: React.FC = () => {
                   className="w-full py-2.5 px-4 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs flex items-center justify-center gap-1.5 transition-colors shadow-md"
                 >
                   <Bot className="w-4 h-4" />
-                  <span>بدء المباراة فوراً ضد مدرب آلي 🤖</span>
+                  <span>ابدأ مباراة تدريبية دلوقتي 🤖</span>
                 </button>
               </div>
             )}
@@ -959,7 +978,7 @@ export const OnlinePvPTab: React.FC = () => {
             <div className="p-3 bg-slate-950/70 rounded-2xl border border-slate-800/80 flex items-center gap-2 text-xs text-slate-300">
               <Award className="w-4 h-4 text-amber-400 shrink-0" />
               <span>
-                كل مباراة أونلاين مكتملة (سواء تحدي عشوائي أو غرفة مع صديق) تحسب الفوز فوراً في الترتيب اليومي.
+                كل مباراة مكتملة ضد مدرب حقيقي (تحدي عشوائي أو غرفة مع صديق) بتتحسب في الترتيب اليومي: الفوز 3 نقاط والتعادل نقطة. المباريات التدريبية ضد المدرب الآلي مش بتتحسب.
               </span>
             </div>
           </div>
@@ -979,6 +998,7 @@ export const OnlinePvPTab: React.FC = () => {
                       <th className="py-3 px-3 text-center">#</th>
                       <th className="py-3 px-3">المدرب والنادي</th>
                       <th className="py-3 px-2 text-center">القوة</th>
+                      <th className="py-3 px-3 text-center text-amber-300">نقاط</th>
                       <th className="py-3 px-3 text-center text-emerald-400">فوز (W)</th>
                       <th className="py-3 px-2 text-center text-blue-400">تعادل (D)</th>
                       <th className="py-3 px-2 text-center text-red-400">خسارة (L)</th>
@@ -1052,6 +1072,11 @@ export const OnlinePvPTab: React.FC = () => {
                             <span className="px-2 py-0.5 rounded-md bg-slate-800 text-slate-300 font-mono font-bold text-[11px]">
                               {coach.clubRating}
                             </span>
+                          </td>
+
+                          {/* Points */}
+                          <td className="py-3 px-3 text-center">
+                            <span className="font-mono font-black text-amber-300 text-sm">{coach.points ?? coach.wins * 3 + coach.draws}</span>
                           </td>
 
                           {/* Wins */}

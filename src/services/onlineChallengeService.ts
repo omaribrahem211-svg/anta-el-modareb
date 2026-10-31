@@ -15,6 +15,12 @@ import {
   deleteDoc,
   onSnapshot,
   Unsubscribe,
+  runTransaction,
+  collection,
+  query,
+  where,
+  getDocs,
+  increment,
 } from 'firebase/firestore';
 
 export interface ChallengeParticipant {
@@ -34,7 +40,7 @@ export interface ChallengeParticipant {
 
 export interface ChallengeRoomState {
   code: string;
-  status: 'waiting' | 'ready' | 'playing' | 'completed';
+  status: 'waiting' | 'ready' | 'playing' | 'completed' | 'closed';
   createdAt: number;
   host: ChallengeParticipant;
   guest?: ChallengeParticipant;
@@ -66,7 +72,16 @@ export interface DailyCoachRankEntry {
   draws: number;
   matchesPlayed: number;
   lastActiveTimestamp: number;
+  points?: number;
+  goalDifference?: number;
 }
+
+/** Rooms older than this (no activity) are treated as dead. */
+const ROOM_STALE_MS = 3 * 60 * 60 * 1000;
+const QUEUE_HEARTBEAT_MS = 2500;
+const QUEUE_ENTRY_FRESH_MS = 9000;
+const MATCHMAKING_TIMEOUT_MS = 18000;
+const todayKey = () => new Date().toISOString().slice(0, 10);
 
 const STORAGE_KEY_CHALLENGE_HISTORY = 'anta_elmodareb_online_challenges_history_v1';
 const STORAGE_KEY_PLAYER_ID = 'anta_elmodareb_challenge_player_id';
@@ -174,7 +189,15 @@ class OnlineChallengeClient {
   private firestoreUnsubscribe: Unsubscribe | null = null;
   private cachedRoomState: any = null;
   private lastProcessedEventTime = 0;
+  private lastProcessedEventId = '';
+  private sawFirstSnapshot = false;
   private lastTickMinute = -1;
+
+  // Firestore matchmaking state
+  private queueTimer: any = null;
+  private queueTimeout: any = null;
+  private queueUnsub: Unsubscribe | null = null;
+  private queueActive = false;
 
   public getStatus(): 'disconnected' | 'connecting' | 'connected' {
     return this.connectionStatus;
@@ -357,6 +380,8 @@ class OnlineChallengeClient {
     }
 
     const docRef = doc(db, 'challenge_rooms', code);
+    this.sawFirstSnapshot = false;
+    this.lastProcessedEventId = '';
     this.firestoreUnsubscribe = onSnapshot(docRef, (snapshot) => {
       if (!snapshot.exists()) {
         if (this.currentRoomCode === code) {
@@ -375,6 +400,16 @@ class OnlineChallengeClient {
       this.cachedRoomState = data;
       const myPlayerId = getOrCreatePlayerId();
       const isHost = data.host?.playerId === myPlayerId;
+
+      // The host closed the room (we soft-close before deleting so the guest is always told)
+      if (data.status === 'closed') {
+        if (this.currentRoomCode === code) {
+          this.emitMessage({ type: 'opponent_left', message: 'تم إغلاق غرفة التحدي من قبل المنشئ.' });
+          this.currentRoomCode = null;
+          this.cachedRoomState = null;
+        }
+        return;
+      }
 
       // 1. Guest joined detection
       if (data.guest && (!prev || !prev.guest)) {
@@ -408,9 +443,19 @@ class OnlineChallengeClient {
       }
 
       // 4. Handle incoming lastEvent updates (ticks, tactics, rematch)
-      if (data.lastEvent && data.lastEvent.timestamp > this.lastProcessedEventTime) {
-        this.lastProcessedEventTime = data.lastEvent.timestamp;
-        const { type, senderId, ...rest } = data.lastEvent;
+      // Events are de-duplicated by identity, not by the sender's clock: two phones rarely agree on
+      // the time, and comparing timestamps made one side silently drop the other side's events.
+      const ev = data.lastEvent;
+      const evId = ev ? (ev.eventId || `${ev.type}:${ev.senderId}:${ev.timestamp}`) : '';
+      const firstSnapshot = !this.sawFirstSnapshot;
+      this.sawFirstSnapshot = true;
+      if (ev && firstSnapshot) {
+        // Joining / reconnecting: whatever is already there happened before us, don't replay it.
+        this.lastProcessedEventId = evId;
+      } else if (ev && evId !== this.lastProcessedEventId) {
+        this.lastProcessedEventId = evId;
+        this.lastProcessedEventTime = ev.timestamp || this.lastProcessedEventTime;
+        const { type, senderId, ...rest } = ev;
 
         if (senderId !== myPlayerId) {
           if (type === 'opponent_in_game_tactics' || type === 'in_game_tactics') {
@@ -483,7 +528,7 @@ class OnlineChallengeClient {
   }) {
     await this.connect();
     const playerId = getOrCreatePlayerId();
-    const code = generateRoomCode();
+    let code = generateRoomCode();
 
     if (this.transport === 'websocket' && this.socket?.readyState === WebSocket.OPEN) {
       this.currentRoomCode = code;
@@ -514,6 +559,15 @@ class OnlineChallengeClient {
       createdAt: Date.now(),
       host: initialHost,
     };
+
+    // never overwrite somebody else's live room if the random code happens to collide
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const existing = await getDoc(doc(db, 'challenge_rooms', code));
+      const dead = !existing.exists() || Date.now() - (existing.data() as any)?.lastActivity > ROOM_STALE_MS || (existing.data() as any)?.status === 'closed';
+      if (dead) break;
+      code = generateRoomCode();
+    }
+    roomData.code = code;
 
     const docRef = doc(db, 'challenge_rooms', code);
     await setDoc(docRef, cleanForFirestore({
@@ -560,51 +614,53 @@ class OnlineChallengeClient {
       return;
     }
 
-    // Firestore Mode
+    // Firestore Mode: claim the guest seat atomically so two people typing the same code at the
+    // same moment can't both "join" (the second one used to silently overwrite the first).
     const docRef = doc(db, 'challenge_rooms', cleanCode);
-    const snap = await getDoc(docRef);
-
-    if (!snap.exists()) {
-      throw new Error('كود الغرفة غير صحيح أو أن الغرفة غير موجودة.');
-    }
-
-    const currentRoom = snap.data() as any;
-    if (currentRoom.status === 'playing' || currentRoom.status === 'completed') {
-      throw new Error('المباراة في هذه الغرفة بدأت بالفعل أو انتهت.');
-    }
-
-    if (currentRoom.guest && currentRoom.guest.playerId !== playerId) {
-      throw new Error('غرفة التحدي ممتلئة بالفعل بمنافس آخر.');
-    }
-
     const guestParticipant: ChallengeParticipant = {
       playerId,
       playerName: participant.playerName,
+      avatar: (participant as any).avatar,
       clubName: participant.clubName,
       clubRating: participant.clubRating,
       tactics: participant.tactics,
       squadSummary: participant.squadSummary,
+      benchSummary: (participant as any).benchSummary,
       isReady: false,
       isConnected: true,
     };
 
-    const updatedRoom: ChallengeRoomState = {
-      ...currentRoom,
-      guest: guestParticipant,
-      status: 'ready',
-    };
-
-    await updateDoc(docRef, cleanForFirestore({
-      guest: guestParticipant,
-      status: 'ready',
-      lastActivity: Date.now(),
-      lastEvent: {
-        type: 'opponent_joined',
-        guest: guestParticipant,
-        senderId: playerId,
-        timestamp: Date.now(),
-      },
-    }));
+    let updatedRoom: ChallengeRoomState;
+    try {
+      updatedRoom = await runTransaction(db, async (tx) => {
+        const snap = await tx.get(docRef);
+        if (!snap.exists()) throw new Error('كود الغرفة غير صحيح أو أن الغرفة غير موجودة.');
+        const currentRoom = snap.data() as any;
+        if (currentRoom.status === 'closed' || Date.now() - (currentRoom.lastActivity || currentRoom.createdAt || 0) > ROOM_STALE_MS) {
+          throw new Error('الغرفة دي انتهت. اطلب من صاحبك كود جديد.');
+        }
+        if (currentRoom.host?.playerId === playerId) {
+          throw new Error('دي غرفتك إنت. ابعت الكود لصاحبك عشان يدخل.');
+        }
+        if (currentRoom.status === 'playing' || currentRoom.status === 'completed') {
+          throw new Error('المباراة في هذه الغرفة بدأت بالفعل أو انتهت.');
+        }
+        if (currentRoom.guest && currentRoom.guest.playerId !== playerId) {
+          throw new Error('غرفة التحدي ممتلئة بالفعل بمنافس آخر.');
+        }
+        const now = Date.now();
+        tx.update(docRef, cleanForFirestore({
+          guest: guestParticipant,
+          status: 'ready',
+          lastActivity: now,
+          lastEvent: { type: 'opponent_joined', guest: guestParticipant, senderId: playerId, timestamp: now },
+        }));
+        return { ...currentRoom, guest: guestParticipant, status: 'ready' } as ChallengeRoomState;
+      });
+    } catch (err) {
+      this.currentRoomCode = null;
+      throw err;
+    }
 
     this.cachedRoomState = updatedRoom;
     this.lastProcessedEventTime = Date.now();
@@ -906,8 +962,10 @@ class OnlineChallengeClient {
         if (snap.exists()) {
           const data = snap.data() as any;
           if (data.host?.playerId === playerId) {
-            // Host left -> delete or close room
-            deleteDoc(docRef).catch(() => {});
+            // Host left -> tell the guest first (soft close), then remove the room
+            updateDoc(docRef, { status: 'closed', lastActivity: Date.now(), lastEvent: { type: 'opponent_left', senderId: playerId, timestamp: Date.now() } })
+              .catch(() => {})
+              .finally(() => { setTimeout(() => deleteDoc(docRef).catch(() => {}), 4000); });
           } else {
             // Guest left -> mark room waiting
             updateDoc(docRef, {
@@ -960,8 +1018,14 @@ class OnlineChallengeClient {
       return;
     }
 
-    // Fallback: If socket unavailable, simulate fast matchmaking bot
-    const botClubNames = ['نادي النجوم الدولي', 'أكاديمية الفرسان', 'اتحاد الأبطال', 'نادي الصقور أونلاين', 'كتيبة الأساطير'];
+    // Phone app / no relay server: real matchmaking through a Firestore queue
+    await this.startFirestoreMatchmaking(participant, playerId);
+  }
+
+  /** Emits a clearly-labelled practice match against a virtual coach. */
+  private startBotMatch(participant: any, reason: 'timeout' | 'requested') {
+    const playerId = getOrCreatePlayerId();
+    const botClubNames = ['نادي النجوم الدولي', 'أكاديمية الفرسان', 'اتحاد الأبطال', 'نادي الصقور', 'كتيبة الأساطير'];
     const botCoachNames = ['كابتن طارق السعيد', 'المدرب حسام البدري', 'كابتن أحمد سامي', 'المدرب إيهاب جلال', 'كابتن علي ماهر'];
     const randomBotClub = botClubNames[Math.floor(Math.random() * botClubNames.length)];
     const randomBotCoach = botCoachNames[Math.floor(Math.random() * botCoachNames.length)];
@@ -1006,8 +1070,130 @@ class OnlineChallengeClient {
         role: 'host',
         room: fallbackRoom,
         opponent: fallbackRoom.guest,
+        isBot: true,
+        botReason: reason,
       });
-    }, 1500);
+    }, 700);
+  }
+
+  private stopFirestoreMatchmaking(removeEntry: boolean) {
+    this.queueActive = false;
+    if (this.queueTimer) { clearInterval(this.queueTimer); this.queueTimer = null; }
+    if (this.queueTimeout) { clearTimeout(this.queueTimeout); this.queueTimeout = null; }
+    if (this.queueUnsub) { this.queueUnsub(); this.queueUnsub = null; }
+    if (removeEntry) {
+      deleteDoc(doc(db, 'challenge_queue', getOrCreatePlayerId())).catch(() => {});
+    }
+  }
+
+  private finishFirestoreMatch(room: any, myId: string) {
+    this.stopFirestoreMatchmaking(false);
+    // our queue entry has done its job
+    setTimeout(() => deleteDoc(doc(db, 'challenge_queue', myId)).catch(() => {}), 1500);
+    const role = room.host?.playerId === myId ? 'host' : 'guest';
+    this.currentRoomCode = room.code;
+    this.cachedRoomState = room;
+    this.subscribeFirestoreRoom(room.code);
+    this.emitMessage({
+      type: 'random_match_matched',
+      code: room.code,
+      role,
+      room,
+      opponent: role === 'host' ? room.guest : room.host,
+      isBot: false,
+    });
+  }
+
+  private async startFirestoreMatchmaking(participant: any, playerId: string) {
+    this.stopFirestoreMatchmaking(true);
+    this.queueActive = true;
+    const myRef = doc(db, 'challenge_queue', playerId);
+    const now = Date.now();
+    await setDoc(myRef, cleanForFirestore({
+      playerId,
+      participant: { playerId, ...participant },
+      status: 'waiting',
+      roomCode: null,
+      createdAt: now,
+      lastSeen: now,
+    }));
+    this.emitMessage({ type: 'matchmaking_searching', queueSize: 1 });
+
+    // 1) somebody else may claim us: wait for our own entry to flip to "matched"
+    this.queueUnsub = onSnapshot(myRef, async (snap) => {
+      const d: any = snap.data();
+      if (!this.queueActive || !d || d.status !== 'matched' || !d.roomCode) return;
+      try {
+        const roomSnap = await getDoc(doc(db, 'challenge_rooms', d.roomCode));
+        if (roomSnap.exists() && this.queueActive) this.finishFirestoreMatch(roomSnap.data(), playerId);
+      } catch (err) {
+        console.warn('[OnlineChallenge] could not open matched room:', err);
+      }
+    }, () => {});
+
+    // 2) or we claim somebody. Only the player with the larger id claims, so two people who see
+    //    each other at the same instant never create two different rooms.
+    const tick = async () => {
+      if (!this.queueActive) return;
+      try {
+        await updateDoc(myRef, { lastSeen: Date.now() });
+        const snap = await getDocs(query(collection(db, 'challenge_queue'), where('status', '==', 'waiting')));
+        const t = Date.now();
+        const others = snap.docs
+          .map(d => d.data() as any)
+          .filter(d => d.playerId !== playerId && t - (d.lastSeen || 0) < QUEUE_ENTRY_FRESH_MS);
+        this.emitMessage({ type: 'matchmaking_searching', queueSize: others.length + 1 });
+        const candidates = others.filter(o => o.playerId < playerId).sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
+        for (const c of candidates) {
+          if (!this.queueActive) return;
+          const room = await this.tryClaimOpponent(myRef, doc(db, 'challenge_queue', c.playerId), playerId);
+          if (room) { this.finishFirestoreMatch(room, playerId); return; }
+        }
+      } catch (err) {
+        console.warn('[OnlineChallenge] matchmaking poll warning:', err);
+      }
+    };
+    this.queueTimer = setInterval(tick, QUEUE_HEARTBEAT_MS);
+    void tick();
+
+    // 3) nobody real around: be honest and offer a practice match instead
+    this.queueTimeout = setTimeout(() => {
+      if (!this.queueActive) return;
+      this.stopFirestoreMatchmaking(true);
+      this.startBotMatch(participant, 'timeout');
+    }, MATCHMAKING_TIMEOUT_MS);
+  }
+
+  private async tryClaimOpponent(myRef: any, theirRef: any, myId: string): Promise<any | null> {
+    const code = generateRoomCode();
+    const roomRef = doc(db, 'challenge_rooms', code);
+    try {
+      return await runTransaction(db, async (tx) => {
+        const mine = await tx.get(myRef);
+        const theirs = await tx.get(theirRef);
+        const m: any = mine.data();
+        const o: any = theirs.data();
+        if (!mine.exists() || m.status !== 'waiting') return null;
+        if (!theirs.exists() || o.status !== 'waiting' || Date.now() - (o.lastSeen || 0) > QUEUE_ENTRY_FRESH_MS + 3000) return null;
+        const now = Date.now();
+        const room = {
+          code,
+          status: 'playing',
+          createdAt: now,
+          host: { ...o.participant, isReady: true, isConnected: true },
+          guest: { ...m.participant, isReady: true, isConnected: true },
+          matchState: { minute: 0, homeScore: 0, awayScore: 0, status: 'playing' },
+          lastActivity: now,
+          lastEvent: { type: 'room_created', senderId: myId, timestamp: now },
+        };
+        tx.set(roomRef, cleanForFirestore(room));
+        tx.update(theirRef, { status: 'matched', roomCode: code });
+        tx.update(myRef, { status: 'matched', roomCode: code });
+        return room;
+      });
+    } catch (err) {
+      return null; // somebody else got there first; try the next candidate on the next poll
+    }
   }
 
   public cancelMatchmaking() {
@@ -1018,6 +1204,7 @@ class OnlineChallengeClient {
         playerId,
       });
     }
+    if (this.queueActive) this.stopFirestoreMatchmaking(true);
   }
 
   public requestBotMatch(participant: {
@@ -1039,7 +1226,8 @@ class OnlineChallengeClient {
         },
       });
     } else {
-      this.findRandomMatch(participant);
+      if (this.queueActive) this.stopFirestoreMatchmaking(true);
+      this.startBotMatch(participant, 'requested');
     }
   }
 
@@ -1048,6 +1236,37 @@ class OnlineChallengeClient {
   // ==========================================
 
   public async fetchDailyRanking(): Promise<DailyCoachRankEntry[]> {
+    // 1) Firestore: works on the phone app and on the web, no server needed
+    try {
+      const snap = await getDocs(query(collection(db, 'challenge_daily_ranking'), where('dateKey', '==', todayKey())));
+      const rows = snap.docs.map(d => d.data() as any).filter(r => r && r.playerId);
+      rows.sort((a, b) =>
+        (b.points || 0) - (a.points || 0) ||
+        ((b.goalsFor || 0) - (b.goalsAgainst || 0)) - ((a.goalsFor || 0) - (a.goalsAgainst || 0)) ||
+        (b.goalsFor || 0) - (a.goalsFor || 0) ||
+        (a.played || 0) - (b.played || 0)
+      );
+      if (rows.length > 0) {
+        return rows.slice(0, 50).map((r, i) => ({
+          rank: i + 1,
+          playerId: r.playerId,
+          coachName: r.coachName || 'مدرب',
+          avatar: r.avatar || undefined,
+          clubName: r.clubName || '',
+          clubRating: r.clubRating || 70,
+          wins: r.wins || 0,
+          losses: r.losses || 0,
+          draws: r.draws || 0,
+          matchesPlayed: r.played || 0,
+          lastActiveTimestamp: r.lastActive || 0,
+          points: r.points || 0,
+          goalDifference: (r.goalsFor || 0) - (r.goalsAgainst || 0),
+        }));
+      }
+    } catch (err) {
+      console.warn('[OnlineChallenge] Firestore ranking unavailable:', err);
+    }
+    // 2) Relay server (web build only)
     try {
       const res = await fetch('/api/pvp/daily-ranking');
       if (res.ok) {
@@ -1069,23 +1288,57 @@ class OnlineChallengeClient {
     homeScore: number;
     awayScore: number;
   }) {
-    // 1. Send via WebSocket if open
-    if (this.socket && this.socket.readyState === WebSocket.OPEN) {
-      this.sendWs({
-        type: 'record_match_result',
-        result,
-      });
-    }
+    const myId = getOrCreatePlayerId();
+    const iAmHost = result.host.playerId === myId;
+    const iAmGuest = result.guest.playerId === myId;
+    const opponentId = iAmHost ? result.guest.playerId : result.host.playerId;
+    const isPractice = String(opponentId || '').startsWith('bot_');
 
-    // 2. Also send via REST API to guarantee registration in server RAM
+    // Practice matches against the virtual coach never count towards the daily ranking
+    if (isPractice) return;
+
+    // 1. Relay server paths (web build)
+    if (this.socket && this.socket.readyState === WebSocket.OPEN) {
+      this.sendWs({ type: 'record_match_result', result });
+    }
     try {
       await fetch('/api/pvp/record-result', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(result),
       });
+    } catch {
+      // no relay server (phone app) - Firestore below is the source of truth there
+    }
+
+    // 2. Firestore: every phone records only ITS OWN line, exactly once
+    if (!iAmHost && !iAmGuest) return;
+    try {
+      const me = iAmHost ? result.host : result.guest;
+      const gf = iAmHost ? result.homeScore : result.awayScore;
+      const ga = iAmHost ? result.awayScore : result.homeScore;
+      const win = gf > ga ? 1 : 0;
+      const draw = gf === ga ? 1 : 0;
+      const loss = gf < ga ? 1 : 0;
+      const dateKey = todayKey();
+      await setDoc(doc(db, 'challenge_daily_ranking', `${dateKey}_${myId}`), {
+        dateKey,
+        playerId: myId,
+        coachName: me.playerName,
+        avatar: me.avatar && !String(me.avatar).startsWith('data:') ? me.avatar : '',
+        clubName: me.clubName,
+        clubRating: me.clubRating,
+        played: increment(1),
+        wins: increment(win),
+        draws: increment(draw),
+        losses: increment(loss),
+        goalsFor: increment(gf),
+        goalsAgainst: increment(ga),
+        points: increment(win * 3 + draw),
+        lastActive: Date.now(),
+      }, { merge: true });
     } catch (err) {
-      console.warn('[OnlineChallenge] Failed to post match result to server API:', err);
+      console.warn('[OnlineChallenge] Failed to record ranking line in Firestore:', err);
     }
   }
 

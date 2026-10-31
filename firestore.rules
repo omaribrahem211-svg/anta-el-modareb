@@ -71,12 +71,35 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
-    // Rules for Live Challenge Rooms (RAM/Firestore Realtime Relay for PvP)
+    // Rules for Live Challenge Rooms (Firestore realtime relay for PvP, works on the phone app)
     match /challenge_rooms/{roomCode} {
-      // Allow players on Android and Web to create, join, and sync real-time challenge rooms
       allow read, get, list: if true;
       allow create: if request.resource.data.code == roomCode;
-      allow update: if true;
+      // the room identity can never be rewritten (code + host stay fixed)
+      allow update: if request.resource.data.code == resource.data.code
+        && request.resource.data.host.playerId == resource.data.host.playerId;
+      // rooms can be cleaned up by the players once nobody is mid-match (or by an admin any time)
+      allow delete: if isAdmin()
+        || resource.data.status in ['waiting', 'ready', 'completed', 'closed'];
+    }
+
+    // Random-match queue: one short-lived entry per player, document id = player id
+    match /challenge_queue/{playerId} {
+      allow read, list: if true;
+      allow create: if request.resource.data.playerId == playerId;
+      allow update: if resource.data.playerId == playerId
+        || request.resource.data.status == 'matched';
+      allow delete: if true;
+    }
+
+    // Daily online-challenge ranking: one document per coach per day (dateKey_playerId)
+    match /challenge_daily_ranking/{entryId} {
+      allow read, list: if true;
+      allow create, update: if entryId == (request.resource.data.dateKey + '_' + request.resource.data.playerId)
+        && request.resource.data.points is number
+        && request.resource.data.played is number
+        && request.resource.data.played <= 300
+        && request.resource.data.points <= request.resource.data.played * 3;
       allow delete: if isAdmin();
     }
 
