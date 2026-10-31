@@ -1,6 +1,6 @@
 import React, { useMemo } from 'react';
-import { Club, MatchEvent, TeamTactics } from '../types/game';
-import { OnlineMatchPitch3D, PitchLiveEvent } from './pvp/OnlineMatchPitch3D';
+import { Club, MatchEvent, MatchStats, TeamTactics } from '../types/game';
+import { OnlineMatchPitch3D, PitchLiveEvent, PitchFeedItem, SquadPlayerInfo } from './pvp/OnlineMatchPitch3D';
 
 export interface TacticalPitch2DProps {
   homeTeam: Club;
@@ -27,6 +27,34 @@ export interface TacticalPitch2DProps {
   homePenalties?: number;
   awayPenalties?: number;
   isCupMatch?: boolean;
+  /** Active player ids on the field (reflects substitutions) */
+  homeLineupIds?: string[];
+  awayLineupIds?: string[];
+  /** Live formations (falls back to the club's saved tactics) */
+  homeFormation?: string;
+  awayFormation?: string;
+  stats?: Partial<MatchStats>;
+  homeXg?: number;
+  awayXg?: number;
+}
+
+/** Order the squad so the players actually on the pitch come first, mapped to the pitch's squad shape. */
+function toPitchSquad(team: Club | undefined, lineupIds?: string[]): SquadPlayerInfo[] | undefined {
+  const players = (team as any)?.players as any[] | undefined;
+  if (!Array.isArray(players) || players.length === 0) return undefined;
+  const map = (p: any): SquadPlayerInfo => ({
+    id: p.id,
+    name: p.name,
+    number: typeof p.number === 'number' ? p.number : undefined,
+    position: p.position,
+    rating: typeof p.overallRating === 'number' ? p.overallRating : p.rating,
+  });
+  if (Array.isArray(lineupIds) && lineupIds.length > 0) {
+    const byId = new Map(players.map((p) => [p.id, p]));
+    const onPitch = lineupIds.map((id) => byId.get(id)).filter(Boolean).map(map);
+    if (onPitch.length >= 8) return onPitch;
+  }
+  return players.map(map);
 }
 
 /**
@@ -59,7 +87,17 @@ export const TacticalPitch2D: React.FC<TacticalPitch2DProps> = ({
   homePenalties,
   awayPenalties,
   isCupMatch,
+  homeLineupIds,
+  awayLineupIds,
+  homeFormation: homeFormationProp,
+  awayFormation: awayFormationProp,
+  stats,
+  homeXg,
+  awayXg,
 }) => {
+  const homeLabel = homeTeam?.shortName || homeTeam?.name || 'المضيف';
+  const awayLabel = awayTeam?.shortName || awayTeam?.name || 'الضيف';
+
   // Find the most recent event up to current minute
   const latestMatchEvent = useMemo(() => {
     if (!events || events.length === 0) return null;
@@ -102,29 +140,55 @@ export const TacticalPitch2D: React.FC<TacticalPitch2DProps> = ({
     awayDangerousAttacks,
   ]);
 
-  // Convert event to PitchLiveEvent for 3D pitch celebration overlay
+  // Convert event to PitchLiveEvent for the pitch overlays.
+  // Match-flow events (goal/card/foul...) only stay "live" for a few minutes, otherwise an old goal
+  // would keep the goal card and the ball stuck in the net until the next event.
   const convertedLastEvent: PitchLiveEvent | null = useMemo(() => {
     if (!latestMatchEvent) return null;
+    const age = currentMinute - latestMatchEvent.minute;
+    const isMilestone = (latestMatchEvent.type as string) === 'halftime' || (latestMatchEvent.type as string) === 'fulltime';
+    if (!isMilestone && age > 3) return null;
+    const ev: any = latestMatchEvent;
     return {
-      id: (latestMatchEvent as any).id || `${latestMatchEvent.minute}-${latestMatchEvent.type}`,
-      minute: latestMatchEvent.minute,
-      type: latestMatchEvent.type,
-      team: latestMatchEvent.teamId === homeTeam?.id ? homeTeam?.name : awayTeam?.name,
+      id: ev.id || `${ev.minute}-${ev.type}-${ev.playerId || ''}`,
+      minute: ev.minute,
+      type: ev.type,
+      team: ev.teamId === homeTeam?.id ? homeLabel : awayLabel,
       textAr:
-        latestMatchEvent.description ||
-        (latestMatchEvent as any).textAr ||
-        (latestMatchEvent.type === 'goal' ? 'هدف رائع!' : ''),
+        ev.description ||
+        ev.textAr ||
+        (ev.type === 'goal' ? 'هدف رائع!' : ''),
+      scorerName: ev.type === 'goal' ? ev.playerName : undefined,
+      assistName: ev.type === 'goal' ? ev.assistPlayerName : undefined,
+      playerName: ev.playerName,
+      outPlayerName: ev.outPlayerName,
+      inPlayerName: ev.inPlayerName,
     };
-  }, [latestMatchEvent, homeTeam?.id, homeTeam?.name, awayTeam?.name]);
+  }, [latestMatchEvent, currentMinute, homeTeam?.id, homeLabel, awayLabel]);
+
+  // Latest 3 meaningful events for the commentary strip (newest first)
+  const recentEvents: PitchFeedItem[] = useMemo(() => {
+    if (!events || events.length === 0) return [];
+    return events
+      .filter((e) => e && typeof e.minute === 'number' && e.minute <= currentMinute && e.description)
+      .sort((a, b) => b.minute - a.minute)
+      .slice(0, 3)
+      .map((e, i) => ({
+        id: `${e.minute}-${e.type}-${e.playerId || i}-${i}`,
+        minute: e.minute,
+        type: e.type,
+        text: e.description,
+      }));
+  }, [events, currentMinute]);
 
   const momentum = useMemo(() => {
     return Math.max(-100, Math.min(100, (homePossession - 50) * 2));
   }, [homePossession]);
 
   const homeFormation =
-    homeTeam?.tactics?.formation || userTactics?.formation || '4-3-3';
+    homeFormationProp || homeTeam?.tactics?.formation || userTactics?.formation || '4-3-3';
   const awayFormation =
-    awayTeam?.tactics?.formation || '4-4-2';
+    awayFormationProp || awayTeam?.tactics?.formation || '4-4-2';
 
   const derivedTactic = useMemo(() => {
     if (activeTactic) return activeTactic;
@@ -138,8 +202,8 @@ export const TacticalPitch2D: React.FC<TacticalPitch2DProps> = ({
 
   return (
     <OnlineMatchPitch3D
-      homeClubName={homeTeam?.shortName || homeTeam?.name || 'المضيف'}
-      awayClubName={awayTeam?.shortName || awayTeam?.name || 'الضيف'}
+      homeClubName={homeLabel}
+      awayClubName={awayLabel}
       homeScore={homeScore}
       awayScore={awayScore}
       minute={currentMinute}
@@ -149,13 +213,20 @@ export const TacticalPitch2D: React.FC<TacticalPitch2DProps> = ({
       awayPossession={awayPossession}
       homeFormation={homeFormation}
       awayFormation={awayFormation}
-      homeSquad={(homeTeam as any)?.players}
-      awaySquad={(awayTeam as any)?.players}
+      homeSquad={toPitchSquad(homeTeam, homeLineupIds)}
+      awaySquad={toPitchSquad(awayTeam, awayLineupIds)}
       lastEvent={convertedLastEvent}
       isFinished={isFinished}
       status={isFinished ? 'finished' : isHalfTime ? 'halftime' : 'playing'}
       addedTime={currentMinute === 45 || currentMinute === 90 ? 3 : undefined}
-      title="استاد المباراة التفاعلي 2.5D"
+      title="استاد المباراة التفاعلي"
+      recentEvents={recentEvents}
+      homeShots={stats?.homeShots}
+      awayShots={stats?.awayShots}
+      homeShotsOnTarget={stats?.homeShotsOnTarget}
+      awayShotsOnTarget={stats?.awayShotsOnTarget}
+      homeXg={homeXg}
+      awayXg={awayXg}
       homeColor={homeTeam?.primaryColor}
       awayColor={awayTeam?.primaryColor}
       activeTactic={derivedTactic}

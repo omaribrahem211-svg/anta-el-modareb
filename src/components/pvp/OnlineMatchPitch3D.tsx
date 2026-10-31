@@ -3,14 +3,10 @@ import {
   Activity,
   Volume2,
   VolumeX,
-  Compass,
   Zap,
   Shield,
   Crosshair,
   Sliders,
-  Sparkles,
-  ArrowUp,
-  ArrowDown,
   Flame,
   Play,
   CheckCircle2,
@@ -20,7 +16,6 @@ import {
   AlertCircle,
 } from 'lucide-react';
 import { stadiumAudio } from '../../utils/stadiumAudio';
-import { PitchPlayerFigurine3D } from '../models/Football3DModels';
 
 export interface PitchLiveEvent {
   id?: string;
@@ -41,6 +36,14 @@ export interface SquadPlayerInfo {
   number?: number;
   position?: string;
   role?: string;
+  rating?: number;
+}
+
+export interface PitchFeedItem {
+  id: string;
+  minute: number;
+  type?: string;
+  text: string;
 }
 
 export interface OnlineMatchPitch3DProps {
@@ -74,6 +77,14 @@ export interface OnlineMatchPitch3DProps {
   homePenalties?: number;
   awayPenalties?: number;
   isCupMatch?: boolean;
+  /** Recent match events (newest first) shown in the live commentary strip */
+  recentEvents?: PitchFeedItem[];
+  homeShots?: number;
+  awayShots?: number;
+  homeShotsOnTarget?: number;
+  awayShotsOnTarget?: number;
+  homeXg?: number;
+  awayXg?: number;
 }
 
 // Normalized coordinate for player positions on the vertical pitch (x: 0..100%, y: 0..100%)
@@ -88,6 +99,7 @@ interface PlayerDot {
   isCarrier: boolean;
   isRunning: boolean;
   isScorer?: boolean;
+  rating?: number;
 }
 
 // Map role to traditional squad number
@@ -155,7 +167,7 @@ function assignPlayerNameAndNumber(
   clubName: string,
   squad: SquadPlayerInfo[] | undefined,
   usedNames: Set<string>
-): { name: string; jerseyNumber: number } {
+): { name: string; jerseyNumber: number; rating?: number } {
   // Check if squad has an unused match for this position
   if (squad && squad.length > 0) {
     const isCategoryMatch = (pPos: string | undefined, r: string) => {
@@ -182,6 +194,7 @@ function assignPlayerNameAndNumber(
       return {
         name: match.name,
         jerseyNumber: match.number || ROLE_NUMBER_MAP[slotRole] || (slotIndex + 1),
+        rating: match.rating,
       };
     }
   }
@@ -294,6 +307,78 @@ const VERTICAL_FORMATIONS_MAP: Record<string, { role: string; x: number; y: numb
   ],
 };
 
+
+type FormationSlot = { role: string; x: number; y: number };
+const formationSlotsCache: Record<string, FormationSlot[]> = {};
+
+/**
+ * Builds pitch slots for ANY formation string (e.g. "4-2-3-1", "3-4-2-1", "4-2-3-1-asym").
+ * The game has 26 formations; the hand-made map only covers 6 of them.
+ */
+function getFormationSlots(formation?: string): FormationSlot[] {
+  const key = formation || '4-3-3';
+  if (VERTICAL_FORMATIONS_MAP[key]) return VERTICAL_FORMATIONS_MAP[key];
+  if (formationSlotsCache[key]) return formationSlotsCache[key];
+
+  const m = key.match(/^\d(?:-\d)+/);
+  const rows = m ? m[0].split('-').map(Number) : [];
+  const sum = rows.reduce((a, b) => a + b, 0);
+  if (rows.length < 3 || sum !== 10) return VERTICAL_FORMATIONS_MAP['4-3-3'];
+
+  const spreadX = (n: number): number[] => {
+    if (n === 1) return [50];
+    const spread = n === 2 ? 40 : n === 3 ? 56 : n === 4 ? 66 : 74;
+    return Array.from({ length: n }, (_, i) => 50 - spread / 2 + (i * spread) / (n - 1));
+  };
+  const defRoles = (n: number) =>
+    n === 2 ? ['CB', 'CB'] : n === 4 ? ['LB', 'CB', 'CB', 'RB'] : n === 5 ? ['LWB', 'CB', 'CB', 'CB', 'RWB'] : Array(n).fill('CB');
+  const midRoles = (n: number, first: boolean, last: boolean, multi: boolean) => {
+    if (n === 1) return [multi && first ? 'CDM' : multi && last ? 'CAM' : 'CM'];
+    if (n === 2) return multi && first ? ['CDM', 'CDM'] : multi && last ? ['CAM', 'CAM'] : ['CM', 'CM'];
+    if (n === 3) return multi && last ? ['LM', 'CAM', 'RM'] : multi && first ? ['CM', 'CDM', 'CM'] : ['CM', 'CM', 'CM'];
+    if (n === 4) return ['LM', 'CM', 'CM', 'RM'];
+    return Array(n).fill('CM');
+  };
+  const fwdRoles = (n: number) =>
+    n === 1 ? ['ST'] : n === 2 ? ['ST', 'ST'] : n === 3 ? ['LW', 'ST', 'RW'] : n === 4 ? ['LW', 'ST', 'ST', 'RW'] : Array(n).fill('ST');
+
+  const slots: FormationSlot[] = [{ role: 'GK', x: 50, y: 94 }];
+  const [def, ...rest] = rows;
+  const defX = spreadX(def);
+  defRoles(def).forEach((role, i) => slots.push({ role, x: defX[i], y: def >= 5 ? 85 : 83 }));
+
+  const k = rest.length;
+  rest.forEach((n, ri) => {
+    const y = k === 1 ? 58 : 72 - (ri * 22) / (k - 1);
+    const isLast = ri === k - 1;
+    const roles = isLast ? fwdRoles(n) : midRoles(n, ri === 0, ri === k - 2, k > 2);
+    const xs = spreadX(n);
+    roles.forEach((role, i) => slots.push({ role, x: xs[i], y }));
+  });
+
+  formationSlotsCache[key] = slots;
+  return slots;
+}
+
+// Team colours: keep valid hex, and make sure the two teams are visually distinct
+const HEX_RE = /^#[0-9a-fA-F]{6}$/;
+function hexToRgb(h: string): [number, number, number] {
+  return [parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16), parseInt(h.slice(5, 7), 16)];
+}
+function resolveKitColors(home?: string, away?: string): { home: string; away: string } {
+  const h = home && HEX_RE.test(home) ? home : '#f97316';
+  let a = away && HEX_RE.test(away) ? away : '#10b981';
+  const [r1, g1, b1] = hexToRgb(h);
+  const [r2, g2, b2] = hexToRgb(a);
+  const dist = Math.hypot(r1 - r2, g1 - g2, b1 - b2);
+  if (dist < 90) a = h.toLowerCase() === '#10b981' ? '#f97316' : '#10b981';
+  return { home: h, away: a };
+}
+function readableOn(hex: string): string {
+  const [r, g, b] = hexToRgb(hex);
+  return (r * 299 + g * 587 + b * 114) / 1000 > 150 ? '#0b1220' : '#ffffff';
+}
+
 // Tactical Presets for quick actions
 const QUICK_TACTICS_LIST = [
   { id: 'attack', label: 'هجوم كاسح', icon: Zap, color: 'text-amber-400' },
@@ -303,31 +388,6 @@ const QUICK_TACTICS_LIST = [
   { id: 'high_press', label: 'ضغط عالي', icon: Activity, color: 'text-rose-400' },
   { id: 'shoot', label: 'تسديد', icon: Crosshair, color: 'text-purple-400' },
 ];
-
-/**
- * Miniature 3D Player Figurine Component (مجسم لاعب ثلاثي الأبعاد مطور مع الاسم والرقم وحلقة الإضاءة التكتيكية)
- */
-const MiniaturePlayerFigurine: React.FC<{
-  player: PlayerDot;
-  isHome: boolean;
-  primaryColor?: string;
-  isGK: boolean;
-}> = ({ player, isHome, primaryColor, isGK }) => {
-  return (
-    <PitchPlayerFigurine3D
-      player={player}
-      name={player?.name}
-      jerseyNumber={player?.jerseyNumber}
-      roleArabic={player?.roleArabic}
-      isHome={isHome}
-      primaryColor={primaryColor}
-      isGK={isGK}
-      isCarrier={player?.isCarrier}
-      isRunning={player?.isRunning}
-      isScorer={player?.isScorer}
-    />
-  );
-};
 
 export const OnlineMatchPitch3D: React.FC<OnlineMatchPitch3DProps> = ({
   homeClubName,
@@ -360,10 +420,16 @@ export const OnlineMatchPitch3D: React.FC<OnlineMatchPitch3DProps> = ({
   homePenalties,
   awayPenalties,
   isCupMatch,
+  recentEvents,
+  homeShots,
+  awayShots,
+  homeShotsOnTarget,
+  awayShotsOnTarget,
+  homeXg,
+  awayXg,
 }) => {
-  // Perspective angle state: 'isometric' (2.5D longitudinal) | 'broadcast' (3D longitudinal) | 'top' (2D Tactical)
-  const [viewAngle, setViewAngle] = useState<'isometric' | 'broadcast' | 'top'>('isometric');
-  const [showRadar, setShowRadar] = useState<boolean>(false);
+  // Camera: 'top' (clean tactical 2D, default) | 'isometric' (2.5D) | 'broadcast' (3D)
+  const [viewAngle, setViewAngle] = useState<'isometric' | 'broadcast' | 'top'>('top');
   const [isMuted, setIsMuted] = useState<boolean>(stadiumAudio.isMuted());
   const [selectedTactic, setSelectedTactic] = useState<string>(externalActiveTactic || 'balanced');
   const [halfTimeTalk, setHalfTimeTalk] = useState<'motivate' | 'focus' | 'calm'>('motivate');
@@ -400,6 +466,7 @@ export const OnlineMatchPitch3D: React.FC<OnlineMatchPitch3DProps> = ({
       return;
     }
     const interval = setInterval(() => {
+      if (typeof document !== 'undefined' && document.hidden) return;
       setAnimTick((t) => (t + 1) % 10000);
     }, 850);
     return () => clearInterval(interval);
@@ -730,7 +797,7 @@ export const OnlineMatchPitch3D: React.FC<OnlineMatchPitch3DProps> = ({
 
   // Compute HOME Players (Defending Bottom y=94%, Attacking Top y=6%)
   const homePlayers: PlayerDot[] = useMemo(() => {
-    const list = VERTICAL_FORMATIONS_MAP[homeFormation] || VERTICAL_FORMATIONS_MAP['4-3-3'];
+    const list = getFormationSlots(homeFormation);
     const isHomeAttack = currentBallZone === 'guest_box' || currentBallZone === 'guest_half';
     const isAwayAttack = currentBallZone === 'host_box' || currentBallZone === 'host_half';
     const time = animTick * 0.14;
@@ -827,6 +894,7 @@ export const OnlineMatchPitch3D: React.FC<OnlineMatchPitch3DProps> = ({
         role: p.role,
         roleArabic: getSimplifiedRoleArabic(p.role),
         jerseyNumber: playerInfo.jerseyNumber,
+        rating: playerInfo.rating,
         x: finalX,
         y: finalY,
         isCarrier,
@@ -838,7 +906,7 @@ export const OnlineMatchPitch3D: React.FC<OnlineMatchPitch3DProps> = ({
 
   // Compute AWAY Players (Defending Top y=6%, Attacking Bottom y=94%)
   const awayPlayers: PlayerDot[] = useMemo(() => {
-    const list = VERTICAL_FORMATIONS_MAP[awayFormation] || VERTICAL_FORMATIONS_MAP['4-3-3'];
+    const list = getFormationSlots(awayFormation);
     const isHomeAttack = currentBallZone === 'guest_box' || currentBallZone === 'guest_half';
     const isAwayAttack = currentBallZone === 'host_box' || currentBallZone === 'host_half';
     const time = animTick * 0.14;
@@ -936,6 +1004,7 @@ export const OnlineMatchPitch3D: React.FC<OnlineMatchPitch3DProps> = ({
         role: p.role,
         roleArabic: getSimplifiedRoleArabic(p.role),
         jerseyNumber: playerInfo.jerseyNumber,
+        rating: playerInfo.rating,
         x: finalX,
         y: finalY,
         isCarrier,
@@ -1058,319 +1127,181 @@ export const OnlineMatchPitch3D: React.FC<OnlineMatchPitch3DProps> = ({
     }
   };
 
+  const kit = useMemo(() => resolveKitColors(homeColor, awayColor), [homeColor, awayColor]);
+
+  // Only the player who actually holds the ball gets a name tag (keeps the pitch clean)
+  const carrier = useMemo(() => {
+    const homeC = homePlayers.find((p) => p.isCarrier);
+    const awayC = awayPlayers.find((p) => p.isCarrier);
+    const attackingHome = currentBallZone === 'guest_box' || currentBallZone === 'guest_half';
+    const attackingAway = currentBallZone === 'host_box' || currentBallZone === 'host_half';
+    if (attackingAway) return awayC ? { p: awayC, isHome: false } : null;
+    if (attackingHome) return homeC ? { p: homeC, isHome: true } : null;
+    return homeC ? { p: homeC, isHome: true } : awayC ? { p: awayC, isHome: false } : null;
+  }, [homePlayers, awayPlayers, currentBallZone]);
+
+  const attackingTeam: 'home' | 'away' | null =
+    currentBallZone === 'guest_box' || currentBallZone === 'guest_half'
+      ? 'home'
+      : currentBallZone === 'host_box' || currentBallZone === 'host_half'
+      ? 'away'
+      : null;
+
+  const pct = (n: number) => Math.max(0, Math.min(100, Math.round(Number.isFinite(n) ? n : 0)));
+  const hp = pct(homePossession);
+  const ap = 100 - hp;
+  const hasShotStats = typeof homeShots === 'number' && typeof awayShots === 'number';
+  const hasXg = typeof homeXg === 'number' && typeof awayXg === 'number';
+
+  const renderDisc = (player: PlayerDot, isHome: boolean) => {
+    const isGK = player.role === 'GK';
+    const bg = isGK ? '#facc15' : isHome ? kit.home : kit.away;
+    const fg = readableOn(bg);
+    const size = player.isCarrier ? 30 : 26;
+    const ring = player.isScorer
+      ? '0 0 0 3px #fbbf24, 0 0 16px 4px rgba(251,191,36,0.7)'
+      : player.isCarrier
+      ? '0 0 0 3px rgba(253,230,138,0.9), 0 0 14px 3px rgba(253,230,138,0.5)'
+      : '0 2px 6px rgba(0,0,0,0.5)';
+    return (
+      <div
+        key={player.id}
+        style={{
+          left: `${player.x}%`,
+          top: `${player.y}%`,
+          transform: 'translate(-50%, -50%)',
+          transition: 'left 0.7s cubic-bezier(0.25, 1, 0.5, 1), top 0.7s cubic-bezier(0.25, 1, 0.5, 1)',
+          width: size,
+          height: size,
+          background: bg,
+          color: fg,
+          boxShadow: ring,
+        }}
+        className="absolute z-10 pointer-events-none select-none rounded-full border-2 border-white/90 flex items-center justify-center font-black text-[11px] font-mono box-border"
+        aria-label={`${player.name} رقم ${player.jerseyNumber}`}
+      >
+        {player.jerseyNumber}
+      </div>
+    );
+  };
+
+  const tabs: { id: 'top' | 'isometric' | 'broadcast'; label: string }[] = [
+    { id: 'top', label: 'تكتيكي' },
+    { id: 'isometric', label: 'مائل' },
+    { id: 'broadcast', label: 'بث 3D' },
+  ];
+
+  const feed = (recentEvents || []).slice(0, 3);
+
   return (
     <div
-      className="relative bg-slate-950/90 rounded-3xl border border-slate-800 p-3 sm:p-4 shadow-2xl overflow-hidden select-none"
+      className="relative bg-[#060b14] rounded-3xl border border-slate-800 p-3 shadow-2xl overflow-hidden select-none space-y-2.5"
       id="live-stadium-component"
       dir="rtl"
     >
-      {/* 1. TOP HEADER (Scoreboard, Live Minute & Possession) */}
-      <div className="relative z-10 bg-slate-900/90 border border-slate-800/90 rounded-2xl p-2.5 sm:p-3 mb-3 backdrop-blur-md shadow-lg">
-        {/* Score & Club Matchup Line */}
-        <div className="flex items-center justify-between gap-2">
-          {/* HOME TEAM (Right in RTL - Defends Bottom, Attacks UP ⬆️) */}
-          <div className="flex items-center gap-2 flex-1 min-w-0">
-            <span
-              className="w-3 h-3 rounded-full shrink-0 shadow-[0_0_8px_rgba(16,185,129,0.7)]"
-              style={{ backgroundColor: homeColor || '#10b981' }}
-            />
-            <div className="flex flex-col min-w-0">
-              <span className="text-xs sm:text-sm font-black text-white truncate max-w-[120px] sm:max-w-[160px]">
-                {homeClubName}
-              </span>
-              <span className="text-[9px] text-emerald-400 font-bold flex items-center gap-0.5">
-                <ArrowUp className="w-2.5 h-2.5" /> يهاجم للأعلى
-              </span>
-            </div>
-            <span className="text-lg sm:text-2xl font-black text-emerald-400 font-mono mr-auto">
-              {homeScore}
-            </span>
-          </div>
-
-          {/* CENTER: LIVE MINUTE & MATCH STATE */}
-          <div className="flex flex-col items-center shrink-0 px-2 sm:px-3">
-            <div className="flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-slate-800 border border-slate-700 text-xs font-bold text-slate-200 shadow-inner">
-              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping inline-block" />
-              <span className="font-mono">{minute}'</span>
-            </div>
-            <span className="text-[10px] text-slate-400 font-medium mt-0.5">
-              {isFinished ? 'صافرة النهاية' : minute <= 45 ? 'الشوط الأول' : 'الشوط الثاني'}
-            </span>
-          </div>
-
-          {/* AWAY TEAM (Left in RTL - Defends Top, Attacks DOWN ⬇️) */}
-          <div className="flex items-center justify-end gap-2 flex-1 min-w-0">
-            <span className="text-lg sm:text-2xl font-black text-blue-400 font-mono ml-auto">
-              {awayScore}
-            </span>
-            <div className="flex flex-col items-end min-w-0 text-left">
-              <span className="text-xs sm:text-sm font-black text-white truncate max-w-[120px] sm:max-w-[160px]">
-                {awayClubName}
-              </span>
-              <span className="text-[9px] text-blue-400 font-bold flex items-center gap-0.5">
-                يهاجم للأسفل <ArrowDown className="w-2.5 h-2.5" />
-              </span>
-            </div>
-            <span
-              className="w-3 h-3 rounded-full shrink-0 shadow-[0_0_8px_rgba(59,130,246,0.7)]"
-              style={{ backgroundColor: awayColor || '#3b82f6' }}
-            />
-          </div>
-        </div>
-
-        {/* SLIM POSSESSION BAR */}
-        <div className="mt-2 pt-2 border-t border-slate-800/80">
-          <div className="flex items-center justify-between text-[10px] font-bold text-slate-400 mb-1">
-            <span className="text-emerald-400">{homePossession}% استحواذ</span>
-            <span className="text-slate-500 font-medium">السيطرة الميدانية</span>
-            <span className="text-blue-400">{awayPossession}% استحواذ</span>
-          </div>
-          <div className="w-full h-1.5 rounded-full bg-slate-800 overflow-hidden flex">
-            <div
-              className="h-full transition-all duration-500 rounded-r-full"
-              style={{
-                width: `${homePossession}%`,
-                backgroundColor: homeColor || '#10b981',
-              }}
-            />
-            <div
-              className="h-full transition-all duration-500 rounded-l-full"
-              style={{
-                width: `${awayPossession}%`,
-                backgroundColor: awayColor || '#3b82f6',
-              }}
-            />
-          </div>
-        </div>
-      </div>
-
-      {/* 2. DEDICATED FIXED MATCH EVENTS SCREEN (شاشة عرض أحداث المباراة الثابتة - خارج الملعب بدون حجب اللعب) */}
-      <div className="relative z-10 w-full max-w-lg mx-auto mb-2" id="match-events-fixed-display">
-        {isGoal && goalDetails ? (
-          /* GOAL CELEBRATION BROADCAST CARD (شاشة الهدف التلفزيونية) */
-          <div className="px-3 py-2 sm:py-2.5 rounded-2xl bg-gradient-to-r from-emerald-950 via-slate-900 to-amber-950 border-2 border-amber-400/90 shadow-[0_0_20px_rgba(251,191,36,0.3)] flex items-center justify-between gap-2.5 animate-in fade-in duration-200">
-            <div className="flex items-center gap-2.5 min-w-0 flex-1">
-              <div className="text-2xl sm:text-3xl shrink-0 animate-bounce">⚽</div>
-              <div className="flex flex-col min-w-0">
-                <div className="flex items-center gap-1.5 flex-wrap">
-                  <span className="px-2 py-0.5 rounded-full bg-amber-400 text-slate-950 text-[10px] sm:text-xs font-black shrink-0 shadow">
-                    هــــــــــدف! GOAL!
-                  </span>
-                  <span className="text-[11px] sm:text-xs font-bold text-slate-300">
-                    لصالح: <strong className="text-emerald-300 font-black">{goalDetails.scoringClub}</strong>
-                  </span>
-                </div>
-                <div className="flex items-center gap-2 mt-0.5 text-xs sm:text-sm font-black text-white truncate">
-                  <span className="text-amber-300 drop-shadow">🌟 {goalDetails.scorerName}</span>
-                  {goalDetails.assistName && (
-                    <span className="text-[10px] sm:text-[11px] text-slate-300 font-medium">
-                      (صناعة: <strong className="text-amber-200">{goalDetails.assistName}</strong>)
-                    </span>
-                  )}
-                </div>
-                {lastEvent?.textAr && (
-                  <span className="text-[9.5px] text-slate-300/80 truncate mt-0.5">
-                    {lastEvent.textAr}
-                  </span>
-                )}
-              </div>
-            </div>
-            <div className="shrink-0 text-center pl-1">
-              <span className="font-mono text-xs font-black text-amber-300 bg-slate-950/80 px-2 py-1 rounded-lg border border-amber-400/40 block">
-                {goalDetails.minute}'
-              </span>
-            </div>
-          </div>
-        ) : activeNotification ? (
-          /* ACTIVE MATCH EVENT BROADCAST CARD (شاشة البطاقات والأخطاء والوقت بدل الضائع والتبديلات ونهاية المباراة) */
-          <div
-            className={`px-3 py-2 sm:py-2.5 rounded-2xl bg-gradient-to-r ${activeNotification.bgGradient} border-2 ${activeNotification.borderClass} shadow-xl flex items-center justify-between gap-2.5 animate-in fade-in duration-200`}
+      {/* 1. SCOREBOARD */}
+      <div className="flex items-center justify-between gap-2 bg-[#0d1626] border border-[#1b2a42] rounded-2xl px-3 py-2.5">
+        <div className="flex items-center gap-2 min-w-0 flex-1">
+          <span
+            className="w-8 h-8 rounded-[10px] shrink-0 flex items-center justify-center font-black text-[13px]"
+            style={{ background: kit.home, color: readableOn(kit.home) }}
           >
-            <div className="flex items-center gap-2.5 min-w-0 flex-1">
-              <div className="text-xl sm:text-2xl shrink-0 drop-shadow">
-                {activeNotification.icon}
-              </div>
-              <div className="flex flex-col min-w-0">
-                <div className="flex items-center gap-1.5 flex-wrap">
-                  <span className={`text-[11px] sm:text-xs font-black tracking-tight ${activeNotification.textColor}`}>
-                    {activeNotification.title}
-                  </span>
-                  <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full ${activeNotification.badgeBg} shrink-0`}>
-                    {activeNotification.badge}
-                  </span>
-                </div>
-                <div className="text-[11px] sm:text-xs text-white font-bold truncate mt-0.5">
-                  {activeNotification.subtitle}
-                </div>
-                {activeNotification.details && (
-                  <div className="text-[9.5px] text-slate-300/85 truncate">
-                    {activeNotification.details}
-                  </div>
-                )}
-              </div>
-            </div>
-            <div className="shrink-0 text-center pl-1">
-              <span className="font-mono text-xs font-black text-slate-300 bg-slate-950/80 px-2 py-1 rounded-lg border border-slate-700 block">
-                {lastEvent?.minute ?? minute}'
-              </span>
-            </div>
+            {homeClubName.trim().charAt(0)}
+          </span>
+          <span className="text-[13px] sm:text-sm font-black text-white truncate">{homeClubName}</span>
+        </div>
+
+        <div className="flex flex-col items-center shrink-0 px-1">
+          <div className="flex items-center gap-2.5 font-black text-[26px] leading-none font-mono tabular-nums" dir="ltr">
+            <span className={homeScore > awayScore ? 'text-emerald-400' : 'text-white'}>{homeScore}</span>
+            <span className="text-[#4b5d78] text-lg">:</span>
+            <span className={awayScore > homeScore ? 'text-emerald-400' : 'text-white'}>{awayScore}</span>
           </div>
-        ) : (
-          /* LIVE PLAY TICKER MONITOR (شاشة أحداث اللعب المباشر المستمرة) */
-          <div className="px-3 py-2 rounded-2xl bg-slate-900/90 border border-slate-800 shadow-md flex items-center justify-between gap-2 text-xs">
-            <div className="flex items-center gap-2 min-w-0 flex-1 text-slate-300">
-              <span className="flex h-2 w-2 relative shrink-0">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
-              </span>
-              <span className="text-[10px] sm:text-[11px] font-bold text-amber-400 bg-amber-500/10 px-1.5 py-0.5 rounded border border-amber-500/30 shrink-0">
-                بث مباشر
-              </span>
-              <span className="text-[11px] sm:text-xs truncate font-medium text-slate-200">
-                {lastEvent?.textAr || (currentBallZone === 'guest_box' ? `هجمة واعدة لنادي ${homeClubName} في منطقة الجزاء!` : currentBallZone === 'host_box' ? `هجوم مرتد لنادي ${awayClubName}!` : 'تناقل سريع للكرة في وسط الميدان وفرض السيطرة')}
-              </span>
-            </div>
-            <span className="font-mono text-[11px] font-bold text-slate-400 shrink-0 bg-slate-950 px-2 py-0.5 rounded border border-slate-800">
-              {minute}'
+          <div className="flex items-center gap-1.5 mt-1 text-[11px] font-bold text-emerald-400">
+            {!isFullTimeFinished && !isHalfTimeBreak && <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />}
+            <span dir="ltr" className="font-mono">{isFullTimeFinished ? 'FT' : isHalfTimeBreak ? 'HT' : `${minute}'`}</span>
+            <span className="text-[#7d8ea8]">
+              {isFullTimeFinished ? 'انتهت' : isHalfTimeBreak ? 'استراحة' : minute <= 45 ? 'الشوط الأول' : 'الشوط الثاني'}
             </span>
           </div>
-        )}
+          {homePenalties !== undefined && awayPenalties !== undefined && (
+            <span className="text-[10px] font-black text-amber-300 font-mono mt-0.5" dir="ltr">
+              ({homePenalties} - {awayPenalties}) PEN
+            </span>
+          )}
+        </div>
+
+        <div className="flex items-center gap-2 min-w-0 flex-1 flex-row-reverse">
+          <span
+            className="w-8 h-8 rounded-[10px] shrink-0 flex items-center justify-center font-black text-[13px]"
+            style={{ background: kit.away, color: readableOn(kit.away) }}
+          >
+            {awayClubName.trim().charAt(0)}
+          </span>
+          <span className="text-[13px] sm:text-sm font-black text-white truncate">{awayClubName}</span>
+        </div>
       </div>
 
-      {/* 3. VERTICAL ISOMETRIC 2.5D STADIUM CANVAS (الملعب بدون أي شاشات تغطيه لتبقى الرؤية واضحة 100%) */}
-      <div className="relative w-full overflow-hidden flex flex-col items-center justify-center">
-        {/* Pitch Controls Bar */}
-        <div className="w-full max-w-[340px] sm:max-w-[370px] flex items-center justify-between pb-1.5 px-1 text-[11px] font-bold text-slate-400">
-          {/* Dynamic Attack Indicator */}
-          <div className="flex items-center gap-1.5 text-xs font-bold text-slate-300">
-            {currentBallZone === 'guest_box' ? (
-              <span className="flex items-center gap-1 text-amber-400">
-                <Flame className="w-3.5 h-3.5" />
-                <span>هجمة خطيرة لـ {homeClubName}</span>
-                <ArrowUp className="w-3.5 h-3.5 animate-bounce" />
-              </span>
-            ) : currentBallZone === 'host_box' ? (
-              <span className="flex items-center gap-1 text-amber-400">
-                <Flame className="w-3.5 h-3.5" />
-                <span>هجمة خطيرة لـ {awayClubName}</span>
-                <ArrowDown className="w-3.5 h-3.5 animate-bounce" />
-              </span>
-            ) : (
-              <span className="text-slate-400 font-medium">تناقل الكرة وبناء الهجمة</span>
-            )}
-          </div>
-
-          {/* Camera Angles & Audio Controls */}
-          <div className="flex items-center gap-1">
-            <div className="flex items-center gap-1 bg-slate-900/80 p-0.5 rounded-xl border border-slate-800 text-[10px]">
-              <button
-                type="button"
-                onClick={() => setViewAngle('isometric')}
-                className={`px-2 py-0.5 rounded-lg transition-all cursor-pointer ${
-                  viewAngle === 'isometric'
-                    ? 'bg-emerald-500 text-slate-950 font-black shadow'
-                    : 'text-slate-400 hover:text-white'
-                }`}
-              >
-                مائل 2.5D
-              </button>
-              <button
-                type="button"
-                onClick={() => setViewAngle('broadcast')}
-                className={`px-2 py-0.5 rounded-lg transition-all cursor-pointer ${
-                  viewAngle === 'broadcast'
-                    ? 'bg-emerald-500 text-slate-950 font-black shadow'
-                    : 'text-slate-400 hover:text-white'
-                }`}
-              >
-                بث 3D
-              </button>
-              <button
-                type="button"
-                onClick={() => setViewAngle('top')}
-                className={`px-2 py-0.5 rounded-lg transition-all cursor-pointer ${
-                  viewAngle === 'top'
-                    ? 'bg-emerald-500 text-slate-950 font-black shadow'
-                    : 'text-slate-400 hover:text-white'
-                }`}
-              >
-                رأسي 2D
-              </button>
-            </div>
-
+      {/* 2. TOOLS ROW: camera + live attack indicator + sound */}
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex gap-0.5 bg-[#0d1626] border border-[#1b2a42] rounded-xl p-[3px] shrink-0" role="tablist" aria-label="زاوية الكاميرا">
+          {tabs.map((t) => (
             <button
+              key={t.id}
               type="button"
-              onClick={() => setShowRadar(!showRadar)}
-              className={`p-1 rounded-xl border text-[10px] transition-all cursor-pointer ${
-                showRadar ? 'bg-emerald-500/20 border-emerald-500 text-emerald-400' : 'bg-slate-900 border-slate-800 text-slate-400'
+              role="tab"
+              aria-selected={viewAngle === t.id}
+              onClick={() => setViewAngle(t.id)}
+              className={`h-8 px-3 rounded-[9px] text-[11px] font-black whitespace-nowrap cursor-pointer transition-colors ${
+                viewAngle === t.id ? 'bg-emerald-500 text-emerald-950' : 'text-slate-400 hover:text-white'
               }`}
-              title="رادار التشكيل"
             >
-              <Compass className="w-3.5 h-3.5" />
+              {t.label}
             </button>
-
-            <button
-              type="button"
-              onClick={() => {
-                const next = stadiumAudio.toggleMute();
-                setIsMuted(next);
-                if (!next) stadiumAudio.playWhistle();
-              }}
-              className={`p-1 rounded-xl border text-[10px] transition-all cursor-pointer ${
-                !isMuted ? 'bg-emerald-500/20 border-emerald-500 text-emerald-400' : 'bg-slate-900 border-slate-800 text-slate-400'
-              }`}
-              title={isMuted ? 'تفعيل الصوت' : 'كتم الصوت'}
-            >
-              {isMuted ? <VolumeX className="w-3.5 h-3.5" /> : <Volume2 className="w-3.5 h-3.5 text-emerald-400" />}
-            </button>
-          </div>
+          ))}
         </div>
 
-        {/* LIVE SCOREBOARD BAR (فوق الملعب مباشرة تحت طريقة العرض - شريط النتيجة الشفاف الموحد خارج أرضية الملعب) */}
-        <div className="w-full max-w-[330px] sm:max-w-[360px] mb-2 px-3 py-1.5 rounded-2xl bg-slate-900/95 border border-slate-800 flex items-center justify-between shadow-lg">
-          {/* Home Team */}
-          <div className="flex items-center gap-1.5 min-w-0 flex-1">
-            <span
-              className="w-2.5 h-2.5 rounded-full shrink-0 shadow-sm"
-              style={{ backgroundColor: homeColor || '#10b981' }}
-            />
-            <span className="text-xs font-black text-white truncate max-w-[95px] sm:max-w-[110px]">
-              {homeClubName}
-            </span>
-          </div>
-
-          {/* Central Live Score & Time */}
-          <div className="flex items-center gap-2 px-2 shrink-0">
-            <div className="flex items-center gap-1 px-2.5 py-0.5 rounded-xl bg-slate-950 border border-slate-700/80 shadow-inner font-mono font-black text-sm sm:text-base">
-              <span className="text-emerald-400">{homeScore}</span>
-              <span className="text-slate-500 text-xs">-</span>
-              <span className="text-blue-400">{awayScore}</span>
-            </div>
-            <div className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-slate-800 border border-slate-700 text-[10px] font-black font-mono text-amber-300">
-              {!isFinished && <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping" />}
-              <span>{isFinished ? 'FT' : `${minute}'`}</span>
-            </div>
-          </div>
-
-          {/* Away Team */}
-          <div className="flex items-center justify-end gap-1.5 min-w-0 flex-1 text-left">
-            <span className="text-xs font-black text-white truncate max-w-[95px] sm:max-w-[110px]">
-              {awayClubName}
-            </span>
-            <span
-              className="w-2.5 h-2.5 rounded-full shrink-0 shadow-sm"
-              style={{ backgroundColor: awayColor || '#3b82f6' }}
-            />
-          </div>
+        <div
+          className={`flex-1 min-w-0 h-9 rounded-xl border px-2.5 flex items-center gap-1.5 text-[11px] font-black ${
+            currentBallZone === 'guest_box' || currentBallZone === 'host_box'
+              ? 'bg-[#2a1a05] border-[#6b4310] text-amber-400'
+              : 'bg-[#0d1626] border-[#1b2a42] text-slate-400'
+          }`}
+        >
+          {currentBallZone === 'guest_box' || currentBallZone === 'host_box' ? (
+            <>
+              <Flame className="w-4 h-4 shrink-0" />
+              <span className="truncate">هجمة خطيرة لـ {currentBallZone === 'guest_box' ? homeClubName : awayClubName}</span>
+            </>
+          ) : (
+            <span className="truncate">{attackingTeam ? 'بناء هجمة' : 'تناقل الكرة في الوسط'}</span>
+          )}
         </div>
 
-        {/* 3D VERTICAL PITCH BOARD (الأبعاد المدمجة المتناسقة بدون أي عناصر تحجب اللعب) */}
+        <button
+          type="button"
+          aria-label={isMuted ? 'تفعيل الصوت' : 'كتم الصوت'}
+          onClick={() => {
+            const next = stadiumAudio.toggleMute();
+            setIsMuted(next);
+            if (!next) stadiumAudio.playWhistle();
+          }}
+          className={`w-9 h-9 shrink-0 rounded-xl border flex items-center justify-center cursor-pointer ${
+            !isMuted ? 'bg-emerald-500/15 border-emerald-500/60 text-emerald-400' : 'bg-[#0d1626] border-[#1b2a42] text-slate-500'
+          }`}
+        >
+          {isMuted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
+        </button>
+      </div>
+
+      {/* 3. PITCH (+ half-time / full-time panels) */}
+      <div className="relative w-full flex flex-col items-center justify-center">
         <div
           style={{
             ...transformStyle,
             transition: 'transform 0.4s cubic-bezier(0.2, 0.8, 0.2, 1)',
           }}
-          className="relative w-full max-w-[330px] sm:max-w-[360px] aspect-[10/12.2] rounded-3xl overflow-hidden shadow-[0_25px_60px_rgba(0,0,0,0.9)] border-2 border-slate-700/80 bg-emerald-900"
+          className="relative w-full max-w-[360px] aspect-[10/12.2] rounded-[20px] overflow-hidden shadow-[0_18px_40px_rgba(0,0,0,0.7)] border border-[#1d3a2b] bg-emerald-900"
         >
           {/* Alternating Horizontal Mowed Grass Stripes (أشرطة العشب الأفقية كالملاعب العالمية) */}
           <div className="absolute inset-0 flex flex-col pointer-events-none">
@@ -1570,105 +1501,88 @@ export const OnlineMatchPitch3D: React.FC<OnlineMatchPitch3DProps> = ({
             )}
           </svg>
 
-          {/* HOME PLAYERS (Miniature 3D Figurines - Emerald Kit) */}
-          {homePlayers.map((player) => (
-            <div
-              key={player.id}
-              style={{
-                left: `${player.x}%`,
-                top: `${player.y}%`,
-                transform: 'translate(-50%, -50%)',
-                transition: 'left 0.7s cubic-bezier(0.25, 1, 0.5, 1), top 0.7s cubic-bezier(0.25, 1, 0.5, 1)',
-              }}
-              className="absolute z-10 pointer-events-none select-none"
-            >
-              <MiniaturePlayerFigurine
-                player={player}
-                isHome={true}
-                primaryColor={homeColor}
-                isGK={player.role === 'GK'}
-              />
-            </div>
-          ))}
+          {/* PLAYERS: clean number discs, no name clutter */}
+          {homePlayers.map((player) => renderDisc(player, true))}
+          {awayPlayers.map((player) => renderDisc(player, false))}
 
-          {/* AWAY PLAYERS (Miniature 3D Figurines - Blue Kit) */}
-          {awayPlayers.map((player) => (
-            <div
-              key={player.id}
-              style={{
-                left: `${player.x}%`,
-                top: `${player.y}%`,
-                transform: 'translate(-50%, -50%)',
-                transition: 'left 0.7s cubic-bezier(0.25, 1, 0.5, 1), top 0.7s cubic-bezier(0.25, 1, 0.5, 1)',
-              }}
-              className="absolute z-10 pointer-events-none select-none"
-            >
-              <MiniaturePlayerFigurine
-                player={player}
-                isHome={false}
-                primaryColor={awayColor}
-                isGK={player.role === 'GK'}
-              />
-            </div>
-          ))}
-
-          {/* 3D BALL WITH REALISTIC TRAJECTORY & SHADOW */}
+          {/* BALL */}
           <div
             style={{
               left: `${ballPos.x}%`,
               top: `${ballPos.y}%`,
               transform: 'translate(-50%, -50%)',
               transition: 'left 0.45s cubic-bezier(0.25, 1, 0.5, 1), top 0.45s cubic-bezier(0.25, 1, 0.5, 1)',
+              boxShadow: '0 0 0 4px rgba(253,230,138,0.35), 0 0 14px 4px rgba(253,230,138,0.55)',
             }}
-            className="absolute z-20 pointer-events-none"
+            className="absolute z-20 pointer-events-none w-3 h-3 rounded-full bg-white"
           >
-            {/* Ground Contact Shadow */}
-            <div className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-3.5 h-1.5 bg-black/70 rounded-full blur-[0.8px]" />
-
-            {/* 3D Ball Sphere */}
-            <div className="relative w-3.5 h-3.5 sm:w-4 sm:h-4 rounded-full bg-white border border-slate-900 shadow-md flex items-center justify-center animate-ball-float">
-              <span className="text-[7.5px] sm:text-[8px] leading-none">⚽</span>
-            </div>
-
-            {/* Shot Flash Glow */}
             {attackSimulation.isShot && (
-              <span className="absolute -inset-1 rounded-full bg-amber-400/30 animate-ping pointer-events-none" />
+              <span className="absolute -inset-2 rounded-full bg-amber-400/30 animate-ping pointer-events-none" />
             )}
           </div>
 
-          {/* 2D TACTICAL RADAR OVERLAY (Collapsible in Corner) */}
-          {showRadar && (
-            <div className="absolute bottom-2 left-2 z-25 bg-slate-950/90 border border-slate-700 rounded-xl p-1.5 shadow-2xl backdrop-blur-sm pointer-events-none">
-              <div className="text-[7px] font-bold text-slate-400 text-center mb-0.5">رادار التشكيل</div>
-              <div className="relative w-16 h-24 bg-emerald-950/90 rounded border border-emerald-500/40 overflow-hidden">
-                <div className="absolute inset-x-0 top-1/2 h-[1px] bg-emerald-400/30" />
-                <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-4 h-4 rounded-full border border-emerald-400/30" />
-                {homePlayers.map((p) => (
-                  <div
-                    key={`radar-${p.id}`}
-                    style={{ left: `${p.x}%`, top: `${p.y}%` }}
-                    className={`absolute w-1.5 h-1.5 -translate-x-1/2 -translate-y-1/2 rounded-full ${
-                      p.isCarrier ? 'bg-amber-400 ring-1 ring-white animate-ping' : 'bg-emerald-400'
-                    }`}
-                  />
-                ))}
-                {awayPlayers.map((p) => (
-                  <div
-                    key={`radar-${p.id}`}
-                    style={{ left: `${p.x}%`, top: `${p.y}%` }}
-                    className={`absolute w-1.5 h-1.5 -translate-x-1/2 -translate-y-1/2 rounded-full ${
-                      p.isCarrier ? 'bg-amber-400 ring-1 ring-white animate-ping' : 'bg-blue-400'
-                    }`}
-                  />
-                ))}
-                <div
-                  style={{ left: `${ballPos.x}%`, top: `${ballPos.y}%` }}
-                  className="absolute w-1.5 h-1.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-yellow-300 ring-1 ring-amber-500 animate-pulse"
-                />
+          {/* BALL CARRIER NAME TAG */}
+          {carrier && !isGoal && !isFullTimeFinished && !isHalfTimeBreak && (
+            <div
+              style={{
+                left: `${Math.max(24, Math.min(76, carrier.p.x))}%`,
+                top: `${carrier.p.y + (carrier.p.y > 82 ? -7.5 : 6.5)}%`,
+                transform: 'translate(-50%, -50%)',
+                transition: 'left 0.7s cubic-bezier(0.25, 1, 0.5, 1), top 0.7s cubic-bezier(0.25, 1, 0.5, 1)',
+                borderColor: carrier.isHome ? kit.home : kit.away,
+              }}
+              className="absolute z-30 pointer-events-none flex items-center gap-1.5 bg-[#060b14]/90 border rounded-[10px] pl-2 pr-1 py-[3px] text-[11px] font-black text-white whitespace-nowrap max-w-[70%]"
+            >
+              {typeof carrier.p.rating === 'number' && carrier.p.rating > 0 && (
+                <span
+                  className="rounded-[6px] px-1.5 text-[11px] leading-[18px] font-mono"
+                  style={{
+                    background: carrier.isHome ? kit.home : kit.away,
+                    color: readableOn(carrier.isHome ? kit.home : kit.away),
+                  }}
+                >
+                  {Math.round(carrier.p.rating)}
+                </span>
+              )}
+              <span className="truncate">{carrier.p.name}</span>
+            </div>
+          )}
+
+          {/* GOAL CARD (non-blocking, top of the pitch) */}
+          {isGoal && goalDetails && (
+            <div className="absolute z-30 left-3 right-3 top-[34%] pointer-events-none rounded-2xl border border-emerald-400 bg-gradient-to-b from-[#060b14]/95 to-[#062820]/95 px-3 py-2.5 flex items-center gap-3 shadow-2xl animate-in fade-in zoom-in-95 duration-200">
+              <div
+                className="w-11 h-11 rounded-full border-2 border-white shrink-0 flex items-center justify-center font-black text-lg"
+                style={{
+                  background: goalDetails.isHomeScorer ? kit.home : kit.away,
+                  color: readableOn(goalDetails.isHomeScorer ? kit.home : kit.away),
+                }}
+              >
+                ⚽
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="font-black text-xl leading-none text-emerald-400">هــدف!</div>
+                <div className="font-black text-[13px] text-white truncate mt-1">
+                  {goalDetails.scorerName}
+                  {goalDetails.assistName && (
+                    <span className="text-[11px] font-bold text-slate-400"> · تمريرة {goalDetails.assistName}</span>
+                  )}
+                </div>
+                <div className="text-[10px] font-bold text-slate-400 truncate mt-0.5">لصالح {goalDetails.scoringClub}</div>
+              </div>
+              <div className="font-mono font-black text-[13px] text-emerald-400 shrink-0" dir="ltr">
+                {goalDetails.minute}'
               </div>
             </div>
           )}
+
+          {/* LEGEND */}
+          <div className="absolute z-10 right-2.5 bottom-2 flex gap-2 text-[10px] font-bold text-emerald-50/90 pointer-events-none">
+            <span className="flex items-center gap-1"><i className="w-2 h-2 rounded-full inline-block" style={{ background: kit.home }} />{homeClubName}</span>
+            <span className="flex items-center gap-1"><i className="w-2 h-2 rounded-full inline-block" style={{ background: kit.away }} />{awayClubName}</span>
+          </div>
         </div>
+
 
         {/* HALF-TIME CENTER SCREEN (شاشة استراحة الشوطين في منتصف الشاشة - خيارات المدرب وزر بدء الشوط الثاني) */}
         {isHalfTimeBreak && (
@@ -1890,20 +1804,118 @@ export const OnlineMatchPitch3D: React.FC<OnlineMatchPitch3DProps> = ({
         )}
       </div>
 
-      {/* 4. COACH CONTROL PANEL (لوحة تحكم وتوجيهات المدرب - دكة البدلاء) */}
-      <div className="relative z-10 mt-2.5 pt-2 border-t border-slate-800/80">
-        <div className="flex items-center justify-between mb-1.5 px-1">
-          <span className="text-[11px] sm:text-xs font-black text-slate-200 flex items-center gap-1.5">
-            <Sliders className="w-3.5 h-3.5 text-emerald-400" />
-            <span>لوحة تحكم وتوجيهات المدرب (دكة البدلاء)</span>
-          </span>
-          <span className="text-[10px] text-amber-300 font-bold bg-amber-500/10 border border-amber-500/30 px-2 py-0.5 rounded-lg">
-            التكتيك الحالي: {QUICK_TACTICS_LIST.find((t) => t.id === selectedTactic)?.label || 'متوازن'}
+      {/* 4. STATS STRIP */}
+      <div className="bg-[#0d1626] border border-[#1b2a42] rounded-2xl px-3 py-2.5 space-y-2">
+        <div className="flex items-center justify-between text-[11px] font-bold text-slate-400">
+          <span className="font-mono tabular-nums" style={{ color: kit.home }}>{hp}%</span>
+          <span>الاستحواذ</span>
+          <span className="font-mono tabular-nums" style={{ color: kit.away }}>{ap}%</span>
+        </div>
+        <div className="flex h-1.5 rounded overflow-hidden bg-slate-800">
+          <div className="h-full transition-all duration-500" style={{ width: `${hp}%`, background: kit.home }} />
+          <div className="h-full transition-all duration-500" style={{ width: `${ap}%`, background: kit.away }} />
+        </div>
+        {(hasShotStats || hasXg) && (
+          <div className="grid grid-cols-3 gap-2 text-center pt-0.5" dir="rtl">
+            {hasShotStats && (
+              <div>
+                <div className="text-[11px] text-[#7d8ea8] font-bold">تسديدات</div>
+                <div className="font-black text-sm font-mono tabular-nums" dir="ltr">
+                  <span style={{ color: kit.away }}>{awayShots}</span> <span className="text-[#4b5d78]">·</span> <span style={{ color: kit.home }}>{homeShots}</span>
+                </div>
+              </div>
+            )}
+            {hasShotStats && typeof homeShotsOnTarget === 'number' && typeof awayShotsOnTarget === 'number' && (
+              <div>
+                <div className="text-[11px] text-[#7d8ea8] font-bold">على المرمى</div>
+                <div className="font-black text-sm font-mono tabular-nums" dir="ltr">
+                  <span style={{ color: kit.away }}>{awayShotsOnTarget}</span> <span className="text-[#4b5d78]">·</span> <span style={{ color: kit.home }}>{homeShotsOnTarget}</span>
+                </div>
+              </div>
+            )}
+            {hasXg && (
+              <div>
+                <div className="text-[11px] text-[#7d8ea8] font-bold">الخطورة xG</div>
+                <div className="font-black text-sm font-mono tabular-nums" dir="ltr">
+                  <span style={{ color: kit.away }}>{Number(awayXg).toFixed(1)}</span> <span className="text-[#4b5d78]">·</span> <span style={{ color: kit.home }}>{Number(homeXg).toFixed(1)}</span>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* 5. EVENT BANNER + LIVE COMMENTARY */}
+      {activeNotification && !isGoal && (
+        <div
+          className={`px-3 py-2.5 rounded-2xl bg-gradient-to-r ${activeNotification.bgGradient} border ${activeNotification.borderClass} flex items-center justify-between gap-2.5`}
+        >
+          <div className="flex items-center gap-2.5 min-w-0 flex-1">
+            <div className="text-xl shrink-0">{activeNotification.icon}</div>
+            <div className="min-w-0">
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <span className={`text-[12px] font-black ${activeNotification.textColor}`}>{activeNotification.title}</span>
+                <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full ${activeNotification.badgeBg} shrink-0`}>
+                  {activeNotification.badge}
+                </span>
+              </div>
+              <div className="text-[12px] text-white font-bold truncate mt-0.5">{activeNotification.subtitle}</div>
+              {activeNotification.details && (
+                <div className="text-[10px] text-slate-300/85 truncate">{activeNotification.details}</div>
+              )}
+            </div>
+          </div>
+          <span className="font-mono text-[12px] font-black text-slate-300 shrink-0" dir="ltr">
+            {lastEvent?.minute ?? minute}'
           </span>
         </div>
+      )}
 
-        {/* Quick Tactic Action Buttons */}
-        <div className="grid grid-cols-3 sm:grid-cols-6 gap-1.5">
+      <div className="bg-[#0d1626] border border-[#1b2a42] rounded-2xl px-3 py-1">
+        {feed.length > 0 ? (
+          feed.map((ev, i) => (
+            <div
+              key={ev.id}
+              className={`flex items-center gap-2.5 py-2 ${i < feed.length - 1 ? 'border-b border-[#16233a]' : ''}`}
+            >
+              <span
+                className={`font-mono font-black text-xs min-w-[30px] ${i === 0 ? 'text-emerald-400' : 'text-[#7d8ea8]'}`}
+                dir="ltr"
+              >
+                {ev.minute}'
+              </span>
+              <span className={`text-[12.5px] leading-snug ${i === 0 ? 'font-bold text-white' : 'text-slate-400 font-medium'}`}>
+                {ev.text}
+              </span>
+            </div>
+          ))
+        ) : (
+          <div className="flex items-center gap-2.5 py-2">
+            <span className="font-mono font-black text-xs min-w-[30px] text-emerald-400" dir="ltr">{minute}'</span>
+            <span className="text-[12.5px] font-bold text-white">
+              {lastEvent?.textAr ||
+                (currentBallZone === 'guest_box'
+                  ? `هجمة واعدة لنادي ${homeClubName} في منطقة الجزاء`
+                  : currentBallZone === 'host_box'
+                  ? `هجوم مرتد لنادي ${awayClubName}`
+                  : 'تناقل سريع للكرة في وسط الميدان')}
+            </span>
+          </div>
+        )}
+      </div>
+
+      {/* 6. COACH QUICK TACTICS */}
+      <div className="bg-[#0d1626] border border-[#1b2a42] rounded-2xl p-2.5">
+        <div className="flex items-center justify-between mb-2 px-0.5">
+          <span className="text-[12px] font-black text-slate-200 flex items-center gap-1.5">
+            <Sliders className="w-4 h-4 text-emerald-400" />
+            <span>توجيهات المدرب</span>
+          </span>
+          <span className="text-[10px] text-amber-300 font-black bg-amber-500/10 border border-amber-500/30 px-2 py-0.5 rounded-lg">
+            {QUICK_TACTICS_LIST.find((t) => t.id === selectedTactic)?.label || 'متوازن'}
+          </span>
+        </div>
+        <div className="grid grid-cols-3 gap-1.5">
           {QUICK_TACTICS_LIST.map((tactic) => {
             const Icon = tactic.icon;
             const isSelected = selectedTactic === tactic.id;
@@ -1912,14 +1924,14 @@ export const OnlineMatchPitch3D: React.FC<OnlineMatchPitch3DProps> = ({
                 key={tactic.id}
                 type="button"
                 onClick={() => handleTacticClick(tactic.id)}
-                className={`py-1.5 sm:py-2 px-1 sm:px-2 rounded-xl text-[10px] sm:text-[11px] font-bold flex items-center justify-center gap-1 transition-all cursor-pointer border shadow-sm ${
+                aria-pressed={isSelected}
+                className={`min-h-[40px] px-1.5 rounded-xl text-[11px] font-black flex items-center justify-center gap-1.5 transition-all cursor-pointer border ${
                   isSelected
-                    ? 'bg-emerald-500/20 border-emerald-500 text-emerald-300 font-black ring-1 ring-emerald-500/40'
-                    : 'bg-slate-900 hover:bg-slate-800/80 border-slate-800 text-slate-400 hover:text-slate-200'
+                    ? 'bg-emerald-500/20 border-emerald-500 text-emerald-300'
+                    : 'bg-slate-900 hover:bg-slate-800 border-slate-800 text-slate-400 hover:text-slate-200'
                 }`}
-                title={tactic.label}
               >
-                <Icon className={`w-3.5 h-3.5 ${isSelected ? 'text-emerald-400' : tactic.color}`} />
+                <Icon className={`w-3.5 h-3.5 shrink-0 ${isSelected ? 'text-emerald-400' : tactic.color}`} />
                 <span className="truncate">{tactic.label}</span>
               </button>
             );

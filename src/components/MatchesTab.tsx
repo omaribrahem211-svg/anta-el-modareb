@@ -577,23 +577,7 @@ export const MatchesTab: React.FC = () => {
             );
           })()}
 
-          {/* Possession & xG Bar */}
-          <div className="mt-3 pt-3 border-t border-slate-800 space-y-1.5">
-            <div className="flex items-center justify-between text-[11px] text-slate-400 font-mono">
-              <span>{liveMatch.stats.homePossession}% استحواذ (xG: {liveMatch.homeXg || 0})</span>
-              <span>{liveMatch.stats.awayPossession}% استحواذ (xG: {liveMatch.awayXg || 0})</span>
-            </div>
-            <div className="w-full h-2 bg-slate-800 rounded-full flex overflow-hidden">
-              <div 
-                className="h-full transition-all duration-500" 
-                style={{ width: `${liveMatch.stats.homePossession}%`, backgroundColor: liveMatch.homeTeam.primaryColor }}
-              />
-              <div 
-                className="h-full transition-all duration-500" 
-                style={{ width: `${liveMatch.stats.awayPossession}%`, backgroundColor: liveMatch.awayTeam.primaryColor }}
-              />
-            </div>
-          </div>
+          {/* Possession / shots / xG now live inside the pitch panel below */}
 
           {/* In-Game Action Controls (if not finished) */}
           {!liveMatch.isFinished && !liveMatch.isHalfTime ? (
@@ -899,6 +883,17 @@ export const MatchesTab: React.FC = () => {
             awayPossession={liveMatch.stats?.awayPossession || 50}
             homeDangerousAttacks={liveMatch.homeDangerousAttacks || 0}
             awayDangerousAttacks={liveMatch.awayDangerousAttacks || 0}
+            homeLineupIds={liveMatch.homeLineup}
+            awayLineupIds={liveMatch.awayLineup}
+            homeFormation={
+              liveMatch.homeTeam?.id === userClub?.id ? userClub?.tactics?.formation : liveMatch.homeTactics?.formation
+            }
+            awayFormation={
+              liveMatch.awayTeam?.id === userClub?.id ? userClub?.tactics?.formation : liveMatch.awayTactics?.formation
+            }
+            stats={liveMatch.stats}
+            homeXg={liveMatch.homeXg}
+            awayXg={liveMatch.awayXg}
             onStartSecondHalf={() => resumeSecondHalf(teamTalkChosen === 'motivate' || teamTalkChosen === 'demand')}
             onFinishMatch={() => {
               console.log('[MatchesTab] User clicked Confirm Result from pitch center overlay');
