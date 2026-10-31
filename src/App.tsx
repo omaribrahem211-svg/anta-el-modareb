@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, startTransition } from 'react'
 import { Capacitor } from '@capacitor/core';
 import { App as CapApp } from '@capacitor/app';
 import ForcedUpdateGate from './components/ForcedUpdateGate';
+import SeasonEventModal from './components/SeasonEventModal';
 import { LanguageProvider } from './utils/i18n';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { GameProvider, useGame } from './context/GameContext';
@@ -422,6 +423,7 @@ export default function App() {
       <AuthProvider>
         <GameProvider>
           <GameApp />
+          <SeasonEventModal />
         </GameProvider>
       </AuthProvider>
     </LanguageProvider>

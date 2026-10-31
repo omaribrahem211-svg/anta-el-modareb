@@ -158,6 +158,7 @@ import { gameStateRepository } from '../services/gameStateRepository';
 import { timed, runWhenIdle } from '../utils/perfLog';
 import { migrateSavePayload, CURRENT_SAVE_FORMAT_VERSION } from '../services/saveBackupService';
 import { smartSyncManager, SmartSyncInput } from '../services/smartSyncManager';
+import { rollSeasonEvent, resolveSeasonEvent as resolveSeasonEventEngine, SeasonEvent } from '../services/seasonEventsEngine';
 import { canPlayerJoinClub, DEFAULT_ECONOMY_CONFIG, calculateClubMonthlyIncome, calculateClubTotalMonthlyWages, validateTransferFinancials } from '../services/economyService';
 import { fetchActiveBroadcasts, applyWorldOverridesToClubs, applyWorldOverridesToMarket, isPlayerDeletedInOverrides, SUPER_ADMIN_EMAIL } from '../services/adminService';
 import {
@@ -289,6 +290,8 @@ interface GameContextType {
   // Match Blocker & Lineup Validation
   matchBlocker: MatchBlockerInfo | null;
   closeMatchBlocker: () => void;
+  pendingSeasonEvent: SeasonEvent | null;
+  resolveSeasonEvent: (choiceId: string) => { message: string } | null;
   autoFixUserStartingLineup: (reopenAsMatchToday?: boolean) => void;
   validateUserLineup: () => SquadValidationResult;
 
@@ -1642,6 +1645,8 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const [showDaySummaryModal, setShowDaySummaryModal] = useState<boolean>(false);
   const [trainingIntensity, setTrainingIntensity] = useState<'recovery' | 'normal' | 'high'>('normal');
   const [matchBlocker, setMatchBlocker] = useState<MatchBlockerInfo | null>(null);
+  const [pendingSeasonEvent, setPendingSeasonEvent] = useState<SeasonEvent | null>(null);
+  const lastSeasonEventDayRef = useRef<number>(-100);
 
   // --- Daily Login Reward State (نظام مكافآت تسجيل الدخول اليومي) ---
   const [dailyRewardState, setDailyRewardState] = useState<DailyLoginRewardState>(() => {
@@ -8873,6 +8878,19 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
       setTeams(calculatedNextTeams);
 
+      // Random season event (camps, friendlies, star demands...). At most one waiting, spaced >= 10 days apart.
+      try {
+        const evDay = newDate.dayIndexInSeason || 0;
+        if (!pendingSeasonEvent && !manager.isUnemployed && evDay - lastSeasonEventDayRef.current >= 10 && Math.random() < Math.min(0.5, 0.06 * daysAdvanced)) {
+          const evClub = calculatedNextTeams.find(t => t && (t.isUserClub || (userClub && t.id === userClub.id)));
+          const ev = evClub ? rollSeasonEvent(evClub) : null;
+          if (ev) {
+            lastSeasonEventDayRef.current = evDay;
+            setPendingSeasonEvent(ev);
+          }
+        }
+      } catch (_) {}
+
       if (allCompletedTransfers.length > 0 && userClub) {
         allCompletedTransfers.forEach(({ negotiation: deal, player: targetPlayer }) => {
           if (targetPlayer && deal) {
@@ -9086,6 +9104,40 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       isSimulationRunningRef.current = false;
       setIsSimulationRunning(false);
     }
+  };
+
+  const resolveSeasonEvent = (choiceId: string): { message: string } | null => {
+    const ev = pendingSeasonEvent;
+    if (!ev) return null;
+    const mine = teams.find(t => t && (t.isUserClub || (userClub && t.id === userClub.id)));
+    if (!mine) { setPendingSeasonEvent(null); return null; }
+    const outcome = resolveSeasonEventEngine(mine, ev, choiceId);
+    const budgetDelta = outcome.club.budget - (mine.budget || 0);
+    setTeams(prev => prev.map(t => (t && t.id === mine.id ? outcome.club : t)));
+    if (budgetDelta !== 0) {
+      setClubEconomy(prev => ({
+        ...prev,
+        currentSeasonNetProfit: (prev.currentSeasonNetProfit || 0) + budgetDelta,
+      }));
+    }
+    if (outcome.walletDelta || outcome.reputationDelta) {
+      setManager(prev => ({
+        ...prev,
+        personalWallet: Math.max(0, (prev.personalWallet || 0) + outcome.walletDelta),
+        reputation: Math.max(1, Math.min(100, (prev.reputation || 50) + outcome.reputationDelta)),
+      }));
+    }
+    setInbox(prev => [{
+      id: `msg_event_${ev.id}`,
+      title: `${ev.icon} ${ev.title}`,
+      sender: 'أحداث الموسم',
+      date: `الجولة ${currentRound}`,
+      type: 'board',
+      read: false,
+      content: outcome.message,
+    } as InboxMessage, ...(Array.isArray(prev) ? prev : [])].slice(0, 300));
+    setPendingSeasonEvent(null);
+    return { message: outcome.message };
   };
 
   const advanceCalendarDay = (skipCheck: boolean = false) => {
@@ -11238,6 +11290,8 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         isMatchDay,
         matchBlocker,
         closeMatchBlocker,
+        pendingSeasonEvent,
+        resolveSeasonEvent,
         autoFixUserStartingLineup,
         validateUserLineup,
         advanceToNextDay,
