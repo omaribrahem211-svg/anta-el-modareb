@@ -318,6 +318,16 @@ export const MatchesTab: React.FC = () => {
   // Active user fixture for the current League round / schedule
   const userFixture = useMemo(() => {
     if (!userClub?.id || manager.isUnemployed) return undefined;
+    // 0. A domestic cup tie that is already due (by calendar date) always comes before the next league round
+    const todayStr = (calendarDate?.rawDateStr || '').trim();
+    const dueCupMatch = (userCalendarSchedule || []).find(
+      m =>
+        m &&
+        !m.isPlayed &&
+        (m.competitionType === 'DOMESTIC_COP' || m.competitionType === 'cup' || Boolean(m.cupStage)) &&
+        (m.date || '').trim() <= todayStr
+    );
+    if (dueCupMatch) return dueCupMatch;
     // 1. Current round unplayed fixture for user's club
     const currentRoundFix = roundFixtures.find(
       f => f && !f.isPlayed && (f.homeTeamId === userClub.id || f.awayTeamId === userClub.id)
