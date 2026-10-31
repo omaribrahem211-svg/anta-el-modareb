@@ -871,6 +871,10 @@ export interface ManagerProfile {
   // Manager Personal Finances & Development
   monthlySalary?: number; // مرتب المدرب الشهري من النادي الحالي
   personalWallet?: number; // الذمة المالية والمحفظة الشخصية للمدرب
+  transferCommissionTotal?: number; // إجمالي عمولات المدرب من صفقات البيع
+  transferProfitTotal?: number; // إجمالي صافي أرباح الصفقات (سعر البيع - سعر الشراء)
+  transferFlipCount?: number; // عدد الصفقات الرابحة
+  bestFlip?: { playerName: string; profit: number; seasonNumber: number }; // أفضل صفقة ربح
   financialTransactions?: ManagerTransaction[]; // سجل المعاملات المالية
   completedCourses?: string[]; // الدورات والرخص التدريبية الحاصل عليها
   seasonCourseAccess?: Record<string, number>; // دورات مفتوحة بإعلان حتى نهاية الموسم المذكور (courseId -> رقم الموسم)

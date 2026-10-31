@@ -1436,6 +1436,64 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
   });
 
+  // Manager's cut on player sales: 1% of the fee + 5% of the net profit over the price the club paid.
+  // Cost basis comes from the latest 'buy' entry of the same player in the transfer history.
+  const paidSellIdsRef = useRef<Set<string>>(new Set());
+  const sessionStartRef = useRef<number>(Date.now());
+  useEffect(() => {
+    if (!Array.isArray(transferHistory) || transferHistory.length === 0) return;
+    const fresh = transferHistory.filter(
+      e => e && e.type === 'sell' && e.id && !paidSellIdsRef.current.has(e.id) && (e.timestamp || 0) >= sessionStartRef.current - 5000
+    );
+    transferHistory.forEach(e => e?.id && paidSellIdsRef.current.add(e.id));
+    if (fresh.length === 0) return;
+
+    let commissionSum = 0;
+    let profitSum = 0;
+    let flips = 0;
+    let best: { playerName: string; profit: number; seasonNumber: number } | undefined;
+    const msgs: InboxMessage[] = [];
+    fresh.forEach(sale => {
+      const fee = Math.max(0, sale.fee || 0);
+      if (fee <= 0) return;
+      const buy = transferHistory.find(b => b && b.type === 'buy' && b.playerId === sale.playerId && (b.timestamp || 0) <= (sale.timestamp || Date.now()));
+      const cost = buy ? Math.max(0, buy.fee || 0) : null;
+      const profit = cost !== null ? fee - cost : 0;
+      const base = Math.round(fee * 0.01);
+      const bonus = profit > 0 ? Math.round(profit * 0.05) : 0;
+      const cut = base + bonus;
+      if (cut <= 0) return;
+      commissionSum += cut;
+      if (profit > 0) {
+        profitSum += profit;
+        flips += 1;
+        if (!best || profit > best.profit) best = { playerName: sale.playerName, profit, seasonNumber: sale.seasonNumber };
+      }
+      msgs.push({
+        id: `msg_cut_${sale.id}`,
+        title: `عمولتك من صفقة ${sale.playerName}: ${cut.toLocaleString()} ج.م 💼`,
+        sender: 'وكيل أعمال المدرب',
+        date: sale.date,
+        type: 'transfer',
+        read: false,
+        content: cost !== null
+          ? `بيع ${sale.playerName} بـ ${fee.toLocaleString()} ج.م بعد شرائه بـ ${cost.toLocaleString()} ج.م (${profit >= 0 ? 'ربح' : 'خسارة'} ${Math.abs(profit).toLocaleString()} ج.م للنادي). عمولتك: 1% من قيمة الصفقة${bonus > 0 ? ` + 5% من صافي الربح (${bonus.toLocaleString()} ج.م)` : ''} = ${cut.toLocaleString()} ج.م أُضيفت لمحفظتك الشخصية.`
+          : `بيع ${sale.playerName} بـ ${fee.toLocaleString()} ج.م. عمولتك 1% من قيمة الصفقة = ${cut.toLocaleString()} ج.م أُضيفت لمحفظتك الشخصية.`,
+      } as InboxMessage);
+    });
+    if (commissionSum <= 0) return;
+    setManager(prev => ({
+      ...prev,
+      personalWallet: (prev.personalWallet || 0) + commissionSum,
+      careerEarnings: (prev.careerEarnings || 0) + commissionSum,
+      transferCommissionTotal: (prev.transferCommissionTotal || 0) + commissionSum,
+      transferProfitTotal: (prev.transferProfitTotal || 0) + profitSum,
+      transferFlipCount: (prev.transferFlipCount || 0) + flips,
+      bestFlip: best && (!prev.bestFlip || best.profit > prev.bestFlip.profit) ? best : prev.bestFlip,
+    }));
+    setInbox(prev => [...msgs, ...(Array.isArray(prev) ? prev : [])].slice(0, 300));
+  }, [transferHistory]);
+
   const [clubEconomy, setClubEconomy] = useState<ClubEconomySummary>(() => {
     try {
       const saved = localStorage.getItem(`${STORAGE_KEY}_clubEconomy`);

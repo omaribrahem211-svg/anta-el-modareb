@@ -629,6 +629,20 @@ export const CareerTab: React.FC = () => {
                 <span className="font-mono font-bold text-amber-400 text-sm">{(manager.personalWallet || 0).toLocaleString()} ج.م</span>
               </div>
               <div className="flex items-center justify-between text-slate-400">
+                <span>عمولاتك من الصفقات (1% + 5% من الربح):</span>
+                <span className="font-mono font-bold text-sky-400">{(manager.transferCommissionTotal || 0).toLocaleString()} ج.م</span>
+              </div>
+              <div className="flex items-center justify-between text-slate-400">
+                <span>صفقات رابحة / صافي أرباحها للنادي:</span>
+                <span className="font-mono font-bold text-sky-400">{manager.transferFlipCount || 0} / {(manager.transferProfitTotal || 0).toLocaleString()} ج.م</span>
+              </div>
+              {manager.bestFlip && (
+                <div className="flex items-center justify-between text-slate-400">
+                  <span>أفضل صفقة: {manager.bestFlip.playerName}</span>
+                  <span className="font-mono font-bold text-emerald-400">+{manager.bestFlip.profit.toLocaleString()} ج.م</span>
+                </div>
+              )}
+              <div className="flex items-center justify-between text-slate-400">
                 <span>خزينة النادي الحالية ({userClub?.name}):</span>
                 <span className="font-mono font-bold text-emerald-400 text-sm">{(userClub?.budget || 0).toLocaleString()} ج.م</span>
               </div>
