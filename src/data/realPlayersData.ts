@@ -477,7 +477,7 @@ export const REAL_MADRID_SQUAD_2026: RealPlayerTemplate[] = [
   },
   {
     id: 'real_madrid_rodrygo',
-    name: 'رودريغو غوس',
+    name: 'رودريغو',
     firstName: 'رودريغو',
     lastName: 'غوس',
     nationality: 'البرازيل',
@@ -497,7 +497,7 @@ export const REAL_MADRID_SQUAD_2026: RealPlayerTemplate[] = [
   },
   {
     id: 'real_madrid_endrick',
-    name: 'إندريك فيليبي',
+    name: 'إندريك',
     firstName: 'إندريك',
     lastName: 'فيليبي',
     nationality: 'البرازيل',
@@ -3088,58 +3088,32 @@ export const REAL_SQUADS_BY_CLUB_ID: Record<string, RealPlayerTemplate[]> = {
   // FC Barcelona
 
   // Atletico Madrid
-  'atletico_madrid': ATLETICO_SQUAD,
-  'esp1_atletico': ATLETICO_SQUAD,
 
   // Manchester City
 
   // Liverpool
-  'liverpool': LIVERPOOL_SQUAD,
-  'eng1_liverpool': LIVERPOOL_SQUAD,
 
   // Arsenal
-  'arsenal': ARSENAL_SQUAD,
-  'eng1_arsenal': ARSENAL_SQUAD,
 
   // Chelsea
-  'chelsea': CHELSEA_SQUAD,
-  'eng1_chelsea': CHELSEA_SQUAD,
 
   // Manchester United
-  'man_united': MAN_UNITED_SQUAD,
-  'eng1_united': MAN_UNITED_SQUAD,
 
   // Tottenham Hotspur
-  'tottenham': TOTTENHAM_SQUAD,
-  'eng1_spurs': TOTTENHAM_SQUAD,
 
   // Bayern Munich
-  'bayern_munich': BAYERN_SQUAD,
-  'ger_bayern': BAYERN_SQUAD,
 
   // Borussia Dortmund
-  'dortmund': DORTMUND_SQUAD,
-  'ger_dortmund': DORTMUND_SQUAD,
 
   // Bayer Leverkusen
-  'leverkusen': LEVERKUSEN_SQUAD,
-  'ger_leverkusen': LEVERKUSEN_SQUAD,
 
   // Paris Saint-Germain
-  'psg': PSG_SQUAD,
-  'fra_paris': PSG_SQUAD,
 
   // Inter Milan
-  'inter_milan': INTER_MILAN_SQUAD,
-  'ita_inter': INTER_MILAN_SQUAD,
 
   // AC Milan
-  'ac_milan': AC_MILAN_SQUAD,
-  'ita_milan': AC_MILAN_SQUAD,
 
   // Juventus
-  'juventus': JUVENTUS_SQUAD,
-  'ita_juve': JUVENTUS_SQUAD,
 
   // Al Hilal
   'al_hilal': AL_HILAL_SQUAD,
