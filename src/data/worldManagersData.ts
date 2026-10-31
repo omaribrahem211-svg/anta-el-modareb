@@ -879,6 +879,58 @@ const ARABIC_COACH_LAST_NAMES = [
   'غنيم', 'عفيفي', 'شحاتة', 'توفيق', 'مطر', 'شعبان', 'البدري'
 ];
 
+
+// Foreign procedural coach names (Arabic transliteration, like the preset managers)
+const FOREIGN_COACH_NAMES: Record<string, { first: string[]; last: string[] }> = {
+  ENG: {
+    first: ['ديفيد', 'ستيف', 'مارك', 'جيمس', 'كريس', 'بول', 'إيان', 'جون', 'أندرو', 'توني', 'داني', 'غاري', 'نيل', 'ريتشارد', 'سايمون', 'مايكل', 'كيفن', 'آدم', 'سكوت', 'لي'],
+    last: ['ريتشاردسون', 'هارت', 'ويلسون', 'كارتر', 'باركر', 'بيل', 'ميتشل', 'كوك', 'فوستر', 'هيوز', 'ماثيوز', 'روبنسون', 'ويب', 'غرين', 'بيكر', 'هولت', 'ديكسون', 'فيشر', 'نيكولز', 'ستيوارت'],
+  },
+  ESP: {
+    first: ['خوسيه', 'كارلوس', 'ميغيل', 'بابلو', 'رافائيل', 'ألفارو', 'خافيير', 'أنطونيو', 'فرناندو', 'سيرجيو', 'إدواردو', 'مانولو', 'دييغو', 'إيفان', 'روبن', 'إيمانول', 'أوسكار', 'لويس', 'خورخي', 'أدريان'],
+    last: ['غارسيا', 'مارتينيز', 'لوبيز', 'سانشيز', 'رودريغيز', 'فيرنانديز', 'غونزاليس', 'ألونسو', 'بلانكو', 'ناباس', 'موليرو', 'ريبيرو', 'كامبوس', 'هيرنانديز', 'ترّيس', 'سواريز', 'أرويو', 'نافارو', 'كاسترو', 'مورينو'],
+  },
+  ITA: {
+    first: ['ماركو', 'لوكا', 'ماتيو', 'أندريا', 'ستيفانو', 'روبرتو', 'ألبرتو', 'فرانشيسكو', 'باولو', 'جيوفاني', 'دافيدي', 'سيموني', 'فابيو', 'كلاوديو', 'أليساندرو', 'نيكولا', 'ماسيمو', 'إنزو', 'ريكاردو', 'فينتشنزو'],
+    last: ['روسي', 'روميو', 'فيراري', 'بيانكي', 'كونتي', 'ماركيزي', 'كوستا', 'جيوردانو', 'ريتشي', 'غريكو', 'ديسانتيس', 'موريتي', 'باريزي', 'فيرارا', 'سيلفستري', 'باسيلي', 'لونغو', 'غاليتي', 'مانشيني', 'ماتزاري'],
+  },
+  GER: {
+    first: ['توماس', 'ميشائيل', 'ستيفان', 'أندرياس', 'ماركوس', 'يورغن', 'كريستيان', 'ألكسندر', 'فلوريان', 'ماتياس', 'بيتر', 'هولغر', 'ثورستن', 'سباستيان', 'دانيال', 'فرانك', 'أوليفر', 'تيم', 'يان', 'نيكو'],
+    last: ['مولر', 'شميت', 'فيشر', 'فيبر', 'شنايدر', 'هوفمان', 'بيكر', 'كلاين', 'فولف', 'كراوس', 'هارتمان', 'لانغ', 'ريتر', 'زيمرمان', 'برون', 'كولر', 'نويمان', 'شولتس', 'فيشباخ', 'هيرمان'],
+  },
+  FRA: {
+    first: ['جان', 'بيير', 'ميشال', 'لوران', 'فرانك', 'ستيفان', 'كريستوف', 'فابريس', 'باتريك', 'ديدييه', 'أنطوان', 'نيكولا', 'جوليان', 'رومان', 'سيدريك', 'إريك', 'برونو', 'أرنو', 'ماتيو', 'يان'],
+    last: ['مارتان', 'بيرنار', 'دوبوا', 'تيري', 'روبير', 'ريشار', 'بوتي', 'دوران', 'لوران', 'سيمون', 'ميشيل', 'لوفيفر', 'غارنييه', 'فوشيه', 'ديفيد', 'بيرتران', 'مورو', 'فونتين', 'شوفالييه', 'غيو'],
+  },
+  BRA: {
+    first: ['روجيريو', 'فابيو', 'ماركوس', 'ريناتو', 'لويس', 'خوسيه', 'كارلوس', 'أدينور', 'دانييل', 'فيليبي', 'ريكاردو', 'غابرييل', 'تياغو', 'رودريغو', 'ألكسندر', 'فاغنر', 'سيزار', 'ليوناردو', 'جيلسون', 'باولو'],
+    last: ['سيلفا', 'سانتوس', 'أوليفيرا', 'سوزا', 'ليما', 'بيريرا', 'كوستا', 'ريبيرو', 'ألفيس', 'كارفاليو', 'غوميز', 'مارتينز', 'روشا', 'دياز', 'نونيس', 'باروس', 'فرنانديز', 'مورايس', 'مونتيرو', 'كاردوسو'],
+  },
+  ARG: {
+    first: ['ماركوس', 'غابرييل', 'دييغو', 'ماوريسيو', 'ماتياس', 'ليوناردو', 'سيباستيان', 'فرناندو', 'هوراشيو', 'إدواردو', 'ريكاردو', 'فابيان', 'لوتشيانو', 'خوان', 'نيكولاس', 'مارتن', 'إرنستو', 'غوستافو', 'فاكوندو', 'رامون'],
+    last: ['غونزاليس', 'رودريغيز', 'فرنانديز', 'لوبيز', 'مارتينيز', 'غارسيا', 'بيريز', 'ألفاريز', 'روميرو', 'سواريز', 'دياز', 'سوسا', 'بينيتيز', 'أكوستا', 'مدينا', 'هيريرا', 'ساباليتا', 'غاغو', 'باتيستا', 'برتولدو'],
+  },
+};
+
+const COUNTRY_TO_POOL: Record<string, string> = {
+  'إنجلترا': 'ENG', 'ويلز': 'ENG', 'إسكتلندا': 'ENG',
+  'إسبانيا': 'ESP', 'إيطاليا': 'ITA', 'ألمانيا': 'GER', 'فرنسا': 'FRA',
+  'البرازيل': 'BRA', 'الأرجنتين': 'ARG',
+};
+
+/** Well-mixed 32-bit string hash so first/last/style picks are independent. */
+function mixHash(input: string): number {
+  let h = 2166136261;
+  for (let i = 0; i < input.length; i++) {
+    h ^= input.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  h ^= h >>> 13;
+  h = Math.imul(h, 0x5bd1e995);
+  h ^= h >>> 15;
+  return h >>> 0;
+}
+
 const TACTICAL_STYLES: ClubManager['tacticalStyle'][] = [
   'attacking', 'possession', 'counter_attack', 'defensive', 'high_press', 'balanced'
 ];
@@ -922,26 +974,30 @@ export function getOrCreateClubManager(club: Club): ClubManager {
   }
 
   // 2. Procedural Authentic Manager for lower tier / unmapped clubs
-  const hash = clubId.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
-  const firstIdx = hash % ARABIC_COACH_FIRST_NAMES.length;
-  const lastIdx = (hash * 3) % ARABIC_COACH_LAST_NAMES.length;
-  const styleIdx = hash % TACTICAL_STYLES.length;
-  const formIdx = hash % FORMATIONS.length;
+  const hash = mixHash(clubId);
+  const poolKey = COUNTRY_TO_POOL[club?.country || ''];
+  const pool = poolKey ? FOREIGN_COACH_NAMES[poolKey] : null;
+  const firstList = pool ? pool.first : ARABIC_COACH_FIRST_NAMES;
+  const lastList = pool ? pool.last : ARABIC_COACH_LAST_NAMES;
+  const firstIdx = hash % firstList.length;
+  const lastIdx = mixHash(clubId + '#last') % lastList.length;
+  const styleIdx = mixHash(clubId + '#style') % TACTICAL_STYLES.length;
+  const formIdx = mixHash(clubId + '#form') % FORMATIONS.length;
 
   const rep = club?.reputation || 30;
   const tier = club?.division || 4;
-  
+
   // Rating calibrated to tier (Tier 4: 55-64, Tier 3: 63-71, Tier 2: 69-76, Tier 1: 74-88)
   const baseRating = tier === 4 ? 58 : tier === 3 ? 65 : tier === 2 ? 71 : 78;
   const rating = Math.min(94, Math.max(50, Math.round(baseRating + (rep % 7) - 3)));
   const basePoints = Math.round(rating * 20 + rep * 12);
 
-  const managerName = `${ARABIC_COACH_FIRST_NAMES[firstIdx]} ${ARABIC_COACH_LAST_NAMES[lastIdx]}`;
+  const managerName = `${firstList[firstIdx]} ${lastList[lastIdx]}`;
 
   return {
     id: `mgr_${clubId}`,
     name: managerName,
-    shortName: ARABIC_COACH_LAST_NAMES[lastIdx],
+    shortName: lastList[lastIdx],
     nationality: club?.country || 'مصر',
     countryCode: club?.countryCode || 'EGY',
     age: 42 + (hash % 24),
@@ -954,7 +1010,7 @@ export function getOrCreateClubManager(club: Club): ClubManager {
     previousWorldRank: 500 + (hash % 1000),
     monthlyRankChange: 0,
     trophiesWonCount: tier <= 2 ? (hash % 3) : 0,
-    majorTrophies: tier <= 2 ? ['صعود دوري المحترفين'] : [],
+    majorTrophies: tier <= 2 ? [pool ? 'الصعود للدرجة الأعلى' : 'صعود دوري المحترفين'] : [],
     currentClubId: clubId,
     currentClubName: club?.name || 'النادي',
     currentLeagueId: club?.leagueId,

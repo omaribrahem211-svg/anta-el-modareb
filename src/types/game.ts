@@ -962,6 +962,7 @@ export interface WorldClubRankingItem {
   primaryColor: string;
   secondaryColor: string;
   trophiesCount?: number;
+  formPoints?: number; // نقاط الأداء من نتائج الدوري الحالي (تُستخدم لحركة الترتيب)
 }
 
 export interface WorldRankingsData {

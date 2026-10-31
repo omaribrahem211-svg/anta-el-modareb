@@ -81,7 +81,7 @@ export const CoachCardModal: React.FC<CoachCardModalProps> = ({
     (m) => m && (m.id === 'user_manager' || m.id === (manager as any)?.id || (m as any)?.isUser)
   )?.worldRank;
 
-  const globalRank = manager?.worldRank || userRankFromList || 850;
+  const globalRank = manager?.worldRank || userRankFromList || (worldRankings?.managers?.length || 400);
   const rankingPoints =
     manager?.rankingPoints || Math.max(1200, 1200 + totalWins * 35 + (manager?.level || 1) * 20);
 

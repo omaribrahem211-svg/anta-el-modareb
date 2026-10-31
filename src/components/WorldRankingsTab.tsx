@@ -147,7 +147,7 @@ export const WorldRankingsTab: React.FC = () => {
           <div className="flex items-center gap-3 bg-slate-900/90 border border-indigo-500/30 p-3.5 rounded-xl shadow-lg shrink-0">
             <div className="w-12 h-12 rounded-xl bg-gradient-to-tr from-amber-500 to-amber-300 text-slate-950 flex flex-col items-center justify-center font-black shadow-md">
               <span className="text-[10px] uppercase tracking-tighter font-extrabold leading-none">ترتيبك</span>
-              <span className="text-lg leading-tight">#{userManagerInRankings?.worldRank || manager.worldRank || 850}</span>
+              <span className="text-lg leading-tight">#{userManagerInRankings?.worldRank || manager.worldRank || (managersList.length || 400)}</span>
             </div>
             <div className="space-y-0.5">
               <div className="text-xs font-bold text-white flex items-center gap-1.5">

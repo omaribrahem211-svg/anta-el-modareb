@@ -1,6 +1,7 @@
 import { 
   Club, 
-  ClubManager, 
+  ClubManager,
+  LeagueStanding, 
   ClubSquadStrength, 
   ManagerProfile, 
   Player, 
@@ -44,9 +45,11 @@ export function calculateSquadStrength(club?: Club | null, customTactics?: TeamT
 
   effectiveStarters.forEach(p => {
     if (!p) return;
-    // Fitness & morale factor (0.9 to 1.05)
-    const conditionMult = 0.85 + ((p.fitness || 100) / 400) + ((p.morale || 70) / 600);
-    const effRating = (p.overallRating || 60) * conditionMult;
+    // Fitness & morale factor: ~1.0 for a healthy, content player; 0.88 floor, 1.04 cap
+    const fit = p.fitness ?? 100;
+    const mor = p.morale ?? 70;
+    const conditionMult = Math.max(0.88, Math.min(1.04, 1 + (fit - 85) * 0.0016 + (mor - 70) * 0.001));
+    const effRating = Math.min(99, (p.overallRating || 60) * conditionMult);
     totalStartersRating += effRating;
 
     if (p.positionCategory === 'FWD') {
@@ -268,14 +271,49 @@ export function calculateTrophyRankingPoints(
   return 150; // 4th tier
 }
 
+export interface WorldRankingsOptions {
+  /** Previous rankings: used to compute real monthly movement and carry form. */
+  previous?: WorldRankingsData | null;
+  /** Live clubs (current squads/reputation). Override the static database by id. */
+  teams?: Club[];
+  /** Current domestic league table of the user's league; results move the clubs' points. */
+  standings?: LeagueStanding[];
+}
+
 /**
- * Builds the complete monthly World Rankings list for all clubs & managers
+ * Form points from the current league table: how far a club's points-per-game is above or
+ * below what its squad strength predicts. Capped so one hot streak cannot flip the order.
+ */
+function computeFormPoints(
+  standings: LeagueStanding[] | undefined,
+  strengthOf: (clubId: string) => number
+): Map<string, number> {
+  const out = new Map<string, number>();
+  const rows = (Array.isArray(standings) ? standings : []).filter(r => r && r.teamId && (r.played || 0) >= 3);
+  if (rows.length < 4) return out;
+  const ordered = [...rows].sort((a, b) => strengthOf(b.teamId) - strengthOf(a.teamId));
+  ordered.forEach((row, idx) => {
+    const expected = 2.0 - 1.2 * (idx / (ordered.length - 1)); // best squad ~2.0 ppg, weakest ~0.8
+    const ppg = row.points / row.played;
+    const pts = Math.max(-1500, Math.min(1500, (ppg - expected) * row.played * 45));
+    out.set(row.teamId, Math.round(pts));
+  });
+  return out;
+}
+
+/**
+ * Builds the complete monthly World Rankings list for all clubs & managers.
+ * - Movement (monthlyRankChange) is real: it compares against the previous list.
+ * - Club points are recomputed from live squads + league results (no ratchet that only grows).
  */
 export function generateMonthlyWorldRankings(
   userManager?: ManagerProfile | null,
   userClub?: Club | null,
-  currentCalendarMonthStr: string = '2026-08'
+  currentCalendarMonthStr: string = '2026-08',
+  options: WorldRankingsOptions = {}
 ): WorldRankingsData {
+  const { previous, teams, standings } = options;
+
   const safeUserManager = userManager || ({
     id: 'user_manager',
     name: 'المدرب',
@@ -286,9 +324,6 @@ export function generateMonthlyWorldRankings(
     reputation: 20,
     wins: 0,
     rankingPoints: 1000,
-    worldRank: 850,
-    previousWorldRank: 850,
-    monthlyRankChange: 0,
     trophies: [],
   } as any);
 
@@ -301,29 +336,61 @@ export function generateMonthlyWorldRankings(
     players: [],
   } as any);
 
-  // 1. Gather all clubs from all global leagues
+  // 1. Gather all clubs: static database first, then live state wins.
   const allClubsMap = new Map<string, Club>();
-
   Object.values(GLOBAL_LEAGUES || {}).forEach(league => {
     (league?.teams || []).forEach(club => {
-      if (club && club.id && !allClubsMap.has(club.id)) {
-        allClubsMap.set(club.id, club);
-      }
+      if (club && club.id && !allClubsMap.has(club.id)) allClubsMap.set(club.id, club);
     });
   });
-
-  // Ensure user club is correctly updated
-  if (safeUserClub?.id && allClubsMap.has(safeUserClub.id)) {
-    allClubsMap.set(safeUserClub.id, {
-      ...allClubsMap.get(safeUserClub.id)!,
-      ...safeUserClub,
-      isUserClub: true,
-    });
+  (Array.isArray(teams) ? teams : []).forEach(live => {
+    if (!live || !live.id) return;
+    const base = allClubsMap.get(live.id);
+    allClubsMap.set(live.id, base ? { ...base, ...live } : live);
+  });
+  if (userClub?.id) {
+    const base = allClubsMap.get(userClub.id);
+    allClubsMap.set(userClub.id, { ...(base || {}), ...userClub, isUserClub: true } as Club);
   }
 
   const clubsList = Array.from(allClubsMap.values()).filter(c => c && c.id);
 
-  // 2. Compute user manager representation
+  // Strength cache (squad strength is the expensive part)
+  const strengthCache = new Map<string, ReturnType<typeof calculateSquadStrength>>();
+  const strengthOfClub = (club: Club) => {
+    let st = strengthCache.get(club.id);
+    if (!st) {
+      st = calculateSquadStrength(club);
+      strengthCache.set(club.id, st);
+    }
+    return st;
+  };
+  const formMap = computeFormPoints(standings, id => {
+    const c = allClubsMap.get(id);
+    return c ? strengthOfClub(c).overall : 0;
+  });
+
+  // Previous-list lookups. Inside the same month we keep the earlier baseline, so repeated
+  // recalculations do not erase the monthly movement.
+  const sameMonth = !!previous && previous.lastUpdatedMonth === currentCalendarMonthStr;
+  const prevMgrRank = new Map<string, number>();
+  const prevClubRank = new Map<string, number>();
+  const prevClubForm = new Map<string, number>();
+  (previous?.managers || []).forEach(m => m && prevMgrRank.set(m.id, sameMonth ? (m.previousWorldRank || m.worldRank) : m.worldRank));
+  (previous?.clubs || []).forEach(c => {
+    if (!c) return;
+    prevClubRank.set(c.clubId, sameMonth ? (c.previousWorldRank || c.worldRank) : c.worldRank);
+    if (c.formPoints) prevClubForm.set(c.clubId, c.formPoints);
+  });
+
+  // Club form: fresh from the table if it has enough games, else decay last month's value.
+  const clubForm = (clubId: string): number => {
+    if (formMap.has(clubId)) return formMap.get(clubId)!;
+    const old = prevClubForm.get(clubId);
+    return old ? Math.round(old * (sameMonth ? 1 : 0.6)) : 0;
+  };
+
+  // 2. User manager
   const userMgrRating = calculateDynamicManagerRating(safeUserManager);
   const userMgrPoints = safeUserManager.rankingPoints || Math.round(userMgrRating * 30 + (safeUserManager.wins || 0) * 15);
 
@@ -339,59 +406,53 @@ export function generateMonthlyWorldRankings(
     preferredFormation: safeUserManager.favoriteFormation || '4-3-3',
     reputation: safeUserManager.reputation || 20,
     rankingPoints: userMgrPoints,
-    worldRank: safeUserManager.worldRank || 850,
-    previousWorldRank: safeUserManager.previousWorldRank || 850,
-    monthlyRankChange: safeUserManager.monthlyRankChange || 0,
+    worldRank: 0,
+    previousWorldRank: 0,
+    monthlyRankChange: 0,
     trophiesWonCount: safeUserManager.trophies?.length || 0,
     majorTrophies: safeUserManager.trophies || [],
-    currentClubId: safeUserClub?.id || '',
-    currentClubName: safeUserClub?.name || 'بدون نادي',
-    currentLeagueId: safeUserClub?.leagueId,
+    currentClubId: userClub?.id || '',
+    currentClubName: userClub?.name || 'بدون نادٍ',
+    currentLeagueId: userClub?.leagueId,
   };
 
-  // 3. Build Managers List
-  const managersList: ClubManager[] = [];
-  managersList.push(userManagerEntry);
+  // 3. Managers list (dedupe by id; AI managers follow their club's results)
+  const managersList: ClubManager[] = [userManagerEntry];
+  const seenManagerIds = new Set<string>(['user_manager']);
 
   clubsList.forEach(club => {
-    if (!club || club.isUserClub) return; // User manager already added
-
+    if (club.isUserClub) return;
     const mgr = club.manager || getOrCreateClubManager(club);
-    if (!mgr) return;
-    const existing = managersList.find(m => m && (m.id === mgr.id || m.name === mgr.name));
-    if (!existing) {
-      managersList.push({
-        ...mgr,
-        currentClubId: club.id,
-        currentClubName: club.name,
-        currentLeagueId: club.leagueId,
-      });
-    }
+    if (!mgr || seenManagerIds.has(mgr.id)) return;
+    seenManagerIds.add(mgr.id);
+    managersList.push({
+      ...mgr,
+      rankingPoints: Math.max(100, Math.round((mgr.rankingPoints || 0) + clubForm(club.id) * 0.6)),
+      currentClubId: club.id,
+      currentClubName: club.name,
+      currentLeagueId: club.leagueId,
+    });
   });
 
-  // Sort managers by ranking points descending
-  managersList.sort((a, b) => (b?.rankingPoints || 0) - (a?.rankingPoints || 0) || (b?.rating || 0) - (a?.rating || 0));
-
-  // Assign world rank and rank delta
+  managersList.sort((a, b) => (b.rankingPoints || 0) - (a.rankingPoints || 0) || (b.rating || 0) - (a.rating || 0));
   managersList.forEach((mgr, idx) => {
-    if (!mgr) return;
     const newRank = idx + 1;
-    const prevRank = mgr.previousWorldRank || newRank;
+    const prevRank = prevMgrRank.get(mgr.id) ?? newRank;
     mgr.worldRank = newRank;
     mgr.previousWorldRank = prevRank;
     mgr.monthlyRankChange = prevRank - newRank; // positive = moved up
   });
 
-  // 4. Build World Clubs List
+  // 4. Clubs list
   const rankedClubs: WorldClubRankingItem[] = clubsList.map(club => {
-    const strength = club.squadStrength || calculateSquadStrength(club);
+    const strength = strengthOfClub(club);
     const mgr = club.isUserClub ? userManagerEntry : (club.manager || getOrCreateClubManager(club));
     const mgrRating = mgr?.rating || 60;
-    
-    // Club points based on reputation, squad strength, league tier, and manager
+    const form = clubForm(club.id);
+
     const tierBonus = club.division === 1 ? 8000 : club.division === 2 ? 3500 : club.division === 3 ? 1500 : 500;
-    const basePts = ((club.reputation || 30) * 120) + ((strength?.overall || 60) * 60) + (mgrRating * 40) + tierBonus;
-    const clubPts = club.rankingPoints ? Math.max(club.rankingPoints, basePts) : basePts;
+    const basePts = ((club.reputation || 30) * 120) + ((strength.overall || 60) * 60) + (mgrRating * 40) + tierBonus;
+    const clubPts = Math.max(100, Math.round(basePts + form));
 
     return {
       clubId: club.id,
@@ -407,24 +468,23 @@ export function generateMonthlyWorldRankings(
       squadStrength: strength.overall,
       attackStrength: strength.attack,
       defenseStrength: strength.defense,
-      managerName: mgr.name,
-      managerRating: mgr.rating,
+      managerName: mgr?.name || '—',
+      managerRating: mgr?.rating || 60,
       rankingPoints: clubPts,
-      worldRank: 1,
-      previousWorldRank: club.previousWorldRank || 1,
+      worldRank: 0,
+      previousWorldRank: 0,
       monthlyRankChange: 0,
       primaryColor: club.primaryColor || '#0284c7',
       secondaryColor: club.secondaryColor || '#ffffff',
-      trophiesCount: club.division === 1 && club.reputation >= 85 ? Math.floor(club.reputation / 4) : 0,
+      trophiesCount: club.division === 1 && (club.reputation || 0) >= 85 ? Math.floor(club.reputation / 4) : 0,
+      formPoints: form,
     };
   });
 
-  // Sort clubs by ranking points descending
   rankedClubs.sort((a, b) => b.rankingPoints - a.rankingPoints || b.squadStrength - a.squadStrength);
-
   rankedClubs.forEach((club, idx) => {
     const newRank = idx + 1;
-    const prevRank = club.previousWorldRank || newRank;
+    const prevRank = prevClubRank.get(club.clubId) ?? newRank;
     club.worldRank = newRank;
     club.previousWorldRank = prevRank;
     club.monthlyRankChange = prevRank - newRank;
@@ -435,4 +495,28 @@ export function generateMonthlyWorldRankings(
     managers: managersList,
     clubs: rankedClubs,
   };
+}
+
+const moveText = (change: number): string =>
+  change > 0 ? `▲ صعدت ${change} مركز` : change < 0 ? `▼ تراجعت ${Math.abs(change)} مركز` : '▬ بلا تغيير';
+
+/** Body text of the monthly rankings inbox message (built only from real list data). */
+export function buildRankingsReport(
+  rankings: WorldRankingsData,
+  userEntry: ClubManager | undefined,
+  monthLabel: string
+): string {
+  const topManager = rankings.managers?.[0];
+  const topClub = rankings.clubs?.[0];
+  const lines: string[] = [`صدر جدول التصنيف العالمي لشهر ${monthLabel}.`, ''];
+  if (topManager) lines.push(`👑 المدرب الأول: ${topManager.name} (${topManager.currentClubName}) — ${topManager.rankingPoints.toLocaleString('en-US')} نقطة.`);
+  if (topClub) lines.push(`🏆 النادي الأول: ${topClub.clubName} — ${topClub.rankingPoints.toLocaleString('en-US')} نقطة.`);
+  if (userEntry) {
+    lines.push('', `📍 ترتيبك العالمي: #${userEntry.worldRank} من ${rankings.managers.length} (${moveText(userEntry.monthlyRankChange)}) برصيد ${userEntry.rankingPoints.toLocaleString('en-US')} نقطة.`);
+    const myClub = rankings.clubs.find(c => c.clubId === userEntry.currentClubId);
+    if (myClub) lines.push(`🏟️ ترتيب ناديك: #${myClub.worldRank} من ${rankings.clubs.length} (${moveText(myClub.monthlyRankChange)}).`);
+  }
+  const climber = [...(rankings.clubs || [])].sort((a, b) => b.monthlyRankChange - a.monthlyRankChange)[0];
+  if (climber && climber.monthlyRankChange >= 3) lines.push(`🚀 أكبر صعود: ${climber.clubName} (+${climber.monthlyRankChange}).`);
+  return lines.join('\n');
 }

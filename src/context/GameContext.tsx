@@ -193,6 +193,7 @@ import {
 } from '../utils/contractAlertEngine';
 import {
   generateMonthlyWorldRankings,
+  buildRankingsReport,
   calculateDynamicManagerRating,
   calculateSquadStrength,
   calculateMatchRankingPoints,
@@ -1699,7 +1700,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   const recalculateWorldRankings = (monthStr?: string) => {
     const targetMonth = monthStr || (calendarDate?.rawDateStr ? calendarDate.rawDateStr.slice(0, 7) : '2026-08');
-    const updated = generateMonthlyWorldRankings(manager, userClub, targetMonth);
+    const updated = generateMonthlyWorldRankings(manager, userClub, targetMonth, { previous: worldRankings, teams, standings });
     setWorldRankings(updated);
     const userEntry = (updated?.managers || []).find(m => m && (m.id === 'user_manager' || (m.name && m.name.includes('(أنت)'))));
     if (userEntry) {
@@ -8749,7 +8750,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       if (calendarDate && typeof calendarDate.month === 'number' && newDate.month !== calendarDate.month) {
         try {
           const updatedMonthStr = `${newDate.year}-${String(newDate.month).padStart(2, '0')}`;
-          const freshWorldRankings = generateMonthlyWorldRankings(manager, userClub, updatedMonthStr);
+          const freshWorldRankings = generateMonthlyWorldRankings(manager, userClub, updatedMonthStr, { previous: worldRankings, teams: calculatedNextTeams || teams, standings });
           if (freshWorldRankings) {
             setWorldRankings(freshWorldRankings);
 
@@ -8764,7 +8765,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
               date: newDate.formattedArabic,
               type: 'news',
               read: false,
-              content: `صدر رسمياً جدول التصنيف العالمي الجديد لشهر ${newDate.formattedArabic}!\n\n👑 المصنف الأول عالمياً بين المدربين: ${topManager?.name || 'بيب جوارديولا'} (${topManager?.currentClubName || 'مانشستر سيتي'}) برصيد ${(topManager?.rankingPoints || 3200).toLocaleString()} نقطة.\n🏆 المصنف الأول بين الأندية: ${topClub?.clubName || 'ريال مدريد'} برصيد ${(topClub?.rankingPoints || 3400).toLocaleString()} نقطة.\n\n📍 ترتيبك التدريبي العالمي: المركز #${userRankEntry?.worldRank || manager?.worldRank || 850} برصيد ${(userRankEntry?.rankingPoints || manager?.rankingPoints || 1200).toLocaleString()} نقطة.\n\nتفضل بزيارة قسم "التصنيف العالمي" لمشاهدة القائمة الكاملة ومتابعة رحلتك نحو القمة!`,
+              content: buildRankingsReport(freshWorldRankings, userRankEntry, newDate.formattedArabic),
             };
 
             setInbox(prev => [monthlyInboxMsg, ...(prev || [])]);
@@ -8773,6 +8774,8 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
               setManager(prev => ({
                 ...prev,
                 worldRank: userRankEntry.worldRank,
+                previousWorldRank: userRankEntry.previousWorldRank,
+                monthlyRankChange: userRankEntry.monthlyRankChange,
                 rankingPoints: userRankEntry.rankingPoints,
                 managerRating: userDynamicManagerRating,
               }));
