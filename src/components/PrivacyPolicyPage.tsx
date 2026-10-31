@@ -189,7 +189,7 @@ export const PrivacyPolicyPage: React.FC<PrivacyPolicyPageProps> = ({ onBackToGa
             )}
           </p>
 
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
             <div className="bg-slate-950/60 border border-slate-800 p-3 rounded-xl space-y-1">
               <span className="text-xs font-bold text-amber-300 flex items-center gap-1">
                 <CheckCircle2 className="w-3.5 h-3.5 text-amber-400" />
@@ -197,15 +197,6 @@ export const PrivacyPolicyPage: React.FC<PrivacyPolicyPageProps> = ({ onBackToGa
               </span>
               <p className="text-[11px] text-slate-400 leading-snug">
                 {lang === 'ar' ? 'إعلانات شريطية ثابتة أسفل الشاشة يتم ضبطها تلقائياً لتناسب أبعاد شاشة هاتفك.' : 'Static bottom banners tailored to fit standard mobile screen dimensions.'}
-              </p>
-            </div>
-            <div className="bg-slate-950/60 border border-slate-800 p-3 rounded-xl space-y-1">
-              <span className="text-xs font-bold text-amber-300 flex items-center gap-1">
-                <CheckCircle2 className="w-3.5 h-3.5 text-amber-400" />
-                {lang === 'ar' ? 'الإعلانات البينية (Interstitial)' : 'Interstitial Ads'}
-              </span>
-              <p className="text-[11px] text-slate-400 leading-snug">
-                {lang === 'ar' ? 'تظهر في فترات الانتقال الطبيعية بعد انتهاء المباريات لتجنب مقاطعة اللعب.' : 'Displayed at natural transitions after matches conclude, avoiding sudden interruption.'}
               </p>
             </div>
             <div className="bg-slate-950/60 border border-slate-800 p-3 rounded-xl space-y-1">
