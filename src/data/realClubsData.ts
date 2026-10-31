@@ -143,7 +143,7 @@ function topUpRealSquad(real: Player[], clubId: string, countryCode: string, lea
 }
 
 /** Best XI for a 4-3-3 (GK, 2 CB + RB + LB, 3 MID, 3 FWD) plus a 7-man bench with a spare GK. */
-function pickLineup(players: Player[]): { startingPlayerIds: string[]; benchPlayerIds: string[] } {
+export function pickLineup(players: Player[]): { startingPlayerIds: string[]; benchPlayerIds: string[] } {
   const byOvr = (a: Player, b: Player) => (b.overallRating || 0) - (a.overallRating || 0);
   const used = new Set<string>();
   const take = (pred: (p: Player) => boolean, count: number): string[] => {
@@ -161,7 +161,11 @@ function pickLineup(players: Player[]): { startingPlayerIds: string[]; benchPlay
     ...take(p => p.positionCategory === 'FWD', 2),
   ];
   // fill any hole (e.g. no natural LB) with the best remaining outfielder of that line
-  while (xi.length < 11) xi.push(...take(p => p.positionCategory !== 'GK', 1));
+  while (xi.length < 11) {
+    const next = take(p => p.positionCategory !== 'GK', 1);
+    if (next.length === 0) break; // squad smaller than 11
+    xi.push(...next);
+  }
   const bench = [
     ...take(p => p.positionCategory === 'GK', 1),
     ...take(() => true, 6),

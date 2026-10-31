@@ -199,6 +199,7 @@ import {
   calculateMatchRankingPoints,
 } from '../utils/rankingsEngine';
 import { enrichClubsWithManagers } from '../data/worldManagersData';
+import { simulateWorldTransferDay, getTransferWindow, applyWorldMoves, resetWorldTransfers } from '../utils/worldTransferEngine';
 import { generateYouthAcademyBatch, promoteYouthProspectToSquad } from '../utils/youthAcademyEngine';
 import {
   calculateInitialPlayerSavings,
@@ -1713,6 +1714,75 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
   };
 
+  // World transfer windows: every club in every league trades players; completed moves are
+  // stored in worldRankings.worldMoves (saved with the game) and replayed onto the static database on load.
+  const lastTransferSimDateRef = useRef<string>('');
+  useEffect(() => {
+    const dateStr = calendarDate?.rawDateStr;
+    if (!dateStr || !isInitialLoadDoneRef.current) return;
+    const prevDate = lastTransferSimDateRef.current;
+    lastTransferSimDateRef.current = dateStr;
+    if (!prevDate || dateStr <= prevDate) return;
+    const start = Date.parse(`${prevDate}T00:00:00Z`);
+    const end = Date.parse(`${dateStr}T00:00:00Z`);
+    if (!Number.isFinite(start) || !Number.isFinite(end)) return;
+    const gapDays = Math.round((end - start) / 86400000);
+    if (gapDays < 1 || gapDays > 100) return;
+
+    try {
+      const protectedIds = new Set<string>((activeNegotiations || []).map(n => n?.playerId).filter(Boolean) as string[]);
+      let workTeams: Club[] = teams;
+      let movesAcc = { ...(worldRankings?.worldMoves || {}) };
+      const newMoves: Record<string, any> = {};
+      const dealsAll: { playerId: string; toClubName: string; fromClubName: string; playerName: string; fee: number; rating: number }[] = [];
+      const newsItems: DailyNewsItem[] = [];
+
+      for (let i = 1; i <= gapDays; i++) {
+        const d = new Date(start + i * 86400000);
+        const win = getTransferWindow(d.getUTCMonth() + 1, d.getUTCDate());
+        if (!win) continue;
+        const dayStr = d.toISOString().slice(0, 10);
+        const res = simulateWorldTransferDay({
+          liveTeams: workTeams,
+          userClubId: userClub?.id,
+          dateStr: dayStr,
+          seasonNumber: season?.seasonNumber || 1,
+          window: win.window,
+          daysLeft: win.daysLeft,
+          moves: movesAcc,
+          protectedPlayerIds: protectedIds,
+        });
+        workTeams = res.updatedLiveTeams;
+        Object.assign(movesAcc, res.newMoves);
+        Object.assign(newMoves, res.newMoves);
+        dealsAll.push(...res.deals);
+        res.news.forEach((n, idx) => newsItems.push({
+          id: `wt_${dayStr}_${idx}_${Math.random().toString(36).slice(2, 6)}`,
+          dateStr: dayStr,
+          title: n.title,
+          content: n.summary,
+          category: 'transfer',
+          importance: 'medium',
+          icon: '🔁',
+          source: 'سوق الانتقالات',
+        } as DailyNewsItem));
+      }
+
+      if (dealsAll.length === 0 && Object.keys(newMoves).length === 0) return;
+
+      const changed = new Map<string, Club>();
+      workTeams.forEach((c, i) => { if (c && c !== teams[i]) changed.set(c.id, c); });
+      if (changed.size > 0) setTeams(prev => prev.map(c => (c && changed.get(c.id)) || c));
+      setWorldRankings(prev => ({ ...prev, worldMoves: { ...(prev?.worldMoves || {}), ...newMoves } }));
+      const movedIds = new Set(dealsAll.map(d => d.playerId));
+      if (movedIds.size > 0) setTransferMarket(prev => (Array.isArray(prev) ? prev.filter(p => !movedIds.has(p.id)) : prev));
+      if (newsItems.length > 0) setDailyNews(prev => [...newsItems.slice(0, 8), ...(prev || [])].slice(0, 40));
+    } catch (e) {
+      console.warn('[WorldTransfers] simulation notice:', e);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [calendarDate?.rawDateStr]);
+
   const careerStateValidationGuardRef = useRef<string>('');
 
   // Self-healing invariant: Ensure manager is actively linked to their club in state (only after initial hydration completes)
@@ -2023,8 +2093,11 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     if (Array.isArray(migrated.retiredPlayers)) setRetiredPlayers(migrated.retiredPlayers);
     if (migrated.worldRankings) {
       if (typeof migrated.worldRankings === 'object' && !Array.isArray(migrated.worldRankings) && Array.isArray(migrated.worldRankings.managers) && Array.isArray(migrated.worldRankings.clubs)) {
+        resetWorldTransfers();
+        applyWorldMoves(migrated.worldRankings.worldMoves);
         setWorldRankings(migrated.worldRankings);
       } else {
+        resetWorldTransfers();
         const resolvedClub = migrated.teams?.find(t => t && t.isUserClub) || userClub;
         setWorldRankings(generateMonthlyWorldRankings(migrated.manager || manager, resolvedClub, migrated.calendarDate?.rawDateStr?.slice(0, 7) || '2026-08'));
       }
@@ -9745,6 +9818,8 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     localStorage.removeItem(`${STORAGE_KEY}_dailyNews`);
     localStorage.removeItem(`${STORAGE_KEY}_retiredPlayers`);
     localStorage.removeItem(`${STORAGE_KEY}_worldRankings`);
+    resetWorldTransfers();
+    setWorldRankings(prev => ({ ...prev, worldMoves: undefined }));
     localStorage.removeItem(`${STORAGE_KEY}_scoutedOpponents`);
     localStorage.removeItem(`${STORAGE_KEY}_deletedMessageIds`);
 

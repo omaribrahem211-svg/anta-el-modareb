@@ -8,6 +8,44 @@ import {
 import { getCountryById, GLOBAL_COUNTRIES } from '../data/countriesData';
 import { STAR_RATINGS_OVERRIDES } from '../data/starRatingsOverrides';
 
+
+/**
+ * Randomness source. Defaults to Math.random; generateClubSquad switches it to a per-club seeded
+ * generator so a club's generated squad is identical on every launch (stable ids/names/ratings,
+ * which world-level transfers and rankings rely on).
+ */
+let rng: () => number = Math.random;
+
+function seedFromString(str: string): number {
+  let h = 2166136261;
+  for (let i = 0; i < str.length; i++) {
+    h ^= str.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return h >>> 0;
+}
+
+function mulberry32(seed: number): () => number {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+export function withSeededRandom<T>(seed: string, fn: () => T): T {
+  const previous = rng;
+  rng = mulberry32(seedFromString(seed));
+  try {
+    return fn();
+  } finally {
+    rng = previous;
+  }
+}
+
 const POSITIONS_BY_CATEGORY: Record<PositionCategory, Position[]> = {
   GK: ['GK'],
   DEF: ['CB', 'RB', 'LB'],
@@ -46,7 +84,7 @@ export function generatePlayer(options: GeneratePlayerOptions): Player {
 
   // Decide Nationality based on Foreign Player Rate
   let playerCountry = primaryCountry;
-  const isForeign = options.isForeign ?? Math.random() < primaryCountry.foreignPlayerRate;
+  const isForeign = options.isForeign ?? rng() < primaryCountry.foreignPlayerRate;
 
   if (isForeign) {
     // Pick another country (weighted towards culturally and football-historically relevant regions)
@@ -75,7 +113,7 @@ export function generatePlayer(options: GeneratePlayerOptions): Player {
       foreignKeys = ['BRA', 'ARG', 'ESP', 'ITA'].filter(k => k !== primaryCountry.code);
     }
 
-    const randomKey = foreignKeys[Math.floor(Math.random() * foreignKeys.length)] || 'BRA';
+    const randomKey = foreignKeys[Math.floor(rng() * foreignKeys.length)] || 'BRA';
     playerCountry = GLOBAL_COUNTRIES[randomKey] || primaryCountry;
   }
 
@@ -85,9 +123,9 @@ export function generatePlayer(options: GeneratePlayerOptions): Player {
 
   if (!pos) {
     const cats: PositionCategory[] = ['GK', 'DEF', 'DEF', 'DEF', 'MID', 'MID', 'MID', 'FWD', 'FWD'];
-    cat = cats[Math.floor(Math.random() * cats.length)];
+    cat = cats[Math.floor(rng() * cats.length)];
     const possiblePositions = POSITIONS_BY_CATEGORY[cat];
-    pos = possiblePositions[Math.floor(Math.random() * possiblePositions.length)];
+    pos = possiblePositions[Math.floor(rng() * possiblePositions.length)];
   } else if (!cat) {
     if (pos === 'GK') cat = 'GK';
     else if (['CB', 'RB', 'LB'].includes(pos)) cat = 'DEF';
@@ -97,14 +135,14 @@ export function generatePlayer(options: GeneratePlayerOptions): Player {
 
   // Pick First and Last Name from Country Pool
   const { firstNames, lastNames } = playerCountry.playerNamePool;
-  const firstName = firstNames[Math.floor(Math.random() * firstNames.length)];
-  const lastName = lastNames[Math.floor(Math.random() * lastNames.length)];
+  const firstName = firstNames[Math.floor(rng() * firstNames.length)];
+  const lastName = lastNames[Math.floor(rng() * lastNames.length)];
   const fullName = `${firstName} ${lastName}`;
 
   // Age & Ratings
   const ageMin = options.ageMin ?? 18;
   const ageMax = options.ageMax ?? 33;
-  const age = Math.floor(Math.random() * (ageMax - ageMin + 1)) + ageMin;
+  const age = Math.floor(rng() * (ageMax - ageMin + 1)) + ageMin;
 
   // Calibrate baseLevel if generating for an Arab club/league so generated ratings are never inflated
   const ARAB_CODES = new Set([
@@ -129,18 +167,18 @@ export function generatePlayer(options: GeneratePlayerOptions): Player {
     }
   }
 
-  const variance = Math.floor(Math.random() * 5 - 2); // -2 to +2
+  const variance = Math.floor(rng() * 5 - 2); // -2 to +2
   const maxAllowedOvr = isArabLeagueOrCountry ? (isForeign ? 84 : 81) : 92;
   const overall = Math.min(maxAllowedOvr, Math.max(52, effectiveBaseLevel + variance));
 
   // Potential is higher for young players, with realistic caps
   const potentialBoost =
     age <= 20
-      ? Math.floor(Math.random() * 8 + 4)
+      ? Math.floor(rng() * 8 + 4)
       : age <= 24
-      ? Math.floor(Math.random() * 5 + 2)
+      ? Math.floor(rng() * 5 + 2)
       : age <= 27
-      ? Math.floor(Math.random() * 3 + 1)
+      ? Math.floor(rng() * 3 + 1)
       : 0;
   const maxAllowedPot = isArabLeagueOrCountry ? (isForeign ? 86 : 85) : 94;
   const potential = Math.min(maxAllowedPot, overall + potentialBoost);
@@ -152,24 +190,24 @@ export function generatePlayer(options: GeneratePlayerOptions): Player {
   const isFwd = cat === 'FWD';
 
   const attributes = {
-    pace: Math.min(92, Math.max(35, overall + Math.floor(Math.random() * 12 - 4))),
-    shooting: Math.min(92, Math.max(25, overall + (isFwd ? Math.floor(Math.random() * 5 + 3) : isDef ? -Math.floor(Math.random() * 15 + 5) : -1))),
-    passing: Math.min(92, Math.max(30, overall + (isMid ? Math.floor(Math.random() * 5 + 3) : isGK ? -10 : -1))),
-    dribbling: Math.min(92, Math.max(30, overall + (isFwd || isMid ? Math.floor(Math.random() * 5 + 2) : isGK ? -15 : -4))),
-    defending: Math.min(92, Math.max(25, overall + (isDef ? Math.floor(Math.random() * 5 + 4) : isFwd ? -Math.floor(Math.random() * 18 + 8) : -3))),
-    physical: Math.min(92, Math.max(38, overall + Math.floor(Math.random() * 10 - 3))),
-    goalkeeping: isGK ? Math.min(92, overall + Math.floor(Math.random() * 4 + 1)) : undefined,
+    pace: Math.min(92, Math.max(35, overall + Math.floor(rng() * 12 - 4))),
+    shooting: Math.min(92, Math.max(25, overall + (isFwd ? Math.floor(rng() * 5 + 3) : isDef ? -Math.floor(rng() * 15 + 5) : -1))),
+    passing: Math.min(92, Math.max(30, overall + (isMid ? Math.floor(rng() * 5 + 3) : isGK ? -10 : -1))),
+    dribbling: Math.min(92, Math.max(30, overall + (isFwd || isMid ? Math.floor(rng() * 5 + 2) : isGK ? -15 : -4))),
+    defending: Math.min(92, Math.max(25, overall + (isDef ? Math.floor(rng() * 5 + 4) : isFwd ? -Math.floor(rng() * 18 + 8) : -3))),
+    physical: Math.min(92, Math.max(38, overall + Math.floor(rng() * 10 - 3))),
+    goalkeeping: isGK ? Math.min(92, overall + Math.floor(rng() * 4 + 1)) : undefined,
   };
 
   // Realistic Market Value & Monthly Salary calculation
   const { marketValue, salary } = calculatePlayerValuation(overall, potential, age, cat, clubRep);
 
-  const preferredFoot = PREFERRED_FEET[Math.floor(Math.random() * PREFERRED_FEET.length)];
-  const personality = PERSONALITIES[Math.floor(Math.random() * PERSONALITIES.length)];
+  const preferredFoot = PREFERRED_FEET[Math.floor(rng() * PREFERRED_FEET.length)];
+  const personality = PERSONALITIES[Math.floor(rng() * PERSONALITIES.length)];
 
   const playerId = options.clubId
-    ? `${options.clubId}_p_${Math.random().toString(36).substring(2, 9)}`
-    : `p_${playerCountry.code.toLowerCase()}_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    ? `${options.clubId}_p_${rng().toString(36).substring(2, 9)}`
+    : `p_${playerCountry.code.toLowerCase()}_${Date.now()}_${rng().toString(36).substring(2, 7)}`;
 
   const generated: Player = {
     id: playerId,
@@ -194,7 +232,7 @@ export function generatePlayer(options: GeneratePlayerOptions): Player {
     morale: 85,
     fitness: 100,
     form: 7.0,
-    number: Math.floor(Math.random() * 99 + 1),
+    number: Math.floor(rng() * 99 + 1),
     stats: {
       appearances: 0,
       starts: 0,
@@ -212,7 +250,7 @@ export function generatePlayer(options: GeneratePlayerOptions): Player {
       averageRating: 7.0,
       motm: 0,
     },
-    contractYears: Math.floor(Math.random() * 3 + 1),
+    contractYears: Math.floor(rng() * 3 + 1),
   };
 
   (generated as any)._realisticCalibratedV2 = true;
@@ -521,7 +559,7 @@ export function generateClubSquad(
     { pos: 'ST', cat: 'FWD' },
   ];
 
-  return squadBlueprint.map((slot, index) => {
+  return withSeededRandom(`squad:${clubId}`, () => squadBlueprint.map((slot, index) => {
     const player = generatePlayer({
       countryId: countryCode,
       clubId,
@@ -537,7 +575,7 @@ export function generateClubSquad(
     player.currentClubId = clubId;
     player.currentLeagueId = leagueId;
     return player;
-  });
+  }));
 }
 
 export function generateFreeAgentsMarket(count = 20): Player[] {
@@ -545,8 +583,8 @@ export function generateFreeAgentsMarket(count = 20): Player[] {
   const players: Player[] = [];
 
   for (let i = 0; i < count; i++) {
-    const randomCountry = countryKeys[Math.floor(Math.random() * countryKeys.length)];
-    const baseLevel = Math.floor(Math.random() * 35 + 48); // 48 - 83 rating
+    const randomCountry = countryKeys[Math.floor(rng() * countryKeys.length)];
+    const baseLevel = Math.floor(rng() * 35 + 48); // 48 - 83 rating
     const player = generatePlayer({
       countryId: randomCountry,
       clubReputation: 30,

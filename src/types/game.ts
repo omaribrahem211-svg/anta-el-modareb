@@ -965,8 +965,22 @@ export interface WorldClubRankingItem {
   formPoints?: number; // نقاط الأداء من نتائج الدوري الحالي (تُستخدم لحركة الترتيب)
 }
 
+/** One completed AI transfer (latest move per player). Replayed onto the static club database on load. */
+export interface WorldMoveRecord {
+  fromClubId: string;
+  toClubId: string; // 'FREE' = released
+  fee: number;
+  salary: number;
+  contractYears: number;
+  seasonNumber: number;
+  dateStr: string;
+  playerName: string;
+}
+
 export interface WorldRankingsData {
   lastUpdatedMonth: string; // e.g. '2026-08'
+  /** World transfer ledger (playerId -> latest move). Stored here so it saves/resets with the rankings. */
+  worldMoves?: Record<string, WorldMoveRecord>;
   rankingMonth?: string;
   managers: ClubManager[];
   clubs: WorldClubRankingItem[];

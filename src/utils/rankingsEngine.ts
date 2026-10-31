@@ -494,6 +494,7 @@ export function generateMonthlyWorldRankings(
     lastUpdatedMonth: currentCalendarMonthStr,
     managers: managersList,
     clubs: rankedClubs,
+    worldMoves: previous?.worldMoves,
   };
 }
 
