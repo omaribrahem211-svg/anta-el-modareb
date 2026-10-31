@@ -2,8 +2,10 @@ import { useState } from 'react';
 import { useGame } from '../context/GameContext';
 
 export default function SeasonEventModal() {
-  const { pendingSeasonEvent, resolveSeasonEvent } = useGame() as any;
+  const { pendingSeasonEvent, resolveSeasonEvent, userClub } = useGame() as any;
   const [result, setResult] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const budget = Math.max(0, userClub?.budget || 0);
 
   if (!pendingSeasonEvent && !result) return null;
 
@@ -29,16 +31,26 @@ export default function SeasonEventModal() {
         </div>
         <p className="text-sm text-slate-300 leading-relaxed">{ev.body}</p>
         <div className="space-y-2">
-          {ev.choices.map((c: any) => (
-            <button
-              key={c.id}
-              onClick={() => { const r = resolveSeasonEvent(c.id); setResult(r?.message || 'تم.'); }}
-              className="w-full text-right bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-2xl px-4 py-3"
-            >
-              <div className="text-sm font-bold text-white">{c.label}</div>
-              <div className="text-[11px] text-slate-400 mt-0.5">{c.hint}</div>
-            </button>
-          ))}
+          {ev.choices.map((c: any) => {
+            const cantPay = (c.cost || 0) > budget;
+            return (
+              <button
+                key={c.id}
+                disabled={busy || cantPay}
+                onClick={() => {
+                  if (busy) return;
+                  setBusy(true);
+                  const r = resolveSeasonEvent(c.id);
+                  if (r?.message) setResult(r.message);
+                  setBusy(false);
+                }}
+                className="w-full text-right bg-slate-800 hover:bg-slate-700 disabled:opacity-40 border border-slate-700 rounded-2xl px-4 py-3"
+              >
+                <div className="text-sm font-bold text-white">{c.label}</div>
+                <div className="text-[11px] text-slate-400 mt-0.5">{cantPay ? 'خزينة النادي لا تكفي' : c.hint}</div>
+              </button>
+            );
+          })}
         </div>
       </div>
     </div>

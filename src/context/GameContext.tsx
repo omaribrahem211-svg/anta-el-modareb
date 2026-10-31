@@ -158,7 +158,7 @@ import { gameStateRepository } from '../services/gameStateRepository';
 import { timed, runWhenIdle } from '../utils/perfLog';
 import { migrateSavePayload, CURRENT_SAVE_FORMAT_VERSION } from '../services/saveBackupService';
 import { smartSyncManager, SmartSyncInput } from '../services/smartSyncManager';
-import { rollSeasonEvent, resolveSeasonEvent as resolveSeasonEventEngine, SeasonEvent } from '../services/seasonEventsEngine';
+import { rollSeasonEvent, resolveSeasonEvent as resolveSeasonEventEngine, recordSeasonEvent, rolloverSeasonEventHistory, emptySeasonEventHistory, SeasonEventHistory, SeasonEvent } from '../services/seasonEventsEngine';
 import { canPlayerJoinClub, DEFAULT_ECONOMY_CONFIG, calculateClubMonthlyIncome, calculateClubTotalMonthlyWages, validateTransferFinancials } from '../services/economyService';
 import { fetchActiveBroadcasts, applyWorldOverridesToClubs, applyWorldOverridesToMarket, isPlayerDeletedInOverrides, SUPER_ADMIN_EMAIL } from '../services/adminService';
 import {
@@ -1645,8 +1645,27 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const [showDaySummaryModal, setShowDaySummaryModal] = useState<boolean>(false);
   const [trainingIntensity, setTrainingIntensity] = useState<'recovery' | 'normal' | 'high'>('normal');
   const [matchBlocker, setMatchBlocker] = useState<MatchBlockerInfo | null>(null);
-  const [pendingSeasonEvent, setPendingSeasonEvent] = useState<SeasonEvent | null>(null);
-  const lastSeasonEventDayRef = useRef<number>(-100);
+  // Season events: the pending event and the cooldown history are persisted so reloading the app can neither
+  // dodge nor re-roll an event, and a ref mirrors the pending event so a double tap cannot resolve it twice.
+  const [pendingSeasonEvent, setPendingSeasonEventState] = useState<SeasonEvent | null>(() => {
+    try { const raw = localStorage.getItem(`${STORAGE_KEY}_pendingSeasonEvent`); return raw ? JSON.parse(raw) : null; } catch { return null; }
+  });
+  const pendingSeasonEventRef = useRef<SeasonEvent | null>(pendingSeasonEvent);
+  const setPendingSeasonEvent = (ev: SeasonEvent | null) => {
+    pendingSeasonEventRef.current = ev;
+    setPendingSeasonEventState(ev);
+    try {
+      if (ev) localStorage.setItem(`${STORAGE_KEY}_pendingSeasonEvent`, JSON.stringify(ev));
+      else localStorage.removeItem(`${STORAGE_KEY}_pendingSeasonEvent`);
+    } catch {}
+  };
+  const seasonEventHistoryRef = useRef<SeasonEventHistory>((() => {
+    try { const raw = localStorage.getItem(`${STORAGE_KEY}_seasonEventHistory`); return raw ? JSON.parse(raw) : emptySeasonEventHistory(); } catch { return emptySeasonEventHistory(); }
+  })());
+  const saveSeasonEventHistory = (h: SeasonEventHistory) => {
+    seasonEventHistoryRef.current = h;
+    try { localStorage.setItem(`${STORAGE_KEY}_seasonEventHistory`, JSON.stringify(h)); } catch {}
+  };
 
   // --- Daily Login Reward State (نظام مكافآت تسجيل الدخول اليومي) ---
   const [dailyRewardState, setDailyRewardState] = useState<DailyLoginRewardState>(() => {
@@ -8878,14 +8897,17 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
       setTeams(calculatedNextTeams);
 
-      // Random season event (camps, friendlies, star demands...). At most one waiting, spaced >= 10 days apart.
+      // Random season event (camps, friendlies, star demands...). One at a time, spaced >= 10 days apart, with
+      // per-kind cooldowns and per-season caps on the events that hand out free value.
       try {
         const evDay = newDate.dayIndexInSeason || 0;
-        if (!pendingSeasonEvent && !manager.isUnemployed && evDay - lastSeasonEventDayRef.current >= 10 && Math.random() < Math.min(0.5, 0.06 * daysAdvanced)) {
+        const seasonNo = season?.seasonNumber || 1;
+        const hist = rolloverSeasonEventHistory(seasonEventHistoryRef.current, seasonNo);
+        if (!pendingSeasonEventRef.current && !manager.isUnemployed && evDay - hist.lastDay >= 10 && Math.random() < Math.min(0.5, 0.06 * daysAdvanced)) {
           const evClub = calculatedNextTeams.find(t => t && (t.isUserClub || (userClub && t.id === userClub.id)));
-          const ev = evClub ? rollSeasonEvent(evClub) : null;
+          const ev = evClub ? rollSeasonEvent(evClub, hist, evDay) : null;
           if (ev) {
-            lastSeasonEventDayRef.current = evDay;
+            saveSeasonEventHistory(recordSeasonEvent(hist, ev, evDay, seasonNo));
             setPendingSeasonEvent(ev);
           }
         }
@@ -9107,11 +9129,14 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   const resolveSeasonEvent = (choiceId: string): { message: string } | null => {
-    const ev = pendingSeasonEvent;
+    const ev = pendingSeasonEventRef.current;
     if (!ev) return null;
     const mine = teams.find(t => t && (t.isUserClub || (userClub && t.id === userClub.id)));
     if (!mine) { setPendingSeasonEvent(null); return null; }
     const outcome = resolveSeasonEventEngine(mine, ev, choiceId);
+    if (!outcome.ok) return { message: outcome.message };
+    // Clear first (synchronously, via the ref) so a second tap on the same event does nothing
+    setPendingSeasonEvent(null);
     const budgetDelta = outcome.club.budget - (mine.budget || 0);
     setTeams(prev => prev.map(t => (t && t.id === mine.id ? outcome.club : t)));
     if (budgetDelta !== 0) {
@@ -9980,6 +10005,8 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   const resetGame = (startingClubId?: string) => {
+    setPendingSeasonEvent(null);
+    saveSeasonEventHistory(emptySeasonEventHistory());
     // Clear storage repository (IndexedDB and localStorage mirrors)
     gameStateRepository.clearLocalGameState().catch(err => console.warn('Error clearing local game state:', err));
 
