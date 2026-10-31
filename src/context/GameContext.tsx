@@ -469,6 +469,20 @@ const INITIAL_SEASON: SeasonInfo = {
 
 const GameContext = createContext<GameContextType | undefined>(undefined);
 
+const INBOX_MAX_MESSAGES = 100;
+function capInbox(list: InboxMessage[]): InboxMessage[] {
+  if (!Array.isArray(list)) return [];
+  const seen = new Set<string>();
+  const out: InboxMessage[] = [];
+  for (const m of list) {
+    if (!m || !m.id || seen.has(m.id)) continue;
+    seen.add(m.id);
+    out.push(m);
+    if (out.length >= INBOX_MAX_MESSAGES) break;
+  }
+  return out;
+}
+
 export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const { user } = useAuth();
 
@@ -1036,13 +1050,13 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
   });
 
-  const [inbox, setInbox] = useState<InboxMessage[]>(() => {
+  const [inbox, setInboxRaw] = useState<InboxMessage[]>(() => {
     try {
       const saved = localStorage.getItem(`${STORAGE_KEY}_inbox`);
       if (saved !== null) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed)) {
-          return parsed;
+          return capInbox(parsed);
         }
       }
       return INITIAL_INBOX;
@@ -1050,6 +1064,16 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       return INITIAL_INBOX;
     }
   });
+
+  // Central inbox guard: every write goes through here so the list can never grow
+  // unbounded (which used to bloat every save/render and freeze the game).
+  const setInbox = useCallback((value: InboxMessage[] | ((prev: InboxMessage[]) => InboxMessage[])) => {
+    setInboxRaw(prev => {
+      const base = Array.isArray(prev) ? prev : [];
+      const next = typeof value === 'function' ? (value as (p: InboxMessage[]) => InboxMessage[])(base) : value;
+      return capInbox(next);
+    });
+  }, []);
 
   // 5. Domestic Cup & Continental Tournaments (Disabled for smooth League-only calendar & performance)
   const [cupTournament, setCupTournament] = useState<CupTournament | null>(null);
@@ -4221,7 +4245,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           manager: updatedManager,
           transferMarket,
           incomingBids,
-          inbox: [...newInboxMsgs, ...inbox],
+          inbox: capInbox([...newInboxMsgs, ...inbox]),
           cupTournament: updatedCupTournament,
           africanChampionsLeague: updatedContinental,
           jobOffers,
@@ -5209,7 +5233,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         manager: updatedManager,
         transferMarket,
         incomingBids,
-        inbox: [...newInboxMsgs, ...inbox],
+        inbox: capInbox([...newInboxMsgs, ...inbox]),
         cupTournament: updatedCupTournament,
         africanChampionsLeague: updatedContinental,
         jobOffers,
@@ -7309,13 +7333,11 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   const clearAllMessages = () => {
-    setInbox(prev => {
-      const allIds = prev.map(m => m.id);
-      setDeletedMessageIds(deletedPrev =>
-        Array.from(new Set([...deletedPrev, ...allIds])).slice(-200)
-      );
-      return [];
-    });
+    const allIds = (inbox || []).map(m => m.id);
+    setDeletedMessageIds(deletedPrev =>
+      Array.from(new Set([...deletedPrev, ...allIds])).slice(-200)
+    );
+    setInbox([]);
   };
 
   const markAllMessagesRead = () => {
@@ -8782,7 +8804,14 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         try {
           const contractAlerts = checkExpiringContracts(userClub, newDate.formattedArabic, inbox || []);
           if (contractAlerts.length > 0) {
-            setInbox(prev => [...contractAlerts, ...(prev || [])]);
+            // Re-check against the freshest inbox so fast multi-day sims never duplicate alerts
+            setInbox(prev => {
+              const base = prev || [];
+              const fresh = contractAlerts.filter(a => !base.some(m =>
+                m.contractDetails?.playerId === a.contractDetails?.playerId &&
+                !m.contractDetails?.renewed && m.actionTaken !== 'renewed'));
+              return fresh.length ? [...fresh, ...base] : base;
+            });
           }
         } catch (contractErr) {
           console.warn('[DailyProgression] Contract alert error:', contractErr);
