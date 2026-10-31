@@ -4,7 +4,7 @@ export interface ManagerTransaction {
   id: string;
   date: string;
   amount: number;
-  type: 'salary' | 'trophy_bonus' | 'course_license' | 'license_upgrade' | 'license_renewal' | 'club_donation' | 'player_bonus' | 'match_bonus';
+  type: 'salary' | 'trophy_bonus' | 'course_license' | 'license_upgrade' | 'license_renewal' | 'club_donation' | 'player_bonus' | 'match_bonus' | 'transfer_commission' | 'reward';
   description: string;
 }
 

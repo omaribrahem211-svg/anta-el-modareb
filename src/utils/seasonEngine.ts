@@ -2668,7 +2668,7 @@ export function processNewSeasonAdvancement(
     totalBonusesEarned: settledManagerState.totalBonusesEarned || 0,
     conqueredLeagues: newConqueredLeagues,
     worldDominationPercentage,
-    financialTransactions: (settledManagerState.financialTransactions || []).slice(0, 30),
+    financialTransactions: (settledManagerState.financialTransactions || []).slice(0, 80),
     history: [historyEntry, ...(settledManagerState.history || [])],
   };
 

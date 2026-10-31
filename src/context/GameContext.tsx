@@ -1453,6 +1453,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     let flips = 0;
     let best: { playerName: string; profit: number; seasonNumber: number } | undefined;
     const msgs: InboxMessage[] = [];
+    const commissionTxs: ManagerTransaction[] = [];
     fresh.forEach(sale => {
       const fee = Math.max(0, sale.fee || 0);
       if (fee <= 0) return;
@@ -1464,6 +1465,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       const cut = base + bonus;
       if (cut <= 0) return;
       commissionSum += cut;
+      commissionTxs.push({ id: `tx_cut_${sale.id}`, date: sale.date, amount: cut, type: 'transfer_commission', description: `عمولة بيع ${sale.playerName}${bonus > 0 ? ' (شاملة حصة الربح)' : ''}` });
       if (profit > 0) {
         profitSum += profit;
         flips += 1;
@@ -1484,6 +1486,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     if (commissionSum <= 0) return;
     setManager(prev => ({
       ...prev,
+      financialTransactions: [...commissionTxs, ...(prev.financialTransactions || [])].slice(0, 80),
       personalWallet: (prev.personalWallet || 0) + commissionSum,
       careerEarnings: (prev.careerEarnings || 0) + commissionSum,
       transferCommissionTotal: (prev.transferCommissionTotal || 0) + commissionSum,
@@ -3997,7 +4000,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       personalWallet: (manager.personalWallet || 0) + totalManagerIncome,
       monthlySalary: manager.monthlySalary || 25000,
       totalBonusesEarned: (manager.totalBonusesEarned || 0) + matchBonus + managerCupBonusCut,
-      financialTransactions: [...newFinancialTxs, ...(manager.financialTransactions || [])].slice(0, 30),
+      financialTransactions: [...newFinancialTxs, ...(manager.financialTransactions || [])].slice(0, 80),
     };
 
     const todayStr = new Date().toISOString().split('T')[0];
@@ -4910,7 +4913,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           personalWallet: (manager.personalWallet || 0) + simTotalEarned,
           monthlySalary: manager.monthlySalary || 25000,
           totalBonusesEarned: (manager.totalBonusesEarned || 0) + simMatchBonus + simCupBonusCut,
-          financialTransactions: [...simFinancialTxs, ...(manager.financialTransactions || [])].slice(0, 30),
+          financialTransactions: [...simFinancialTxs, ...(manager.financialTransactions || [])].slice(0, 80),
         };
 
         const dynamicRating = calculateDynamicManagerRating(initialUpdatedManager);
@@ -9498,7 +9501,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       setManager(prev => ({
         ...prev,
         personalWallet: Math.max(0, (prev.personalWallet || 0) - amount),
-        financialTransactions: [tx, ...(prev.financialTransactions || [])].slice(0, 30),
+        financialTransactions: [tx, ...(prev.financialTransactions || [])].slice(0, 80),
       }));
     }
 
@@ -9581,7 +9584,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       setManager(prev => ({
         ...prev,
         personalWallet: Math.max(0, (prev.personalWallet || 0) - totalCost),
-        financialTransactions: [tx, ...(prev.financialTransactions || [])].slice(0, 30),
+        financialTransactions: [tx, ...(prev.financialTransactions || [])].slice(0, 80),
       }));
     }
 
@@ -9649,7 +9652,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       personalWallet: Math.max(0, (prev.personalWallet || 0) - amount),
       totalClubDonations: (prev.totalClubDonations || 0) + amount,
       reputation: Math.min(100, prev.reputation + (amount >= 50000 ? 5 : 2)),
-      financialTransactions: [tx, ...(prev.financialTransactions || [])].slice(0, 30),
+      financialTransactions: [tx, ...(prev.financialTransactions || [])].slice(0, 80),
     }));
 
     // Add to club treasury
@@ -9812,7 +9815,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         reputation: newRep,
         rankingPoints: newRankPts,
         developmentPoints: (prev.developmentPoints || 0) + extraDevPts,
-        financialTransactions: [tx, ...(prev.financialTransactions || [])].slice(0, 30),
+        financialTransactions: [tx, ...(prev.financialTransactions || [])].slice(0, 80),
       };
     });
 
@@ -10243,6 +10246,10 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       setManager(prev => ({
         ...prev,
         personalWallet: (prev.personalWallet || 0) + (coinAmount * 100),
+        financialTransactions: [{
+          id: `tx_reward_${Date.now()}`, date: `الجولة ${currentRound}`, amount: coinAmount * 100,
+          type: 'reward' as const, description: 'مكافأة مشاهدة إعلان',
+        }, ...(prev.financialTransactions || [])].slice(0, 80),
       }));
 
       try {
@@ -10359,6 +10366,10 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       setManager(prev => ({
         ...prev,
         personalWallet: (prev.personalWallet || 0) + (reward.coins * 100),
+        financialTransactions: [{
+          id: `tx_reward_${Date.now()}`, date: `الجولة ${currentRound}`, amount: reward.coins * 100,
+          type: 'reward' as const, description: 'مكافأة مهمة / جائزة',
+        }, ...(prev.financialTransactions || [])].slice(0, 80),
       }));
 
       try {

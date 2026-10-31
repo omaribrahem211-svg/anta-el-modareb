@@ -521,7 +521,7 @@ export const CareerTab: React.FC = () => {
             ) : (
               <ul className="space-y-1.5">
                 {(showAllTransactions ? transactions : transactions.slice(0, 5)).map(tx => {
-                  const positive = ['salary', 'trophy_bonus', 'match_bonus'].includes(tx.type);
+                  const positive = ['salary', 'trophy_bonus', 'match_bonus', 'transfer_commission', 'reward'].includes(tx.type);
                   return (
                     <li key={tx.id} className="flex items-center gap-2.5 bg-slate-950/60 border border-slate-800 rounded-xl p-2.5 text-xs">
                       <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${positive ? 'bg-emerald-500/15 text-emerald-300' : 'bg-rose-500/15 text-rose-300'}`}>

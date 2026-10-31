@@ -839,7 +839,7 @@ export function settleEndOfSeasonLicenseAndBonus(
     personalWallet: walletAfterSettlement,
     careerEarnings: (manager.careerEarnings || 0) + bonusToDeposit,
     totalBonusesEarned: (manager.totalBonusesEarned || 0) + bonusToDeposit,
-    financialTransactions: transactions.slice(0, 60),
+    financialTransactions: transactions.slice(0, 80),
     lastSettledSeasonNumber: seasonNumber,
   };
 
