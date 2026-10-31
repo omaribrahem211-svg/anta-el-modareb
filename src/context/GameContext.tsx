@@ -949,9 +949,25 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const id = manager?.currentClubId;
     if (!id || manager?.isUnemployed || !Array.isArray(teams)) return;
     if (!teams.some(t => t && t.id === id)) return;
+    const lvlBad = (v: any) => !(Number.isFinite(Number(v)) && Number(v) >= 1);
+    const fixFacilities = (t: Club): Club => {
+      const f: any = t.facilities || {};
+      const keys = ['stadiumLevel', 'medicalCenterLevel', 'trainingGroundLevel', 'youthAcademyLevel', 'scoutingNetworkLevel'];
+      if (t.facilities && keys.every(k => !lvlBad(f[k])) && Number(f.stadiumCapacity) > 0) return t;
+      const healed: any = { ...f, stadiumName: f.stadiumName || t.name, stadiumCapacity: Number(f.stadiumCapacity) > 0 ? Number(f.stadiumCapacity) : 5000 };
+      keys.forEach(k => { healed[k] = lvlBad(f[k]) ? 1 : Math.min(5, Math.round(Number(f[k]))); });
+      return { ...t, facilities: healed };
+    };
+    const mine = teams.find(t => t && t.id === id);
+    const facilitiesBroken = !!mine && fixFacilities(mine) !== mine;
     const drifted = teams.some(t => t && t.id && ((t.id === id) !== !!t.isUserClub));
-    if (!drifted) return;
-    setTeams(prev => prev.map(t => (t && t.id && ((t.id === id) !== !!t.isUserClub)) ? { ...t, isUserClub: t.id === id } : t));
+    if (!drifted && !facilitiesBroken) return;
+    setTeams(prev => prev.map(t => {
+      if (!t || !t.id) return t;
+      let nt = (t.id === id) !== !!t.isUserClub ? { ...t, isUserClub: t.id === id } : t;
+      if (t.id === id) nt = fixFacilities(nt);
+      return nt;
+    }));
   }, [teams, manager?.currentClubId, manager?.isUnemployed]);
 
   const teamsRef = useRef<Club[]>(teams);
@@ -8829,27 +8845,28 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         } catch (_) {}
       }
 
-      // Deduct monthly player salaries on the 1st of each month (or when month changes)
-      const isNewMonthDay = newDate.day === 1 || (calendarDate && newDate.month !== calendarDate.month);
-      if (isNewMonthDay) {
-        let userMonthlyWagesPaid = 0;
+      // Player salaries are paid pro-rata for every day that passed (monthly wages / 30 per day) instead of one big
+      // lump on the 1st of the month, so skipping several days never makes the treasury drop suddenly.
+      {
+        let userWagesPaid = 0;
         calculatedNextTeams = calculatedNextTeams.map(club => {
           if (!club) return club;
-          const clubMonthlyWages = (club.players || []).reduce((sum, p) => sum + (p?.salary || 0), 0);
+          const monthlyWages = (club.players || []).reduce((sum, p) => sum + (p?.salary || 0), 0);
+          const dueWages = Math.round((monthlyWages * Math.max(1, daysAdvanced)) / 30);
           if (club.isUserClub || (userClub && club.id === userClub.id)) {
-            userMonthlyWagesPaid = clubMonthlyWages;
+            userWagesPaid = Math.min(dueWages, club.budget || 0);
           }
           return {
             ...club,
-            budget: Math.max(0, (club.budget || 0) - clubMonthlyWages),
+            budget: Math.max(0, (club.budget || 0) - dueWages),
           };
         });
 
-        if (userMonthlyWagesPaid > 0) {
+        if (userWagesPaid > 0) {
           setClubEconomy(prev => ({
             ...prev,
-            wagesExpenseTotal: (prev.wagesExpenseTotal || 0) + userMonthlyWagesPaid,
-            currentSeasonNetProfit: (prev.currentSeasonNetProfit || 0) - userMonthlyWagesPaid,
+            wagesExpenseTotal: (prev.wagesExpenseTotal || 0) + userWagesPaid,
+            currentSeasonNetProfit: (prev.currentSeasonNetProfit || 0) - userWagesPaid,
           }));
         }
       }

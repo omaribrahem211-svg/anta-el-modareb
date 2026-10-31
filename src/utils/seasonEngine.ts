@@ -2525,7 +2525,9 @@ export function processNewSeasonAdvancement(
     let youthProspects = team.youthAcademyProspects;
     let teamDevPoints = team.developmentPoints || 0;
 
-    if (team.isUserClub) {
+    // Use the club the manager will coach NEXT season (the old isUserClub flag still points at the previous club
+    // after a job change, which gave the new club no budget/intake and the old club the new club's budget).
+    if (team.id === nextUserClub.id) {
       if (acceptedJobOffer) {
         teamBudget = acceptedJobOffer.transferBudget || team.budget || 250000;
       } else {
