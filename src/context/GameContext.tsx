@@ -4199,19 +4199,6 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       });
     } catch (_) {}
 
-    // Interstitial Check (decoupled microtask so it never blocks React UI or causes race condition)
-    try {
-      queueMicrotask(() => {
-        try {
-          AdManager.onMatchCompleted();
-        } catch (adErr) {
-          console.warn('Non-fatal AdMob onMatchCompleted error:', adErr);
-        }
-      });
-    } catch (e) {
-      // ignore
-    }
-
     // Prune older round events before committing to React state and IndexedDB
     const prunedFixturesForState = pruneFixturesForStorage(updatedFixtures, nextRoundNumber);
     setFixtures(prunedFixturesForState);
@@ -5085,9 +5072,6 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     // Boost Consumption
     AdManager.consumeTrainingBoost();
-    // Interstitial Check (non-blocking background preload & show if ready)
-    AdManager.onMatchCompleted();
-
     // Track match in challengesManager & show Post-Match Summary modal with goal scorers and minutes
     if (hasSimUserMatch) {
       try {

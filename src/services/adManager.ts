@@ -8,7 +8,6 @@ import {
   BannerAdPosition,
   RewardAdOptions,
   RewardAdPluginEvents,
-  InterstitialAdPluginEvents,
   BannerAdPluginEvents,
   AdMobRewardItem,
 } from '@capacitor-community/admob';
@@ -39,26 +38,6 @@ class AdManagerService {
   private isTopBannerLoading = false;
   private isTopBannerCreated = true;
 
-  // Interstitial State
-  private isInterstitialLoading = false;
-  private isInterstitialLoaded = false;
-  private isInterstitialShowing = false;
-  private interstitialLoadPromise: Promise<boolean> | null = null;
-  private interstitialListenerHandles: PluginListenerHandle[] = [];
-
-  private async cleanupInterstitialListeners() {
-    while (this.interstitialListenerHandles.length > 0) {
-      const handle = this.interstitialListenerHandles.pop();
-      if (handle) {
-        try {
-          await handle.remove();
-        } catch {
-          // ignore
-        }
-      }
-    }
-  }
-
   // Rewarded State
   private isRewardedLoading = false;
   private isRewardedLoaded = false;
@@ -82,8 +61,6 @@ class AdManagerService {
 
   private state: AdManagerState = {
     isPremium: false,
-    matchesPlayedSinceLastInterstitial: 0,
-    lastInterstitialTimestamp: Date.now(),
     activeBoost: null,
     lastRewardedAdTimestamp: 0,
   };
@@ -177,9 +154,8 @@ class AdManagerService {
         }
 
         if (this.isNative) {
-          // Preload Interstitial and Rewarded in background so they are ready
+          // Preload the rewarded ad in the background so it is ready
           setTimeout(() => {
-            this.loadInterstitial().catch(() => {});
             this.loadRewarded().catch(() => {});
           }, 2000);
         }
@@ -411,113 +387,6 @@ class AdManagerService {
     this.isTopBannerActive = true;
     this.isTopBannerLoading = false;
     return true;
-  }
-
-  // ==========================================
-  // MATCH PROGRESSION & INTERSTITIAL ADS
-  // ==========================================
-
-  public isInterstitialReady(): boolean {
-    return this.isInterstitialLoaded || !this.isNative;
-  }
-
-  public async loadInterstitial(timeoutMs: number = 10000): Promise<boolean> {
-    if (this.isInterstitialLoaded) return true;
-    if (this.isInterstitialLoading && this.interstitialLoadPromise) {
-      return this.interstitialLoadPromise;
-    }
-
-    if (!this.isNative) {
-      this.isInterstitialLoaded = true;
-      return true;
-    }
-
-    this.isInterstitialLoading = true;
-
-    this.interstitialLoadPromise = new Promise<boolean>(async (resolve) => {
-      let settled = false;
-      let timer: NodeJS.Timeout | null = null;
-
-      const finish = async (success: boolean) => {
-        if (settled) return;
-        settled = true;
-        if (timer) {
-          clearTimeout(timer);
-          timer = null;
-        }
-        await this.cleanupInterstitialListeners();
-        this.isInterstitialLoading = false;
-        this.isInterstitialLoaded = success;
-        this.interstitialLoadPromise = null;
-        resolve(success);
-      };
-
-      timer = setTimeout(() => {
-        console.warn(`[ADMOB_INTERSTITIAL_TIMEOUT] Load timed out after ${timeoutMs}ms`);
-        finish(false);
-      }, timeoutMs);
-
-      try {
-        if (!this.isInitialized) {
-          await this.initialize();
-        }
-
-        await this.cleanupInterstitialListeners();
-
-        const interstitialAdId = ADMOB_CONFIG.IS_TEST_MODE ? TEST_AD_IDS.INTERSTITIAL_ID : ADMOB_CONFIG.INTERSTITIAL_ID;
-
-        const loadedHandle = await AdMob.addListener(InterstitialAdPluginEvents.Loaded, () => {
-          console.log('[ADMOB_INTERSTITIAL_LOADED] Interstitial loaded successfully:', interstitialAdId);
-          finish(true);
-        });
-        this.interstitialListenerHandles.push(loadedHandle);
-
-        const failedHandle = await AdMob.addListener(InterstitialAdPluginEvents.FailedToLoad, async (err: any) => {
-          const errCode = (err && (err.code ?? err.errorCode)) ?? 'UNKNOWN';
-          const errMsg = (err && (err.message ?? err.errorMessage)) ?? (typeof err === 'object' ? JSON.stringify(err) : String(err));
-          console.warn(`[ADMOB_INTERSTITIAL_FAILED] Code: ${errCode} | Message: ${errMsg}`);
-          // Fallback to official test ad unit if production ad failed to load
-          if (interstitialAdId !== TEST_AD_IDS.INTERSTITIAL_ID) {
-            console.log('[ADMOB_INTERSTITIAL] Retrying with Google test interstitial unit');
-            AdMob.prepareInterstitial({
-              adId: TEST_AD_IDS.INTERSTITIAL_ID,
-              isTesting: true,
-            }).catch(() => finish(false));
-          } else {
-            finish(false);
-          }
-        });
-        this.interstitialListenerHandles.push(failedHandle);
-
-        const options: AdOptions = {
-          adId: interstitialAdId,
-          isTesting: ADMOB_CONFIG.IS_TEST_MODE,
-        };
-
-        console.log('[ADMOB_INTERSTITIAL] Preparing interstitial ad:', interstitialAdId);
-        AdMob.prepareInterstitial(options).catch(async (err: any) => {
-          console.warn('[ADMOB_INTERSTITIAL_PREPARE_ERROR]', err);
-          finish(false);
-        });
-      } catch (ex) {
-        console.error('[ADMOB_INTERSTITIAL_EXCEPTION]', ex);
-        finish(false);
-      }
-    });
-
-    return this.interstitialLoadPromise;
-  }
-
-  public async showInterstitial(onDismiss?: () => void): Promise<boolean> {
-    // Interstitial ads between matches are completely disabled per user requirement
-    if (onDismiss) onDismiss();
-    return false;
-  }
-
-  public onMatchCompleted(fixtureId?: string, onAfterAd?: () => void): { shouldShowInterstitial: boolean } {
-    // Interstitial ads between matches are completely disabled per user requirement
-    if (onAfterAd) onAfterAd();
-    return { shouldShowInterstitial: false };
   }
 
   // ==========================================

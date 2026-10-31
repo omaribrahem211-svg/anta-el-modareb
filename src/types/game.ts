@@ -1339,8 +1339,6 @@ export interface ActiveTrainingBoost {
 
 export interface AdManagerState {
   isPremium: boolean;
-  matchesPlayedSinceLastInterstitial: number;
-  lastInterstitialTimestamp: number;
   activeBoost: ActiveTrainingBoost | null;
   lastRewardedAdTimestamp: number;
 }

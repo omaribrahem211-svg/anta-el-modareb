@@ -183,7 +183,6 @@ export const OnlineMatchArena: React.FC<OnlineMatchArenaProps> = ({
   const [rematchRequested, setRematchRequested] = useState(false);
   const [rematchWaiting, setRematchWaiting] = useState(false);
   const [savedLocally, setSavedLocally] = useState(false);
-  const hasShownAdForMatchRef = useRef(false);
 
   // Dedicated container ref for internal commentary scrolling (NO page jump!)
   const commentaryBoxRef = useRef<HTMLDivElement>(null);
@@ -263,7 +262,6 @@ export const OnlineMatchArena: React.FC<OnlineMatchArenaProps> = ({
         setRematchRequested(false);
         setRematchWaiting(false);
         setSavedLocally(false);
-        hasShownAdForMatchRef.current = false;
         setSubsRemaining(5);
         setCurrentStarters(defaultStarters);
         setCurrentBench(defaultBench);
@@ -743,23 +741,8 @@ export const OnlineMatchArena: React.FC<OnlineMatchArenaProps> = ({
     }
   }, [host.clubName, guest.clubName, host.playerName, guest.playerName, matchState.homeScore, matchState.awayScore]);
 
-  // Safe Exit after completed match (respects the 5-match interstitial cycle)
   const handleExitWithAd = () => {
-    if (matchState.status === 'finished' && !hasShownAdForMatchRef.current) {
-      hasShownAdForMatchRef.current = true;
-      try {
-        const res = AdManager.onMatchCompleted(undefined, () => {
-          onExitMatch();
-        });
-        if (!res.shouldShowInterstitial) {
-          onExitMatch();
-        }
-      } catch {
-        onExitMatch();
-      }
-    } else {
-      onExitMatch();
-    }
+    onExitMatch();
   };
 
   return (
