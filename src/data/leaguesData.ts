@@ -39,6 +39,7 @@ import {
   ITALY_SERIE_B_CLUBS,
   FRANCE_LIGUE_2_CLUBS
 } from './lowerTiersData';
+import { applySeason2627 } from './season2627';
 import { get as idbGet, set as idbSet } from 'idb-keyval';
 
 // Re-export for backward compatibility
@@ -85,6 +86,9 @@ export const EGYPT_TIER_3_TEAMS: Club[] = [
   createClub('eg3_maleyat_kafr', 'نادي مالية كفر الزيات', 'المالية', 'الغربية', 'مصر', 'EGY', 3, 'egy_tier_3', 42, 61, '#dc2626', '#eab308', 370000, 135000, 110000, 'استاد مالية كفر الزيات', 6000, 2),
   createClub('eg3_qous', 'نادي قوص الرياضي', 'قوص', 'قنا', 'مصر', 'EGY', 3, 'egy_tier_3', 36, 57, '#0284c7', '#ffffff', 280000, 100000, 90000, 'ملعب قوص الرياضي بقنا', 4000, 2),
 ];
+
+// تركيبة موسم 2026/27 (الصاعدون والهابطون) — تُطبّق على المصفوفات نفسها
+applySeason2627(EGYPT_TIER_3_TEAMS);
 
 export const EGYPT_TIER_2_TEAMS = EGYPT_TIER_2_CLUBS;
 export const EGYPT_TIER_1_TEAMS = EGYPT_PREMIER_CLUBS;
