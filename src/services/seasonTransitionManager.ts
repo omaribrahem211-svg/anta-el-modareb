@@ -313,32 +313,81 @@ export class SeasonTransitionManager {
       activeLeague?.tier || currentSeason?.divisionTier || 1
     );
 
-    // 2. Generate End of Season Summary (League only)
+    // 2. Generate End of Season Summary
     const summaryClub = userClub || teams[0];
     const seasonEndSummary = calculateSeasonEndSummary(
       { ...currentSeason, status: 'completed' },
       standings,
       summaryClub,
       activeLeague,
-      null,
+      cupTournament,
       manager,
-      null
+      params.continentalTournament
     );
 
-    const nextCupTournament = null as any;
-    const nextContinentalTournament = null as any;
+    // 3. Initialize Next Season's Domestic National Cup for the active country
+    const totalLeagueRounds = Math.max(18, (teams.length - 1) * 2);
+    const nextCupTournament = initNationalCupTournament(
+      nextSeasonNum,
+      country,
+      teams,
+      userClub,
+      totalLeagueRounds
+    );
 
-    // 3. Generate Fresh Master Calendar Schedule for Season N+1 (League Only)
+    // 4. Determine Which Continental Tournament User's Club Participates In (with Strict Mutual Exclusion & Continent Isolation)
+    const userId = userClub?.id;
+    const userEligibleForCont = isClubEligibleForContinentalQualification(userClub);
+    const userQualifiedForPrimary = Boolean(
+      userId && userEligibleForCont && qualifications.cclQualifiedClubIds.includes(userId)
+    );
+    const userQualifiedForSecondary = Boolean(
+      userId &&
+        userEligibleForCont &&
+        qualifications.cccQualifiedClubIds.includes(userId) &&
+        !qualifications.cclQualifiedClubIds.includes(userId)
+    );
+    const targetContinentalCode: 'ccl' | 'ccc' | 'ucl' | 'uel' | 'acl' | 'acl2' = userQualifiedForSecondary
+      ? qualifications.secondaryContinentalCode
+      : qualifications.primaryContinentalCode;
+
+    const qualifiedIdsForTarget = userQualifiedForSecondary
+      ? qualifications.cccQualifiedClubIds
+      : qualifications.cclQualifiedClubIds;
+
+    const excludedIdsForTarget = new Set<string>(
+      userQualifiedForSecondary
+        ? qualifications.cclQualifiedClubIds
+        : qualifications.cccQualifiedClubIds
+    );
+    if (userId && !userQualifiedForPrimary && !userQualifiedForSecondary) {
+      excludedIdsForTarget.add(userId);
+    }
+
+    const qualifiedClubObjs = qualifiedIdsForTarget
+      .map(id => teams.find(t => t.id === id) || findClubInWorld(id))
+      .filter((c): c is Club => Boolean(c && isClubEligibleForContinentalQualification(c)));
+
+    const nextContinentalTournament = initContinentalTournamentByCode(
+      targetContinentalCode,
+      nextSeasonNum,
+      teams,
+      userQualifiedForPrimary || userQualifiedForSecondary ? userClub || undefined : undefined,
+      qualifiedClubObjs,
+      excludedIdsForTarget
+    );
+
+    // 5. Generate Fresh Master Calendar Schedule for Season N+1 (League + Domestic Cup + Continental Cup)
     const nextMasterSchedule = CalendarManager.generateMasterSchedule({
       seasonNumber: nextSeasonNum,
       activeLeague,
       teams,
       userClub,
-      cupTournament: null,
-      continentalTournament: null,
+      cupTournament: nextCupTournament,
+      continentalTournament: nextContinentalTournament,
     });
 
-    // 4. Reset Standings for Season N+1
+    // 6. Reset Standings for Season N+1
     const nextStandings: LeagueStanding[] = teams.map(t => ({
       teamId: t.id,
       teamName: t.name,
@@ -353,24 +402,37 @@ export class SeasonTransitionManager {
       form: [],
     }));
 
-    // 5. Update Manager Records
+    // 7. Update Manager Records
     const isUserChampion = standings[0]?.teamId === userClub?.id;
+    const isUserCupWinner = Boolean(userClub?.id && cupTournament?.winnerClubId === userClub.id);
+    const isUserContWinner = Boolean(
+      userClub?.id &&
+      (seasonEndSummary.continentalTrophyAwarded ||
+        params.continentalTournament?.winnerClubId === userClub.id)
+    );
 
     const newTrophiesForManager = [...(manager.trophies || [])];
     if (isUserChampion && seasonEndSummary.leagueTrophyAwarded && !newTrophiesForManager.includes(seasonEndSummary.leagueTrophyAwarded)) {
       newTrophiesForManager.push(seasonEndSummary.leagueTrophyAwarded);
+    }
+    if (isUserCupWinner && seasonEndSummary.cupTrophyAwarded && !newTrophiesForManager.includes(seasonEndSummary.cupTrophyAwarded)) {
+      newTrophiesForManager.push(seasonEndSummary.cupTrophyAwarded);
+    }
+    if (isUserContWinner && seasonEndSummary.continentalTrophyAwarded && !newTrophiesForManager.includes(seasonEndSummary.continentalTrophyAwarded)) {
+      newTrophiesForManager.push(seasonEndSummary.continentalTrophyAwarded);
     }
 
     const updatedManager: ManagerProfile = {
       ...manager,
       totalSeasons: (manager.totalSeasons || 1) + 1,
       leagueTitles: isUserChampion ? (manager.leagueTitles || 0) + 1 : (manager.leagueTitles || 0),
+      cupTitles: isUserCupWinner ? (manager.cupTitles || 0) + 1 : (manager.cupTitles || 0),
       trophies: newTrophiesForManager,
-      reputation: isUserChampion ? Math.min(100, (manager.reputation || 20) + 10) : manager.reputation,
-      level: isUserChampion ? (manager.level || 1) + 1 : manager.level,
+      reputation: isUserChampion || isUserContWinner ? Math.min(100, (manager.reputation || 20) + 10) : manager.reputation,
+      level: isUserChampion || isUserContWinner ? (manager.level || 1) + 1 : manager.level,
     };
 
-    // 6. Next Season Info
+    // 8. Next Season Info
     const nextSeason: SeasonInfo = {
       seasonId: `season_${nextSeasonNum}_${Date.now()}`,
       seasonNumber: nextSeasonNum,
@@ -384,17 +446,26 @@ export class SeasonTransitionManager {
       divisionTier: activeLeague.tier,
     };
 
-    // 7. Inbox Announcement Message
+    // 9. Inbox Announcement Message
+    const federationSender = isEuropeanCountry(country)
+      ? 'الاتحاد الأوروبي لكرة القدم (UEFA) ورابطة الدوري'
+      : 'الاتحاد الإفريقي لكرة القدم (CAF) ورابطة الأندية';
+
     const announcementInboxMessage = {
       id: `msg_season_trans_${nextSeasonNum}_${Date.now()}`,
-      title: `🎉 انطلاق الموسم الجديد ${nextSeasonNum} لـ ${activeLeague.name} 🏟️`,
-      sender: 'رابطة الأندية المحترفة',
+      title: `🎉 انطلاق الموسم الجديد ${nextSeasonNum} واعتماد المتأهلين للبطولات القارية 🌍`,
+      sender: federationSender,
       date: startDateStr,
       type: 'board' as const,
       read: false,
       content:
-        `انطلق رسمياً الموسم الكروي الجديد ${nextSeasonNum} لمسابقة ${activeLeague.name}!\n\n` +
-        `📅 جدول مباريات الدوري للموسم الجديد جاهز بالكامل بنظام الذهاب والإياب الأسبوعي المنتظم في عطلة نهاية الأسبوع. نتمنى لك موسماً حافلاً بالانتصارات والبطولات! 🚀`,
+        `انطلق رسمياً الموسم الكروي الجديد ${nextSeasonNum} بتحديث شامل لجدول المباريات والمسابقات المحلية والقارية!\n\n` +
+        `🏆 الأندية المتأهلة للبطولات القارية هذا الموسم:\n` +
+        qualifications.qualificationNotes.join('\n') +
+        '\n\n' +
+        `🛡️ الكأس المحلية: ${nextCupTournament.name}\n` +
+        `🌍 البطولة القارية النشطة: ${nextContinentalTournament.name}\n\n` +
+        `📅 جدول مباريات الموسم الجديد جاهز بالكامل وفق التقويم الزمني الموحد (الدوري في عطلة نهاية الأسبوع، ودوري الأبطال والكأس أيام الثلاثاء والأربعاء، والكونفدرالية/الدوري الأوروبي أيام الخميس مع ضمان فاصل راحة 48 ساعة على الأقل). نتمنى لك موسماً حافلاً بالبطولات! 🚀`,
     };
 
     return {
