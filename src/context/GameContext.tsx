@@ -2060,8 +2060,8 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     if (migrated.season) setSeason(migrated.season);
     if (migrated.activeLeague) setActiveLeague(migrated.activeLeague);
     if (Array.isArray(migrated.teams) && migrated.teams.length > 0) setTeams(migrated.teams.map(normalizeClub));
-    if (Array.isArray(migrated.standings) && migrated.standings.length > 0) setStandings(migrated.standings.map(normalizeStanding));
-    if (Array.isArray(migrated.fixtures) && migrated.fixtures.length > 0) setFixtures(migrated.fixtures);
+    if (Array.isArray(migrated.standings)) setStandings(migrated.standings.map(normalizeStanding));
+    if (Array.isArray(migrated.fixtures)) setFixtures(migrated.fixtures);
     if (typeof migrated.currentRound === 'number') setCurrentRound(migrated.currentRound);
     if (migrated.manager) {
       const normalizedMgr = normalizeManagerProfile(migrated.manager);

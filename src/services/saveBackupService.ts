@@ -13,6 +13,10 @@ import { INITIAL_TEAMS, INITIAL_MANAGER, INITIAL_TRANSFER_MARKET } from '../data
 import { normalizeClub, normalizeStanding, normalizeManagerProfile } from '../utils/dataNormalizer';
 import { EGYPT_TIER_4_LEAGUE, getLeagueById } from '../data/leaguesData';
 import { normalizeCalendarDate } from '../utils/calendarEngine';
+import { Capacitor } from '@capacitor/core';
+import { Filesystem, Directory, Encoding } from '@capacitor/filesystem';
+import { Share } from '@capacitor/share';
+import { get as idbGet, set as idbSet } from 'idb-keyval';
 
 export const CURRENT_SAVE_FORMAT_VERSION = 2;
 export const APP_BUILD_VERSION = '2.5.0';
@@ -135,7 +139,8 @@ export function migrateSavePayload(rawPayload: any): LocalGameSavePayload {
     worldRankings: (src?.worldRankings && typeof src.worldRankings === 'object' && !Array.isArray(src.worldRankings)) ? src.worldRankings : null,
     scoutedOpponents: (src?.scoutedOpponents && typeof src.scoutedOpponents === 'object' && !Array.isArray(src.scoutedOpponents)) ? src.scoutedOpponents : {},
     deletedMessageIds: Array.isArray(src?.deletedMessageIds) ? src.deletedMessageIds : [],
-  };
+    ...(src?.dailyRewardState && typeof src.dailyRewardState === 'object' ? { dailyRewardState: src.dailyRewardState } : {}),
+  } as LocalGameSavePayload;
 
   return migrated;
 }
@@ -170,19 +175,7 @@ export function getExportSaveCode(payload: LocalGameSavePayload, trainerId?: str
   return JSON.stringify(container);
 }
 
-/**
- * Triggers a browser download of the save file (.anta-save or .json)
- */
-export function downloadSaveFile(
-  payload: LocalGameSavePayload, 
-  trainerId?: string, 
-  format: 'anta-save' | 'json' = 'anta-save'
-): void {
-  const container = createExportContainer(payload, trainerId);
-  const jsonStr = JSON.stringify(container, null, 2);
-  const mimeType = format === 'json' ? 'application/json' : 'application/octet-stream';
-  const blob = new Blob([jsonStr], { type: `${mimeType};charset=utf-8;` });
-  
+function buildSaveFileName(container: AntaSaveContainer, format: 'anta-save' | 'json'): string {
   const sanitizedName = (container.header.managerName || 'Manager')
     .replace(/[^\w\u0600-\u06FF]/g, '_')
     .slice(0, 20);
@@ -190,8 +183,51 @@ export function downloadSaveFile(
   const roundNum = container.payload.currentRound || 1;
   const dateStr = new Date().toISOString().slice(0, 10);
   const ext = format === 'json' ? 'json' : 'anta-save';
-  const fileName = `AntaElModareb_${sanitizedName}_S${seasonNum}_R${roundNum}_${dateStr}.${ext}`;
+  return `AntaElModareb_${sanitizedName}_S${seasonNum}_R${roundNum}_${dateStr}.${ext}`;
+}
 
+export type SaveExportMethod = 'share' | 'download' | 'cancelled';
+
+/**
+ * Exports the save file.
+ *  - Android / iOS app: writes the file to the app cache and opens the system Share sheet
+ *    (Drive, WhatsApp, Files...). The old <a download> trick does nothing inside the WebView.
+ *  - Browser: classic file download.
+ * The JSON is written compactly (no pretty-printing) so files are several times smaller.
+ */
+export async function exportSaveFile(
+  payload: LocalGameSavePayload,
+  trainerId?: string,
+  format: 'anta-save' | 'json' = 'json'
+): Promise<{ method: SaveExportMethod; fileName: string; sizeKb: number }> {
+  const container = createExportContainer(payload, trainerId);
+  const jsonStr = JSON.stringify(container);
+  const fileName = buildSaveFileName(container, format);
+  const sizeKb = Math.round(jsonStr.length / 1024);
+
+  if (Capacitor.isNativePlatform()) {
+    try {
+      const written = await Filesystem.writeFile({
+        path: fileName,
+        data: jsonStr,
+        directory: Directory.Cache,
+        encoding: Encoding.UTF8,
+      });
+      await Share.share({
+        title: 'نسخة مسيرتي - أنت المدرب',
+        text: `نسخة احتياطية من مسيرة ${container.header.managerName}`,
+        url: written.uri,
+        dialogTitle: 'احفظ أو ابعت ملف المسيرة',
+      });
+      return { method: 'share', fileName, sizeKb };
+    } catch (err: any) {
+      const msg = String(err?.message || err || '');
+      if (/cancel/i.test(msg)) return { method: 'cancelled', fileName, sizeKb };
+      throw new Error(`تعذر مشاركة الملف (${msg || 'خطأ غير معروف'}). جرّب خيار "نسخ الكود" بدلاً منه.`);
+    }
+  }
+
+  const blob = new Blob([jsonStr], { type: 'application/json;charset=utf-8;' });
   const url = URL.createObjectURL(blob);
   const link = document.createElement('a');
   link.href = url;
@@ -200,6 +236,69 @@ export function downloadSaveFile(
   link.click();
   document.body.removeChild(link);
   setTimeout(() => URL.revokeObjectURL(url), 1000);
+  return { method: 'download', fileName, sizeKb };
+}
+
+/** Kept for backward compatibility with older callers. */
+export function downloadSaveFile(
+  payload: LocalGameSavePayload,
+  trainerId?: string,
+  format: 'anta-save' | 'json' = 'anta-save'
+): void {
+  void exportSaveFile(payload, trainerId, format);
+}
+
+/* ------------------------- safety snapshot (undo a restore) ------------------------- */
+
+const SAFETY_SNAPSHOT_KEY = 'anta_el_modareb_pre_restore_snapshot_v1';
+
+export interface SafetySnapshotInfo {
+  savedAt: number;
+  managerName: string;
+  seasonNumber: number;
+  clubName: string;
+}
+
+/** Stores the current career right before a restore overwrites it, so the restore can be undone. */
+export async function saveSafetySnapshot(payload: LocalGameSavePayload): Promise<void> {
+  try {
+    await idbSet(SAFETY_SNAPSHOT_KEY, { savedAt: Date.now(), payload });
+  } catch (err) {
+    console.warn('[SaveBackupService] Could not store safety snapshot:', err);
+  }
+}
+
+export async function loadSafetySnapshot(): Promise<{ info: SafetySnapshotInfo; payload: LocalGameSavePayload } | null> {
+  try {
+    const raw: any = await idbGet(SAFETY_SNAPSHOT_KEY);
+    if (!raw?.payload) return null;
+    const club = raw.payload.teams?.find((t: any) => t?.isUserClub);
+    return {
+      info: {
+        savedAt: raw.savedAt || 0,
+        managerName: raw.payload.manager?.name || 'المدرب',
+        seasonNumber: raw.payload.season?.seasonNumber || 1,
+        clubName: club?.name || 'نادي',
+      },
+      payload: raw.payload,
+    };
+  } catch {
+    return null;
+  }
+}
+
+/** Human readable summary of a (migrated) save, shown before the person confirms a restore. */
+export function describeSavePayload(data: LocalGameSavePayload) {
+  const club = (data.teams || []).find((t: any) => t?.isUserClub) || (data.teams || [])[0];
+  return {
+    managerName: data.manager?.name || 'المدرب',
+    clubName: club?.name || 'غير محدد',
+    leagueName: (data.activeLeague as any)?.name || '',
+    seasonNumber: data.season?.seasonNumber || 1,
+    round: data.currentRound || 1,
+    teamsCount: (data.teams || []).length,
+    worldEra: (data.worldRankings as any)?.worldEra || 0,
+  };
 }
 
 export interface ImportSaveResult {
@@ -210,6 +309,9 @@ export interface ImportSaveResult {
     managerName?: string;
     seasonNumber?: number;
     exportedAt?: string;
+    /** ok = checksum matches; modified = file was changed after export; unknown = no checksum in file */
+    integrity?: 'ok' | 'modified' | 'unknown';
+    formatVersion?: number;
   };
 }
 
@@ -282,12 +384,33 @@ export async function parseAndValidateSaveFile(fileOrText: File | string): Promi
       };
     }
 
+    // Refuse files that are clearly not a career. Without this a stray JSON would be "migrated"
+    // into the default starter world and silently wipe the person's real progress.
+    {
+      const probe = targetPayload?.payload || targetPayload?.current_save || targetPayload?.data || targetPayload?.save || targetPayload;
+      const clubCount = Array.isArray(probe?.teams) ? probe.teams.filter((t: any) => t && Array.isArray(t.players)).length : 0;
+      if (!probe?.manager || typeof probe.manager !== 'object' || clubCount < 2) {
+        return {
+          success: false,
+          error: 'الملف ده مش مسيرة كاملة (ناقصه بيانات المدرب أو الأندية). اتأكد إنك اخترت ملف الحفظ الأصلي اللي اتصدّر من اللعبة.',
+        };
+      }
+      if (typeof headerInfo?.formatVersion === 'number' && headerInfo.formatVersion > CURRENT_SAVE_FORMAT_VERSION) {
+        return {
+          success: false,
+          error: 'الملف ده اتعمل بنسخة أحدث من اللعبة. حدّث التطبيق الأول وبعدين جرّب تاني.',
+        };
+      }
+    }
+
+    let integrity: 'ok' | 'modified' | 'unknown' = 'unknown';
     // Non-blocking checksum audit:
     // Log diagnostics, but never block user from importing valid game data.
     if (headerInfo?.checksum) {
       try {
         const payloadString = JSON.stringify(targetPayload);
         const expectedChecksum = computeChecksum(payloadString);
+        integrity = headerInfo.checksum === expectedChecksum ? 'ok' : 'modified';
         if (headerInfo.checksum === expectedChecksum) {
           console.info('[SaveBackupService] File integrity verified successfully.');
         } else {
@@ -308,6 +431,8 @@ export async function parseAndValidateSaveFile(fileOrText: File | string): Promi
         managerName: headerInfo?.managerName || migrated.manager?.name || 'المدرب',
         seasonNumber: migrated.season?.seasonNumber || 1,
         exportedAt: headerInfo?.exportedAt || 'نسخة محفوظة',
+        integrity,
+        formatVersion: headerInfo?.formatVersion,
       },
     };
   } catch (err: any) {

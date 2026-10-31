@@ -1,9 +1,14 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { useGame } from '../context/GameContext';
 import { 
-  downloadSaveFile, 
+  exportSaveFile,
   parseAndValidateSaveFile, 
   getExportSaveCode,
+  describeSavePayload,
+  saveSafetySnapshot,
+  loadSafetySnapshot,
+  type SafetySnapshotInfo,
+  type ImportSaveResult,
   CURRENT_SAVE_FORMAT_VERSION, 
   APP_BUILD_VERSION 
 } from '../services/saveBackupService';
@@ -93,11 +98,21 @@ export const SettingsBackupModal: React.FC<SettingsBackupModalProps> = ({
   const [isCopied, setIsCopied] = useState(false);
   const [showCodePasteArea, setShowCodePasteArea] = useState(false);
   const [pastedCode, setPastedCode] = useState('');
+  const [pending, setPending] = useState<ImportSaveResult | null>(null);
+  const [isRestoring, setIsRestoring] = useState(false);
+  const [undoInfo, setUndoInfo] = useState<SafetySnapshotInfo | null>(null);
   const [feedback, setFeedback] = useState<{
     type: 'success' | 'error';
     title: string;
     message: string;
   } | null>(null);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    let cancelled = false;
+    loadSafetySnapshot().then(snap => { if (!cancelled) setUndoInfo(snap?.info || null); });
+    return () => { cancelled = true; };
+  }, [isOpen]);
 
   if (!isOpen) return null;
 
@@ -132,22 +147,32 @@ export const SettingsBackupModal: React.FC<SettingsBackupModalProps> = ({
     };
   };
 
-  const handleExportBackup = (format: 'anta-save' | 'json' = 'anta-save') => {
+  const handleExportBackup = async () => {
     setIsExporting(true);
     setFeedback(null);
     try {
       const payload = getPayload();
-      downloadSaveFile(payload, trainerProfile?.trainerId, format);
-      setFeedback({
-        type: 'success',
-        title: 'تم تصدير ملف الحفظ بنجاح',
-        message: `تم تنزيل ملف (${format === 'json' ? '.json' : '.anta-save'}) بنجاح على جهازك. يمكنك نقله للهاتف أو رفعه في أي وقت.`
-      });
+      const res = await exportSaveFile(payload, trainerProfile?.trainerId, 'json');
+      if (res.method === 'cancelled') {
+        setFeedback({ type: 'error', title: 'اتلغى الحفظ', message: 'مفيش ملف اتحفظ. دوس على الزرار تاني وقت ما تكون جاهز.' });
+      } else if (res.method === 'share') {
+        setFeedback({
+          type: 'success',
+          title: 'النسخة جاهزة 📦',
+          message: `اختار مكان الحفظ من القايمة اللي ظهرت (Drive، واتساب، الملفات...). حجم الملف حوالي ${res.sizeKb} ك.ب.`,
+        });
+      } else {
+        setFeedback({
+          type: 'success',
+          title: 'اتنزّل ملف المسيرة',
+          message: `الملف (${res.fileName}) اتحفظ في التنزيلات. حجمه حوالي ${res.sizeKb} ك.ب. احتفظ بيه في مكان آمن.`,
+        });
+      }
     } catch (e: any) {
       setFeedback({
         type: 'error',
         title: 'فشل التصدير',
-        message: `حدث خطأ أثناء إعداد ملف الحفظ: ${e?.message || 'خطأ غير معروف'}`
+        message: e?.message || 'حصلت مشكلة وإحنا بنجهز الملف. جرّب "نسخ الكود" بدل الملف.',
       });
     } finally {
       setIsExporting(false);
@@ -200,38 +225,83 @@ export const SettingsBackupModal: React.FC<SettingsBackupModalProps> = ({
   const processImportData = async (fileOrText: File | string) => {
     setIsImporting(true);
     setFeedback(null);
-
+    setPending(null);
     try {
       const result = await parseAndValidateSaveFile(fileOrText);
-
       if (!result.success || !result.data) {
         setFeedback({
           type: 'error',
-          title: 'فشل استيراد المسيرة',
+          title: 'مقدرناش نقرأ الملف',
           message: result.error || 'الملف أو الكود غير متوافق أو تالف.'
         });
         return;
       }
+      // Nothing is touched yet: show what is inside and let the person confirm.
+      setPending(result);
+    } catch (err: any) {
+      setFeedback({
+        type: 'error',
+        title: 'خطأ أثناء قراءة الملف',
+        message: `حصلت مشكلة: ${err?.message || 'خطأ غير متوقع'}`
+      });
+    } finally {
+      setIsImporting(false);
+    }
+  };
 
-      // Safe application and persistence
-      await applyLoadedSave(result.data);
-
+  const confirmRestore = async () => {
+    if (!pending?.data) return;
+    setIsRestoring(true);
+    setFeedback(null);
+    try {
+      // 1) keep the current career so the restore can be undone with one tap
+      await saveSafetySnapshot(getPayload() as any);
+      // 2) never let a half-played match from the old career leak into the restored one
+      try { discardSavedLiveMatch?.(); } catch { /* ignore */ }
+      // 3) apply
+      await applyLoadedSave(pending.data);
+      const snap = await loadSafetySnapshot();
+      setUndoInfo(snap?.info || null);
+      const sum = describeSavePayload(pending.data);
+      setPending(null);
       setPastedCode('');
       setShowCodePasteArea(false);
-
       setFeedback({
         type: 'success',
-        title: 'تمت استعادة المسيرة بنجاح! 🏆',
-        message: `تم تحميل تقدم المدرب (${result.metadata?.managerName || result.data.manager?.name}) في الموسم ${result.metadata?.seasonNumber || result.data.season?.seasonNumber}. تم تحديث كافة أنظمة اللعبة والتشكيلة وحفظها محلياً على جهازك.`
+        title: 'تمت استعادة المسيرة 🏆',
+        message: `رجعنا مسيرة ${sum.managerName} (${sum.clubName}) في الموسم ${sum.seasonNumber}. مسيرتك القديمة اتحفظت تلقائيًا ولو ندمت تقدر ترجع لها من زرار "تراجع عن الاستعادة".`
       });
     } catch (err: any) {
       setFeedback({
         type: 'error',
-        title: 'خطأ أثناء الاستيراد',
-        message: `تعذر إتمام الاستعادة: ${err?.message || 'حدث خطأ غير متوقع'}`
+        title: 'فشلت الاستعادة',
+        message: `حصلت مشكلة أثناء التحميل: ${err?.message || 'خطأ غير متوقع'}. مسيرتك القديمة محفوظة، تقدر تدوس "تراجع عن الاستعادة".`
       });
     } finally {
-      setIsImporting(false);
+      setIsRestoring(false);
+    }
+  };
+
+  const undoRestore = async () => {
+    setIsRestoring(true);
+    setFeedback(null);
+    try {
+      const snap = await loadSafetySnapshot();
+      if (!snap) {
+        setFeedback({ type: 'error', title: 'مفيش نسخة للتراجع', message: 'مفيش مسيرة محفوظة قبل آخر استعادة.' });
+        return;
+      }
+      try { discardSavedLiveMatch?.(); } catch { /* ignore */ }
+      await applyLoadedSave(snap.payload);
+      setFeedback({
+        type: 'success',
+        title: 'رجعنا مسيرتك القديمة ↩️',
+        message: `اتسترجعت مسيرة ${snap.info.managerName} (${snap.info.clubName}) في الموسم ${snap.info.seasonNumber}.`
+      });
+    } catch (err: any) {
+      setFeedback({ type: 'error', title: 'فشل التراجع', message: err?.message || 'خطأ غير متوقع' });
+    } finally {
+      setIsRestoring(false);
     }
   };
 
@@ -343,59 +413,34 @@ export const SettingsBackupModal: React.FC<SettingsBackupModalProps> = ({
                 <span className="text-[10px] text-slate-400">اختر الصيغة المناسبة لجهازك</span>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                {/* 1. Standard .anta-save */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 <button
                   type="button"
-                  onClick={() => handleExportBackup('anta-save')}
+                  onClick={handleExportBackup}
                   disabled={isExporting}
-                  className="p-2.5 bg-slate-800 hover:bg-slate-750 border border-emerald-500/30 hover:border-emerald-500/60 rounded-xl text-right transition-all flex flex-col gap-1 cursor-pointer group active:scale-[0.98]"
+                  className="p-3 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-60 rounded-xl text-right transition-all flex items-center justify-between cursor-pointer active:scale-[0.98]"
                 >
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-bold text-white group-hover:text-emerald-300">ملف مشفر</span>
-                    <span className="text-[9px] text-emerald-400 font-mono bg-emerald-950/80 px-1 py-0.5 rounded border border-emerald-800/50">
-                      .anta-save
-                    </span>
+                  <div>
+                    <span className="text-sm font-black text-white block">حفظ نسخة من مسيرتي</span>
+                    <span className="text-[10px] text-emerald-100/90">ملف تحتفظ بيه أو تبعته لنفسك على واتساب / درايف</span>
                   </div>
-                  <span className="text-[10px] text-slate-400">الصيغة الرسمية المعتمدة</span>
+                  {isExporting ? <Loader2 className="w-4 h-4 animate-spin text-white" /> : <Download className="w-5 h-5 text-white" />}
                 </button>
 
-                {/* 2. Standard .json */}
-                <button
-                  type="button"
-                  onClick={() => handleExportBackup('json')}
-                  disabled={isExporting}
-                  className="p-2.5 bg-slate-800 hover:bg-slate-750 border border-teal-500/30 hover:border-teal-500/60 rounded-xl text-right transition-all flex flex-col gap-1 cursor-pointer group active:scale-[0.98]"
-                >
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-bold text-white group-hover:text-teal-300">ملف قياسي</span>
-                    <span className="text-[9px] text-teal-400 font-mono bg-teal-950/80 px-1 py-0.5 rounded border border-teal-800/50">
-                      .json
-                    </span>
-                  </div>
-                  <span className="text-[10px] text-slate-400">متوافق مع كل برامج الهاتف</span>
-                </button>
-
-                {/* 3. Copy Code */}
                 <button
                   type="button"
                   onClick={handleCopyCode}
-                  className={`p-2.5 border rounded-xl text-right transition-all flex flex-col gap-1 cursor-pointer group active:scale-[0.98] ${
-                    isCopied 
-                      ? 'bg-emerald-950/80 border-emerald-500 text-emerald-300' 
-                      : 'bg-slate-800 hover:bg-slate-750 border-amber-500/30 hover:border-amber-500/60 text-white'
+                  className={`p-3 border rounded-xl text-right transition-all flex items-center justify-between cursor-pointer active:scale-[0.98] ${
+                    isCopied
+                      ? 'bg-emerald-950/80 border-emerald-500 text-emerald-300'
+                      : 'bg-slate-800 hover:bg-slate-700 border-amber-500/40 text-white'
                   }`}
                 >
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-bold flex items-center gap-1">
-                      {isCopied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5 text-amber-400" />}
-                      <span>{isCopied ? 'تم النسخ!' : 'نسخ الكود'}</span>
-                    </span>
-                    <span className="text-[9px] text-amber-400 font-mono bg-amber-950/80 px-1 py-0.5 rounded border border-amber-800/50">
-                      Clipboard
-                    </span>
+                  <div>
+                    <span className="text-sm font-black block">{isCopied ? 'تم النسخ!' : 'نسخ الكود'}</span>
+                    <span className="text-[10px] text-slate-400">للصقه في جهاز تاني من غير ملفات</span>
                   </div>
-                  <span className="text-[10px] text-slate-400">لصق فوري بدون تحميل ملف</span>
+                  {isCopied ? <Check className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4 text-amber-400" />}
                 </button>
               </div>
             </div>
@@ -433,10 +478,10 @@ export const SettingsBackupModal: React.FC<SettingsBackupModalProps> = ({
                   )}
                   <div>
                     <span className="text-xs font-bold text-white group-hover:text-sky-300 block">
-                      اختيار ملف الحفظ من جهازك
+                      استعادة مسيرة من ملف
                     </span>
                     <span className="text-[10px] text-slate-400">
-                      يدعم ملفات (.anta-save) و (.json) من الموقع والتطبيق
+                      هتشوف محتوى الملف الأول وبعدين تأكد الاستعادة
                     </span>
                   </div>
                 </div>
@@ -466,11 +511,76 @@ export const SettingsBackupModal: React.FC<SettingsBackupModalProps> = ({
                     className="w-full py-2 px-3 bg-sky-600 hover:bg-sky-500 disabled:opacity-50 disabled:pointer-events-none text-white text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-1.5 shadow-md active:scale-[0.98] cursor-pointer"
                   >
                     {isImporting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <ClipboardPaste className="w-3.5 h-3.5" />}
-                    <span>استيراد كود المسيرة واستئناف اللعب</span>
+                    <span>اقرأ الكود</span>
                   </button>
                 </div>
               )}
             </div>
+
+            {/* Preview before restoring */}
+            {pending?.data && (() => {
+              const sum = describeSavePayload(pending.data);
+              const integ = pending.metadata?.integrity;
+              return (
+                <div className="bg-sky-950/40 border border-sky-500/40 rounded-2xl p-3.5 space-y-2.5 animate-fadeIn">
+                  <div className="flex items-center gap-2 text-sky-200 text-sm font-black">
+                    <FileCheck className="w-4 h-4 text-sky-400" />
+                    <span>لقينا المسيرة دي في الملف</span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2 text-[11px]">
+                    <div className="bg-slate-900/70 rounded-xl p-2"><span className="text-slate-400 block">المدرب</span><span className="font-bold text-white">{sum.managerName}</span></div>
+                    <div className="bg-slate-900/70 rounded-xl p-2"><span className="text-slate-400 block">النادي</span><span className="font-bold text-white">{sum.clubName}</span></div>
+                    <div className="bg-slate-900/70 rounded-xl p-2"><span className="text-slate-400 block">الموسم / الجولة</span><span className="font-bold text-white">{sum.seasonNumber} / {sum.round}</span></div>
+                    <div className="bg-slate-900/70 rounded-xl p-2"><span className="text-slate-400 block">تاريخ الحفظ</span><span className="font-bold text-white">{pending.metadata?.exportedAt && pending.metadata.exportedAt.length > 9 ? pending.metadata.exportedAt.slice(0, 10) : 'غير مسجل'}</span></div>
+                  </div>
+                  {integ === 'modified' && (
+                    <p className="text-[11px] text-amber-300 bg-amber-950/40 border border-amber-700/40 rounded-xl p-2">
+                      الملف ده اتعدّل بعد ما اتصدّر. ممكن يشتغل عادي، بس لو فيه حاجة غريبة بعد الاستعادة ارجع بزرار التراجع.
+                    </p>
+                  )}
+                  <p className="text-[11px] text-slate-300">
+                    الاستعادة هتحل محل مسيرتك الحالية. هنحفظ نسخة منها تلقائيًا الأول عشان تقدر ترجع لها.
+                  </p>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={confirmRestore}
+                      disabled={isRestoring}
+                      className="py-2.5 bg-sky-600 hover:bg-sky-500 disabled:opacity-60 text-white text-xs font-black rounded-xl flex items-center justify-center gap-1.5 cursor-pointer active:scale-[0.98]"
+                    >
+                      {isRestoring ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle2 className="w-3.5 h-3.5" />}
+                      <span>استعادة دلوقتي</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setPending(null)}
+                      disabled={isRestoring}
+                      className="py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold rounded-xl cursor-pointer active:scale-[0.98]"
+                    >
+                      إلغاء
+                    </button>
+                  </div>
+                </div>
+              );
+            })()}
+
+            {/* Undo last restore */}
+            {undoInfo && !pending && (
+              <button
+                type="button"
+                onClick={undoRestore}
+                disabled={isRestoring}
+                className="w-full p-3 bg-slate-950/70 hover:bg-slate-900 border border-amber-500/30 rounded-2xl text-right flex items-center justify-between cursor-pointer active:scale-[0.98]"
+              >
+                <div>
+                  <span className="text-xs font-black text-amber-300 block">تراجع عن آخر استعادة</span>
+                  <span className="text-[10px] text-slate-400">
+                    ترجع مسيرة {undoInfo.managerName} ({undoInfo.clubName}) - الموسم {undoInfo.seasonNumber}
+                  </span>
+                </div>
+                {isRestoring ? <Loader2 className="w-4 h-4 animate-spin text-amber-400" /> : <RotateCcw className="w-4 h-4 text-amber-400" />}
+              </button>
+            )}
 
             {/* Hidden File Input supporting all devices and Android document pickers */}
             <input
