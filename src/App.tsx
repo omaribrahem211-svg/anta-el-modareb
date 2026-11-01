@@ -67,7 +67,7 @@ function GameApp() {
   }, []);
   const [selectedPlayer, setSelectedPlayer] = useState<Player | null>(null);
   const [isRewardedModalOpen, setIsRewardedModalOpen] = useState<boolean>(false);
-  const [rewardedModalDefaultType, setRewardedModalDefaultType] = useState<AdRewardType>('coins');
+  const [rewardedModalDefaultType, setRewardedModalDefaultType] = useState<AdRewardType>('club_funds');
   const [isPremium, setIsPremium] = useState<boolean>(AdManager.isPremium());
   const [isAdminMode, setIsAdminMode] = useState<boolean>(() => {
     return (

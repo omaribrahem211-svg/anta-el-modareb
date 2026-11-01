@@ -144,12 +144,12 @@ export const DailyLoginRewardModal: React.FC<DailyLoginRewardModalProps> = ({
             devPoints: claimSuccessReward.developmentPoints || 0,
             energyPercent: 15,
             reputation: 1,
-            label: `✨ مضاعفة مكافأة اليوم (2X): +${(claimSuccessReward.clubFunds || 0).toLocaleString()} ج.م و +${claimSuccessReward.coins} كوينز!`,
+            label: `✨ مضاعفة مكافأة اليوم (2X): +${(claimSuccessReward.clubFunds || 0).toLocaleString()} ج.م!`,
           });
 
           setIsDoubled(true);
           setCanDouble(false);
-          setClaimMessage(`🔥 مبروك يا كابتن! تم مضاعفة مكافأة اليوم (2X) بنجاح كامل! حصلت على إجمالي: +${((claimSuccessReward.clubFunds || 0) * 2).toLocaleString()} ج.م و +${claimSuccessReward.coins * 2} كوينز!`);
+          setClaimMessage(`🔥 مبروك يا كابتن! تم مضاعفة مكافأة اليوم (2X) بنجاح كامل! حصلت على إجمالي: +${((claimSuccessReward.clubFunds || 0) * 2).toLocaleString()} ج.م!`);
         },
         () => {
           if (!secondAdEarned) {
@@ -267,10 +267,6 @@ export const DailyLoginRewardModal: React.FC<DailyLoginRewardModalProps> = ({
                   </div>
 
                   <div className="space-y-1 my-1">
-                    <div className="flex items-center gap-1.5 text-xs font-bold text-amber-300">
-                      <Coins className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-                      <span>+{item.coins} كوينز</span>
-                    </div>
                     {item.clubFunds > 0 && (
                       <div className="flex items-center gap-1.5 text-xs font-bold text-emerald-300">
                         <Wallet className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
@@ -322,10 +318,6 @@ export const DailyLoginRewardModal: React.FC<DailyLoginRewardModalProps> = ({
                 </div>
 
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs mt-2">
-                  <div className="flex items-center gap-1.5 font-black text-amber-300 bg-amber-950/50 p-2.5 rounded-xl border border-amber-600/30">
-                    <Coins className="w-4 h-4 text-amber-400 shrink-0" />
-                    <span>+{day7.coins} كوينز</span>
-                  </div>
 
                   <div className="flex items-center gap-1.5 font-black text-emerald-300 bg-emerald-950/50 p-2.5 rounded-xl border border-emerald-600/30">
                     <Wallet className="w-4 h-4 text-emerald-400 shrink-0" />

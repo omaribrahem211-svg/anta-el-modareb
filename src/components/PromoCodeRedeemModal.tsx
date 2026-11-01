@@ -159,11 +159,6 @@ export const PromoCodeRedeemModal: React.FC<PromoCodeRedeemModalProps> = ({ isOp
               <div className="text-2xl sm:text-3xl font-black text-emerald-400 font-mono tracking-tight">
                 +{successResult.amount.toLocaleString()} ج.م
               </div>
-              {successResult.coins ? (
-                <div className="text-xs text-amber-300 font-bold pt-1">
-                  + {successResult.coins.toLocaleString()} كوينز ذهبية 🪙
-                </div>
-              ) : null}
             </div>
 
             {userClub && (

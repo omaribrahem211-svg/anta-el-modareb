@@ -391,13 +391,6 @@ export const ChallengesTab: React.FC = () => {
                   +{luckyChestWonReward.budget.toLocaleString()} ج.م
                 </span>
               </div>
-              <div className="p-2 rounded-xl bg-amber-950/60 border border-amber-500/30 flex flex-col items-center">
-                <Coins className="w-4 h-4 text-amber-400 mb-1" />
-                <span className="text-[10px] text-slate-400">كوينز ذهبية</span>
-                <span className="font-mono font-black text-xs text-amber-300">
-                  +{luckyChestWonReward.coins}
-                </span>
-              </div>
               <div className="p-2 rounded-xl bg-sky-950/60 border border-sky-500/30 flex flex-col items-center">
                 <Star className="w-4 h-4 text-sky-400 mb-1" />
                 <span className="text-[10px] text-slate-400">نقاط تطوير</span>
@@ -414,7 +407,7 @@ export const ChallengesTab: React.FC = () => {
                 هل ترغب في مضاعفة كل هذه الجوائز (2X)؟
               </span>
               <p className="text-[11px] text-slate-300">
-                شاهد إعلاناً ثانياً لتحصل على ضعف الميزانية والكوينز ونقاط التطوير فوراً!
+                شاهد إعلاناً ثانياً لتحصل على ضعف الميزانية ونقاط التطوير فوراً!
               </p>
             </div>
 
@@ -551,7 +544,7 @@ export const ChallengesTab: React.FC = () => {
                 )}
               </div>
               <p className="text-xs text-slate-200 mt-0.5 leading-relaxed">
-                شاهد إعلان فيديو وافتح الصندوق فوراً لتحصل على مبالغ مالية تصل إلى <strong>100,000 ج.م</strong> كحد أقصى وكوينز ونقاط تطوير! وتقدر تضاعف الجوائز 2X بإعلان ثانٍ (متاح مرة كل 3 ساعات).
+                شاهد إعلان فيديو وافتح الصندوق فوراً لتحصل على مبالغ مالية تصل إلى <strong>20,000 ج.م</strong> كحد أقصى ونقاط تطوير! وتقدر تضاعف الجوائز 2X بإعلان ثانٍ (متاح مرة كل 3 ساعات).
               </p>
             </div>
           </div>

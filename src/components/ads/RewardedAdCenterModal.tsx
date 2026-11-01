@@ -33,7 +33,7 @@ interface RewardedAdCenterModalProps {
 export const RewardedAdCenterModal: React.FC<RewardedAdCenterModalProps> = ({
   isOpen,
   onClose,
-  defaultRewardType = 'coins',
+  defaultRewardType = 'club_funds',
 }) => {
   const { claimAdReward, userClub } = useGame();
   const [selectedType, setSelectedType] = useState<AdRewardType>(defaultRewardType);
@@ -135,7 +135,7 @@ export const RewardedAdCenterModal: React.FC<RewardedAdCenterModalProps> = ({
     }
   };
 
-  const rewardTypes: AdRewardType[] = ['coins', 'club_funds', 'team_energy', 'training_boost'];
+  const rewardTypes: AdRewardType[] = ['club_funds', 'team_energy', 'training_boost'];
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-950/80 backdrop-blur-sm animate-in fade-in duration-200">
