@@ -7,6 +7,7 @@ import {
   deleteDoc, 
   updateDoc, 
   query, 
+  limit,
   where,
   orderBy, 
   runTransaction 
@@ -278,7 +279,7 @@ export async function fetchAllPromoCodes(): Promise<PromoCode[]> {
     const promoRef = collection(db, 'promo_codes');
     
     // Safety timeout: 4000ms so UI never hangs
-    const getDocsPromise = getDocs(promoRef);
+    const getDocsPromise = getDocs(query(promoRef, limit(200)));
     const timeoutPromise = new Promise<never>((_, reject) =>
       setTimeout(() => reject(new Error('Promo codes fetch timeout')), 4000)
     );
@@ -737,7 +738,7 @@ export async function validatePromoCodeForRedemption(
 
     // Step D: If still not found, search full collection in-memory
     if (!matchedCode) {
-      const allSnap = await getDocs(collection(db, 'promo_codes')).catch(() => null);
+      const allSnap = await getDocs(query(collection(db, 'promo_codes'), limit(200))).catch(() => null);
       if (allSnap && !allSnap.empty) {
         for (const d of allSnap.docs) {
           const data = d.data() as PromoCode;

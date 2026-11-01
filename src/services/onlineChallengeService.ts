@@ -19,6 +19,7 @@ import {
   collection,
   query,
   where,
+  limit,
   getDocs,
   increment,
 } from 'firebase/firestore';
@@ -78,8 +79,8 @@ export interface DailyCoachRankEntry {
 
 /** Rooms older than this (no activity) are treated as dead. */
 const ROOM_STALE_MS = 3 * 60 * 60 * 1000;
-const QUEUE_HEARTBEAT_MS = 2500;
-const QUEUE_ENTRY_FRESH_MS = 9000;
+const QUEUE_HEARTBEAT_MS = 4000;
+const QUEUE_ENTRY_FRESH_MS = 14000;
 const MATCHMAKING_TIMEOUT_MS = 18000;
 const todayKey = () => new Date().toISOString().slice(0, 10);
 
@@ -1137,11 +1138,12 @@ class OnlineChallengeClient {
       if (!this.queueActive) return;
       try {
         await updateDoc(myRef, { lastSeen: Date.now() });
-        const snap = await getDocs(query(collection(db, 'challenge_queue'), where('status', '==', 'waiting')));
+        // Only fresh entries (single-field range, no composite index) and a hard cap: stale rows never cost reads.
+        const snap = await getDocs(query(collection(db, 'challenge_queue'), where('lastSeen', '>', Date.now() - QUEUE_ENTRY_FRESH_MS), limit(25)));
         const t = Date.now();
         const others = snap.docs
           .map(d => d.data() as any)
-          .filter(d => d.playerId !== playerId && t - (d.lastSeen || 0) < QUEUE_ENTRY_FRESH_MS);
+          .filter(d => d.status === 'waiting' && d.playerId !== playerId && t - (d.lastSeen || 0) < QUEUE_ENTRY_FRESH_MS);
         this.emitMessage({ type: 'matchmaking_searching', queueSize: others.length + 1 });
         const candidates = others.filter(o => o.playerId < playerId).sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
         for (const c of candidates) {
@@ -1238,7 +1240,7 @@ class OnlineChallengeClient {
   public async fetchDailyRanking(): Promise<DailyCoachRankEntry[]> {
     // 1) Firestore: works on the phone app and on the web, no server needed
     try {
-      const snap = await getDocs(query(collection(db, 'challenge_daily_ranking'), where('dateKey', '==', todayKey())));
+      const snap = await getDocs(query(collection(db, 'challenge_daily_ranking'), where('dateKey', '==', todayKey()), limit(300)));
       const rows = snap.docs.map(d => d.data() as any).filter(r => r && r.playerId);
       rows.sort((a, b) =>
         (b.points || 0) - (a.points || 0) ||

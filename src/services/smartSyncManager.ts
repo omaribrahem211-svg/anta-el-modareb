@@ -64,6 +64,67 @@ export interface SmartSyncInput {
   deletedMessageIds?: string[];
 }
 
+
+// ---- Cloud save compression -------------------------------------------------------------------------------------
+// A Firestore document is capped at 1 MiB. The raw career JSON (20+ clubs, fixtures, market...) can exceed that and the
+// write would then fail forever. gzip + base64 shrinks it ~10x, so we store a compressed blob and unpack it on load.
+const SAFE_DOC_BYTES = 900_000;
+
+async function gzipToBase64(json: string): Promise<string | null> {
+  try {
+    const CS = (globalThis as any).CompressionStream;
+    if (!CS) return null;
+    const stream = new Blob([json]).stream().pipeThrough(new CS('gzip'));
+    const buf = new Uint8Array(await new Response(stream).arrayBuffer());
+    let bin = '';
+    for (let i = 0; i < buf.length; i += 0x8000) bin += String.fromCharCode(...buf.subarray(i, i + 0x8000));
+    return btoa(bin);
+  } catch (_) {
+    return null;
+  }
+}
+
+async function base64GunzipToJson(b64: string): Promise<any | null> {
+  try {
+    const DS = (globalThis as any).DecompressionStream;
+    if (!DS) return null;
+    const bin = atob(b64);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    const stream = new Blob([bytes]).stream().pipeThrough(new DS('gzip'));
+    return JSON.parse(await new Response(stream).text());
+  } catch (_) {
+    return null;
+  }
+}
+
+async function packCloudSave(full: any): Promise<any> {
+  const json = JSON.stringify(full);
+  const b64 = await gzipToBase64(json);
+  if (b64 && b64.length < SAFE_DOC_BYTES) {
+    return {
+      compressed: true,
+      encoding: 'gzip-b64',
+      schemaVersion: full.schemaVersion,
+      saveVersion: full.saveVersion,
+      savedAt: full.savedAt,
+      userUid: full.userUid,
+      userEmail: full.userEmail,
+      data: b64,
+    };
+  }
+  // No compression support (or still too large): drop the rebuildable heavy parts so the write never exceeds the cap.
+  if (json.length < SAFE_DOC_BYTES) return full;
+  return { ...full, fixtures: [], transferMarket: [], dailyNews: [], inbox: (full.inbox || []).slice(0, 15), scoutedOpponents: {} };
+}
+
+async function unpackCloudSave(data: any): Promise<any | null> {
+  if (data && data.compressed && typeof data.data === 'string') {
+    return await base64GunzipToJson(data.data);
+  }
+  return data;
+}
+
 /**
  * Builds the complete Cloud Career Save payload for durable restore across devices and refreshes.
  */
@@ -394,7 +455,7 @@ class SmartSyncManager {
 
       // 1. Save full career data to user career_save subcollection with safety timeout
       const fullSaveRef = doc(db, 'users', input.user.uid, 'career_save', 'current');
-      const writeFullPromise = setDoc(fullSaveRef, fullPayload);
+      const writeFullPromise = packCloudSave(fullPayload).then(packed => setDoc(fullSaveRef, packed));
       const writeTimeoutPromise = new Promise<never>((_, reject) =>
         setTimeout(() => reject(new Error('Firestore write timeout')), 6000)
       );
@@ -444,7 +505,7 @@ class SmartSyncManager {
 
       const snap = await Promise.race([readPromise, timeoutPromise]);
       if (snap && snap.exists()) {
-        const data = snap.data();
+        const data = await unpackCloudSave(snap.data());
         if (data && data.manager && (data.teams?.length > 0 || data.season)) {
           return data;
         }
