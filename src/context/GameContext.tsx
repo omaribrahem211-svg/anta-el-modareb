@@ -7646,7 +7646,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         reputationChange: 2 + (userWonCup ? 5 : 0),
         finalBudget: (summaryClub?.budget || 100000) + 150000,
         nextLeagueName: activeLeague.name,
-        nextDivisionTier: fallbackPos === 1 && activeLeague.tier > 1 ? activeLeague.tier - 1 : activeLeague.tier,
+        nextDivisionTier: activeLeague.tier > 1 && fallbackPos <= Math.max(1, activeLeague.promotionSpots || 1) ? activeLeague.tier - 1 : activeLeague.tier,
         cupTrophyAwarded: fallbackCupTrophy,
         cupResultText: fallbackCupText,
       };
@@ -7769,7 +7769,9 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const startNextSeason = (chosenOfferId?: string) => {
     try {
       const summaryClub = userClub || teams.find(t => t.isUserClub) || teams[0];
-      const summary = seasonEndSummary || calculateSeasonEndSummary(
+      // Always rebuild the summary from the FINAL standings: a summary cached earlier (e.g. on the last matchday,
+      // computed from the previous day's table) can say "stayed" even though the club won the league / got promoted.
+      const freshSummary = calculateSeasonEndSummary(
         { ...season, status: 'completed', totalRounds },
         standings,
         summaryClub,
@@ -7778,6 +7780,10 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         manager,
         africanChampionsLeague
       );
+      const cachedOk = !!seasonEndSummary && seasonEndSummary.resultStatus === freshSummary.resultStatus && seasonEndSummary.nextDivisionTier === freshSummary.nextDivisionTier;
+      const summary = cachedOk
+        ? seasonEndSummary!
+        : { ...freshSummary, licenseSettlement: seasonEndSummary?.licenseSettlement ?? freshSummary.licenseSettlement };
 
       const safeJobOffers = Array.isArray(jobOffers) ? jobOffers : [];
       const acceptedOffer = chosenOfferId 
