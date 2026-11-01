@@ -244,13 +244,6 @@ export const CareerTab: React.FC = () => {
               <span className="bg-sky-500/15 text-sky-300 border border-sky-500/40 px-2 py-0.5 rounded font-black">الموسم {season.seasonNumber}</span>
             </div>
           </div>
-          <div className="text-left shrink-0">
-            <div className="flex items-center gap-1 justify-end text-amber-300 font-black font-mono text-xl leading-none">
-              <Star className="w-4 h-4 fill-amber-300" />
-              <span>{manager.reputation}</span>
-            </div>
-            <span className="text-[10px] text-slate-400">السمعة</span>
-          </div>
         </div>
 
         <div className="mt-4 space-y-1.5">

@@ -94,12 +94,12 @@ export const MATCH_CHALLENGES_POOL: ChallengeItem[] = [
     isCompleted: false,
     isClaimed: false,
     reward: {
-      budget: 850000,
-      coins: 120,
-      devPoints: 50,
+      budget: 85000,
+      coins: 50,
+      devPoints: 20,
       energyPercent: 25,
-      reputation: 3,
-      label: '850,000 ج.م + 120 كوينز + 50 نقطة تطوير + 3 سمعة 👑',
+      reputation: 1,
+      label: '85,000 ج.م + 50 كوينز + 20 نقطة تطوير + 1 سمعة 👑',
     },
   },
   {
@@ -115,12 +115,12 @@ export const MATCH_CHALLENGES_POOL: ChallengeItem[] = [
     isCompleted: false,
     isClaimed: false,
     reward: {
-      budget: 350000,
-      coins: 50,
-      devPoints: 20,
+      budget: 35000,
+      coins: 20,
+      devPoints: 8,
       energyPercent: 10,
       reputation: 1,
-      label: '350,000 ج.م + 50 كوينز + 20 نقطة تطوير 🛡️',
+      label: '35,000 ج.م + 20 كوينز + 8 نقطة تطوير 🛡️',
     },
   },
   {
@@ -136,12 +136,12 @@ export const MATCH_CHALLENGES_POOL: ChallengeItem[] = [
     isCompleted: false,
     isClaimed: false,
     reward: {
-      budget: 450000,
-      coins: 60,
-      devPoints: 25,
+      budget: 45000,
+      coins: 25,
+      devPoints: 10,
       energyPercent: 15,
-      reputation: 2,
-      label: '450,000 ج.م + 60 كوينز + 25 نقطة تطوير ⚽',
+      reputation: 1,
+      label: '45,000 ج.م + 25 كوينز + 10 نقطة تطوير ⚽',
     },
   },
   {
@@ -157,12 +157,12 @@ export const MATCH_CHALLENGES_POOL: ChallengeItem[] = [
     isCompleted: false,
     isClaimed: false,
     reward: {
-      budget: 500000,
-      coins: 70,
-      devPoints: 30,
+      budget: 50000,
+      coins: 30,
+      devPoints: 12,
       energyPercent: 15,
-      reputation: 2,
-      label: '500,000 ج.م + 70 كوينز + 30 نقطة تطوير ⚡',
+      reputation: 1,
+      label: '50,000 ج.م + 30 كوينز + 12 نقطة تطوير ⚡',
     },
   },
   {
@@ -178,12 +178,12 @@ export const MATCH_CHALLENGES_POOL: ChallengeItem[] = [
     isCompleted: false,
     isClaimed: false,
     reward: {
-      budget: 450000,
-      coins: 65,
-      devPoints: 25,
+      budget: 45000,
+      coins: 25,
+      devPoints: 10,
       energyPercent: 15,
-      reputation: 2,
-      label: '450,000 ج.م + 65 كوينز + 2 سمعة 🏟️',
+      reputation: 1,
+      label: '45,000 ج.م + 25 كوينز + 1 سمعة 🏟️',
     },
   },
   {
@@ -199,12 +199,12 @@ export const MATCH_CHALLENGES_POOL: ChallengeItem[] = [
     isCompleted: false,
     isClaimed: false,
     reward: {
-      budget: 350000,
-      coins: 50,
-      devPoints: 20,
+      budget: 35000,
+      coins: 20,
+      devPoints: 8,
       energyPercent: 10,
       reputation: 1,
-      label: '350,000 ج.م + 50 كوينز 🪙',
+      label: '35,000 ج.م + 20 كوينز 🪙',
     },
   },
   {
@@ -220,12 +220,12 @@ export const MATCH_CHALLENGES_POOL: ChallengeItem[] = [
     isCompleted: false,
     isClaimed: false,
     reward: {
-      budget: 400000,
-      coins: 60,
-      devPoints: 25,
+      budget: 40000,
+      coins: 25,
+      devPoints: 10,
       energyPercent: 15,
-      reputation: 2,
-      label: '400,000 ج.م + 60 كوينز + 25 نقطة تطوير 🌟',
+      reputation: 1,
+      label: '40,000 ج.م + 25 كوينز + 10 نقطة تطوير 🌟',
     },
   },
 ];
@@ -248,12 +248,12 @@ const INITIAL_ACTIVE_CHALLENGES: ChallengeItem[] = [
     isDirectAdAction: true,
     directAdLabel: 'مشاهدة إعلان تمويلي 🎬',
     reward: {
-      budget: 250000,
-      coins: 40,
-      devPoints: 10,
+      budget: 25000,
+      coins: 15,
+      devPoints: 4,
       energyPercent: 0,
       reputation: 1,
-      label: '250,000 ج.م + 40 كوينز 🪙',
+      label: '25,000 ج.م + 15 كوينز 🪙',
     },
   },
   {
@@ -271,12 +271,12 @@ const INITIAL_ACTIVE_CHALLENGES: ChallengeItem[] = [
     isDirectAdAction: true,
     directAdLabel: 'مشاهدة إعلان الاستشفاء 🎬',
     reward: {
-      budget: 150000,
-      coins: 25,
-      devPoints: 5,
+      budget: 15000,
+      coins: 10,
+      devPoints: 3,
       energyPercent: 25,
       reputation: 0,
-      label: '+25% لياقة شاملة + 150,000 ج.م 💵',
+      label: '+25% لياقة شاملة + 15,000 ج.م 💵',
     },
   },
   {
@@ -294,12 +294,12 @@ const INITIAL_ACTIVE_CHALLENGES: ChallengeItem[] = [
     isDirectAdAction: true,
     directAdLabel: 'مشاهدة إعلان السمعة 🎬',
     reward: {
-      budget: 120000,
-      coins: 30,
-      devPoints: 15,
+      budget: 10000,
+      coins: 10,
+      devPoints: 6,
       energyPercent: 0,
-      reputation: 2,
-      label: '+2 سمعة تدريبية + 120,000 ج.م 🌟',
+      reputation: 1,
+      label: '+1 سمعة تدريبية + 10,000 ج.م 🌟',
     },
   },
   {
@@ -317,12 +317,12 @@ const INITIAL_ACTIVE_CHALLENGES: ChallengeItem[] = [
     isDirectAdAction: true,
     directAdLabel: 'مشاهدة إعلان البث 🎬',
     reward: {
-      budget: 450000,
-      coins: 60,
-      devPoints: 20,
+      budget: 45000,
+      coins: 25,
+      devPoints: 8,
       energyPercent: 10,
-      reputation: 2,
-      label: '450,000 ج.م + 60 كوينز + 20 نقطة تطوير 🏆',
+      reputation: 1,
+      label: '45,000 ج.م + 25 كوينز + 8 نقطة تطوير 🏆',
     },
   },
   {
@@ -340,12 +340,12 @@ const INITIAL_ACTIVE_CHALLENGES: ChallengeItem[] = [
     isDirectAdAction: true,
     directAdLabel: 'مشاهدة إعلان الشراكة 🎬',
     reward: {
-      budget: 800000,
-      coins: 100,
-      devPoints: 40,
+      budget: 80000,
+      coins: 40,
+      devPoints: 16,
       energyPercent: 20,
-      reputation: 3,
-      label: '800,000 ج.م + 100 كوينز + 3 سمعة دولية 💎',
+      reputation: 1,
+      label: '80,000 ج.م + 40 كوينز + 1 سمعة دولية 💎',
     },
   },
 
@@ -369,12 +369,12 @@ const INITIAL_ACTIVE_CHALLENGES: ChallengeItem[] = [
     isCompleted: false,
     isClaimed: false,
     reward: {
-      budget: 100000,
-      coins: 20,
-      devPoints: 10,
+      budget: 10000,
+      coins: 10,
+      devPoints: 4,
       energyPercent: 0,
       reputation: 0,
-      label: '100,000 ج.م + 20 كوينز 🪙',
+      label: '10,000 ج.م + 10 كوينز 🪙',
     },
   },
   {
@@ -390,12 +390,12 @@ const INITIAL_ACTIVE_CHALLENGES: ChallengeItem[] = [
     isCompleted: false,
     isClaimed: false,
     reward: {
-      budget: 150000,
-      coins: 25,
-      devPoints: 10,
+      budget: 15000,
+      coins: 10,
+      devPoints: 4,
       energyPercent: 10,
       reputation: 1,
-      label: '150,000 ج.م + 25 كوينز 💵',
+      label: '15,000 ج.م + 10 كوينز 💵',
     },
   },
 ];
@@ -799,17 +799,17 @@ export class ChallengesManager {
         this.state.luckyChestCountToday += 1;
         this.state.lastLuckyChestTimestamp = Date.now();
 
-        // Cash rewards strictly up to 100,000 ج.م max
-        const budgets = [25000, 50000, 75000, 100000];
-        const coinsList = [15, 25, 35, 50];
-        const devPointsList = [5, 10, 15, 20];
+        // Cash rewards strictly up to 20,000 ج.م max
+        const budgets = [5000, 10000, 15000, 20000];
+        const coinsList = [5, 10, 15, 20];
+        const devPointsList = [2, 3, 4, 5];
 
         const randomBudget = budgets[Math.floor(Math.random() * budgets.length)];
         const randomCoins = coinsList[Math.floor(Math.random() * coinsList.length)];
         const randomDevPoints = devPointsList[Math.floor(Math.random() * devPointsList.length)];
 
         const result = {
-          label: `🎉 كنز الحظ الإعلاني: +${randomBudget.toLocaleString()} ج.م (حد أقصى 100 ألف) + ${randomCoins} كوينز + ${randomDevPoints} نقطة تطوير!`,
+          label: `🎉 كنز الحظ الإعلاني: +${randomBudget.toLocaleString()} ج.م (حد أقصى 20 ألف) + ${randomCoins} كوينز + ${randomDevPoints} نقطة تطوير!`,
           budget: randomBudget,
           coins: randomCoins,
           devPoints: randomDevPoints,

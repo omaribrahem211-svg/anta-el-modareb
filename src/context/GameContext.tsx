@@ -8504,6 +8504,51 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   // DAILY PROGRESSION, CALENDAR SIMULATION & CAREER SYSTEMS
   // ----------------------------------------------------
 
+  // Monthly payroll: whenever the calendar enters a new month (by ANY route: advancing days, playing, simulating or
+  // skipping a match) every club pays one month of player wages. Non-match income (TV / commercial deals) arrives the
+  // same way, as a safety net that fades once a club holds 12 months of wages in the bank.
+  const lastPayrollMonthRef = useRef<number | null>(null);
+  useEffect(() => {
+    const raw = calendarDate?.rawDateStr;
+    const m = raw ? /^(\d{4})-(\d{2})/.exec(raw) : null;
+    if (!m) return;
+    const monthIdx = parseInt(m[1], 10) * 12 + (parseInt(m[2], 10) - 1);
+    const key = `${STORAGE_KEY}_lastPayrollMonth`;
+    if (lastPayrollMonthRef.current === null) {
+      let saved: number | null = null;
+      try { const v = localStorage.getItem(key); if (v) saved = parseInt(v, 10); } catch (_) {}
+      lastPayrollMonthRef.current = saved !== null && !isNaN(saved) ? saved : monthIdx;
+    }
+    const diff = monthIdx - (lastPayrollMonthRef.current as number);
+    lastPayrollMonthRef.current = monthIdx;
+    try { localStorage.setItem(key, String(monthIdx)); } catch (_) {}
+    // Backwards (new game / reload) or a long jump (season rollover) never bills; only normal 1-2 month steps do.
+    if (diff < 1 || diff > 2) return;
+    const monthlyDue = (club: any) => {
+      const monthlyWages = (club.players || []).reduce((sum: number, p: any) => sum + (p?.salary || 0), 0);
+      const cushion = monthlyWages * 12;
+      const thinness = cushion > 0 ? Math.min(1, Math.max(0, (cushion - (club.budget || 0)) / cushion)) : 0;
+      return { due: monthlyWages * diff, support: Math.round(monthlyWages * 0.7 * thinness) * diff };
+    };
+    const uc = (teams || []).find(t => t && t.isUserClub);
+    const ud = uc ? monthlyDue(uc) : { due: 0, support: 0 };
+    const userWagesPaid = ud.due;
+    const userSupportIncome = ud.support;
+    setTeams(prev => (prev || []).map(club => {
+      if (!club) return club;
+      const { due, support } = monthlyDue(club);
+      return { ...club, budget: Math.max(0, (club.budget || 0) - due + support) };
+    }));
+    if (userWagesPaid > 0 || userSupportIncome > 0) {
+      setClubEconomy(prev => ({
+        ...prev,
+        wagesExpenseTotal: (prev.wagesExpenseTotal || 0) + userWagesPaid,
+        sponsorIncomeTotal: (prev.sponsorIncomeTotal || 0) + userSupportIncome,
+        currentSeasonNetProfit: (prev.currentSeasonNetProfit || 0) - userWagesPaid + userSupportIncome,
+      }));
+    }
+  }, [calendarDate?.rawDateStr]);
+
   const advanceToNextDay = async (skipToMatch: boolean = false, forceAdvance: boolean = false) => {
     if (isSimulationRunningRef.current) return;
     isSimulationRunningRef.current = true;
@@ -8873,40 +8918,6 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             setInbox(prev => [...aiDayCompRes.inboxNotifications, ...(prev || [])].slice(0, 80));
           }
         } catch (_) {}
-      }
-
-      // Player salaries and non-match income (TV rights, commercial/sponsor deals) both accrue pro-rata per day.
-      // Match-day gate money alone never covers wages in most leagues, so without this the treasury bled out slowly.
-      // Income is a safety net: full for clubs with a thin treasury, fading to zero once a club holds 12 months of wages.
-      {
-        let userWagesPaid = 0;
-        let userSupportIncome = 0;
-        const dayCount = Math.max(1, daysAdvanced);
-        calculatedNextTeams = calculatedNextTeams.map(club => {
-          if (!club) return club;
-          const monthlyWages = (club.players || []).reduce((sum, p) => sum + (p?.salary || 0), 0);
-          const dueWages = Math.round((monthlyWages * dayCount) / 30);
-          const cushion = monthlyWages * 12;
-          const thinness = cushion > 0 ? Math.min(1, Math.max(0, (cushion - (club.budget || 0)) / cushion)) : 0;
-          const support = Math.round((monthlyWages * 0.7 * thinness * dayCount) / 30);
-          if (club.isUserClub || (userClub && club.id === userClub.id)) {
-            userWagesPaid = dueWages;
-            userSupportIncome = support;
-          }
-          return {
-            ...club,
-            budget: Math.max(0, (club.budget || 0) - dueWages + support),
-          };
-        });
-
-        if (userWagesPaid > 0 || userSupportIncome > 0) {
-          setClubEconomy(prev => ({
-            ...prev,
-            wagesExpenseTotal: (prev.wagesExpenseTotal || 0) + userWagesPaid,
-            sponsorIncomeTotal: (prev.sponsorIncomeTotal || 0) + userSupportIncome,
-            currentSeasonNetProfit: (prev.currentSeasonNetProfit || 0) - userWagesPaid + userSupportIncome,
-          }));
-        }
       }
 
       setTeams(calculatedNextTeams);
