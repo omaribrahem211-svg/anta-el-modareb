@@ -1,3 +1,4 @@
+import { App as CapacitorApp } from '@capacitor/app';
 import React, { createContext, useContext, useState, useEffect, useMemo, useCallback, useRef, ReactNode } from 'react';
 import {
   ActiveNegotiation,
@@ -2289,7 +2290,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
         const isLocalDefault = !localSaveOnDisk || (localSeason === 1 && localRound === 1 && localXp === 0);
         const isLocalAhead = localSeason > cloudSeason ||
-          (localSeason === cloudSeason && localRound > localRound);
+          (localSeason === cloudSeason && localRound > cloudRound);
         const isCloudAhead = !isLocalAhead && (
           cloudSeason > localSeason ||
           (cloudSeason === localSeason && cloudRound > localRound) ||
@@ -2322,7 +2323,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   // Persist game state (Local-First: IndexedDB + localStorage mirror, debounced + immediate flush on tab change / page hide)
   const saveTimeoutRef = useRef<any>(null);
-  const flushLocalSaveImmediate = useCallback((overrides?: Partial<any>) => {
+  const flushLocalSaveImmediate = useCallback((overrides?: Partial<any>, urgent: boolean = false) => {
     if (!isInitialLoadDoneRef.current) return;
     try {
       gameStateRepository.saveLocalGameState({
@@ -2354,7 +2355,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         scoutedOpponents,
         deletedMessageIds,
         ...(overrides || {}),
-      });
+      }, urgent ? { urgent: true } : undefined);
     } catch (err) {
       console.warn('Failed immediate flush to local state repository:', err);
     }
@@ -2381,17 +2382,32 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     };
   }, [season, activeLeague, teams, standings, fixtures, currentRound, manager, transferMarket, incomingBids, inbox, cupTournament, africanChampionsLeague, jobOffers, seasonEndSummary, transferHistory, clubEconomy, calendarDate, activeNegotiations, boardSystem, dailyNews, retiredPlayers, worldRankings, scoutedOpponents, deletedMessageIds, user?.uid, getSyncInput, flushLocalSaveImmediate]);
 
+  // Android: swiping the app away fires Capacitor's pause/appStateChange, not always pagehide. Registered once; always
+  // calls the latest flush through a ref so it never saves stale state.
+  const flushLocalSaveRef = useRef(flushLocalSaveImmediate);
+  flushLocalSaveRef.current = flushLocalSaveImmediate;
+  useEffect(() => {
+    const handles: any[] = [];
+    let disposed = false;
+    const reg = (p: Promise<any>) => p.then(h => { if (disposed) h?.remove?.(); else handles.push(h); }).catch(() => {});
+    try {
+      reg(CapacitorApp.addListener('appStateChange', (st: any) => { if (!st?.isActive) flushLocalSaveRef.current(undefined, true); }));
+      reg(CapacitorApp.addListener('pause', () => flushLocalSaveRef.current(undefined, true)));
+    } catch (_) {}
+    return () => { disposed = true; handles.forEach(h => { try { h?.remove?.(); } catch (_) {} }); };
+  }, []);
+
   // Flush save immediately on screen/tab switch, app backgrounding, or window close
   useEffect(() => {
     const handleImmediateSaveTrigger = () => {
-      flushLocalSaveImmediate();
+      flushLocalSaveImmediate(undefined, true);
     };
     window.addEventListener('set-active-tab', handleImmediateSaveTrigger);
     window.addEventListener('pagehide', handleImmediateSaveTrigger);
     window.addEventListener('beforeunload', handleImmediateSaveTrigger);
     const handleVisChange = () => {
       if (document.visibilityState === 'hidden') {
-        flushLocalSaveImmediate();
+        flushLocalSaveImmediate(undefined, true);
       }
     };
     document.addEventListener('visibilitychange', handleVisChange);

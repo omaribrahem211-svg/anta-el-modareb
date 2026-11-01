@@ -177,17 +177,29 @@ let hasEvictedLegacyHeavyKeys = false;
 let lastSaveStartedAt = 0;
 // Minimum gap between full saves (they are coalesced: only the latest payload is written)
 const MIN_SAVE_INTERVAL_MS = 1500;
+// Set when the app is being hidden / closed: every pending wait is skipped so the newest state hits disk NOW.
+let urgentSaveRequested = false;
 
 function waitMs(ms: number): Promise<void> {
-  return new Promise(resolve => setTimeout(resolve, ms));
+  // Interruptible: wakes up early as soon as an urgent save (app hidden / closing) is requested.
+  return new Promise(resolve => {
+    const end = Date.now() + ms;
+    const tick = () => {
+      if (urgentSaveRequested || Date.now() >= end) return resolve();
+      setTimeout(tick, Math.min(50, Math.max(1, end - Date.now())));
+    };
+    tick();
+  });
 }
 
 // Wait until the browser is idle so a heavy save never blocks a frame (match ticks, tab switches)
 function waitForIdle(): Promise<void> {
   return new Promise(resolve => {
+    if (urgentSaveRequested) return resolve();
     const ric = typeof window !== 'undefined' ? (window as any).requestIdleCallback : undefined;
     if (typeof ric === 'function') {
       ric(() => resolve(), { timeout: 1500 });
+      waitMs(1500).then(resolve);
     } else {
       setTimeout(resolve, 50);
     }
@@ -286,8 +298,9 @@ export const gameStateRepository = {
   /**
    * Save complete game state locally with queue coalescing to prevent parallel blocking writes
    */
-  async saveLocalGameState(payload: LocalGameSavePayload): Promise<void> {
+  async saveLocalGameState(payload: LocalGameSavePayload, opts?: { urgent?: boolean }): Promise<void> {
     pendingSavePayload = payload;
+    if (opts?.urgent) urgentSaveRequested = true;
 
     return new Promise<void>((resolve) => {
       saveResolveQueue.push(resolve);
@@ -303,7 +316,7 @@ export const gameStateRepository = {
           // When the app is going to background, save right away; otherwise throttle + wait for idle time.
           // Newer payloads overwrite pendingSavePayload while we wait, so only the latest state is written.
           const isHidden = typeof document !== 'undefined' && document.visibilityState === 'hidden';
-          if (!isHidden) {
+          if (!isHidden && !urgentSaveRequested) {
             const sinceLast = Date.now() - lastSaveStartedAt;
             if (sinceLast < MIN_SAVE_INTERVAL_MS) {
               await waitMs(MIN_SAVE_INTERVAL_MS - sinceLast);
@@ -313,6 +326,7 @@ export const gameStateRepository = {
 
           const toSave = pendingSavePayload;
           pendingSavePayload = null;
+          urgentSaveRequested = false;
           if (!toSave) break;
           lastSaveStartedAt = Date.now();
 
