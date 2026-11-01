@@ -8869,28 +8869,36 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         } catch (_) {}
       }
 
-      // Player salaries are paid pro-rata for every day that passed (monthly wages / 30 per day) instead of one big
-      // lump on the 1st of the month, so skipping several days never makes the treasury drop suddenly.
+      // Player salaries and non-match income (TV rights, commercial/sponsor deals) both accrue pro-rata per day.
+      // Match-day gate money alone never covers wages in most leagues, so without this the treasury bled out slowly.
+      // Income is a safety net: full for clubs with a thin treasury, fading to zero once a club holds 12 months of wages.
       {
         let userWagesPaid = 0;
+        let userSupportIncome = 0;
+        const dayCount = Math.max(1, daysAdvanced);
         calculatedNextTeams = calculatedNextTeams.map(club => {
           if (!club) return club;
           const monthlyWages = (club.players || []).reduce((sum, p) => sum + (p?.salary || 0), 0);
-          const dueWages = Math.round((monthlyWages * Math.max(1, daysAdvanced)) / 30);
+          const dueWages = Math.round((monthlyWages * dayCount) / 30);
+          const cushion = monthlyWages * 12;
+          const thinness = cushion > 0 ? Math.min(1, Math.max(0, (cushion - (club.budget || 0)) / cushion)) : 0;
+          const support = Math.round((monthlyWages * 0.7 * thinness * dayCount) / 30);
           if (club.isUserClub || (userClub && club.id === userClub.id)) {
-            userWagesPaid = Math.min(dueWages, club.budget || 0);
+            userWagesPaid = dueWages;
+            userSupportIncome = support;
           }
           return {
             ...club,
-            budget: Math.max(0, (club.budget || 0) - dueWages),
+            budget: Math.max(0, (club.budget || 0) - dueWages + support),
           };
         });
 
-        if (userWagesPaid > 0) {
+        if (userWagesPaid > 0 || userSupportIncome > 0) {
           setClubEconomy(prev => ({
             ...prev,
             wagesExpenseTotal: (prev.wagesExpenseTotal || 0) + userWagesPaid,
-            currentSeasonNetProfit: (prev.currentSeasonNetProfit || 0) - userWagesPaid,
+            sponsorIncomeTotal: (prev.sponsorIncomeTotal || 0) + userSupportIncome,
+            currentSeasonNetProfit: (prev.currentSeasonNetProfit || 0) - userWagesPaid + userSupportIncome,
           }));
         }
       }
