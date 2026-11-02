@@ -20,6 +20,7 @@ import {
   PositionCategory,
 } from '../types/game';
 import { applyPyramidMovements, hasLowerDivision } from './pyramidEngine';
+import { evolveAIClubs, evolveWorldLeagues } from './worldEvolution';
 import { getLeagueByCountryAndTier, getLeagueById, GLOBAL_LEAGUES, updateLeagueRosterInWorld, getCustomLeagues, getAllClubsForCountry, findClubInWorld, createClub } from '../data/leaguesData';
 import { GLOBAL_COUNTRIES } from '../data/countriesData';
 import { generateLeagueSchedule, generateInitialStandings } from '../data/initialData';
@@ -2106,6 +2107,12 @@ export function processNewSeasonAdvancement(
   } else {
     try { applyPyramidMovements(); } catch {}
   }
+  // 2b. Living world: every other league ages, develops, retires + clubs/managers improve.
+  try {
+    evolveWorldLeagues([nextActiveLeague.id], c => !!c && (c.id === userClub?.id || c.id === acceptedJobOffer?.clubId));
+  } catch (e) {
+    console.warn('[WorldEvolution] failed', e);
+  }
 
   // 2. Prepare clubs for the next season & apply promotions/relegations to world leagues
   let leagueTeams = [...nextActiveLeague.teams];
@@ -2314,7 +2321,7 @@ export function processNewSeasonAdvancement(
   // 3. Flexible Retirement System (strictly between age 35 and 40) + Player Age & Contract Updates
   const newRetiredPlayers: RetiredPlayer[] = [];
 
-  const updatedLeagueTeams = leagueTeams.map(team => {
+  const agedLeagueTeams = leagueTeams.map(team => {
     const squad = Array.isArray(team.players) ? team.players : [];
     const survivingPlayers: Player[] = [];
 
@@ -2585,6 +2592,14 @@ export function processNewSeasonAdvancement(
       seasonPromotedYouthCount: 0,
     };
   });
+
+  // AI clubs in the user's league strengthen themselves & AI managers develop (user club untouched)
+  let updatedLeagueTeams: Club[] = agedLeagueTeams;
+  try {
+    updatedLeagueTeams = evolveAIClubs(agedLeagueTeams, c => !!c && c.id === nextUserClub.id);
+  } catch (e) {
+    console.warn('[WorldEvolution] active league evolve failed', e);
+  }
 
   // Also persist this active league roster to world
   updateLeagueRosterInWorld(nextActiveLeague.id, updatedLeagueTeams);

@@ -16,9 +16,10 @@ function leagueMap(): Record<string, LeagueDefinition> {
 }
 
 export function clubStrength(c: Club): number {
-  const ps = (c.players || []).filter(p => p && typeof (p as any).overall === 'number');
+  const ovr = (p: any): number => Number(p?.overallRating ?? p?.rating ?? 0);
+  const ps = (c.players || []).filter(p => p && ovr(p) > 0);
   if (ps.length === 0) return c.reputation || 40;
-  const top = ps.map(p => (p as any).overall as number).sort((a, b) => b - a).slice(0, 16);
+  const top = ps.map(p => ovr(p)).sort((a, b) => b - a).slice(0, 16);
   const avg = top.reduce((s, v) => s + v, 0) / top.length;
   return avg * 0.8 + (c.reputation || 40) * 0.2;
 }
