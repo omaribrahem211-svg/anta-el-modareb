@@ -2093,6 +2093,27 @@ export function processNewSeasonAdvancement(
     }
   }
 
+  // 2-pre. Season events carry over: sync the LIVE clubs of the season just played (transfers, injuries,
+  // form, budgets, managers) into the persistent world roster BEFORE promotion/relegation and evolution.
+  try {
+    const liveById = new Map<string, Club>();
+    (allTeams || []).forEach(t => { if (t && t.id) liveById.set(t.id, t); });
+    if (liveById.size > 0) {
+      const playedLeagueId = summary.leagueId || currentSeason.leagueId;
+      const playedLeague = getLeagueById(playedLeagueId);
+      const worldIds = new Set((playedLeague.teams || []).map(t => t && t.id));
+      const overlap = [...liveById.keys()].filter(id => worldIds.has(id)).length;
+      if (overlap >= Math.min(8, Math.floor(worldIds.size / 2))) {
+        const merged = (playedLeague.teams || []).map(t => (t && liveById.has(t.id)) ? { ...liveById.get(t.id)!, leagueId: playedLeague.id } : t);
+        const mergedIds = new Set(merged.map(t => t && t.id));
+        liveById.forEach((c, id) => { if (!mergedIds.has(id) && c.leagueId === playedLeague.id) merged.push(c); });
+        updateLeagueRosterInWorld(playedLeague.id, merged);
+      }
+    }
+  } catch (e) {
+    console.warn('[Season] live sync failed', e);
+  }
+
   // 2a. Apply promotion/relegation across the WHOLE world pyramid (AI clubs included).
   // The user's club outcome comes from the real standings; everything else is rating-simulated.
   if (userClub) {
@@ -2106,6 +2127,7 @@ export function processNewSeasonAdvancement(
     nextActiveLeague = getLeagueById(nextActiveLeague.id);
   } else {
     try { applyPyramidMovements(); } catch {}
+    nextActiveLeague = getLeagueById(nextActiveLeague.id);
   }
   // 2b. Living world: every other league ages, develops, retires + clubs/managers improve.
   try {
