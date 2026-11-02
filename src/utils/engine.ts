@@ -1730,10 +1730,11 @@ export function simulateMatchStep(
   const squadDiff = homeStrength.squadStrength - awayStrength.squadStrength;
   const managerDiff = homeStrength.managerRating - awayStrength.managerRating;
   const overallDiff = homeStrength.overall - awayStrength.overall;
-  const compositeDiff = (squadDiff * 0.50) + (overallDiff * 0.30) + (managerDiff * 0.25);
+  // Bounded so a huge rating gap makes the favourite clearly better but never makes the underdog's goals impossible
+  const compositeDiff = Math.max(-8, Math.min(8, (squadDiff * 0.50) + (overallDiff * 0.30) + (managerDiff * 0.25)));
 
-  const rawQualityAdv = (overallDiff * 0.032) + (squadDiff * 0.028) + (managerDiff * 0.018);
-  const qualityAdvantage = Math.max(-0.62, Math.min(0.62, rawQualityAdv));
+  const rawQualityAdv = (overallDiff * 0.022) + (squadDiff * 0.018) + (managerDiff * 0.012);
+  const qualityAdvantage = Math.max(-0.5, Math.min(0.5, rawQualityAdv));
   const homeQualityMod = Math.max(0.38, Math.min(1.72, 1.0 + qualityAdvantage));
   const awayQualityMod = Math.max(0.38, Math.min(1.72, 1.0 - qualityAdvantage));
 
@@ -1799,38 +1800,22 @@ export function simulateMatchStep(
   const homeTeamFatigueMod = calcTeamLiveFatigueMod(homeActivePlayers, prevState.homeFatigueMap);
   const awayTeamFatigueMod = calcTeamLiveFatigueMod(awayActivePlayers, prevState.awayFatigueMap);
 
-  // Realistic Lead Governor & Superiority Priority (Prevents weak teams from beating stronger teams and breaks deadlocks)
+  // Lead governor: keeps scorelines realistic (no endless blowouts, trailing sides push a little) WITHOUT any hidden
+  // "stronger team must win" boost: strength only enters through quality/possession/shot-quality modifiers.
   let homeLeadMod = 1.0;
-  if (scoreDiff >= 3) homeLeadMod = 0.36;
-  else if (scoreDiff === 2) homeLeadMod = 0.65;
-  else if (scoreDiff === 1) homeLeadMod = compositeDiff >= 2.5 ? 1.05 : 0.82;
-  else if (scoreDiff === 0 && compositeDiff >= 1.5) {
-    homeLeadMod = nextMinute >= 45 ? 1.65 : 1.35;
-  } else if (scoreDiff < 0) {
-    homeLeadMod = compositeDiff >= 1.5 ? 1.85 : 1.12;
-  }
+  if (scoreDiff >= 3) homeLeadMod = 0.45;
+  else if (scoreDiff === 2) homeLeadMod = 0.72;
+  else if (scoreDiff === 1) homeLeadMod = 0.9;
+  else if (scoreDiff < 0) homeLeadMod = 1.12;
 
   let awayLeadMod = 1.0;
-  if (scoreDiff <= -3) awayLeadMod = 0.36;
-  else if (scoreDiff === -2) awayLeadMod = 0.65;
-  else if (scoreDiff === -1) awayLeadMod = compositeDiff <= -2.5 ? 1.05 : 0.82;
-  else if (scoreDiff === 0 && compositeDiff <= -1.5) {
-    awayLeadMod = nextMinute >= 45 ? 1.65 : 1.35;
-  } else if (scoreDiff > 0) {
-    awayLeadMod = compositeDiff <= -1.5 ? 1.85 : 1.12;
-  }
+  if (scoreDiff <= -3) awayLeadMod = 0.45;
+  else if (scoreDiff === -2) awayLeadMod = 0.72;
+  else if (scoreDiff === -1) awayLeadMod = 0.9;
+  else if (scoreDiff > 0) awayLeadMod = 1.12;
 
-  // Heavy suppression for clearly weaker teams so they cannot mount unrealistic attacks against a much stronger opponent
-  if (compositeDiff >= 3.5 || squadDiff >= 3.5) {
-    awayLeadMod *= compositeDiff >= 6.5 ? 0.25 : 0.42;
-    if (awayScore >= 1) awayLeadMod *= 0.22; // Prevent weak team from scoring multiple goals
-  } else if (compositeDiff <= -3.5 || squadDiff <= -3.5) {
-    homeLeadMod *= compositeDiff <= -6.5 ? 0.25 : 0.42;
-    if (homeScore >= 1) homeLeadMod *= 0.22;
-  }
-
-  let homeAttackProb = (weightedHomeMid / totalMid) * 0.185 * homeLeadMod * homeQualityMod * homeTeamFatigueMod * crowdAdvantage.homeAttackBonus;
-  let awayAttackProb = (weightedAwayMid / totalMid) * 0.165 * awayLeadMod * awayQualityMod * awayTeamFatigueMod;
+  let homeAttackProb = (weightedHomeMid / totalMid) * 0.34 * homeLeadMod * homeQualityMod * homeTeamFatigueMod * crowdAdvantage.homeAttackBonus;
+  let awayAttackProb = (weightedAwayMid / totalMid) * 0.31 * awayLeadMod * awayQualityMod * awayTeamFatigueMod;
 
   const awayLowBlock = isAwayParked || currentAwayTactics.mentality === 'defensive' || currentAwayTactics.defensiveLine === 'low';
   const homeLowBlock = isHomeParked || currentHomeTactics.mentality === 'defensive' || currentHomeTactics.defensiveLine === 'low';
@@ -1838,8 +1823,8 @@ export function simulateMatchStep(
   if (awayLowBlock) homeAttackProb *= compositeDiff >= 2.5 ? 0.96 : 0.90;
   if (homeLowBlock) awayAttackProb *= compositeDiff <= -2.5 ? 0.96 : 0.90;
 
-  homeAttackProb = Math.min(0.32, Math.max(0.012, homeAttackProb));
-  awayAttackProb = Math.min(0.30, Math.max(0.012, awayAttackProb));
+  homeAttackProb = Math.min(0.46, Math.max(0.012, homeAttackProb));
+  awayAttackProb = Math.min(0.44, Math.max(0.012, awayAttackProb));
 
   const roll = Math.random();
 
@@ -1848,7 +1833,7 @@ export function simulateMatchStep(
     homeDangerousAttacks++;
     const shotRoll = Math.random();
 
-    const homeShotChance = Math.max(0.24, Math.min(0.68, 0.46 + (compositeDiff * 0.014)));
+    const homeShotChance = Math.max(0.24, Math.min(0.68, 0.46 + (compositeDiff * 0.009)));
     if (shotRoll < homeShotChance) {
       homeShots++;
       const topHomeAttacker = pickPlayerByPosition(homeActivePlayers, 'FWD', 'MID');
@@ -1863,7 +1848,7 @@ export function simulateMatchStep(
         ? awayDefenders.reduce((s, d) => s + (d.attributes?.defending || d.overallRating || 68), 0) / awayDefenders.length
         : effAwayDef;
       const baseBlockProb = awayLowBlock ? 0.23 : 0.18;
-      const blockProb = Math.max(0.08, Math.min(0.32, baseBlockProb + ((avgAwayDefSkill - shootingSkill) * 0.003) - (compositeDiff > 0 ? compositeDiff * 0.008 : 0)));
+      const blockProb = Math.max(0.08, Math.min(0.32, baseBlockProb + ((avgAwayDefSkill - shootingSkill) * 0.002) - (compositeDiff > 0 ? compositeDiff * 0.008 : 0)));
 
       if (Math.random() < blockProb) {
         const defendingCb = pickPlayerByPosition(awayActivePlayers, 'DEF', 'MID');
@@ -1877,7 +1862,7 @@ export function simulateMatchStep(
           });
         }
       } else {
-        let onTargetProb = (0.40 + ((shootingSkill - 65) * 0.0045) + (compositeDiff * 0.008)) * fatigueFactor;
+        let onTargetProb = (0.40 + ((shootingSkill - 65) * 0.003) + (compositeDiff * 0.005)) * fatigueFactor;
         onTargetProb = Math.min(0.68, Math.max(0.18, onTargetProb));
 
         const isTarget = Math.random() < onTargetProb;
@@ -1892,19 +1877,11 @@ export function simulateMatchStep(
           const gkEfficiency = awayGkFatigue < 55 ? 0.90 : 1.0;
 
           // Calibrated Goal Conversion on Target prioritizing Player Strength + Manager Rating + Coaching License
-          const atkVsGk = ((shootingSkill - (awayGkPower * gkEfficiency)) * 0.0055);
-          const defSuppression = ((avgAwayDefSkill - 65) * 0.0015);
-          const qualityConversionBonus = (compositeDiff * 0.015) + (managerDiff * 0.005);
-          let goalProb = 0.24 + atkVsGk - defSuppression + qualityConversionBonus;
+          const atkVsGk = ((shootingSkill - (awayGkPower * gkEfficiency)) * 0.0032);
+          const defSuppression = ((avgAwayDefSkill - 65) * 0.001);
+          const qualityConversionBonus = (compositeDiff * 0.009) + (managerDiff * 0.003);
+          let goalProb = 0.34 + atkVsGk - defSuppression + qualityConversionBonus;
 
-          if (scoreDiff <= 0 && compositeDiff >= 1.8) {
-            goalProb += nextMinute >= 45 ? 0.12 : 0.07;
-          }
-          // Strongly suppress weak home team when playing against a much stronger away team
-          if (compositeDiff <= -3.5 || squadDiff <= -3.5) {
-            goalProb = Math.min(0.05, goalProb * 0.25);
-            if (homeScore >= awayScore) goalProb *= 0.20; // Weak team almost never takes the lead against a strong team
-          }
           // Anti-blowout conversion dampener
           if (scoreDiff >= 3) goalProb *= 0.38;
           else if (scoreDiff === 2) goalProb *= 0.65;
@@ -1959,7 +1936,7 @@ export function simulateMatchStep(
     awayDangerousAttacks++;
     const shotRoll = Math.random();
 
-    const awayShotChance = Math.max(0.24, Math.min(0.68, 0.45 - (compositeDiff * 0.014)));
+    const awayShotChance = Math.max(0.24, Math.min(0.68, 0.45 - (compositeDiff * 0.009)));
     if (shotRoll < awayShotChance) {
       awayShots++;
       const topAwayAttacker = pickPlayerByPosition(awayActivePlayers, 'FWD', 'MID');
@@ -1973,7 +1950,7 @@ export function simulateMatchStep(
         ? homeDefenders.reduce((s, d) => s + (d.attributes?.defending || d.overallRating || 68), 0) / homeDefenders.length
         : effHomeDef;
       const baseBlockProb = homeLowBlock ? 0.23 : 0.18;
-      const blockProb = Math.max(0.08, Math.min(0.32, baseBlockProb + ((avgHomeDefSkill - shootingSkill) * 0.003) - (compositeDiff < 0 ? Math.abs(compositeDiff) * 0.008 : 0)));
+      const blockProb = Math.max(0.08, Math.min(0.32, baseBlockProb + ((avgHomeDefSkill - shootingSkill) * 0.002) - (compositeDiff < 0 ? Math.abs(compositeDiff) * 0.008 : 0)));
 
       if (Math.random() < blockProb) {
         const defendingCb = pickPlayerByPosition(homeActivePlayers, 'DEF', 'MID');
@@ -1987,7 +1964,7 @@ export function simulateMatchStep(
           });
         }
       } else {
-        let onTargetProb = (0.40 + ((shootingSkill - 65) * 0.0045) - (compositeDiff * 0.008)) * fatigueFactor * crowdAdvantage.awayIntimidationPenalty;
+        let onTargetProb = (0.40 + ((shootingSkill - 65) * 0.003) - (compositeDiff * 0.005)) * fatigueFactor * crowdAdvantage.awayIntimidationPenalty;
         onTargetProb = Math.min(0.68, Math.max(0.18, onTargetProb));
 
         const isTarget = Math.random() < onTargetProb;
@@ -2001,19 +1978,11 @@ export function simulateMatchStep(
           const homeGkFatigue = prevState.homeFatigueMap[homeGk?.id] ?? 90;
           const gkEfficiency = homeGkFatigue < 55 ? 0.90 : 1.0;
 
-          const atkVsGk = ((shootingSkill - (homeGkPower * gkEfficiency)) * 0.0055);
-          const defSuppression = ((avgHomeDefSkill - 65) * 0.0015);
-          const qualityConversionBonus = (-compositeDiff * 0.015) + (-managerDiff * 0.005);
-          let goalProb = 0.23 + atkVsGk - defSuppression + qualityConversionBonus;
+          const atkVsGk = ((shootingSkill - (homeGkPower * gkEfficiency)) * 0.0032);
+          const defSuppression = ((avgHomeDefSkill - 65) * 0.001);
+          const qualityConversionBonus = (-compositeDiff * 0.009) + (-managerDiff * 0.003);
+          let goalProb = 0.31 + atkVsGk - defSuppression + qualityConversionBonus;
 
-          if (scoreDiff >= 0 && compositeDiff <= -1.8) {
-            goalProb += nextMinute >= 45 ? 0.12 : 0.07;
-          }
-          // Strongly suppress weak away team when playing against a much stronger home team
-          if (compositeDiff >= 3.5 || squadDiff >= 3.5) {
-            goalProb = Math.min(0.05, goalProb * 0.25);
-            if (awayScore >= homeScore) goalProb *= 0.20; // Weak team almost never takes the lead against a strong team
-          }
           if (scoreDiff <= -3) goalProb *= 0.38;
           else if (scoreDiff === -2) goalProb *= 0.65;
 
@@ -2067,7 +2036,7 @@ export function simulateMatchStep(
     const subRoll = Math.random();
 
     // Superior Team Second-Half Breakthrough: if a clearly stronger team (Players + Manager + License) is trailing or tied in the second half, sustained pressure creates high-danger breakthroughs
-    if (nextMinute >= 52 && ((compositeDiff >= 2.5 || squadDiff >= 3.0) && homeScore <= awayScore) && subRoll < 0.065) {
+    if (false && nextMinute >= 52 && ((compositeDiff >= 2.5 || squadDiff >= 3.0) && homeScore <= awayScore) && subRoll < 0.065) {
       homeDangerousAttacks++;
       homeShots++;
       homeShotsOnTarget++;
@@ -2088,7 +2057,7 @@ export function simulateMatchStep(
           description: `🔥 ضغط هجومي كاسح يثمر أخيراً! تفوق واضح في المهارة والتكتيك ينتهي بهدف رائع سجله (${scorer.name})${assister ? ` بصناعة (${assister.name})` : ''} لصالح ${prevState.homeTeam.shortName}!`
         });
       }
-    } else if (nextMinute >= 52 && ((compositeDiff <= -2.5 || squadDiff <= -3.0) && awayScore <= homeScore) && subRoll < 0.065) {
+    } else if (false && nextMinute >= 52 && ((compositeDiff <= -2.5 || squadDiff <= -3.0) && awayScore <= homeScore) && subRoll < 0.065) {
       awayDangerousAttacks++;
       awayShots++;
       awayShotsOnTarget++;
@@ -2585,34 +2554,28 @@ export function simulateMatch(
   const ratingDelta = effHomeRating - effAwayRating;
   const rawSquadDelta = homeStrength.squadStrength - awayStrength.squadStrength;
 
-  // 6. Base Expected Goals (xG) calibrated for realistic 2.2–2.8 average total goals per match with strong priority for superior team
-  const attackDefDeltaHome = (homeStrength.attack - (awayStrength.defense * 0.65 + awayGkRating * 0.35)) * 0.028;
-  const attackDefDeltaAway = (awayStrength.attack - (homeStrength.defense * 0.65 + homeGkRating * 0.35)) * 0.028;
-  const ratingDeltaEffect = Math.max(-1.05, Math.min(1.05, ratingDelta * 0.048));
-
+  // 6. Expected goals from a smooth, probabilistic model (no hard "the stronger side always wins" overrides).
+  //    The gap that drives it is the composite of: starting-XI quality (+ lineup/fitness), squad depth, the manager's
+  //    rating, tactics matchup and home advantage. A bigger gap raises the favourite's chances smoothly; upsets and
+  //    draws stay realistic (about 1-in-4 matches end level when teams are close).
+  const attackDefDeltaHome = (homeStrength.attack - (awayStrength.defense * 0.65 + awayGkRating * 0.35)) * 0.012;
+  const attackDefDeltaAway = (awayStrength.attack - (homeStrength.defense * 0.65 + homeGkRating * 0.35)) * 0.012;
   const awayLowBlockMod = (awayTac.tacticalStyle === 'park_the_bus' || awayTac.mentality === 'defensive' || awayTac.defensiveLine === 'low') ? 0.94 : 1.0;
   const homeLowBlockMod = (homeTac.tacticalStyle === 'park_the_bus' || homeTac.mentality === 'defensive' || homeTac.defensiveLine === 'low') ? 0.94 : 1.0;
 
-  let baseHomeXg = (1.32 + (homePitchAdvantage * 0.04) + attackDefDeltaHome + ratingDeltaEffect) * awayLowBlockMod;
-  let baseAwayXg = (1.00 + attackDefDeltaAway - ratingDeltaEffect) * homeLowBlockMod;
+  // log-ratio of the two sides' scoring rates; 0.12 per composite rating point, bounded
+  const strengthLog = Math.max(-2.2, Math.min(2.2, ratingDelta * 0.12 + (attackDefDeltaHome - attackDefDeltaAway) * 0.5));
+  const baseHomeXg = (1.40 * Math.exp(strengthLog / 2)) * awayLowBlockMod;
+  const baseAwayXg = (1.12 * Math.exp(-strengthLog / 2)) * homeLowBlockMod;
 
-  // Strongly suppress weaker team's expected goals when facing a clearly stronger squad + manager
-  if (ratingDelta >= 3.5 || rawSquadDelta >= 3.0) {
-    baseAwayXg = Math.min(0.42, baseAwayXg * 0.40);
-    baseHomeXg = Math.max(1.85, baseHomeXg * 1.18);
-  } else if (ratingDelta <= -3.5 || rawSquadDelta <= -3.0) {
-    baseHomeXg = Math.min(0.42, baseHomeXg * 0.40);
-    baseAwayXg = Math.max(1.85, baseAwayXg * 1.18);
-  }
+  // 7. Match-day variance (form, luck, refereeing): +/-12% on each side's rate
+  const homeVariance = (Math.random() - 0.5) * 0.24;
+  const awayVariance = (Math.random() - 0.5) * 0.24;
 
-  // 7. Realistic Football Variance (-6% to +6%)
-  const homeVariance = (Math.random() - 0.5) * 0.12;
-  const awayVariance = (Math.random() - 0.5) * 0.12;
+  const finalHomeXg = Math.max(0.15, Math.min(4.2, baseHomeXg * (1 + homeVariance)));
+  const finalAwayXg = Math.max(0.12, Math.min(3.6, baseAwayXg * (1 + awayVariance)));
 
-  let finalHomeXg = Math.max(0.15, Math.min(3.15, baseHomeXg * (1 + homeVariance)));
-  let finalAwayXg = Math.max(0.12, Math.min(2.95, baseAwayXg * (1 + awayVariance)));
-
-  // 8. Poisson-based Goal Sampling (Authentic probabilistic football engine)
+  // 8. Poisson-based goal sampling
   const samplePoisson = (lambda: number): number => {
     const l = Math.exp(-lambda);
     let k = 0;
@@ -2624,41 +2587,8 @@ export function simulateMatch(
     return Math.max(0, k - 1);
   };
 
-  let homeScore = samplePoisson(finalHomeXg);
-  let awayScore = samplePoisson(finalAwayXg);
-
-  // 9. Superiority Priority & Anti-Upset Resolution
-  // Guarantees that a team with clearly superior (Player Strength + Manager Strength + Coaching License) dominates weak teams and wins consistently
-  if (ratingDelta >= 4.0 || rawSquadDelta >= 3.5) {
-    // Clear superiority over a weak team: cap weak team goals at 0 or 1, and ensure strong team wins ~93% (or draws ~7%, never loses)
-    if (awayScore > 1) awayScore = Math.random() < 0.70 ? 0 : 1;
-    if (homeScore <= awayScore) {
-      if (Math.random() < 0.93) {
-        homeScore = awayScore + (ratingDelta >= 7.0 && Math.random() < 0.55 ? 2 : 1);
-      } else {
-        homeScore = awayScore; // Rare competitive draw, never a loss to a very weak team
-      }
-    }
-  } else if (ratingDelta <= -4.0 || rawSquadDelta <= -3.5) {
-    if (homeScore > 1) homeScore = Math.random() < 0.70 ? 0 : 1;
-    if (awayScore <= homeScore) {
-      if (Math.random() < 0.93) {
-        awayScore = homeScore + (ratingDelta <= -7.0 && Math.random() < 0.55 ? 2 : 1);
-      } else {
-        awayScore = homeScore;
-      }
-    }
-  } else if (ratingDelta >= 1.5 || rawSquadDelta >= 1.8) {
-    const winPriorityChance = Math.min(0.88, 0.62 + (ratingDelta * 0.06));
-    if (homeScore <= awayScore && Math.random() < winPriorityChance) {
-      homeScore = awayScore + 1;
-    }
-  } else if (ratingDelta <= -1.5 || rawSquadDelta <= -1.8) {
-    const winPriorityChance = Math.min(0.88, 0.62 + (Math.abs(ratingDelta) * 0.06));
-    if (awayScore <= homeScore && Math.random() < winPriorityChance) {
-      awayScore = homeScore + 1;
-    }
-  }
+  const homeScore = samplePoisson(finalHomeXg);
+  const awayScore = samplePoisson(finalAwayXg);
 
   // 10. Generate Match Events (Goals, Cards, Subs, Stats)
   const events: MatchEvent[] = [];
