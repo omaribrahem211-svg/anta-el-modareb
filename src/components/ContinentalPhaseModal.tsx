@@ -12,10 +12,12 @@ function nameOf(st: ContinentalPhaseState, id: string): string {
 }
 
 export default function ContinentalPhaseModal() {
-  const { continentalPhase, season, playContinentalStep, simulateContinentalToEnd, finishContinentalPhase } = useGame() as any;
+  const { continentalPhase, season, playContinentalStep, playContinentalLiveMatch, simulateContinentalToEnd, finishContinentalPhase, liveMatch } = useGame() as any;
   const st: ContinentalPhaseState | null = continentalPhase;
 
   if (!st || st.status === 'done' || st.seasonNumber !== season?.seasonNumber) return null;
+  // While the user is watching a continental match the normal match screen is shown instead
+  if (liveMatch) return null;
 
   const roundTies: ContTie[] = st.ties.filter(t => t.round === st.round);
   const userTie = roundTies.find(t => t.a === st.userId || t.b === st.userId);
@@ -24,8 +26,8 @@ export default function ContinentalPhaseModal() {
 
   const nextLegLabel = (() => {
     if (!userTie) return 'المباراة التالية';
-    if (st.round === 'F') return 'حاكِ مباراة النهائي';
-    return userTie.legs.length === 0 ? 'حاكِ مباراة الذهاب' : 'حاكِ مباراة الإياب';
+    if (st.round === 'F') return 'العب النهائي';
+    return userTie.legs.length === 0 ? 'العب مباراة الذهاب' : 'العب مباراة الإياب';
   })();
 
   // Most recent match of the user (across all rounds) so every simulated leg shows a clear result
@@ -70,7 +72,7 @@ export default function ContinentalPhaseModal() {
                 {lastTie.winnerId === st.userId ? '✅ تأهلت للدور التالي' : '❌ خرجت من البطولة'} — {tieScoreText(st, lastTie)}
               </div>
             )}
-            <p className="text-[10px] text-slate-500 text-center">المباريات القارية بتتحاكى تلقائياً بدون مشاهدة.</p>
+            <p className="text-[10px] text-slate-500 text-center">تقدر تلعب كل مباراة بنفسك أو تحاكيها.</p>
           </div>
         )}
 
@@ -109,9 +111,14 @@ export default function ContinentalPhaseModal() {
         <div className="space-y-2 pt-2">
           {!finished ? (
             <>
-              <button onClick={() => playContinentalStep()} className="w-full bg-emerald-500 text-slate-950 font-black py-3.5 rounded-2xl active:scale-[0.99]">
+              <button onClick={() => (userTie ? playContinentalLiveMatch() : playContinentalStep())} className="w-full bg-emerald-500 text-slate-950 font-black py-3.5 rounded-2xl active:scale-[0.99]">
                 {nextLegLabel}
               </button>
+              {userTie && (
+                <button onClick={() => playContinentalStep()} className="w-full bg-slate-800 text-slate-200 font-bold py-3 rounded-2xl border border-slate-700">
+                  محاكاة هذه المباراة فقط
+                </button>
+              )}
               <button onClick={() => simulateContinentalToEnd()} className="w-full bg-slate-800 text-slate-200 font-bold py-3 rounded-2xl border border-slate-700">
                 محاكاة باقي البطولة
               </button>

@@ -6,6 +6,9 @@ import {
   createContinentalPhase,
   playNextLeg as playContinentalNextLeg,
   simulateRemaining as simulateContinentalRemaining,
+  playNextLegWithUserScore as playContinentalLegWithUserScore,
+  getUserPendingLeg as getContinentalUserPendingLeg,
+  ROUND_LABEL as CONTINENTAL_ROUND_LABEL,
   getContinentalOutcome,
   loadContinentalPhase,
 } from '../services/continentalPhase';
@@ -307,6 +310,7 @@ interface GameContextType {
   pendingSeasonEvent: SeasonEvent | null;
   continentalPhase: ContinentalPhaseState | null;
   playContinentalStep: () => void;
+  playContinentalLiveMatch: () => void;
   simulateContinentalToEnd: () => void;
   finishContinentalPhase: () => void;
   resolveSeasonEvent: (choiceId: string) => { message: string } | null;
@@ -3488,6 +3492,28 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     if (!currentFixtureId) {
       console.warn('[MatchEndingFlow] Blocked: liveMatch has no fixture ID. Clearing state.');
       setLiveMatch(null);
+      return;
+    }
+
+    // Continental tournament leg watched live: only the continental phase is updated (no league standings/fixtures).
+    if (String(currentFixtureId).startsWith('cont_')) {
+      const snap = liveMatch;
+      completedMatchFixtureIdRef.current = currentFixtureId;
+      clearMatchSimulationTimers();
+      liveMatchRef.current = null;
+      setLiveMatch(null);
+      const cst = continentalPhaseRef.current;
+      if (cst && cst.status === 'active') {
+        try {
+          setContinentalPhase(playContinentalLegWithUserScore(cst, { homeGoals: snap.homeScore, awayGoals: snap.awayScore }));
+        } catch (err) {
+          console.warn('[Continental] could not record live result, simulating the rest:', err);
+          setContinentalPhase(simulateContinentalRemaining(cst));
+        }
+      }
+      try {
+        window.dispatchEvent(new CustomEvent('set-active-tab', { detail: { tab: 'dashboard' } }));
+      } catch (_) {}
       return;
     }
 
@@ -7783,6 +7809,76 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
   };
 
+  // Plays the user's next continental leg as a real, watchable live match (same screen as the league).
+  // Any problem (missing squad, etc.) falls back to the instant simulation so the tournament can never get stuck.
+  const playContinentalLiveMatch = () => {
+    const st = continentalPhaseRef.current;
+    if (!st || st.status !== 'active' || !userClub) return;
+    try {
+      if (liveMatch && !liveMatch.isFinished) {
+        resumeLiveMatch();
+        window.dispatchEvent(new CustomEvent('set-active-tab', { detail: { tab: 'matches' } }));
+        return;
+      }
+      const pending = getContinentalUserPendingLeg(st);
+      if (!pending) { playContinentalStep(); return; }
+
+      const continent = resolveClubContinent(userClub, activeLeague);
+      const poolClubs: Club[] = (() => { try { return getContinentClubPool(continent as any) as Club[]; } catch { return []; } })();
+      const resolveClub = (id: string): Club | undefined =>
+        id === userClub.id ? userClub : (teams.find(t => t && t.id === id) || poolClubs.find(c => c && c.id === id) || findClubInWorld(id));
+      const homeBase = resolveClub(pending.homeId);
+      const awayBase = resolveClub(pending.awayId);
+      if (!homeBase || !awayBase || (homeBase.players || []).length < 11 || (awayBase.players || []).length < 11) {
+        playContinentalStep();
+        return;
+      }
+
+      let userTactics = userClub.tactics;
+      const lineupCheck = validateSquadLineup(userClub);
+      if (!lineupCheck.isValid && userClub.tactics) {
+        const fix = autoFixSquadLineup(userClub);
+        userTactics = { ...userClub.tactics, startingPlayerIds: fix.updatedStartingPlayerIds, benchPlayerIds: fix.updatedBenchPlayerIds };
+        setTeams(prev => prev.map(t => (t.isUserClub || t.id === userClub.id) ? { ...t, tactics: userTactics! } : t));
+      }
+
+      const withManager = (c: Club) => (c.id === userClub.id ? ({ ...c, tactics: userTactics || c.tactics, manager: (manager as any) } as Club) : c);
+      const homeTeam = withManager(homeBase);
+      const awayTeam = withManager(awayBase);
+
+      const fixture = {
+        id: `cont_${st.seasonNumber}_${pending.tieId}_${pending.legNo}`,
+        round: 0,
+        homeTeamId: homeTeam.id,
+        awayTeamId: awayTeam.id,
+        isPlayed: false,
+        competitionType: 'CONTINENTAL_CUP',
+        competitionId: st.compId,
+        competitionName: st.compName,
+        stageName: `${(CONTINENTAL_ROUND_LABEL as any)[st.round]}${pending.isFinal ? '' : pending.legNo === 0 ? ' - الذهاب' : ' - الإياب'}`,
+        stage: st.round === 'F' ? 'final' : 'knockout',
+        date: calendarDate?.rawDateStr,
+      } as unknown as Fixture;
+
+      const initial = createInitialLiveMatchState(fixture, homeTeam, awayTeam, userTactics, userClub.id);
+      initial.isPlaying = true;
+
+      completedMatchFixtureIdRef.current = null;
+      isFinishingMatchRef.current = false;
+      isMatchFinishedRef.current = false;
+      isSimulationRunningRef.current = false;
+      setIsSimulationRunning(false);
+      setMatchBlocker(null);
+      setLiveMatch(initial);
+      try {
+        window.dispatchEvent(new CustomEvent('set-active-tab', { detail: { tab: 'matches' } }));
+      } catch (_) {}
+    } catch (err) {
+      console.warn('[Continental] live match failed to start, simulating instead:', err);
+      playContinentalStep();
+    }
+  };
+
   const simulateContinentalToEnd = () => {
     const st = continentalPhaseRef.current;
     if (!st || st.status !== 'active') return;
@@ -11537,6 +11633,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         pendingSeasonEvent,
         continentalPhase,
         playContinentalStep,
+        playContinentalLiveMatch,
         simulateContinentalToEnd,
         finishContinentalPhase,
         resolveSeasonEvent,

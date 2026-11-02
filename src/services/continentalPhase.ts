@@ -6,7 +6,7 @@
 //
 // Format: 16 teams, knockout. Round of 16 / quarter-finals / semi-finals are two-legged, the final is a single match.
 
-export type ContRoundKey = 'R16' | 'QF' | 'SF' | 'F';
+export type ContRoundKey = 'R32' | 'R16' | 'QF' | 'SF' | 'F';
 
 export interface ContTeam {
   id: string;
@@ -54,13 +54,14 @@ export interface ContinentalPhaseState {
 }
 
 export const ROUND_LABEL: Record<ContRoundKey, string> = {
+  R32: 'دور الـ32',
   R16: 'دور الـ16',
   QF: 'ربع النهائي',
   SF: 'نصف النهائي',
   F: 'النهائي',
 };
 
-const ROUND_ORDER: ContRoundKey[] = ['R16', 'QF', 'SF', 'F'];
+const ROUND_ORDER: ContRoundKey[] = ['R32', 'R16', 'QF', 'SF', 'F'];
 
 export const CONTINENTAL_PHASE_ENABLED = true;
 
@@ -200,16 +201,27 @@ export function createContinentalPhase(params: {
   const { info, userClub, pool, seasonNumber } = params;
   if (!userClub?.id) return null;
 
+  const seenIds = new Set<string>();
   const candidates = (pool || [])
-    .filter(c => c && c.id && c.id !== userClub.id)
+    .filter(c => {
+      if (!c || !c.id || c.id === userClub.id || seenIds.has(c.id)) return false;
+      seenIds.add(c.id);
+      return true;
+    })
     .map(c => ({ c, r: clubRating(c) }))
     .sort((x, y) => y.r - x.r);
-  if (candidates.length < 15) return null;
+  // 32-team knockout when the continent has enough clubs, otherwise a 16-team one
+  const size = candidates.length >= 40 ? 32 : 16;
+  const need = size - 1;
+  if (candidates.length < need) return null;
 
   // Champions competitions: top of the pool (with some variety). Second competitions: next slice.
-  const slice = info.isTopTier ? candidates.slice(0, Math.min(candidates.length, 28)) : candidates.slice(Math.min(10, candidates.length - 15), Math.min(candidates.length, 40));
-  const field = shuffle(slice, rnd).slice(0, 15);
-  if (field.length < 15) return null;
+  const slice = info.isTopTier
+    ? candidates.slice(0, Math.min(candidates.length, need + 14))
+    : candidates.slice(Math.min(8, candidates.length - need), Math.min(candidates.length, need + 26));
+  const field = shuffle(slice, rnd).slice(0, need);
+  if (field.length < need) return null;
+  const startRound: ContRoundKey = size === 32 ? 'R32' : 'R16';
 
   const userRating = clubRating(userClub);
   const teams: ContTeam[] = [
@@ -225,12 +237,12 @@ export function createContinentalPhase(params: {
     isTopTier: info.isTopTier,
     userId: userClub.id,
     teams,
-    ties: pairTies(teams.map(t => t.id), 'R16', rnd),
-    round: 'R16',
+    ties: pairTies(teams.map(t => t.id), startRound, rnd),
+    round: startRound,
     status: 'active',
     userEliminated: false,
     userRoundsWon: 0,
-    userStage: 'R16',
+    userStage: startRound,
     log: [`تأهل ${userClub.name} إلى ${info.compName} 🌍`],
   };
   return state;
@@ -264,7 +276,7 @@ function aggregate(tie: ContTie): { a: number; b: number } {
 }
 
 /** One step: plays the next leg of every undecided tie in the current round and moves on when the round is done. */
-function stepOnce(input: ContinentalPhaseState, rnd: () => number): ContinentalPhaseState {
+function stepOnce(input: ContinentalPhaseState, rnd: () => number, userLegResult?: { homeGoals: number; awayGoals: number }): ContinentalPhaseState {
   if (input.status !== 'active') return input;
   const state: ContinentalPhaseState = JSON.parse(JSON.stringify(input));
   const need = legsPerRound(state.round);
@@ -277,7 +289,10 @@ function stepOnce(input: ContinentalPhaseState, rnd: () => number): ContinentalP
     const isFinal = state.round === 'F';
     const homeId = legNo === 0 ? t.a : t.b;
     const awayId = homeId === t.a ? t.b : t.a;
-    const g = simulateMatchGoals(teamOf(state, homeId).rating, teamOf(state, awayId).rating, rnd, isFinal);
+    const isUserTie = t.a === state.userId || t.b === state.userId;
+    const g = (isUserTie && userLegResult)
+      ? { home: userLegResult.homeGoals, away: userLegResult.awayGoals }
+      : simulateMatchGoals(teamOf(state, homeId).rating, teamOf(state, awayId).rating, rnd, isFinal);
     t.legs.push({ homeId, awayId, homeGoals: g.home, awayGoals: g.away });
 
     if (t.legs.length >= need) {
@@ -320,6 +335,24 @@ function stepOnce(input: ContinentalPhaseState, rnd: () => number): ContinentalP
   }
 
   return state;
+}
+
+/** The user's next unplayed leg (who hosts it), or null when the user is out / the round is not waiting on him. */
+export function getUserPendingLeg(state: ContinentalPhaseState): { tieId: string; homeId: string; awayId: string; legNo: number; isFinal: boolean } | null {
+  if (state.status !== 'active' || state.userEliminated) return null;
+  const tie = state.ties.find(t => t.round === state.round && !t.winnerId && (t.a === state.userId || t.b === state.userId));
+  if (!tie) return null;
+  const legNo = tie.legs.length;
+  if (legNo >= legsPerRound(state.round)) return null;
+  const homeId = legNo === 0 ? tie.a : tie.b;
+  return { tieId: tie.id, homeId, awayId: homeId === tie.a ? tie.b : tie.a, legNo, isFinal: state.round === 'F' };
+}
+
+/** Same as playNextLeg but the user's match uses the score of the match he actually watched. */
+export function playNextLegWithUserScore(input: ContinentalPhaseState, result: { homeGoals: number; awayGoals: number }, rnd: () => number = Math.random): ContinentalPhaseState {
+  const s = stepOnce(input, rnd, result);
+  if (s.userEliminated && s.status === 'active') return simulateRemaining(s, rnd);
+  return s;
 }
 
 /** Plays the next leg for everyone. If that knocks the user out, the rest of the tournament is simulated at once. */
