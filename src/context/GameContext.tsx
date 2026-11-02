@@ -11,6 +11,8 @@ import {
   ROUND_LABEL as CONTINENTAL_ROUND_LABEL,
   getContinentalOutcome,
   loadContinentalPhase,
+  createWorldCupPhase,
+  qualifiesForWorldCup,
 } from '../services/continentalPhase';
 import React, { createContext, useContext, useState, useEffect, useMemo, useCallback, useRef, ReactNode } from 'react';
 import {
@@ -7719,7 +7721,8 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       if (contRw && contRw.season === summary.seasonNumber && !summary.continentalResultText) {
         summary.continentalResultText = contRw.text;
         summary.continentalTrophyAwarded = contRw.trophy;
-        summary.trophiesWonList = contRw.trophy ? [...(summary.trophiesWonList || []), contRw.trophy] : summary.trophiesWonList;
+        const rwTrophies = [contRw.trophy, ...(contRw.extraTrophies || [])].filter(Boolean) as string[];
+        summary.trophiesWonList = rwTrophies.length ? [...(summary.trophiesWonList || []), ...rwTrophies] : summary.trophiesWonList;
         summary.prizeMoney = (summary.prizeMoney || 0) + contRw.prize;
         summary.finalBudget = (summary.finalBudget || 0) + contRw.prize;
         summary.xpEarned = (summary.xpEarned || 0) + contRw.xp;
@@ -7807,7 +7810,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   // ---- Post-league continental competition actions ----
-  const continentalRewardRef = useRef<{ season: number; prize: number; xp: number; rep: number; text: string; trophy?: string } | null>(null);
+  const continentalRewardRef = useRef<{ season: number; prize: number; xp: number; rep: number; text: string; trophy?: string; extraTrophies?: string[] } | null>(null);
 
   const playContinentalStep = () => {
     const st = continentalPhaseRef.current;
@@ -7866,7 +7869,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         competitionType: 'CONTINENTAL_CUP',
         competitionId: st.compId,
         competitionName: st.compName,
-        stageName: `${(CONTINENTAL_ROUND_LABEL as any)[st.round]}${pending.isFinal ? '' : pending.legNo === 0 ? ' - الذهاب' : ' - الإياب'}`,
+        stageName: `${(CONTINENTAL_ROUND_LABEL as any)[st.round]}${pending.single ? '' : pending.legNo === 0 ? ' - الذهاب' : ' - الإياب'}`,
         stage: st.round === 'F' ? 'final' : 'knockout',
         date: calendarDate?.rawDateStr,
       } as unknown as Fixture;
@@ -7905,7 +7908,18 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       const outcome = getContinentalOutcome(st);
       const wages = ((userClub?.players || []) as Player[]).reduce((sum, p) => sum + (p?.salary || 0), 0);
       const prize = Math.round(Math.max(100000, wages * outcome.prizeMonthsOfWages) / 1000) * 1000;
-      continentalRewardRef.current = { season: st.seasonNumber, prize, xp: outcome.xp, rep: outcome.reputation, text: outcome.resultText, trophy: outcome.trophyName };
+      const prevRw = continentalRewardRef.current && continentalRewardRef.current.season === st.seasonNumber ? continentalRewardRef.current : null;
+      continentalRewardRef.current = prevRw
+        ? {
+            season: st.seasonNumber,
+            prize: prevRw.prize + prize,
+            xp: prevRw.xp + outcome.xp,
+            rep: prevRw.rep + outcome.reputation,
+            text: `${prevRw.text} • ${outcome.resultText}`,
+            trophy: prevRw.trophy || outcome.trophyName,
+            extraTrophies: [...(prevRw.extraTrophies || []), ...(prevRw.trophy && outcome.trophyName ? [outcome.trophyName] : [])],
+          }
+        : { season: st.seasonNumber, prize, xp: outcome.xp, rep: outcome.reputation, text: outcome.resultText, trophy: outcome.trophyName };
       setContinentalPhase({ ...st, status: 'done' });
 
       setSeasonEndSummary(prev => prev ? {
@@ -7938,11 +7952,47 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       setContinentalPhase({ ...st, status: 'done' });
     }
 
+    // Champion / finalist of a champions competition continues to the Club World Cup (then the season ends).
+    try {
+      if (qualifiesForWorldCup(st) && userClub) {
+        const worldPool: Club[] = [];
+        const seenW = new Set<string>();
+        Object.values({ ...GLOBAL_LEAGUES, ...getCustomLeagues() }).forEach(l => {
+          if (!l || l.tier !== 1) return;
+          (l.teams || []).forEach(c => { if (c && c.id && !seenW.has(c.id)) { seenW.add(c.id); worldPool.push(c); } });
+        });
+        const cwc = createWorldCupPhase({ seasonNumber: st.seasonNumber, userClub, pool: worldPool });
+        if (cwc) {
+          setContinentalPhase(cwc);
+          return;
+        }
+      }
+    } catch (err) {
+      console.warn('[ClubWorldCup] could not start, going to the season end:', err);
+    }
+
     const mgrNow = manager;
     const clubNow = userClub || teams.find(t => t.isUserClub) || teams[0];
     const posNow = seasonEndSummary?.finalPosition ?? 3;
     scheduleSeasonEndOffersAndModal(() => generateSeasonJobOffers(mgrNow, clubNow, activeLeague, posNow));
   };
+
+  // Safety net: a continental live match (id "cont_...") that no longer matches the tournament state (app restored an
+  // old match, the tournament moved on, it was simulated meanwhile...) must never stay on screen and hide the tournament.
+  useEffect(() => {
+    const id = liveMatch?.fixture?.id;
+    if (!id || !String(id).startsWith('cont_')) return;
+    const ph = continentalPhase;
+    const pend = ph && ph.status === 'active' ? getContinentalUserPendingLeg(ph) : null;
+    const expected = ph && pend ? `cont_${ph.seasonNumber}_${pend.tieId}_${pend.legNo}` : null;
+    if (expected !== id) {
+      console.warn('[Continental] discarding stale continental live match', id, 'expected', expected);
+      clearMatchSimulationTimers();
+      liveMatchRef.current = null;
+      setLiveMatch(null);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [liveMatch?.fixture?.id, continentalPhase]);
 
   // Safety net: once the continental tournament is over, the season-end screen MUST show up. If anything went wrong
   // (an exception while building offers, an interrupted save/reload...) open it directly instead of leaving the game stuck.
@@ -8090,7 +8140,9 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           ...summary,
           continentalResultText: contReward.text,
           continentalTrophyAwarded: contReward.trophy,
-          trophiesWonList: contReward.trophy ? [...(summary.trophiesWonList || []), contReward.trophy] : summary.trophiesWonList,
+          trophiesWonList: ([contReward.trophy, ...(contReward.extraTrophies || [])].filter(Boolean) as string[]).length
+            ? [...(summary.trophiesWonList || []), ...([contReward.trophy, ...(contReward.extraTrophies || [])].filter(Boolean) as string[])]
+            : summary.trophiesWonList,
           prizeMoney: (summary.prizeMoney || 0) + contReward.prize,
           finalBudget: (summary.finalBudget || 0) + contReward.prize,
           xpEarned: (summary.xpEarned || 0) + contReward.xp,

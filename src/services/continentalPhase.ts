@@ -51,6 +51,7 @@ export interface ContinentalPhaseState {
   userEliminated: boolean;
   userRoundsWon: number;
   log: string[];
+  singleLeg?: boolean; // Club World Cup: every tie is a single match
 }
 
 export const ROUND_LABEL: Record<ContRoundKey, string> = {
@@ -248,6 +249,60 @@ export function createContinentalPhase(params: {
   return state;
 }
 
+/**
+ * Club World Cup: 32 clubs from the whole world, single-match knockout. Opponents come from the strongest clubs on
+ * earth so it is deliberately hard. Only called for clubs that won / reached the final of a champions competition.
+ */
+export function createWorldCupPhase(params: {
+  seasonNumber: number;
+  userClub: any;
+  pool: any[];
+  rnd?: () => number;
+}): ContinentalPhaseState | null {
+  const rnd = params.rnd || Math.random;
+  const { userClub, pool, seasonNumber } = params;
+  if (!userClub?.id) return null;
+  const seen = new Set<string>();
+  const candidates = (pool || [])
+    .filter(c => {
+      if (!c || !c.id || c.id === userClub.id || seen.has(c.id)) return false;
+      seen.add(c.id);
+      return (c.players || []).length >= 11;
+    })
+    .map(c => ({ c, r: clubRating(c) }))
+    .sort((x, y) => y.r - x.r);
+  if (candidates.length < 31) return null;
+  const field = shuffle(candidates.slice(0, Math.min(candidates.length, 48)), rnd).slice(0, 31);
+  const teams: ContTeam[] = [
+    { id: userClub.id, name: userClub.name || 'فريقك', rating: clubRating(userClub), country: userClub.country, isUser: true },
+    ...field.map(f => ({ id: f.c.id, name: f.c.name, rating: f.r, country: f.c.country })),
+  ];
+  return {
+    version: 1,
+    seasonNumber,
+    compId: 'cwc',
+    compName: 'كأس العالم للأندية',
+    isTopTier: true,
+    userId: userClub.id,
+    teams,
+    ties: pairTies(teams.map(t => t.id), 'R32', rnd),
+    round: 'R32',
+    status: 'active',
+    userEliminated: false,
+    userRoundsWon: 0,
+    userStage: 'R32',
+    singleLeg: true,
+    log: [`تأهل ${userClub.name} إلى كأس العالم للأندية 🌍🏆`],
+  };
+}
+
+/** True when the user's finished continental run earns a Club World Cup place. */
+export function qualifiesForWorldCup(state: ContinentalPhaseState): boolean {
+  if (state.compId === 'cwc' || !state.isTopTier || state.status !== 'finished') return false;
+  const o = getContinentalOutcome(state);
+  return o.isChampion || o.isRunnerUp;
+}
+
 // ------------------------------------------------------------------------------------------------------------------
 // Progression
 // ------------------------------------------------------------------------------------------------------------------
@@ -256,8 +311,9 @@ function teamOf(state: ContinentalPhaseState, id: string): ContTeam {
   return state.teams.find(t => t.id === id) || { id, name: id, rating: 60 };
 }
 
-function legsPerRound(round: ContRoundKey): number {
-  return round === 'F' ? 1 : 2;
+function legsFor(state: ContinentalPhaseState): number {
+  if (state.singleLeg) return 1;
+  return state.round === 'F' ? 1 : 2;
 }
 
 function aggregate(tie: ContTie): { a: number; b: number } {
@@ -279,7 +335,7 @@ function aggregate(tie: ContTie): { a: number; b: number } {
 function stepOnce(input: ContinentalPhaseState, rnd: () => number, userLegResult?: { homeGoals: number; awayGoals: number }): ContinentalPhaseState {
   if (input.status !== 'active') return input;
   const state: ContinentalPhaseState = JSON.parse(JSON.stringify(input));
-  const need = legsPerRound(state.round);
+  const need = legsFor(state);
 
   state.ties = state.ties.map(tie => {
     if (tie.round !== state.round || tie.winnerId) return tie;
@@ -292,7 +348,7 @@ function stepOnce(input: ContinentalPhaseState, rnd: () => number, userLegResult
     const isUserTie = t.a === state.userId || t.b === state.userId;
     const g = (isUserTie && userLegResult)
       ? { home: userLegResult.homeGoals, away: userLegResult.awayGoals }
-      : simulateMatchGoals(teamOf(state, homeId).rating, teamOf(state, awayId).rating, rnd, isFinal);
+      : simulateMatchGoals(teamOf(state, homeId).rating, teamOf(state, awayId).rating, rnd, isFinal || !!state.singleLeg);
     t.legs.push({ homeId, awayId, homeGoals: g.home, awayGoals: g.away });
 
     if (t.legs.length >= need) {
@@ -338,14 +394,14 @@ function stepOnce(input: ContinentalPhaseState, rnd: () => number, userLegResult
 }
 
 /** The user's next unplayed leg (who hosts it), or null when the user is out / the round is not waiting on him. */
-export function getUserPendingLeg(state: ContinentalPhaseState): { tieId: string; homeId: string; awayId: string; legNo: number; isFinal: boolean } | null {
+export function getUserPendingLeg(state: ContinentalPhaseState): { tieId: string; homeId: string; awayId: string; legNo: number; isFinal: boolean; single: boolean } | null {
   if (state.status !== 'active' || state.userEliminated) return null;
   const tie = state.ties.find(t => t.round === state.round && !t.winnerId && (t.a === state.userId || t.b === state.userId));
   if (!tie) return null;
   const legNo = tie.legs.length;
-  if (legNo >= legsPerRound(state.round)) return null;
+  if (legNo >= legsFor(state)) return null;
   const homeId = legNo === 0 ? tie.a : tie.b;
-  return { tieId: tie.id, homeId, awayId: homeId === tie.a ? tie.b : tie.a, legNo, isFinal: state.round === 'F' };
+  return { tieId: tie.id, homeId, awayId: homeId === tie.a ? tie.b : tie.a, legNo, isFinal: state.round === 'F', single: !!state.singleLeg || state.round === 'F' };
 }
 
 /** Same as playNextLeg but the user's match uses the score of the match he actually watched. */
@@ -408,6 +464,7 @@ export function getContinentalOutcome(state: ContinentalPhaseState): Continental
   if (isRunnerUp) months += 0.3;
   if (isChampion) months += 0.8;
   if (!state.isTopTier) months *= 0.7;
+  if (state.compId === 'cwc') months *= 1.6;
 
   const xp = state.userRoundsWon * 40 + (isChampion ? 250 : 0);
   const reputation = isChampion ? 3 : isRunnerUp ? 1 : 0;
