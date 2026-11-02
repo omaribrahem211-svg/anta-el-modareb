@@ -1,4 +1,14 @@
 import { App as CapacitorApp } from '@capacitor/app';
+import {
+  ContinentalPhaseState,
+  CONTINENTAL_PHASE_ENABLED,
+  getContinentalQualification,
+  createContinentalPhase,
+  playNextLeg as playContinentalNextLeg,
+  simulateRemaining as simulateContinentalRemaining,
+  getContinentalOutcome,
+  loadContinentalPhase,
+} from '../services/continentalPhase';
 import React, { createContext, useContext, useState, useEffect, useMemo, useCallback, useRef, ReactNode } from 'react';
 import {
   ActiveNegotiation,
@@ -122,6 +132,7 @@ import {
   advanceContinentalTournament,
   recalculateContinentalGroupStandings,
   repairContinentalTournamentIntegrity,
+  getContinentClubPool,
 } from '../utils/continentalEngine';
 import { getDomesticCupDefinitionForCountry } from '../data/competitionsData';
 import { EGYPT_PREMIER_CLUBS } from '../data/arabClubsData';
@@ -292,6 +303,10 @@ interface GameContextType {
   matchBlocker: MatchBlockerInfo | null;
   closeMatchBlocker: () => void;
   pendingSeasonEvent: SeasonEvent | null;
+  continentalPhase: ContinentalPhaseState | null;
+  playContinentalStep: () => void;
+  simulateContinentalToEnd: () => void;
+  finishContinentalPhase: () => void;
   resolveSeasonEvent: (choiceId: string) => { message: string } | null;
   autoFixUserStartingLineup: (reopenAsMatchToday?: boolean) => void;
   validateUserLineup: () => SquadValidationResult;
@@ -1163,10 +1178,60 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   const [showSeasonTransitionModal, setShowSeasonTransitionModal] = useState<boolean>(false);
 
+  // Post-league continental competition (see services/continentalPhase.ts). Persisted locally so closing the app mid-way
+  // never loses it; the season-end modal + job offers wait until this phase is finished.
+  const CONT_PHASE_KEY = `${STORAGE_KEY}_continentalPhase`;
+  const [continentalPhase, setContinentalPhaseState] = useState<ContinentalPhaseState | null>(() => {
+    try { return loadContinentalPhase(localStorage.getItem(`${STORAGE_KEY}_continentalPhase`)); } catch { return null; }
+  });
+  const continentalPhaseRef = useRef<ContinentalPhaseState | null>(continentalPhase);
+  const setContinentalPhase = (next: ContinentalPhaseState | null) => {
+    continentalPhaseRef.current = next;
+    setContinentalPhaseState(next);
+    try {
+      if (next) localStorage.setItem(CONT_PHASE_KEY, JSON.stringify(next));
+      else localStorage.removeItem(CONT_PHASE_KEY);
+    } catch (_) {}
+  };
+
+  // Returns true when the season-end screen must wait because the user's club plays (or just played) a continental
+  // competition this season. Any failure returns false so the normal season end can never be blocked.
+  const tryStartContinentalPhase = (summary: any, club: any): boolean => {
+    if (!CONTINENTAL_PHASE_ENABLED || !summary || !club) return false;
+    try {
+      const existing = continentalPhaseRef.current;
+      if (existing && existing.seasonNumber === summary.seasonNumber) return existing.status !== 'done';
+      const continent = resolveClubContinent(club, activeLeague);
+      const info = getContinentalQualification({
+        divisionTier: summary.divisionTier,
+        finalPosition: summary.finalPosition,
+        totalTeams: summary.totalTeams,
+        continent,
+      });
+      if (!info) return false;
+      const st = createContinentalPhase({
+        seasonNumber: summary.seasonNumber,
+        info,
+        userClub: club,
+        pool: getContinentClubPool(continent as any),
+      });
+      if (!st) return false;
+      setContinentalPhase(st);
+      return true;
+    } catch (err) {
+      console.warn('[Continental] could not start phase, continuing with normal season end:', err);
+      return false;
+    }
+  };
+
   // Season-end heavy work (job offers) and the full-screen modal are deferred a few hundred ms so the
   // match-result commit renders first. Opening everything in one tick froze low-end Android WebViews.
   const seasonEndScheduleRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const scheduleSeasonEndOffersAndModal = (buildOffers: () => ReturnType<typeof generateSeasonJobOffers>) => {
+  const scheduleSeasonEndOffersAndModal = (
+    buildOffers: () => ReturnType<typeof generateSeasonJobOffers>,
+    ctx?: { summary: any; club: any }
+  ) => {
+    if (ctx && tryStartContinentalPhase(ctx.summary, ctx.club)) return; // continental phase first, then offers
     if (seasonEndScheduleRef.current) clearTimeout(seasonEndScheduleRef.current);
     seasonEndScheduleRef.current = setTimeout(() => {
       seasonEndScheduleRef.current = null;
@@ -4336,7 +4401,8 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       const offersManager = updatedManager;
       setSeasonEndSummary(summary);
       scheduleSeasonEndOffersAndModal(() =>
-        generateSeasonJobOffers(offersManager, summaryClub, activeLeague, summary.finalPosition)
+        generateSeasonJobOffers(offersManager, summaryClub, activeLeague, summary.finalPosition),
+        { summary, club: summaryClub }
       );
 
       newInboxMsgs.unshift({
@@ -5206,7 +5272,8 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       const offersManager = updatedManager;
       setSeasonEndSummary(summary);
       scheduleSeasonEndOffersAndModal(() =>
-        generateSeasonJobOffers(offersManager, summaryClub, activeLeague, summary.finalPosition)
+        generateSeasonJobOffers(offersManager, summaryClub, activeLeague, summary.finalPosition),
+        { summary, club: summaryClub }
       );
 
       newInboxMsgs.unshift({
@@ -5598,7 +5665,8 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         const offersMgrC = activeMgr;
         setSeasonEndSummary(summary);
         scheduleSeasonEndOffersAndModal(() =>
-          generateSeasonJobOffers(offersMgrC, summaryClub, activeLeague, summary.finalPosition)
+          generateSeasonJobOffers(offersMgrC, summaryClub, activeLeague, summary.finalPosition),
+          { summary, club: summaryClub }
         );
         setSeason(prev => ({ ...prev, status: 'completed' }));
       }
@@ -7571,6 +7639,9 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   const openSeasonModal = () => {
+    // The continental competition (if the club qualified) always comes before the season-end screen.
+    const ph = continentalPhaseRef.current;
+    if (ph && ph.seasonNumber === season.seasonNumber && ph.status !== 'done') return;
     // When user explicitly requests to review the season end, open the modal and ensure summary is ready
     if (season.status !== 'completed') {
       setSeason(prev => ({ ...prev, status: 'completed' }));
@@ -7676,6 +7747,74 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   const closeSeasonModal = () => {
     setShowSeasonTransitionModal(false);
+  };
+
+  // ---- Post-league continental competition actions ----
+  const continentalRewardRef = useRef<{ season: number; prize: number; xp: number; rep: number; text: string; trophy?: string } | null>(null);
+
+  const playContinentalStep = () => {
+    const st = continentalPhaseRef.current;
+    if (!st || st.status !== 'active') return;
+    try {
+      setContinentalPhase(playContinentalNextLeg(st));
+    } catch (err) {
+      console.warn('[Continental] step failed, finishing the tournament safely:', err);
+      setContinentalPhase(simulateContinentalRemaining(st));
+    }
+  };
+
+  const simulateContinentalToEnd = () => {
+    const st = continentalPhaseRef.current;
+    if (!st || st.status !== 'active') return;
+    setContinentalPhase(simulateContinentalRemaining(st));
+  };
+
+  // Called from the continental screen once the user is out (or the tournament ended): pays the prize, records the
+  // trophy and only now shows the season-end screen with the job offers.
+  const finishContinentalPhase = () => {
+    const st = continentalPhaseRef.current;
+    if (!st || st.status !== 'finished') return;
+    try {
+      const outcome = getContinentalOutcome(st);
+      const wages = ((userClub?.players || []) as Player[]).reduce((sum, p) => sum + (p?.salary || 0), 0);
+      const prize = Math.round(Math.max(100000, wages * outcome.prizeMonthsOfWages) / 1000) * 1000;
+      continentalRewardRef.current = { season: st.seasonNumber, prize, xp: outcome.xp, rep: outcome.reputation, text: outcome.resultText, trophy: outcome.trophyName };
+      setContinentalPhase({ ...st, status: 'done' });
+
+      setSeasonEndSummary(prev => prev ? {
+        ...prev,
+        continentalResultText: outcome.resultText,
+        continentalTrophyAwarded: outcome.trophyName,
+        trophiesWonList: outcome.trophyName ? [...(prev.trophiesWonList || []), outcome.trophyName] : prev.trophiesWonList,
+        prizeMoney: (prev.prizeMoney || 0) + prize,
+        finalBudget: (prev.finalBudget || 0) + prize,
+        xpEarned: (prev.xpEarned || 0) + outcome.xp,
+        reputationChange: (prev.reputationChange || 0) + outcome.reputation,
+      } : prev);
+
+      if (outcome.trophyName && (manager as any).lastTrophyAwardedSeasonNumber === st.seasonNumber) {
+        // The season-end flow already stamped this season's trophies, so the rollover will not add this one: add it now.
+        setManager(prev => ({ ...prev, trophies: (prev.trophies || []).includes(outcome.trophyName as string) ? prev.trophies : [...(prev.trophies || []), outcome.trophyName as string] }));
+      }
+
+      setInbox(prev => [{
+        id: `msg_continental_${st.seasonNumber}_${Date.now()}`,
+        title: `${outcome.isChampion ? '🏆' : '🌍'} ${st.compName}: ${outcome.resultText}`,
+        sender: 'الاتحاد القاري',
+        date: `الموسم ${st.seasonNumber}`,
+        type: 'news',
+        read: false,
+        content: `${outcome.resultText}\nمكافأة المشاركة القارية: +${prize.toLocaleString()} ج.م أُضيفت إلى ميزانية الموسم القادم.`,
+      } as InboxMessage, ...(prev || [])].slice(0, 80));
+    } catch (err) {
+      console.warn('[Continental] finish failed, continuing to the season end anyway:', err);
+      setContinentalPhase({ ...st, status: 'done' });
+    }
+
+    const mgrNow = manager;
+    const clubNow = userClub || teams.find(t => t.isUserClub) || teams[0];
+    const posNow = seasonEndSummary?.finalPosition ?? 3;
+    scheduleSeasonEndOffersAndModal(() => generateSeasonJobOffers(mgrNow, clubNow, activeLeague, posNow));
   };
 
   const resignToUnemployed = () => {
@@ -7797,9 +7936,24 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         africanChampionsLeague
       );
       const cachedOk = !!seasonEndSummary && seasonEndSummary.resultStatus === freshSummary.resultStatus && seasonEndSummary.nextDivisionTier === freshSummary.nextDivisionTier;
-      const summary = cachedOk
+      let summary = cachedOk
         ? seasonEndSummary!
         : { ...freshSummary, licenseSettlement: seasonEndSummary?.licenseSettlement ?? freshSummary.licenseSettlement };
+      const contReward = continentalRewardRef.current;
+      if (!cachedOk && contReward && contReward.season === summary.seasonNumber) {
+        summary = {
+          ...summary,
+          continentalResultText: contReward.text,
+          continentalTrophyAwarded: contReward.trophy,
+          trophiesWonList: contReward.trophy ? [...(summary.trophiesWonList || []), contReward.trophy] : summary.trophiesWonList,
+          prizeMoney: (summary.prizeMoney || 0) + contReward.prize,
+          finalBudget: (summary.finalBudget || 0) + contReward.prize,
+          xpEarned: (summary.xpEarned || 0) + contReward.xp,
+          reputationChange: (summary.reputationChange || 0) + contReward.rep,
+        };
+      }
+      continentalRewardRef.current = null;
+      setContinentalPhase(null);
 
       const safeJobOffers = Array.isArray(jobOffers) ? jobOffers : [];
       const acceptedOffer = chosenOfferId 
@@ -8729,7 +8883,8 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         setSeason(prev => ({ ...prev, status: 'completed' }));
         setSeasonEndSummary(summary);
         scheduleSeasonEndOffersAndModal(() =>
-          generateSeasonJobOffers(offersMgrD, summaryClub, activeLeague, summary.finalPosition)
+          generateSeasonJobOffers(offersMgrD, summaryClub, activeLeague, summary.finalPosition),
+          { summary, club: summaryClub }
         );
         setCupTournament(null);
         setAfricanChampionsLeague(null);
@@ -10046,6 +10201,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   const resetGame = (startingClubId?: string) => {
+    setContinentalPhase(null);
     setPendingSeasonEvent(null);
     saveSeasonEventHistory(emptySeasonEventHistory());
     // Clear storage repository (IndexedDB and localStorage mirrors)
@@ -11359,6 +11515,10 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         matchBlocker,
         closeMatchBlocker,
         pendingSeasonEvent,
+        continentalPhase,
+        playContinentalStep,
+        simulateContinentalToEnd,
+        finishContinentalPhase,
         resolveSeasonEvent,
         autoFixUserStartingLineup,
         validateUserLineup,

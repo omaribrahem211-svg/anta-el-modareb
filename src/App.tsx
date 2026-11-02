@@ -3,6 +3,7 @@ import { Capacitor } from '@capacitor/core';
 import { App as CapApp } from '@capacitor/app';
 import ForcedUpdateGate from './components/ForcedUpdateGate';
 import SeasonEventModal from './components/SeasonEventModal';
+import ContinentalPhaseModal from './components/ContinentalPhaseModal';
 import { LanguageProvider } from './utils/i18n';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { GameProvider, useGame } from './context/GameContext';
@@ -424,6 +425,7 @@ export default function App() {
         <GameProvider>
           <GameApp />
           <SeasonEventModal />
+          <ContinentalPhaseModal />
         </GameProvider>
       </AuthProvider>
     </LanguageProvider>
