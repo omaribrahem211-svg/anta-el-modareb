@@ -19,6 +19,7 @@ import {
   Position,
   PositionCategory,
 } from '../types/game';
+import { applyPyramidMovements, hasLowerDivision } from './pyramidEngine';
 import { getLeagueByCountryAndTier, getLeagueById, GLOBAL_LEAGUES, updateLeagueRosterInWorld, getCustomLeagues, getAllClubsForCountry, findClubInWorld, createClub } from '../data/leaguesData';
 import { GLOBAL_COUNTRIES } from '../data/countriesData';
 import { generateLeagueSchedule, generateInitialStandings } from '../data/initialData';
@@ -78,7 +79,7 @@ export function calculateSeasonEndSummary(
   let leagueTrophyAwarded: string | undefined = undefined;
 
   const isTier1 = activeLeague.tier === 1;
-  const isLowestTier = activeLeague.tier === 4 || activeLeague.relegationSpots === 0;
+  const isLowestTier = activeLeague.tier === 4 || activeLeague.relegationSpots === 0 || !hasLowerDivision(activeLeague);
 
   // STRICT RULE: Championship and promotion can ONLY be awarded when the season is fully completed (all fixtures played)
   if (isSeasonFullyCompleted) {
@@ -2089,6 +2090,21 @@ export function processNewSeasonAdvancement(
     } else {
       nextActiveLeague = getLeagueByCountryAndTier(currentCountry, newDivisionTier, currentLeague.id);
     }
+  }
+
+  // 2a. Apply promotion/relegation across the WHOLE world pyramid (AI clubs included).
+  // The user's club outcome comes from the real standings; everything else is rating-simulated.
+  if (userClub) {
+    const fromTier = summary.divisionTier || getLeagueById(summary.leagueId || currentSeason.leagueId).tier;
+    const toTier = summary.nextDivisionTier ?? fromTier;
+    try {
+      applyPyramidMovements({ clubId: userClub.id, outcome: toTier < fromTier ? 'up' : toTier > fromTier ? 'down' : 'stay' });
+    } catch (e) {
+      console.warn('[Pyramid] movement failed, falling back to user-only move', e);
+    }
+    nextActiveLeague = getLeagueById(nextActiveLeague.id);
+  } else {
+    try { applyPyramidMovements(); } catch {}
   }
 
   // 2. Prepare clubs for the next season & apply promotions/relegations to world leagues

@@ -2054,7 +2054,7 @@ export function simulateMatchStep(
           playerName: scorer.name,
           assistPlayerId: assister?.id,
           assistPlayerName: assister?.name,
-          description: `🔥 ضغط هجومي كاسح يثمر أخيراً! تفوق واضح في المهارة والتكتيك ينتهي بهدف رائع سجله (${scorer.name})${assister ? ` بصناعة (${assister.name})` : ''} لصالح ${prevState.homeTeam.shortName}!`
+          description: `🔥 ضغط هجومي كاسح يثمر أخيراً! تفوق واضح في المهارة والتكتيك ينتهي بهدف رائع سجله (${scorer.name})${assister ? ` بصناعة (${assister?.name})` : ''} لصالح ${prevState.homeTeam.shortName}!`
         });
       }
     } else if (false && nextMinute >= 52 && ((compositeDiff <= -2.5 || squadDiff <= -3.0) && awayScore <= homeScore) && subRoll < 0.065) {
