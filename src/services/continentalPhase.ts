@@ -495,19 +495,33 @@ export const COMP_PRESTIGE: Record<string, number> = {
 };
 export const prestigeOf = (compId: string): number => COMP_PRESTIGE[compId] ?? 0.6;
 
-/** Reward schedule in "months of the club's wages" (before prestige). Shown to the user before the tournament. */
-export const REWARD_SCHEDULE = { participation: 0.25, perRoundWin: 0.18, runnerUp: 0.7, champion: 2.0 };
+/**
+ * Prize ladder by the STAGE the user reaches, in "months of the club's wages" (before prestige).
+ * Entering the tournament pays `participation`; every later round the user reaches adds its own amount.
+ */
+export const REWARD_SCHEDULE = {
+  participation: 0.25,
+  stage: { R32: 0.25, R16: 0.45, QF: 0.8, SF: 1.3, F: 2.0 } as Record<ContRoundKey, number>,
+  champion: 2.0,
+};
+
+const STAGE_NAME: Record<ContRoundKey, string> = {
+  R32: 'دور الـ32', R16: 'دور الـ16', QF: 'ربع النهائي', SF: 'نصف النهائي', F: 'النهائي',
+};
 
 export interface PayoutLine { label: string; months: number }
+
+/** Rounds the user actually played in, in order. */
+function roundsReached(state: ContinentalPhaseState): ContRoundKey[] {
+  return ROUND_ORDER.filter(r => state.ties.some(t => t.round === r && (t.a === state.userId || t.b === state.userId)));
+}
 
 export function getPayoutLines(state: ContinentalPhaseState): PayoutLine[] {
   const pr = prestigeOf(state.compId);
   const champion = state.championId === state.userId;
-  const finalTie = state.ties.find(t => t.round === 'F');
-  const runnerUp = !champion && !!finalTie && (finalTie.a === state.userId || finalTie.b === state.userId);
+  const reached = roundsReached(state);
   const lines: PayoutLine[] = [{ label: 'مكافأة المشاركة', months: REWARD_SCHEDULE.participation * pr }];
-  if (state.userRoundsWon > 0) lines.push({ label: `مكافأة التأهل (${state.userRoundsWon} ${state.userRoundsWon > 2 ? 'أدوار' : 'دور'})`, months: REWARD_SCHEDULE.perRoundWin * pr * state.userRoundsWon });
-  if (runnerUp) lines.push({ label: 'مكافأة بلوغ النهائي (الوصيف)', months: REWARD_SCHEDULE.runnerUp * pr });
+  reached.slice(1).forEach(r => lines.push({ label: `بلوغ ${STAGE_NAME[r]}`, months: REWARD_SCHEDULE.stage[r] * pr }));
   if (champion) lines.push({ label: '🏆 مكافأة التتويج بالبطولة', months: REWARD_SCHEDULE.champion * pr });
   return lines;
 }

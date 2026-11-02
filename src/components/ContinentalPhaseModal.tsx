@@ -9,6 +9,7 @@ import {
   tieScoreText,
   type ContinentalPhaseState,
   type ContTie,
+  type ContRoundKey,
 } from '../services/continentalPhase';
 import { themeOf } from '../services/continentalThemes';
 
@@ -57,7 +58,9 @@ export default function ContinentalPhaseModal() {
   const pr = prestigeOf(st.compId);
   const floor = Math.round(100000 * pr);
   const money = (months: number) => fmt(Math.max(0, wageBill) * months * 1000 / 1000);
-  const roundKeys = Array.from(new Set(st.ties.map(t => t.round)));
+  const allRounds: ContRoundKey[] = ['R32', 'R16', 'QF', 'SF', 'F'];
+  const entryRound: ContRoundKey = st.ties.length ? st.ties[0].round : st.round;
+  const roundKeys = allRounds.slice(allRounds.indexOf(entryRound));
 
   const nextLegLabel = (() => {
     if (!userTie) return 'المباراة التالية';
@@ -94,12 +97,16 @@ export default function ContinentalPhaseModal() {
 
         {!finished && (
           <div className={`${th.accentSoft} border ${th.accentBorder} rounded-3xl p-4 space-y-1.5`}>
-            <div className={`text-[11px] font-black ${th.accentText}`}>💰 الجوائز المالية</div>
+            <div className={`text-[11px] font-black ${th.accentText}`}>💰 الجوائز المالية حسب الدور اللي توصله</div>
             <div className="text-[11px] text-slate-200 space-y-1">
-              <div className="flex justify-between"><span>مكافأة المشاركة لكل نادٍ</span><span className="font-black">{fmt(Math.max(floor, wageBill * REWARD_SCHEDULE.participation * pr))} ج.م</span></div>
-              <div className="flex justify-between"><span>عن كل دور تتأهل منه</span><span className="font-black">+{money(REWARD_SCHEDULE.perRoundWin * pr)} ج.م</span></div>
-              <div className="flex justify-between"><span>الوصيف</span><span className="font-black">+{money(REWARD_SCHEDULE.runnerUp * pr)} ج.م</span></div>
-              <div className={`flex justify-between ${th.accentText}`}><span>🏆 البطل</span><span className="font-black">+{money(REWARD_SCHEDULE.champion * pr)} ج.م</span></div>
+              <div className="flex justify-between"><span>الدخول والمشاركة</span><span className="font-black">{fmt(Math.max(floor, wageBill * REWARD_SCHEDULE.participation * pr))} ج.م</span></div>
+              {roundKeys.slice(1).map(rk => (
+                <div key={rk} className={`flex justify-between ${rk === st.round ? th.accentText : ''}`}>
+                  <span>بلوغ {ROUND_LABEL[rk]}{rk === st.round ? ' ← أنت هنا' : ''}</span>
+                  <span className="font-black">+{money(REWARD_SCHEDULE.stage[rk] * pr)} ج.م</span>
+                </div>
+              ))}
+              <div className={`flex justify-between ${th.accentText}`}><span>🏆 التتويج بالبطولة</span><span className="font-black">+{money(REWARD_SCHEDULE.champion * pr)} ج.م</span></div>
             </div>
             <p className="text-[10px] text-slate-400">+ مكافأة شخصية لك كمدرب (5% إلى 15% من جائزة النادي) وخبرة وسمعة تزيد مع أهمية البطولة.</p>
           </div>
