@@ -1,4 +1,5 @@
 import { App as CapacitorApp } from '@capacitor/app';
+import { getLiveTopFlightPool, getLiveTopFlightPoolsByContinent } from '../services/worldClubPools';
 import {
   ContinentalPhaseState,
   CONTINENTAL_PHASE_ENABLED,
@@ -1222,7 +1223,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         seasonNumber: summary.seasonNumber,
         info,
         userClub: club,
-        pool: getContinentClubPool(continent as any),
+        pool: getLiveTopFlightPool(String(continent)),
       });
       if (!st) return false;
       setContinentalPhase(st);
@@ -7838,7 +7839,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       if (!pending) { playContinentalStep(); return; }
 
       const continent = resolveClubContinent(userClub, activeLeague);
-      const poolClubs: Club[] = (() => { try { return getContinentClubPool(continent as any) as Club[]; } catch { return []; } })();
+      const poolClubs: Club[] = (() => { try { return getLiveTopFlightPool(String(continent)) as Club[]; } catch { return []; } })();
       const resolveClub = (id: string): Club | undefined =>
         id === userClub.id ? userClub : (teams.find(t => t && t.id === id) || poolClubs.find(c => c && c.id === id) || findClubInWorld(id));
       const homeBase = resolveClub(pending.homeId);
@@ -7955,13 +7956,13 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     // Champion / finalist of a champions competition continues to the Club World Cup (then the season ends).
     try {
       if (qualifiesForWorldCup(st) && userClub) {
-        const worldPool: Club[] = [];
-        const seenW = new Set<string>();
-        Object.values({ ...GLOBAL_LEAGUES, ...getCustomLeagues() }).forEach(l => {
-          if (!l || l.tier !== 1) return;
-          (l.teams || []).forEach(c => { if (c && c.id && !seenW.has(c.id)) { seenW.add(c.id); worldPool.push(c); } });
+        const cwc = createWorldCupPhase({
+          seasonNumber: st.seasonNumber,
+          userClub,
+          userCompId: st.compId,
+          userContinent: st.continent || String(resolveClubContinent(userClub, activeLeague) || ''),
+          poolsByContinent: getLiveTopFlightPoolsByContinent(),
         });
-        const cwc = createWorldCupPhase({ seasonNumber: st.seasonNumber, userClub, pool: worldPool });
         if (cwc) {
           setContinentalPhase(cwc);
           return;

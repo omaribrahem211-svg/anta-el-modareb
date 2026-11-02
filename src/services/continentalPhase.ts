@@ -14,6 +14,7 @@ export interface ContTeam {
   rating: number;
   country?: string;
   isUser?: boolean;
+  route?: string; // how the club qualified (used by the Club World Cup)
 }
 
 export interface ContLeg {
@@ -52,6 +53,7 @@ export interface ContinentalPhaseState {
   userRoundsWon: number;
   log: string[];
   singleLeg?: boolean; // Club World Cup: every tie is a single match
+  continent?: string;  // continent of the competition (AFRICA / EUROPE / ASIA)
 }
 
 export const ROUND_LABEL: Record<ContRoundKey, string> = {
@@ -236,6 +238,7 @@ export function createContinentalPhase(params: {
     compId: info.compId,
     compName: info.compName,
     isTopTier: info.isTopTier,
+    continent: info.continent,
     userId: userClub.id,
     teams,
     ties: pairTies(teams.map(t => t.id), startRound, rnd),
@@ -250,33 +253,69 @@ export function createContinentalPhase(params: {
 }
 
 /**
- * Club World Cup: 32 clubs from the whole world, single-match knockout. Opponents come from the strongest clubs on
- * earth so it is deliberately hard. Only called for clubs that won / reached the final of a champions competition.
+ * Club World Cup qualification slots (fixed, transparent, 32 in total). The user's club takes one slot of the
+ * champions competition he won / reached the final of.
+ */
+export const WORLD_CUP_SLOTS: { continent: string; compId: string; name: string; slots: number; topTier: boolean }[] = [
+  { continent: 'AFRICA', compId: 'ccl', name: 'دوري أبطال أفريقيا', slots: 4, topTier: true },
+  { continent: 'AFRICA', compId: 'ccc', name: 'الكونفدرالية الأفريقية', slots: 4, topTier: false },
+  { continent: 'EUROPE', compId: 'ucl', name: 'دوري أبطال أوروبا', slots: 6, topTier: true },
+  { continent: 'EUROPE', compId: 'uel', name: 'الدوري الأوروبي', slots: 4, topTier: false },
+  { continent: 'ASIA', compId: 'acl', name: 'دوري أبطال آسيا', slots: 4, topTier: true },
+  { continent: 'ASIA', compId: 'acl2', name: 'دوري أبطال آسيا 2', slots: 2, topTier: false },
+  { continent: 'SOUTH_AMERICA', compId: 'lib', name: 'كوبا ليبرتادوريس', slots: 4, topTier: true },
+  { continent: 'SOUTH_AMERICA', compId: 'sud', name: 'كوبا سودأمريكانا', slots: 4, topTier: false },
+];
+// 4+4+6+4+4+2+4+4 = 32
+
+/**
+ * Club World Cup: 32 TOP-FLIGHT clubs, single-match knockout, filled by the fixed slots above.
+ * `poolsByContinent` must contain top-flight clubs only. Opponents of each competition are drawn from the strongest
+ * clubs of that continent (champions competitions from the very top, second competitions from the next group).
  */
 export function createWorldCupPhase(params: {
   seasonNumber: number;
   userClub: any;
-  pool: any[];
+  userCompId: string;        // champions competition the user qualified through
+  userContinent: string;
+  poolsByContinent: Record<string, any[]>;
   rnd?: () => number;
 }): ContinentalPhaseState | null {
   const rnd = params.rnd || Math.random;
-  const { userClub, pool, seasonNumber } = params;
+  const { userClub, poolsByContinent, seasonNumber, userCompId, userContinent } = params;
   if (!userClub?.id) return null;
-  const seen = new Set<string>();
-  const candidates = (pool || [])
-    .filter(c => {
-      if (!c || !c.id || c.id === userClub.id || seen.has(c.id)) return false;
-      seen.add(c.id);
-      return (c.players || []).length >= 11;
-    })
-    .map(c => ({ c, r: clubRating(c) }))
-    .sort((x, y) => y.r - x.r);
-  if (candidates.length < 31) return null;
-  const field = shuffle(candidates.slice(0, Math.min(candidates.length, 48)), rnd).slice(0, 31);
+
+  const used = new Set<string>([userClub.id]);
   const teams: ContTeam[] = [
-    { id: userClub.id, name: userClub.name || 'فريقك', rating: clubRating(userClub), country: userClub.country, isUser: true },
-    ...field.map(f => ({ id: f.c.id, name: f.c.name, rating: f.r, country: f.c.country })),
+    { id: userClub.id, name: userClub.name || 'فريقك', rating: clubRating(userClub), country: userClub.country, isUser: true,
+      route: WORLD_CUP_SLOTS.find(x => x.compId === userCompId)?.name || 'بطل قاري' },
   ];
+
+  for (const continent of Array.from(new Set(WORLD_CUP_SLOTS.map(x => x.continent)))) {
+    const ranked = (poolsByContinent[continent] || [])
+      .filter(c => c && c.id && (c.players || []).length >= 11 && !(typeof c.division === 'number' && c.division > 1))
+      .map(c => ({ c, r: clubRating(c) }))
+      .sort((x, y) => y.r - x.r);
+    let cursor = 0;
+    for (const slot of WORLD_CUP_SLOTS.filter(x => x.continent === continent)) {
+      const quota = slot.slots - (slot.compId === userCompId && continent === userContinent ? 1 : 0);
+      // window: the next ~2.5x quota strongest not-yet-used clubs, then pick randomly inside it
+      const window: { c: any; r: number }[] = [];
+      let i = cursor;
+      while (i < ranked.length && window.length < Math.ceil(quota * 2.5)) {
+        if (!used.has(ranked[i].c.id)) window.push(ranked[i]);
+        i++;
+      }
+      const picked = shuffle(window, rnd).slice(0, quota);
+      picked.forEach(p => {
+        used.add(p.c.id);
+        teams.push({ id: p.c.id, name: p.c.name, rating: p.r, country: p.c.country, route: slot.name });
+      });
+      cursor = i;
+    }
+  }
+  if (teams.length !== 32) return null;
+
   return {
     version: 1,
     seasonNumber,

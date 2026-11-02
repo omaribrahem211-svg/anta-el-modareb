@@ -83,6 +83,23 @@ export default function ContinentalPhaseModal() {
           </div>
         )}
 
+        {isCwc && (() => {
+          const counts: Record<string, number> = {};
+          st.teams.forEach(t => { const k = (t as any).route; if (k) counts[k] = (counts[k] || 0) + 1; });
+          const entries = Object.entries(counts);
+          if (!entries.length) return null;
+          return (
+            <div className="bg-slate-900 border border-slate-700 rounded-3xl p-4">
+              <div className="text-[11px] text-sky-300 font-bold mb-2">طريقة التأهل ({st.teams.length} نادي من الدوريات الممتازة فقط)</div>
+              <div className="grid grid-cols-2 gap-1.5 text-[11px] text-slate-300">
+                {entries.map(([k, n]) => (
+                  <div key={k} className="flex justify-between bg-slate-950 rounded-lg px-2 py-1"><span>{k}</span><span className="font-black text-white">{n}</span></div>
+                ))}
+              </div>
+            </div>
+          );
+        })()}
+
         {lastTie && lastLeg && (
           <div className="bg-slate-900 border border-amber-500/40 rounded-3xl p-4 space-y-1.5">
             <div className="text-[11px] text-amber-300 font-bold">
