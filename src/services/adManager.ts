@@ -16,7 +16,7 @@ import { AdManagerState, ActiveTrainingBoost, TrainingBoostType } from '../types
 import { AdRewardManager, AdRewardType, AdRewardClaimResult } from './adRewardService';
 
 const ADMOB_STORAGE_KEY = 'modareb_admob_state_v1';
-const BOTTOM_NAV_MARGIN_DP = 58; // Sits above the bottom navigation bar
+const BOTTOM_NAV_MARGIN_DP = 58; // Default; replaced at runtime by the measured bottom-nav height
 
 class AdManagerService {
   private isInitialized = false;
@@ -281,7 +281,7 @@ class AdManagerService {
           adId: bannerAdId,
           adSize: BannerAdSize.BANNER,
           position: BannerAdPosition.BOTTOM_CENTER,
-          margin: BOTTOM_NAV_MARGIN_DP,
+          margin: this.bannerMarginDp,
           isTesting: isTest,
         };
 
@@ -307,6 +307,27 @@ class AdManagerService {
       this.isBannerLoading = false;
       return false;
     }
+  }
+
+  private bannerMarginDp = BOTTOM_NAV_MARGIN_DP;
+
+  /** Measured bottom-nav height (CSS px == dp). Returns true when the margin changed. */
+  public setBannerMargin(dp: number): boolean {
+    const v = Math.max(40, Math.min(160, Math.ceil(dp)));
+    if (v === this.bannerMarginDp) return false;
+    this.bannerMarginDp = v;
+    return true;
+  }
+
+  public getBannerMargin(): number {
+    return this.bannerMarginDp;
+  }
+
+  /** Re-create the native banner so a new margin takes effect. */
+  public async reapplyBannerMargin(): Promise<void> {
+    if (!this.isBannerCreated) return;
+    await this.destroyBanner();
+    await this.ensureBannerActive();
   }
 
   public async showBanner(): Promise<boolean> {
