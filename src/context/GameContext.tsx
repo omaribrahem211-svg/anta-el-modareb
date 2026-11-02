@@ -7714,6 +7714,17 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       } else if (seasonEndSummary?.licenseSettlement) {
         summary.licenseSettlement = seasonEndSummary.licenseSettlement;
       }
+      // Keep the continental prize/trophy when this summary is rebuilt after the tournament ended
+      const contRw = continentalRewardRef.current;
+      if (contRw && contRw.season === summary.seasonNumber && !summary.continentalResultText) {
+        summary.continentalResultText = contRw.text;
+        summary.continentalTrophyAwarded = contRw.trophy;
+        summary.trophiesWonList = contRw.trophy ? [...(summary.trophiesWonList || []), contRw.trophy] : summary.trophiesWonList;
+        summary.prizeMoney = (summary.prizeMoney || 0) + contRw.prize;
+        summary.finalBudget = (summary.finalBudget || 0) + contRw.prize;
+        summary.xpEarned = (summary.xpEarned || 0) + contRw.xp;
+        summary.reputationChange = (summary.reputationChange || 0) + contRw.rep;
+      }
       setSeasonEndSummary(summary);
       if (summaryClub && summary.trophiesWonList && summary.trophiesWonList.length > 0) {
         runWhenIdle(() => {
@@ -7932,6 +7943,24 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const posNow = seasonEndSummary?.finalPosition ?? 3;
     scheduleSeasonEndOffersAndModal(() => generateSeasonJobOffers(mgrNow, clubNow, activeLeague, posNow));
   };
+
+  // Safety net: once the continental tournament is over, the season-end screen MUST show up. If anything went wrong
+  // (an exception while building offers, an interrupted save/reload...) open it directly instead of leaving the game stuck.
+  useEffect(() => {
+    const ph = continentalPhase;
+    if (!ph || ph.status !== 'done' || ph.seasonNumber !== season.seasonNumber) return;
+    if (showSeasonTransitionModal) return;
+    const timer = setTimeout(() => {
+      try {
+        openSeasonModal();
+      } catch (err) {
+        console.warn('[Continental] watchdog could not open the season end screen:', err);
+        setShowSeasonTransitionModal(true);
+      }
+    }, 2200);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [continentalPhase?.status, continentalPhase?.seasonNumber, showSeasonTransitionModal, season.seasonNumber]);
 
   const resignToUnemployed = () => {
     // Resignation is disabled for system stability
