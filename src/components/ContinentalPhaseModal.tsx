@@ -2,18 +2,22 @@ import { useGame } from '../context/GameContext';
 import {
   ROUND_LABEL,
   getContinentalOutcome,
+  getContinentalPayout,
+  prestigeOf,
+  REWARD_SCHEDULE,
   qualifiesForWorldCup,
   tieScoreText,
   type ContinentalPhaseState,
   type ContTie,
 } from '../services/continentalPhase';
+import { themeOf } from '../services/continentalThemes';
 
 function nameOf(st: ContinentalPhaseState, id: string): string {
   return st.teams.find(t => t.id === id)?.name || id;
 }
 
 export default function ContinentalPhaseModal() {
-  const { continentalPhase, season, playContinentalStep, playContinentalLiveMatch, simulateContinentalToEnd, finishContinentalPhase, liveMatch, finishLiveMatchAndAdvance } = useGame() as any;
+  const { userClub, continentalPhase, season, playContinentalStep, playContinentalLiveMatch, simulateContinentalToEnd, finishContinentalPhase, liveMatch, finishLiveMatchAndAdvance } = useGame() as any;
   const st: ContinentalPhaseState | null = continentalPhase;
 
   if (!st || st.status === 'done' || st.seasonNumber !== season?.seasonNumber) return null;
@@ -46,6 +50,14 @@ export default function ContinentalPhaseModal() {
   const outcome = finished ? getContinentalOutcome(st) : null;
   const goesToWorldCup = finished && qualifiesForWorldCup(st);
   const isCwc = st.compId === 'cwc';
+  const th = themeOf(st.compId);
+  const fmt = (n: number) => Math.round(n).toLocaleString('en-US');
+  const wageBill = ((userClub?.players || []) as any[]).reduce((sum, p) => sum + (Number(p?.salary) || 0), 0);
+  const payout = (() => { try { return getContinentalPayout(st, wageBill); } catch { return null; } })();
+  const pr = prestigeOf(st.compId);
+  const floor = Math.round(100000 * pr);
+  const money = (months: number) => fmt(Math.max(0, wageBill) * months * 1000 / 1000);
+  const roundKeys = Array.from(new Set(st.ties.map(t => t.round)));
 
   const nextLegLabel = (() => {
     if (!userTie) return 'المباراة التالية';
@@ -64,13 +76,34 @@ export default function ContinentalPhaseModal() {
   return (
     <div className="fixed inset-0 z-[9500] bg-slate-950 overflow-y-auto" dir="rtl">
       <div className="max-w-md mx-auto p-4 space-y-4 pb-10">
-        <div className="text-center pt-2 space-y-1">
-          <div className="text-4xl">{finished && outcome?.isChampion ? '🏆' : '🌍'}</div>
-          <h1 className="text-lg font-black text-white">{st.compName}</h1>
-          <p className="text-xs text-slate-400">
+        <div className={`${th.hero} rounded-3xl p-5 text-center space-y-1.5 border ${th.accentBorder} relative overflow-hidden`}>
+          <div className="absolute -top-6 -left-4 text-8xl opacity-10 select-none">{th.emoji}</div>
+          <div className="text-5xl">{finished && outcome?.isChampion ? th.trophy : th.emoji}</div>
+          <h1 className="text-xl font-black text-white">{st.compName}</h1>
+          <div className={`text-[11px] font-bold ${th.accentText}`}>{th.tagline}</div>
+          <div className="text-sm tracking-widest text-amber-300">{'★'.repeat(th.stars)}<span className="text-slate-600">{'★'.repeat(5 - th.stars)}</span></div>
+          <p className="text-xs text-slate-300">
             {finished ? 'انتهت مشاركتك في البطولة' : isCwc ? `${ROUND_LABEL[st.round]} • مباراة واحدة • الموسم ${st.seasonNumber}` : `${ROUND_LABEL[st.round]} • الموسم ${st.seasonNumber}`}
           </p>
+          <div className="flex justify-center gap-1 pt-1">
+            {roundKeys.map(rk => (
+              <span key={rk} className={`text-[10px] font-black px-2 py-0.5 rounded-full ${rk === (finished ? outcome?.stageReached : st.round) ? th.chipActive : 'bg-black/30 text-slate-400'}`}>{ROUND_LABEL[rk]}</span>
+            ))}
+          </div>
         </div>
+
+        {!finished && (
+          <div className={`${th.accentSoft} border ${th.accentBorder} rounded-3xl p-4 space-y-1.5`}>
+            <div className={`text-[11px] font-black ${th.accentText}`}>💰 الجوائز المالية</div>
+            <div className="text-[11px] text-slate-200 space-y-1">
+              <div className="flex justify-between"><span>مكافأة المشاركة لكل نادٍ</span><span className="font-black">{fmt(Math.max(floor, wageBill * REWARD_SCHEDULE.participation * pr))} ج.م</span></div>
+              <div className="flex justify-between"><span>عن كل دور تتأهل منه</span><span className="font-black">+{money(REWARD_SCHEDULE.perRoundWin * pr)} ج.م</span></div>
+              <div className="flex justify-between"><span>الوصيف</span><span className="font-black">+{money(REWARD_SCHEDULE.runnerUp * pr)} ج.م</span></div>
+              <div className={`flex justify-between ${th.accentText}`}><span>🏆 البطل</span><span className="font-black">+{money(REWARD_SCHEDULE.champion * pr)} ج.م</span></div>
+            </div>
+            <p className="text-[10px] text-slate-400">+ مكافأة شخصية لك كمدرب (5% إلى 15% من جائزة النادي) وخبرة وسمعة تزيد مع أهمية البطولة.</p>
+          </div>
+        )}
 
         {finished && outcome && (
           <div className={`rounded-3xl p-5 text-center border ${outcome.isChampion ? 'bg-amber-500/10 border-amber-400/50' : 'bg-slate-900 border-slate-700'}`}>
@@ -80,6 +113,20 @@ export default function ContinentalPhaseModal() {
                 ? '🌍 تأهلت إلى كأس العالم للأندية! 32 نادياً من أنحاء العالم بنظام خروج المغلوب.'
                 : 'بعد المتابعة ستظهر نتيجة الموسم وعروض الأندية. المكافآت ستُضاف إلى ميزانية الموسم القادم.'}
             </p>
+          </div>
+        )}
+
+        {finished && payout && (
+          <div className={`${th.accentSoft} border ${th.accentBorder} rounded-3xl p-4 space-y-1.5`}>
+            <div className={`text-[11px] font-black ${th.accentText}`}>💰 مكافآتك من البطولة</div>
+            <div className="text-[11px] text-slate-200 space-y-1">
+              {payout.lines.map(l => (
+                <div key={l.label} className="flex justify-between"><span>{l.label}</span><span className="font-black">{fmt(l.amount)} ج.م</span></div>
+              ))}
+              <div className="flex justify-between border-t border-white/10 pt-1 font-black text-emerald-300"><span>إجمالي مكافأة النادي</span><span>{fmt(payout.clubPrize)} ج.م</span></div>
+              <div className="flex justify-between font-black text-amber-300"><span>مكافأتك الشخصية كمدرب</span><span>{fmt(payout.managerBonus)} ج.م</span></div>
+              <div className="flex justify-between text-slate-300"><span>الخبرة / السمعة</span><span>+{outcome?.xp} XP • +{outcome?.reputation} سمعة</span></div>
+            </div>
           </div>
         )}
 
@@ -154,7 +201,7 @@ export default function ContinentalPhaseModal() {
         <div className="space-y-2 pt-2">
           {!finished ? (
             <>
-              <button onClick={() => (userTie ? playContinentalLiveMatch() : playContinentalStep())} className="w-full bg-emerald-500 text-slate-950 font-black py-3.5 rounded-2xl active:scale-[0.99]">
+              <button onClick={() => (userTie ? playContinentalLiveMatch() : playContinentalStep())} className={`w-full ${th.button} font-black py-3.5 rounded-2xl active:scale-[0.99]`}>
                 {nextLegLabel}
               </button>
               {userTie && (
@@ -167,7 +214,7 @@ export default function ContinentalPhaseModal() {
               </button>
             </>
           ) : (
-            <button onClick={() => finishContinentalPhase()} className="w-full bg-amber-400 text-slate-950 font-black py-3.5 rounded-2xl active:scale-[0.99]">
+            <button onClick={() => finishContinentalPhase()} className={`w-full ${th.button} font-black py-3.5 rounded-2xl active:scale-[0.99]`}>
               {goesToWorldCup ? 'متابعة إلى كأس العالم للأندية' : 'متابعة إلى نهاية الموسم'}
             </button>
           )}

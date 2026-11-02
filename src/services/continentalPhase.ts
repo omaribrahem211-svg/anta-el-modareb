@@ -489,6 +489,53 @@ export interface ContinentalOutcome {
   reputation: number;
 }
 
+/** How much each competition matters (rewards, XP and reputation scale with it). */
+export const COMP_PRESTIGE: Record<string, number> = {
+  cwc: 2.2, ucl: 1.5, ccl: 1.1, acl: 1.1, lib: 1.2, uel: 0.8, ccc: 0.6, acl2: 0.55, sud: 0.7,
+};
+export const prestigeOf = (compId: string): number => COMP_PRESTIGE[compId] ?? 0.6;
+
+/** Reward schedule in "months of the club's wages" (before prestige). Shown to the user before the tournament. */
+export const REWARD_SCHEDULE = { participation: 0.25, perRoundWin: 0.18, runnerUp: 0.7, champion: 2.0 };
+
+export interface PayoutLine { label: string; months: number }
+
+export function getPayoutLines(state: ContinentalPhaseState): PayoutLine[] {
+  const pr = prestigeOf(state.compId);
+  const champion = state.championId === state.userId;
+  const finalTie = state.ties.find(t => t.round === 'F');
+  const runnerUp = !champion && !!finalTie && (finalTie.a === state.userId || finalTie.b === state.userId);
+  const lines: PayoutLine[] = [{ label: 'مكافأة المشاركة', months: REWARD_SCHEDULE.participation * pr }];
+  if (state.userRoundsWon > 0) lines.push({ label: `مكافأة التأهل (${state.userRoundsWon} ${state.userRoundsWon > 2 ? 'أدوار' : 'دور'})`, months: REWARD_SCHEDULE.perRoundWin * pr * state.userRoundsWon });
+  if (runnerUp) lines.push({ label: 'مكافأة بلوغ النهائي (الوصيف)', months: REWARD_SCHEDULE.runnerUp * pr });
+  if (champion) lines.push({ label: '🏆 مكافأة التتويج بالبطولة', months: REWARD_SCHEDULE.champion * pr });
+  return lines;
+}
+
+export interface ContinentalPayout {
+  lines: { label: string; amount: number }[];
+  clubPrize: number;      // paid into the club budget
+  managerBonus: number;   // personal bonus for the coach
+}
+
+/** Cash payout from the club's monthly wage bill. Never below a small floor so tiny clubs still get something. */
+export function getContinentalPayout(state: ContinentalPhaseState, wageBillRaw: number): ContinentalPayout {
+  const wageBill = Number.isFinite(wageBillRaw) ? Math.max(0, wageBillRaw) : 0;
+  const pr = prestigeOf(state.compId);
+  const floor = 100000 * pr;
+  const round1k = (n: number) => Math.round(n / 1000) * 1000;
+  const lines = getPayoutLines(state).map((l, i) => ({
+    label: l.label,
+    amount: round1k(Math.max(i === 0 ? floor : 0, Math.max(0, wageBill) * l.months)),
+  }));
+  const clubPrize = lines.reduce((s, l) => s + l.amount, 0);
+  const champion = state.championId === state.userId;
+  const finalTie = state.ties.find(t => t.round === 'F');
+  const runnerUp = !champion && !!finalTie && (finalTie.a === state.userId || finalTie.b === state.userId);
+  const share = champion ? 0.15 : runnerUp ? 0.1 : 0.05;
+  return { lines, clubPrize, managerBonus: round1k(clubPrize * share) };
+}
+
 export function getContinentalOutcome(state: ContinentalPhaseState): ContinentalOutcome {
   const isChampion = state.championId === state.userId;
   const finalTie = state.ties.find(t => t.round === 'F');
@@ -498,15 +545,10 @@ export function getContinentalOutcome(state: ContinentalPhaseState): Continental
     ? 'F'
     : (ROUND_ORDER.slice().reverse().find(r => state.ties.some(t => t.round === r && (t.a === state.userId || t.b === state.userId))) || 'R16');
 
-  // Prize in "months of the club's wages" so it scales to any league, small on purpose.
-  let months = 0.3 + 0.2 * Math.min(state.userRoundsWon, 1) + 0.3 * Math.max(0, Math.min(state.userRoundsWon, 2) - 1) + 0.4 * Math.max(0, Math.min(state.userRoundsWon, 3) - 2);
-  if (isRunnerUp) months += 0.3;
-  if (isChampion) months += 0.8;
-  if (!state.isTopTier) months *= 0.7;
-  if (state.compId === 'cwc') months *= 1.6;
-
-  const xp = state.userRoundsWon * 40 + (isChampion ? 250 : 0);
-  const reputation = isChampion ? 3 : isRunnerUp ? 1 : 0;
+  const pr = prestigeOf(state.compId);
+  const months = getPayoutLines(state).reduce((s, l) => s + l.months, 0);
+  const xp = Math.round((60 + state.userRoundsWon * 40 + (isRunnerUp ? 80 : 0) + (isChampion ? 250 : 0)) * pr);
+  const reputation = Math.round((state.userRoundsWon * 0.4 + (isRunnerUp ? 1.5 : 0) + (isChampion ? 3 : 0)) * pr);
 
   let resultText: string;
   if (isChampion) resultText = `🏆 بطل ${state.compName}!`;

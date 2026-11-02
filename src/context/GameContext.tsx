@@ -13,6 +13,7 @@ import {
   getContinentalOutcome,
   loadContinentalPhase,
   createWorldCupPhase,
+  getContinentalPayout,
   qualifiesForWorldCup,
 } from '../services/continentalPhase';
 import React, { createContext, useContext, useState, useEffect, useMemo, useCallback, useRef, ReactNode } from 'react';
@@ -7811,7 +7812,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   // ---- Post-league continental competition actions ----
-  const continentalRewardRef = useRef<{ season: number; prize: number; xp: number; rep: number; text: string; trophy?: string; extraTrophies?: string[] } | null>(null);
+  const continentalRewardRef = useRef<{ season: number; prize: number; xp: number; rep: number; text: string; trophy?: string; extraTrophies?: string[]; managerBonus?: number } | null>(null);
 
   const playContinentalStep = () => {
     const st = continentalPhaseRef.current;
@@ -7908,7 +7909,9 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     try {
       const outcome = getContinentalOutcome(st);
       const wages = ((userClub?.players || []) as Player[]).reduce((sum, p) => sum + (p?.salary || 0), 0);
-      const prize = Math.round(Math.max(100000, wages * outcome.prizeMonthsOfWages) / 1000) * 1000;
+      const payout = getContinentalPayout(st, wages);
+      const prize = payout.clubPrize;
+      const mgrBonus = payout.managerBonus;
       const prevRw = continentalRewardRef.current && continentalRewardRef.current.season === st.seasonNumber ? continentalRewardRef.current : null;
       continentalRewardRef.current = prevRw
         ? {
@@ -7916,11 +7919,12 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             prize: prevRw.prize + prize,
             xp: prevRw.xp + outcome.xp,
             rep: prevRw.rep + outcome.reputation,
+            managerBonus: (prevRw.managerBonus || 0) + mgrBonus,
             text: `${prevRw.text} • ${outcome.resultText}`,
             trophy: prevRw.trophy || outcome.trophyName,
             extraTrophies: [...(prevRw.extraTrophies || []), ...(prevRw.trophy && outcome.trophyName ? [outcome.trophyName] : [])],
           }
-        : { season: st.seasonNumber, prize, xp: outcome.xp, rep: outcome.reputation, text: outcome.resultText, trophy: outcome.trophyName };
+        : { season: st.seasonNumber, prize, xp: outcome.xp, rep: outcome.reputation, text: outcome.resultText, trophy: outcome.trophyName, managerBonus: mgrBonus };
       setContinentalPhase({ ...st, status: 'done' });
 
       setSeasonEndSummary(prev => prev ? {
@@ -7946,7 +7950,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         date: `الموسم ${st.seasonNumber}`,
         type: 'news',
         read: false,
-        content: `${outcome.resultText}\nمكافأة المشاركة القارية: +${prize.toLocaleString()} ج.م أُضيفت إلى ميزانية الموسم القادم.`,
+        content: `${outcome.resultText}\n${payout.lines.map(l => `• ${l.label}: ${l.amount.toLocaleString()} ج.م`).join('\n')}\nإجمالي مكافأة النادي: +${prize.toLocaleString()} ج.م (تُضاف لميزانية الموسم القادم).\nمكافأتك الشخصية كمدرب: +${mgrBonus.toLocaleString()} ج.م.`,
       } as InboxMessage, ...(prev || [])].slice(0, 80));
     } catch (err) {
       console.warn('[Continental] finish failed, continuing to the season end anyway:', err);
@@ -8150,6 +8154,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           reputationChange: (summary.reputationChange || 0) + contReward.rep,
         };
       }
+      const contMgrBonus = contReward && contReward.season === summary.seasonNumber ? (contReward.managerBonus || 0) : 0;
       continentalRewardRef.current = null;
       setContinentalPhase(null);
 
@@ -8166,6 +8171,10 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         teams,
         acceptedOffer
       ));
+      if (contMgrBonus > 0) {
+        // Coach's personal continental bonus (paid once, after the rollover so it cannot be overwritten)
+        result.updatedManager = { ...result.updatedManager, personalWallet: (result.updatedManager.personalWallet || 0) + contMgrBonus };
+      }
 
       const overriddenNextTeams = applyWorldOverridesToClubs(result.nextTeams);
       const targetUserClubId = result.updatedManager.currentClubId;
