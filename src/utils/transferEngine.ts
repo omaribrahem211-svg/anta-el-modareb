@@ -1084,6 +1084,87 @@ export function findEligibleBuyerClubs(
   return eligible;
 }
 
+// ----------------------------------------------------------------------------------------------------------------
+// Selling negotiation: the user may ask MORE than the market value, but only as much as a real buyer would pay.
+// Willingness is deterministic per (player, buyer, season) so re-asking cannot "reroll" a lucky price.
+// ----------------------------------------------------------------------------------------------------------------
+function stableUnit(key: string): number {
+  let h = 2166136261;
+  for (let i = 0; i < key.length; i++) {
+    h ^= key.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return ((h >>> 0) % 10000) / 10000; // 0..1
+}
+
+export interface SaleOfferResult {
+  status: 'accepted' | 'counter' | 'rejected';
+  fairValue: number;
+  maxWilling: number;       // highest price any eligible buyer would pay (rounded)
+  fee: number;              // accepted fee, or counter fee when status === 'counter'
+  buyerId?: string;
+  buyerName?: string;
+  message: string;
+  hasBuyers: boolean;
+}
+
+export function evaluatePlayerSaleOffer(
+  player: Player,
+  askFee: number,
+  allTeams: Club[],
+  userClubId: string | undefined,
+  seasonNumber: number
+): SaleOfferResult {
+  const fair = Math.max(25000, Math.round(player.marketValue || 50000));
+  const ask = Math.max(0, Math.round(askFee || 0));
+  const buyers = findEligibleBuyerClubs(player, allTeams, userClubId);
+  if (buyers.length === 0) {
+    return { status: 'rejected', fairValue: fair, maxWilling: 0, fee: 0, hasBuyers: false, message: 'لا توجد أندية مهتمة بشراء اللاعب حالياً.' };
+  }
+
+  const age = player.age || 26;
+  const ovr = player.overallRating || 60;
+  const pot = player.potentialRating || ovr;
+  let base = 1.0;
+  if (age <= 21 && pot - ovr >= 6) base += 0.12;
+  else if (age <= 24 && pot - ovr >= 4) base += 0.07;
+  if (age >= 33) base -= 0.12;
+  else if (age >= 30) base -= 0.05;
+  if ((player.contractYears ?? 3) <= 1) base -= 0.06;       // short contract => buyer pays less
+  if (player.isListedForTransfer) base += 0.02;
+  if ((player.contractYears ?? 3) >= 3 && age <= 28) base += 0.03;
+
+  const scored = buyers.map(b => {
+    const noise = (stableUnit(`${player.id}|${b.club.id}|${seasonNumber}`) - 0.5) * 0.14; // ±7%
+    const need = stableUnit(`need|${player.id}|${b.club.id}`) < 0.3 ? 0.06 : 0;           // some clubs badly need this role
+    const premium = Math.max(0.9, Math.min(1.4, base + noise + need));
+    const willing = Math.max(0, Math.min(b.maxAffordableFee, Math.round(fair * premium)));
+    return { club: b.club, willing };
+  }).sort((a, b) => b.willing - a.willing);
+
+  const best = scored[0];
+  const maxWilling = best.willing;
+
+  if (ask <= maxWilling) {
+    const pool = scored.filter(x => x.willing >= ask);
+    const pick = pool[Math.floor(stableUnit(`pick|${player.id}|${ask}`) * pool.length)] || best;
+    return {
+      status: 'accepted', fairValue: fair, maxWilling, fee: ask, buyerId: pick.club.id, buyerName: pick.club.name, hasBuyers: true,
+      message: `وافق نادي ${pick.club.name} على دفع ${ask.toLocaleString()} ج.م.`,
+    };
+  }
+  if (ask <= maxWilling * 1.25) {
+    return {
+      status: 'counter', fairValue: fair, maxWilling, fee: maxWilling, buyerId: best.club.id, buyerName: best.club.name, hasBuyers: true,
+      message: `نادي ${best.club.name} يرى السعر مرتفعاً، ويعرض ${maxWilling.toLocaleString()} ج.م كحد أقصى.`,
+    };
+  }
+  return {
+    status: 'rejected', fairValue: fair, maxWilling, fee: 0, hasBuyers: true,
+    message: 'السعر المطلوب مبالغ فيه جداً مقارنة بقيمة اللاعب؛ رفضت كل الأندية المهتمة.',
+  };
+}
+
 /**
  * Evaluates whether an AI buyer club accepts or rejects a manager's counter-offer.
  */

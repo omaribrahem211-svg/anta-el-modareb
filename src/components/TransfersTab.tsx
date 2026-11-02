@@ -1,3 +1,4 @@
+import { SellNegotiationModal } from './SellNegotiationModal';
 import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
 import { Player, Club, ActiveNegotiation } from '../types/game';
 import {
@@ -1530,27 +1531,38 @@ export const TransfersTab: React.FC<TransfersTabProps> = ({
     [dbItemByIdMap]
   );
 
+  const [sellNegotiationPlayer, setSellNegotiationPlayer] = useState<Player | null>(null);
   const handleQuickSell = useCallback(
     (player: Player) => {
       if (!player || !player.id) return;
-      const res = sellPlayer(player.id);
-      if (res.success) {
-        setBoughtPlayerIds(prev => {
-          if (!prev.has(player.id)) return prev;
-          const next = new Set(prev);
-          next.delete(player.id);
-          return next;
-        });
-        setTransferCounter(c => c + 1);
-      }
-      setNotification({ text: res.message, type: res.success ? 'success' : 'error' });
+      setSellNegotiationPlayer(player);
+    },
+    []
+  );
+  const handleSellNegotiated = useCallback(
+    (playerId: string, message: string) => {
+      setBoughtPlayerIds(prev => {
+        if (!prev.has(playerId)) return prev;
+        const next = new Set(prev);
+        next.delete(playerId);
+        return next;
+      });
+      setTransferCounter(c => c + 1);
+      setNotification({ text: message, type: 'success' });
       setTimeout(() => setNotification(null), 3500);
     },
-    [sellPlayer]
+    []
   );
 
   return (
     <div className="flex flex-col space-y-3 pb-24" dir="rtl">
+      {sellNegotiationPlayer && (
+        <SellNegotiationModal
+          player={sellNegotiationPlayer}
+          onClose={() => setSellNegotiationPlayer(null)}
+          onSold={msg => handleSellNegotiated(sellNegotiationPlayer.id, msg)}
+        />
+      )}
       {/* ================================================================ */}
       {/* 1. NEW EXECUTIVE SCOUTING & FINANCIAL COMMAND BENTO HEADER       */}
       {/* ================================================================ */}
@@ -2838,7 +2850,7 @@ export const TransfersTab: React.FC<TransfersTabProps> = ({
                         className="bg-red-950/70 hover:bg-red-900/80 border border-red-800/80 text-red-300 px-2.5 py-2 rounded-xl text-xs font-bold flex items-center gap-1 active:scale-95 transition-transform cursor-pointer"
                       >
                         <DollarSign className="w-3.5 h-3.5 text-red-400" />
-                        <span>بيع فوري ({formatCompactCurrency(salePrice)})</span>
+                        <span>تفاوض وبيع ({formatCompactCurrency(salePrice)})</span>
                       </button>
                     </div>
                   </div>

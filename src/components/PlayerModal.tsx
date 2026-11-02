@@ -9,6 +9,7 @@ import { PlayerKit3DModel } from './models/Football3DModels';
 import { PlayerCard } from './PlayerCard';
 import { ClubBadge } from './ClubBadge';
 import { ModalPortal } from './common/ModalPortal';
+import { SellNegotiationModal } from './SellNegotiationModal';
 import {
   X,
   Zap,
@@ -119,14 +120,9 @@ export const PlayerModal: React.FC<PlayerModalProps> = ({ player, onClose, onSta
     setTimeout(() => setNotification(null), 3000);
   };
 
+  const [showSellNegotiation, setShowSellNegotiation] = useState(false);
   const handleSell = () => {
-    const res = sellPlayer(player.id);
-    if (res.success) {
-      onClose();
-    } else {
-      setNotification({ text: res.message, type: 'error' });
-      setTimeout(() => setNotification(null), 3000);
-    }
+    setShowSellNegotiation(true);
   };
 
   const handleHealWithAd = async () => {
@@ -847,7 +843,7 @@ export const PlayerModal: React.FC<PlayerModalProps> = ({ player, onClose, onSta
                 className="bg-red-950/80 hover:bg-red-900/90 border border-red-700 text-red-200 py-2.5 px-2 rounded-xl text-xs font-bold flex flex-col items-center justify-center gap-1 transition-all active:scale-95"
               >
                 <DollarSign className="w-4 h-4 text-red-400" />
-                <span>عرض للبيع</span>
+                <span>تفاوض وبيع</span>
               </button>
             </div>
           </>
@@ -896,6 +892,13 @@ export const PlayerModal: React.FC<PlayerModalProps> = ({ player, onClose, onSta
 
       </div>
       </div>
+      {showSellNegotiation && (
+        <SellNegotiationModal
+          player={player}
+          onClose={() => setShowSellNegotiation(false)}
+          onSold={() => onClose()}
+        />
+      )}
     </ModalPortal>
   );
 };

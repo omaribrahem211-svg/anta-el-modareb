@@ -191,6 +191,8 @@ import {
   evaluateTransferOffer,
   executeAtomicTransfer,
   findEligibleBuyerClubs,
+  evaluatePlayerSaleOffer,
+  type SaleOfferResult,
   generateIncomingAiBids,
   getAllDatabasePlayers,
   resolveClubInfo,
@@ -370,7 +372,8 @@ interface GameContextType {
   counterSellNegotiation: (negotiationId: string, demandedFee: number) => { success: boolean; message: string };
   rejectSellNegotiation: (negotiationId: string) => { success: boolean; message: string };
   clearCompletedNegotiations: () => void;
-  sellPlayer: (playerId: string) => { success: boolean; message: string };
+  sellPlayer: (playerId: string, opts?: { fee: number; buyerId?: string }) => { success: boolean; message: string };
+  evaluatePlayerSale: (playerId: string, askFee: number) => SaleOfferResult | null;
   listPlayerForTransfer: (playerId: string, isListed: boolean) => { success: boolean; message: string };
   releasePlayerContract: (playerId: string) => { success: boolean; message: string };
   acceptIncomingBid: (bidId: string) => { success: boolean; message: string };
@@ -5905,7 +5908,13 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     return { success: false, result: negotiation };
   };
 
-  const sellPlayer = (playerId: string): { success: boolean; message: string } => {
+  const evaluatePlayerSale = (playerId: string, askFee: number): SaleOfferResult | null => {
+    const p = userClub?.players?.find(x => x.id === playerId);
+    if (!userClub || !p) return null;
+    return evaluatePlayerSaleOffer(p, askFee, teams, userClub.id, season.seasonNumber);
+  };
+
+  const sellPlayer = (playerId: string, opts?: { fee: number; buyerId?: string }): { success: boolean; message: string } => {
     if (!userClub) {
       return { success: false, message: 'أنت غير مرتبط بأي نادٍ حالياً!' };
     }
@@ -5920,14 +5929,25 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       return { success: false, message: 'لا يمكن بيع اللاعب؛ يجب أن يحتوي الفريق على 14 لاعباً على الأقل!' };
     }
 
-    const saleAmount = Math.max(25000, Math.round(targetPlayer.marketValue || 50000));
+    let saleAmount = Math.max(25000, Math.round(targetPlayer.marketValue || 50000));
 
     // Pick a real AI club so the sold player joins another club and actively plays there
     const eligibleBuyers = findEligibleBuyerClubs(targetPlayer, teams, userClub.id);
     const fallbackAiClubs = teams.filter(t => !t.isUserClub && t.id !== userClub.id);
-    const chosenBuyer = eligibleBuyers.length > 0
+    let chosenBuyer = eligibleBuyers.length > 0
       ? eligibleBuyers[Math.floor(Math.random() * eligibleBuyers.length)].club
       : (fallbackAiClubs.length > 0 ? fallbackAiClubs[Math.floor(Math.random() * fallbackAiClubs.length)] : null);
+
+    // Negotiated sale: the asking price is re-validated here (never trust the UI) against what buyers would really pay
+    if (opts && Number.isFinite(opts.fee)) {
+      const check = evaluatePlayerSaleOffer(targetPlayer, Math.round(opts.fee), teams, userClub.id, season.seasonNumber);
+      if (check.status !== 'accepted' || !check.buyerId) {
+        return { success: false, message: check.message };
+      }
+      saleAmount = check.fee;
+      const negotiatedBuyer = eligibleBuyers.find(b => b.club.id === check.buyerId)?.club;
+      if (negotiatedBuyer) chosenBuyer = negotiatedBuyer;
+    }
 
     if (chosenBuyer) {
       const ensuredBuyerTeams = teams.map(t =>
@@ -11563,6 +11583,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         rejectSellNegotiation,
         clearCompletedNegotiations,
         sellPlayer,
+        evaluatePlayerSale,
         listPlayerForTransfer,
         releasePlayerContract,
         acceptIncomingBid,
