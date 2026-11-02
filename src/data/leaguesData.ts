@@ -393,6 +393,24 @@ export function saveCustomLeagues(leagues: Record<string, LeagueDefinition>): vo
   }
 }
 
+// Batch mode: many roster updates (season rollover touches dozens of leagues) must serialize/persist ONCE,
+// otherwise every call re-serializes the whole world and freezes phones.
+let worldBatchDepth = 0;
+let worldBatchDirty = false;
+
+export function runWorldBatch<T>(fn: () => T): T {
+  worldBatchDepth++;
+  try {
+    return fn();
+  } finally {
+    worldBatchDepth--;
+    if (worldBatchDepth === 0 && worldBatchDirty) {
+      worldBatchDirty = false;
+      saveCustomLeagues(getCustomLeagues());
+    }
+  }
+}
+
 export function updateLeagueRosterInWorld(leagueId: string, updatedTeams: Club[]): void {
   const currentLeagues = getCustomLeagues();
   const targetLeague = currentLeagues[leagueId] || GLOBAL_LEAGUES[leagueId];
@@ -405,6 +423,10 @@ export function updateLeagueRosterInWorld(leagueId: string, updatedTeams: Club[]
 
   modifiedLeagueIds.add(leagueId);
   currentLeagues[leagueId] = updated;
+  if (worldBatchDepth > 0) {
+    worldBatchDirty = true;
+    return;
+  }
   saveCustomLeagues(currentLeagues);
 }
 

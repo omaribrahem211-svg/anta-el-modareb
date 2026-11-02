@@ -24,9 +24,16 @@ export default function ContinentalPhaseModal() {
 
   const nextLegLabel = (() => {
     if (!userTie) return 'المباراة التالية';
-    if (st.round === 'F') return 'العب النهائي';
-    return userTie.legs.length === 0 ? 'العب مباراة الذهاب' : 'العب مباراة الإياب';
+    if (st.round === 'F') return 'حاكِ مباراة النهائي';
+    return userTie.legs.length === 0 ? 'حاكِ مباراة الذهاب' : 'حاكِ مباراة الإياب';
   })();
+
+  // Most recent match of the user (across all rounds) so every simulated leg shows a clear result
+  const userTies = st.ties.filter(t => (t.a === st.userId || t.b === st.userId) && t.legs.length > 0);
+  const lastTie = userTies.length ? userTies[userTies.length - 1] : null;
+  const lastLeg = lastTie ? lastTie.legs[lastTie.legs.length - 1] : null;
+  const lastLegNo = lastTie ? lastTie.legs.length : 0;
+  const tieDecided = !!lastTie?.winnerId;
 
   return (
     <div className="fixed inset-0 z-[9500] bg-slate-950 overflow-y-auto" dir="rtl">
@@ -45,6 +52,25 @@ export default function ContinentalPhaseModal() {
             <p className="text-xs text-slate-400 mt-2">
               بعد المتابعة ستظهر نتيجة الموسم وعروض الأندية. مكافأة المشاركة القارية ستُضاف إلى ميزانية الموسم القادم.
             </p>
+          </div>
+        )}
+
+        {lastTie && lastLeg && (
+          <div className="bg-slate-900 border border-amber-500/40 rounded-3xl p-4 space-y-1.5">
+            <div className="text-[11px] text-amber-300 font-bold">
+              آخر نتيجة لك • {ROUND_LABEL[lastTie.round]}{lastTie.round === 'F' ? '' : lastLegNo === 1 ? ' (الذهاب)' : ' (الإياب)'}
+            </div>
+            <div className="flex items-center justify-between gap-2 text-sm font-black text-white">
+              <span className="flex-1 text-center">{nameOf(st, lastLeg.homeId)}</span>
+              <span className="text-lg font-mono text-amber-300">{lastLeg.homeGoals} - {lastLeg.awayGoals}</span>
+              <span className="flex-1 text-center">{nameOf(st, lastLeg.awayId)}</span>
+            </div>
+            {tieDecided && (
+              <div className={`text-center text-xs font-bold ${lastTie.winnerId === st.userId ? 'text-emerald-300' : 'text-red-300'}`}>
+                {lastTie.winnerId === st.userId ? '✅ تأهلت للدور التالي' : '❌ خرجت من البطولة'} — {tieScoreText(st, lastTie)}
+              </div>
+            )}
+            <p className="text-[10px] text-slate-500 text-center">المباريات القارية بتتحاكى تلقائياً بدون مشاهدة.</p>
           </div>
         )}
 

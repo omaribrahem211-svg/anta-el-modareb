@@ -171,36 +171,11 @@ export function evolveAIClubs(teams: Club[], isUser: (c: Club) => boolean, rng: 
  * (that league is aged by the season rollover itself and then passed to evolveAIClubs).
  */
 export function evolveWorldLeagues(excludeLeagueIds: string[], isUser: (c: Club) => boolean, rng: Rng = Math.random): void {
+  // Player ageing / retirement / youth for the rest of the world is handled by advanceWorldEra (worldTransferEngine);
+  // doing it here as well would age everybody twice per season. This only makes AI clubs invest and managers grow.
   const all = { ...GLOBAL_LEAGUES, ...getCustomLeagues() };
   for (const league of Object.values(all)) {
     if (!league || excludeLeagueIds.includes(league.id) || !Array.isArray(league.teams) || !league.teams.length) continue;
-    const aged = league.teams.map(club => {
-      if (!club || isUser(club)) return club;
-      const idMap = new Map<string, string>();
-      const base = avgTopOvr(club);
-      const players: Player[] = [];
-      for (const p of club.players || []) {
-        if (!p) continue;
-        const prog = progressPlayerOneYear(p, rng);
-        if (shouldRetire(prog, rng)) {
-          const r = makeRegen(prog, club, base, rng);
-          idMap.set(p.id, r.id);
-          players.push(r);
-        } else players.push(prog);
-      }
-      let tactics: any = club.tactics;
-      if (tactics && idMap.size) {
-        const m = (id: string) => idMap.get(id) || id;
-        tactics = {
-          ...tactics,
-          startingPlayerIds: (tactics.startingPlayerIds || []).map(m),
-          benchPlayerIds: (tactics.benchPlayerIds || []).map(m),
-          captainId: tactics.captainId ? m(tactics.captainId) : tactics.captainId,
-          penaltyTakerId: tactics.penaltyTakerId ? m(tactics.penaltyTakerId) : tactics.penaltyTakerId,
-        };
-      }
-      return { ...club, players, tactics, isNewlyPromoted: false } as Club;
-    });
-    updateLeagueRosterInWorld(league.id, evolveAIClubs(aged as Club[], isUser, rng));
+    updateLeagueRosterInWorld(league.id, evolveAIClubs(league.teams, isUser, rng));
   }
 }
