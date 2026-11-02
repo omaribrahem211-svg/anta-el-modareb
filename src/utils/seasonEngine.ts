@@ -2618,7 +2618,7 @@ export function processNewSeasonAdvancement(
   // AI clubs in the user's league strengthen themselves & AI managers develop (user club untouched)
   let updatedLeagueTeams: Club[] = agedLeagueTeams;
   try {
-    updatedLeagueTeams = evolveAIClubs(agedLeagueTeams, c => !!c && c.id === nextUserClub.id);
+    updatedLeagueTeams = evolveAIClubs(agedLeagueTeams, c => !!c && c.id === nextUserClub.id, Math.random, summary.resultStatus === 'champion' ? 1 : 0);
   } catch (e) {
     console.warn('[WorldEvolution] active league evolve failed', e);
   }

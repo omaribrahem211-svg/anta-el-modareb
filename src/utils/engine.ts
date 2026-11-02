@@ -67,6 +67,8 @@ export interface LiveSimulationState {
   speed: 1 | 2 | 4;
   substitutionsCount: number;
   userTacticsSnapshot?: TeamTactics;
+  homeDayForm?: number; // hidden per-match form (≈0.82–1.18): even dominant sides have off days
+  awayDayForm?: number;
   userClubId?: string;
   
   // Tactical live engine tracking
@@ -123,8 +125,9 @@ export function calculateManagerRatingFromProfile(mgr: any, fallbackReputation: 
     const repBaseline = Math.max(52, Math.min(82, Math.round(42 + (fallbackReputation * 0.38))));
     const rawMgrRating = typeof mgr.rating === 'number' && mgr.rating > 0 ? mgr.rating : baseRating;
     // Blend AI manager rating with club reputation and cap it so weak clubs never get elite coaching buffs
-    const blendedAiRating = Math.round((rawMgrRating * 0.45) + (repBaseline * 0.55));
-    return Math.max(52, Math.min(repBaseline + 4, blendedAiRating));
+    // Developed AI managers (see worldEvolution.developManager) matter: mostly their own rating, anchored to club stature
+    const blendedAiRating = Math.round((rawMgrRating * 0.70) + (repBaseline * 0.30));
+    return Math.max(52, Math.min(repBaseline + 9, blendedAiRating));
   }
 
   // User Manager: Full reward for Coaching License, Level, Courses, and Career Trophies/Reputation
@@ -189,7 +192,7 @@ export function calculateTeamStrength(
 
   if (!isUserTeam) {
     // Strictly cap AI manager rating relative to its actual squad quality so a weak team cannot get hidden manager boosts
-    mgrRating = Math.min(mgrRating, Math.round(prelimSquadAvg + 3));
+    mgrRating = Math.min(mgrRating, Math.round(prelimSquadAvg + 8));
   }
 
   if (!team || !team.players || team.players.length === 0) {
@@ -273,7 +276,7 @@ export function calculateTeamStrength(
   const completenessFactor = startingPlayers.length >= 11 ? 1.0 : Math.max(0.65, startingPlayers.length / 11);
 
   // Tactical Manager & Coaching License Influence Factor
-  let managerBoost = (mgrRating - 62) * 0.50;
+  let managerBoost = (mgrRating - 62) * 0.22;
   const staffBonuses = getClubStaffBonuses(team);
   if (staffBonuses.tacticalSynergyBonus > 0) {
     managerBoost += staffBonuses.tacticalSynergyBonus * 30; // Technical staff tactical bonus
@@ -1034,6 +1037,8 @@ export function createInitialLiveMatchState(
     speed: 1,
     substitutionsCount: 0,
     userTacticsSnapshot: userTactics,
+    homeDayForm: 1 + (Math.random() + Math.random() - 1) * 0.30,
+    awayDayForm: 1 + (Math.random() + Math.random() - 1) * 0.30,
     homeLineup: defaultHomeIds,
     awayLineup: defaultAwayIds,
     homeTactics: defaultHomeTactics,
@@ -1727,16 +1732,20 @@ export function simulateMatchStep(
   const effAwayDef = awayStrength.defense * matchup.awayDefenseMod * awaySynergy.defenseMod * awayPhysMod * awayCountFactor;
 
   // Authoritative Composite Power Priority: Total Player Strength + Manager Strength + Coaching License
-  const squadDiff = homeStrength.squadStrength - awayStrength.squadStrength;
-  const managerDiff = homeStrength.managerRating - awayStrength.managerRating;
-  const overallDiff = homeStrength.overall - awayStrength.overall;
+  // LIVE_DIFF_DAMP: the live engine stacks many strength-dependent layers (possession, attack prob, shot quality,
+  // on-target, conversion). Damping the raw gaps keeps live results consistent with the quick simulator, so
+  // a strong user team wins often but still drops points (realistic, no invincible seasons).
+  const LIVE_DIFF_DAMP = 0.3;
+  const squadDiff = (homeStrength.squadStrength - awayStrength.squadStrength) * LIVE_DIFF_DAMP;
+  const managerDiff = (homeStrength.managerRating - awayStrength.managerRating) * LIVE_DIFF_DAMP;
+  const overallDiff = (homeStrength.overall - awayStrength.overall) * LIVE_DIFF_DAMP;
   // Bounded so a huge rating gap makes the favourite clearly better but never makes the underdog's goals impossible
   const compositeDiff = Math.max(-8, Math.min(8, (squadDiff * 0.50) + (overallDiff * 0.30) + (managerDiff * 0.25)));
 
   const rawQualityAdv = (overallDiff * 0.022) + (squadDiff * 0.018) + (managerDiff * 0.012);
-  const qualityAdvantage = Math.max(-0.5, Math.min(0.5, rawQualityAdv));
-  const homeQualityMod = Math.max(0.38, Math.min(1.72, 1.0 + qualityAdvantage));
-  const awayQualityMod = Math.max(0.38, Math.min(1.72, 1.0 - qualityAdvantage));
+  const qualityAdvantage = Math.max(-0.3, Math.min(0.3, rawQualityAdv));
+  const homeQualityMod = Math.max(0.6, Math.min(1.45, 1.0 + qualityAdvantage));
+  const awayQualityMod = Math.max(0.6, Math.min(1.45, 1.0 - qualityAdvantage));
 
   // Dynamic Possession for this minute (strongly reflects quality gap and tactical control)
   const weightedHomeMid = effHomeMid * Math.sqrt(homeQualityMod);
@@ -1814,8 +1823,8 @@ export function simulateMatchStep(
   else if (scoreDiff === -1) awayLeadMod = 0.9;
   else if (scoreDiff > 0) awayLeadMod = 1.12;
 
-  let homeAttackProb = (weightedHomeMid / totalMid) * 0.34 * homeLeadMod * homeQualityMod * homeTeamFatigueMod * crowdAdvantage.homeAttackBonus;
-  let awayAttackProb = (weightedAwayMid / totalMid) * 0.31 * awayLeadMod * awayQualityMod * awayTeamFatigueMod;
+  let homeAttackProb = (weightedHomeMid / totalMid) * 0.43 * homeLeadMod * homeQualityMod * homeTeamFatigueMod * crowdAdvantage.homeAttackBonus;
+  let awayAttackProb = (weightedAwayMid / totalMid) * 0.40 * awayLeadMod * awayQualityMod * awayTeamFatigueMod;
 
   const awayLowBlock = isAwayParked || currentAwayTactics.mentality === 'defensive' || currentAwayTactics.defensiveLine === 'low';
   const homeLowBlock = isHomeParked || currentHomeTactics.mentality === 'defensive' || currentHomeTactics.defensiveLine === 'low';
@@ -1823,8 +1832,10 @@ export function simulateMatchStep(
   if (awayLowBlock) homeAttackProb *= compositeDiff >= 2.5 ? 0.96 : 0.90;
   if (homeLowBlock) awayAttackProb *= compositeDiff <= -2.5 ? 0.96 : 0.90;
 
-  homeAttackProb = Math.min(0.46, Math.max(0.012, homeAttackProb));
-  awayAttackProb = Math.min(0.44, Math.max(0.012, awayAttackProb));
+  homeAttackProb *= (prevState.homeDayForm ?? 1);
+  awayAttackProb *= (prevState.awayDayForm ?? 1);
+  homeAttackProb = Math.min(0.56, Math.max(0.07, homeAttackProb));
+  awayAttackProb = Math.min(0.54, Math.max(0.07, awayAttackProb));
 
   const roll = Math.random();
 
@@ -1886,7 +1897,7 @@ export function simulateMatchStep(
           if (scoreDiff >= 3) goalProb *= 0.38;
           else if (scoreDiff === 2) goalProb *= 0.65;
 
-          goalProb = Math.max(0.01, Math.min(0.55, goalProb));
+          goalProb = Math.max(0.09, Math.min(0.55, goalProb));
 
           if (Math.random() < goalProb) {
             homeScore++;
@@ -1986,7 +1997,7 @@ export function simulateMatchStep(
           if (scoreDiff <= -3) goalProb *= 0.38;
           else if (scoreDiff === -2) goalProb *= 0.65;
 
-          goalProb = Math.max(0.01, Math.min(0.55, goalProb));
+          goalProb = Math.max(0.09, Math.min(0.55, goalProb));
 
           if (Math.random() < goalProb) {
             awayScore++;
@@ -2412,6 +2423,8 @@ export function simulateMatchStep(
     substitutionsCount: userSubsCount,
     autoSubsEnabled: prevState.autoSubsEnabled ?? true,
     userClubId: prevState.userClubId,
+    homeDayForm: prevState.homeDayForm,
+    awayDayForm: prevState.awayDayForm,
   };
 }
 

@@ -97,7 +97,7 @@ function makeRegen(old: Player, club: Club, clubBase: number, rng: Rng): Player 
 }
 
 /** Club "invests": upgrades its weakest regulars, more if it is below what its reputation/budget deserves. */
-export function strengthenClub(club: Club, leagueMeanOvr: number, leagueMeanRep: number, rng: Rng): Club {
+export function strengthenClub(club: Club, leagueMeanOvr: number, leagueMeanRep: number, rng: Rng, pressure = 0, rank01 = 0.5): Club {
   const players = (club.players || []).filter(Boolean);
   if (players.length < 12) return club;
   const target = leagueMeanOvr + ((club.reputation || leagueMeanRep) - leagueMeanRep) * 0.22;
@@ -106,7 +106,8 @@ export function strengthenClub(club: Club, leagueMeanOvr: number, leagueMeanRep:
   let n = budget > 30_000_000 ? 2 : 1;
   if ((club as any).isNewlyPromoted) n += 1;
   if (gap > 2) n += 1;
-  if (gap < -1) n = 0;              // over-achievers do not keep inflating
+  if (gap < -1 && !(pressure > 0 && rank01 < 0.5)) n = 0;
+  if (pressure > 0 && rank01 < 0.5) n += 1;      // rivals respond to a dominant champion              // over-achievers do not keep inflating
   if (n <= 0) return club;
 
   const sorted = [...players].sort((a, b) => ovrOf(b) - ovrOf(a)).slice(0, 15);
@@ -115,7 +116,7 @@ export function strengthenClub(club: Club, leagueMeanOvr: number, leagueMeanRep:
   const ids = new Map<string, Player>();
   for (const p of picks) {
     const bump = 1 + Math.floor(rng() * 2);                              // +1..+2 (new signing / promoted youngster)
-    const cap = Math.min(94, Math.round(target + 3));
+    const cap = Math.min(94, Math.round(target + 3 + (pressure > 0 && rank01 < 0.5 ? 3 : 0)));
     const next = Math.min(cap, ovrOf(p) + bump);
     const actual = next - ovrOf(p);
     if (actual <= 0) continue;
@@ -148,7 +149,7 @@ export function developManager(club: Club, strengthRank01: number, rng: Rng): Cl
 }
 
 /** Strengthen clubs + develop managers for a list of AI clubs (user club is never touched). */
-export function evolveAIClubs(teams: Club[], isUser: (c: Club) => boolean, rng: Rng = Math.random): Club[] {
+export function evolveAIClubs(teams: Club[], isUser: (c: Club) => boolean, rng: Rng = Math.random, pressure = 0): Club[] {
   const ai = teams.filter(t => !isUser(t));
   if (!ai.length) return teams;
   const meanOvr = ai.reduce((s, c) => s + avgTopOvr(c), 0) / ai.length;
@@ -157,7 +158,7 @@ export function evolveAIClubs(teams: Club[], isUser: (c: Club) => boolean, rng: 
   const rankOf = new Map(ranked.map((c, i) => [c.id, ranked.length > 1 ? i / (ranked.length - 1) : 0.5]));
   return teams.map(c => {
     if (isUser(c)) return c;
-    let x = strengthenClub(c, meanOvr, meanRep, rng);
+    let x = strengthenClub(c, meanOvr, meanRep, rng, pressure, rankOf.get(c.id) ?? 0.5);
     x = developManager(x, rankOf.get(c.id) ?? 0.5, rng);
     // reputation drifts toward real strength
     const drift = Math.round(((meanRep + (avgTopOvr(x) - meanOvr) * 1.2) - (x.reputation || meanRep)) * 0.15);
