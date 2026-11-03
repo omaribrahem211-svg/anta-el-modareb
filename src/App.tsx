@@ -4,6 +4,7 @@ import { App as CapApp } from '@capacitor/app';
 import ForcedUpdateGate from './components/ForcedUpdateGate';
 import SeasonEventModal from './components/SeasonEventModal';
 import ContinentalPhaseModal from './components/ContinentalPhaseModal';
+import { SeasonSafeBoundary } from './components/SeasonSafeBoundary';
 import { LanguageProvider } from './utils/i18n';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { GameProvider, useGame } from './context/GameContext';
@@ -373,7 +374,7 @@ function GameApp() {
       )}
 
       {/* Multi-Season Career Transition Modal */}
-      <SeasonTransitionModal />
+      <SeasonModalSafe />
 
       {/* Daily Simulation Summary Modal */}
       <DaySummaryModal
@@ -417,6 +418,28 @@ function GameApp() {
   );
 }
 
+function SeasonModalSafe() {
+  const { startNextSeason } = useGame() as any;
+  return (
+    <SeasonSafeBoundary name="SeasonTransition" onRecover={() => startNextSeason?.()} recoverLabel="ابدأ الموسم الجديد">
+      <SeasonTransitionModal />
+    </SeasonSafeBoundary>
+  );
+}
+
+function ContinentalSafe() {
+  const { finishContinentalPhase, continentalPhase } = useGame() as any;
+  return (
+    <SeasonSafeBoundary
+      name="Continental"
+      onRecover={() => { try { if (continentalPhase?.status === 'finished') finishContinentalPhase?.(); } catch (_) {} }}
+      recoverLabel="متابعة"
+    >
+      <ContinentalPhaseModal />
+    </SeasonSafeBoundary>
+  );
+}
+
 export default function App() {
   return (
     <LanguageProvider>
@@ -424,8 +447,8 @@ export default function App() {
       <AuthProvider>
         <GameProvider>
           <GameApp />
-          <SeasonEventModal />
-          <ContinentalPhaseModal />
+          <SeasonSafeBoundary name="SeasonEvent"><SeasonEventModal /></SeasonSafeBoundary>
+          <ContinentalSafe />
         </GameProvider>
       </AuthProvider>
     </LanguageProvider>

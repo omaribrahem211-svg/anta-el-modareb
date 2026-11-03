@@ -1,5 +1,6 @@
 import { App as CapacitorApp } from '@capacitor/app';
 import { getLiveTopFlightPool, getLiveTopFlightPoolsByContinent } from '../services/worldClubPools';
+import { healStaleLeagueFixtures } from '../utils/leagueHeal';
 import {
   ContinentalPhaseState,
   CONTINENTAL_PHASE_ENABLED,
@@ -1854,6 +1855,45 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   }, [season.status, allLeagueFixturesPlayed, leagueFixtures.length, cupCompleted, continentalCompleted, userHasUnplayedMatches]);
   const unreadMessagesCount = inbox.filter(m => !m.read).length;
 
+  // Fixture watchdog: repairs saves/seasons that would otherwise freeze ("stuck at round N", season never ends).
+  //  - league fixtures that can never be played (a club against itself, or a club that is not in the league any more)
+  //  - leftover unplayed non-league fixtures of the user after every league match was played
+  const fixtureRepairKeyRef = useRef<string>('');
+  useEffect(() => {
+    try {
+      if (liveMatch || isSimulationRunning || !Array.isArray(fixtures) || fixtures.length === 0 || !Array.isArray(teams) || teams.length === 0) return;
+      const key = `${season?.seasonNumber}_${fixtures.length}_${fixtures.filter(f => f && !f.isPlayed).length}_${currentRound}`;
+      if (fixtureRepairKeyRef.current === key) return;
+      fixtureRepairKeyRef.current = key;
+
+      const teamIds = new Set(teams.filter(Boolean).map(t => t.id));
+      const isLeagueFix = (f: Fixture) => normalizeCompetitionType(f.competitionType || f.tournamentId) === 'LEAGUE';
+      const broken = (f: Fixture) =>
+        !!f && !f.isPlayed && isLeagueFix(f) &&
+        (f.homeTeamId === f.awayTeamId ||
+          (!teamIds.has(f.homeTeamId) && !findClubInWorld(f.homeTeamId)) ||
+          (!teamIds.has(f.awayTeamId) && !findClubInWorld(f.awayTeamId)));
+      let repaired = fixtures;
+      const brokenCount = fixtures.filter(broken).length;
+      if (brokenCount > 0 && teamIds.size >= 4) {
+        console.warn('[FixtureWatchdog] removing unplayable league fixtures:', brokenCount);
+        repaired = repaired.filter(f => !broken(f));
+      }
+      const leagueLeft = repaired.some(f => f && !f.isPlayed && isLeagueFix(f));
+      if (!leagueLeft && userClub) {
+        const orphan = (f: Fixture) => !!f && !f.isPlayed && !isLeagueFix(f) && (f.homeTeamId === userClub.id || f.awayTeamId === userClub.id)
+          && !String(f.id || '').startsWith('cont_');
+        if (repaired.some(orphan)) {
+          console.warn('[FixtureWatchdog] closing leftover non-league fixtures of the user');
+          repaired = repaired.map(f => (orphan(f) ? { ...f, isPlayed: true, homeScore: f.homeScore ?? 0, awayScore: f.awayScore ?? 0, events: [] } as Fixture : f));
+        }
+      }
+      if (repaired !== fixtures) setFixtures(repaired);
+    } catch (e) {
+      console.warn('[FixtureWatchdog] failed', e);
+    }
+  }, [fixtures, teams, liveMatch, isSimulationRunning, season?.seasonNumber, currentRound, userClub?.id]);
+
   // Warm the season-snapshot cache so "restart season" can read it synchronously after an app reload
   useEffect(() => {
     gameStateRepository.loadSeasonSnapshot(season?.seasonNumber || 1).catch(() => {});
@@ -3179,13 +3219,23 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
 
     // 6. Initialize fresh live match simulation state and start playing immediately
-    const initialSimulationState = createInitialLiveMatchState(
-      targetFixture,
-      homeTeam,
-      awayTeam,
-      currentUserTactics,
-      userClub?.id
-    );
+    let initialSimulationState: LiveSimulationState;
+    try {
+      initialSimulationState = createInitialLiveMatchState(
+        targetFixture,
+        homeTeam,
+        awayTeam,
+        currentUserTactics,
+        userClub?.id
+      );
+    } catch (liveErr) {
+      // The match screen could not be built (bad squad data...). Never leave the user stuck: simulate this match.
+      console.error('[startLiveMatch] could not start live match, simulating instead:', liveErr);
+      forceAutoSimUserRef.current = targetFixture.id;
+      setLiveMatch(null);
+      void instantSimulateCurrentRound({ advanceDate: false, forcePlayUserMatch: true });
+      return;
+    }
     initialSimulationState.isPlaying = true;
 
     completedMatchFixtureIdRef.current = null;
@@ -3847,6 +3897,24 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       console.log('[DIAG] CPU_SIMULATION_COMPLETED');
     } else {
       console.log('[DIAG] CPU_SIMULATION_SKIPPED [TEST_A]');
+    }
+
+    // Self-heal: CPU fixtures of this/earlier rounds that failed to simulate must not freeze the season
+    try {
+      const heal = healStaleLeagueFixtures({
+        fixtures: updatedFixtures,
+        standings: updatedStandings,
+        teams,
+        upToRound: currentRound,
+        protectUserId: userClub?.id,
+      });
+      if (heal.healed > 0) {
+        console.warn('[LeagueHeal] resolved stuck fixtures after live match:', heal.healed);
+        updatedFixtures = heal.fixtures;
+        updatedStandings = heal.standings;
+      }
+    } catch (healErr) {
+      console.warn('[LeagueHeal] failed', healErr);
     }
 
     // Advance domestic league currentRound and align calendar date with next round
@@ -4635,7 +4703,10 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         ((f.date || '').trim() === todayDateRaw || (f.date || '').trim() <= todayDateRaw || (f.round && f.round <= currentRound))
       ).sort((a, b) => String(a.date || '').localeCompare(String(b.date || '')));
 
-      const primaryTodayMatch = todayUserMatches[0];
+      const forcedFixtureId = forceAutoSimUserRef.current;
+      forceAutoSimUserRef.current = null;
+      const forceSimUser = !!forcedFixtureId;
+      const primaryTodayMatch = forceSimUser ? undefined : todayUserMatches[0];
 
       // STRICT RULE: The user MUST play all of their matches and rounds across all competitions!
       // If the user is managing a club and has an unplayed match due today/this round, start the live match instead of silently simulating it!
@@ -4653,9 +4724,10 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         f =>
           f &&
           !f.isPlayed &&
-          !(userClub && !manager.isUnemployed && (f.homeTeamId === userClub.id || f.awayTeamId === userClub.id)) &&
-          normalizeCompetitionType(f.competitionType || f.tournamentId) === 'LEAGUE' &&
-          f.round === currentRound
+          (f.id === forcedFixtureId ||
+            (!(userClub && !manager.isUnemployed && (f.homeTeamId === userClub.id || f.awayTeamId === userClub.id)) &&
+              normalizeCompetitionType(f.competitionType || f.tournamentId) === 'LEAGUE' &&
+              f.round === currentRound))
       );
 
       let updatedFixtures = [...fixtures];
@@ -5244,6 +5316,24 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       }
     } catch (aiCompErr) {
       console.warn('[instantSimulateCurrentRound] Non-fatal AI competitive transfer notice:', aiCompErr);
+    }
+
+    // Self-heal: a CPU fixture that failed to simulate must never freeze the round
+    try {
+      const heal = healStaleLeagueFixtures({
+        fixtures: updatedFixtures,
+        standings: updatedStandings,
+        teams: updatedAllTeams,
+        upToRound: currentRound,
+        protectUserId: userClub && !manager.isUnemployed ? userClub.id : undefined,
+      });
+      if (heal.healed > 0) {
+        console.warn('[LeagueHeal] resolved stuck fixtures:', heal.healed);
+        updatedFixtures = heal.fixtures;
+        updatedStandings = heal.standings;
+      }
+    } catch (healErr) {
+      console.warn('[LeagueHeal] failed', healErr);
     }
 
     const unplayedLeagueInRound = updatedFixtures.some(
@@ -7812,6 +7902,8 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   // ---- Post-league continental competition actions ----
+  const forceAutoSimUserRef = useRef<string | null>(null);
+  const isStartingSeasonRef = useRef<boolean>(false);
   const continentalRewardRef = useRef<{ season: number; prize: number; xp: number; rep: number; text: string; trophy?: string; extraTrophies?: string[]; managerBonus?: number } | null>(null);
 
   const playContinentalStep = () => {
@@ -8122,6 +8214,9 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   const startNextSeason = (chosenOfferId?: string) => {
+    if (isStartingSeasonRef.current) return; // double tap while the new season is being built
+    isStartingSeasonRef.current = true;
+    setTimeout(() => { isStartingSeasonRef.current = false; }, 4000);
     try {
       const summaryClub = userClub || teams.find(t => t.isUserClub) || teams[0];
       // Always rebuild the summary from the FINAL standings: a summary cached earlier (e.g. on the last matchday,
@@ -8411,6 +8506,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       }
     } catch (err) {
       console.error('Error starting next season:', err);
+      try {
       // Failsafe recovery: bump season number, reset round and regenerate fresh fixtures and standings so game never locks
       const safeNextSeasonNum = season.seasonNumber + 1;
       const safeJobOffers = Array.isArray(jobOffers) ? jobOffers : [];
@@ -8418,7 +8514,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         ? safeJobOffers.find(o => o.id === chosenOfferId)
         : safeJobOffers.find(o => o.status === 'accepted');
 
-      const safeNextLeague = acceptedOffer ? getLeagueById(acceptedOffer.leagueId) : activeLeague;
+      const safeNextLeague = (acceptedOffer ? getLeagueById(acceptedOffer.leagueId) : null) || activeLeague;
       let safeTeams = acceptedOffer && Array.isArray(safeNextLeague.teams) && safeNextLeague.teams.length > 0 
         ? [...safeNextLeague.teams] 
         : teams;
@@ -8438,6 +8534,13 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         };
       });
 
+      if (acceptedOffer && !safeTeams.some(t => t.isUserClub)) {
+        // The offered club is not in that league's roster any more (it was promoted / relegated): bring it over.
+        const offered = findClubInWorld(acceptedOffer.clubId);
+        if (offered) {
+          safeTeams = [...safeTeams.filter(t => t.id !== offered.id).slice(0, Math.max(0, safeTeams.length - 1)), { ...offered, isUserClub: true, leagueId: safeNextLeague.id }];
+        }
+      }
       const safeUserClub = safeTeams.find(t => t.isUserClub) || safeTeams[0];
       const safeStandings = generateInitialStandings(safeTeams);
       const safeFixtures = generateMasterSeasonAgenda(safeNextSeasonNum, safeNextLeague, safeTeams, undefined, undefined, safeUserClub);
@@ -8474,6 +8577,15 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       setShowSeasonTransitionModal(false);
       setSeasonEndSummary(null);
       setJobOffers([]);
+      } catch (fatal) {
+        // Last resort: never leave the user on a frozen season-end screen
+        console.error('[startNextSeason] failsafe failed too:', fatal);
+        setLiveMatch(null);
+        setShowSeasonTransitionModal(false);
+        setSeasonEndSummary(null);
+        setJobOffers([]);
+        setContinentalPhase(null);
+      }
     }
   };
 

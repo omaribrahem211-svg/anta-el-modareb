@@ -416,21 +416,21 @@ export const SeasonTransitionModal: React.FC = () => {
                   </div>
                   <div className="flex justify-between items-center text-xs py-1 border-b border-slate-700/40">
                     <span className="text-slate-300">مكافأة ترتيب الدوري:</span>
-                    <span className="font-bold text-emerald-400">+{seasonEndSummary.prizeMoney.toLocaleString()}$</span>
+                    <span className="font-bold text-emerald-400">+{Number(seasonEndSummary.prizeMoney || 0).toLocaleString()}$</span>
                   </div>
                   {(seasonEndSummary.cupPrizeMoney || 0) > 0 && (
                     <div className="flex justify-between items-center text-xs py-1 border-b border-slate-700/40">
                       <span className="text-amber-300 font-semibold">جوائز مسابقة الكأس:</span>
-                      <span className="font-bold text-amber-400">+{seasonEndSummary.cupPrizeMoney.toLocaleString()}$</span>
+                      <span className="font-bold text-amber-400">+{Number(seasonEndSummary.cupPrizeMoney || 0).toLocaleString()}$</span>
                     </div>
                   )}
                   <div className="flex justify-between items-center text-xs py-1 border-b border-slate-700/40">
                     <span className="text-slate-300">عوائد التذاكر والرعاة:</span>
-                    <span className="font-semibold text-slate-200">+{seasonEndSummary.ticketRevenueTotal.toLocaleString()}$</span>
+                    <span className="font-semibold text-slate-200">+{Number(seasonEndSummary.ticketRevenueTotal || 0).toLocaleString()}$</span>
                   </div>
                   <div className="flex justify-between items-center text-sm pt-1">
                     <span className="font-bold text-slate-200">ميزانية النادي الجديدة:</span>
-                    <span className="font-bold text-emerald-400">{seasonEndSummary.finalBudget.toLocaleString()}$</span>
+                    <span className="font-bold text-emerald-400">{Number(seasonEndSummary.finalBudget || 0).toLocaleString()}$</span>
                   </div>
                 </div>
 

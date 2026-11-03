@@ -2130,6 +2130,23 @@ export function processNewSeasonAdvancement(
       try { applyPyramidMovements(); } catch {}
       nextActiveLeague = getLeagueById(nextActiveLeague.id);
     }
+    // The job offer was made BEFORE promotion/relegation moved clubs around: the offered club may now play in another
+    // league. Follow it, otherwise it would end up in two leagues (and an innocent club would be dropped).
+    if (acceptedJobOffer) {
+      try {
+        const wantedId = String(acceptedJobOffer.clubId || '').toLowerCase();
+        const everyLeague = { ...GLOBAL_LEAGUES, ...getCustomLeagues() };
+        const home = Object.values(everyLeague).find(l => l && (l.teams || []).some(t => t && t.id && t.id.toLowerCase() === wantedId));
+        if (home) {
+          nextActiveLeague = home;
+          targetLeagueId = home.id;
+          targetTier = home.tier;
+          currentCountry = home.country || currentCountry;
+        }
+      } catch (e) {
+        console.warn('[Season] could not re-resolve the offered club league', e);
+      }
+    }
     // 2b. Living world: every other league ages, develops, retires + clubs/managers improve.
     try {
       evolveWorldLeagues([nextActiveLeague.id], c => !!c && (c.id === userClub?.id || c.id === acceptedJobOffer?.clubId));
