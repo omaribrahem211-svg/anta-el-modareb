@@ -263,7 +263,8 @@ export function calculatePlayerFairValue(
   const mv = (player && typeof player.marketValue === 'number' && !isNaN(player.marketValue) && player.marketValue > 0) ? player.marketValue : 0;
 
   // Baseline 3-season price: always reflects at least the synced rating benchmark so trained players' price matches their current rating
-  const fairMarketValue = Math.max(25000, mv, syncedValue);
+  // Same figure the sale side uses (marketValue): buying a player back must not cost far more than what he was sold for.
+  const fairMarketValue = Math.max(25000, mv > 0 ? mv : syncedValue);
   const minimumAcceptableFee = fairMarketValue;
 
   // Recommended monthly salary

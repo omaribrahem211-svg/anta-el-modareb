@@ -647,6 +647,7 @@ export const TransfersTab: React.FC<TransfersTabProps> = ({
     activeNegotiations,
     startPlayerNegotiation,
     respondToNegotiationOffer,
+    rebidNegotiation,
     cancelNegotiation,
     listPlayerForTransfer,
     acceptSellNegotiation,
@@ -785,15 +786,15 @@ export const TransfersTab: React.FC<TransfersTabProps> = ({
         let statusType: MarketPlayerItem['statusType'] = 'contract';
 
         if (rawP.isListedForTransfer) {
-          priceMultiplier = 0.85;
+          priceMultiplier = 0.9;
           statusLabel = 'معروض للبيع';
           statusType = 'listed';
         } else if ((rawP.contractYears || 2) <= 1) {
-          priceMultiplier = 0.75;
+          priceMultiplier = 0.85;
           statusLabel = 'عقد ينتهي';
           statusType = 'expiring';
         } else if ((rawP.overallRating || (rawP as any).rating || 65) >= 78) {
-          priceMultiplier = 1.2;
+          priceMultiplier = 1.0;
           statusLabel = 'نجم بارز';
           statusType = 'star';
         }
@@ -1007,15 +1008,15 @@ export const TransfersTab: React.FC<TransfersTabProps> = ({
           let statusType: MarketPlayerItem['statusType'] = 'contract';
 
           if (rawP.isListedForTransfer) {
-            priceMultiplier = 0.85;
+            priceMultiplier = 0.9;
             statusLabel = 'معروض للبيع';
             statusType = 'listed';
           } else if ((rawP.contractYears || 2) <= 1) {
-            priceMultiplier = 0.75;
+            priceMultiplier = 0.85;
             statusLabel = 'عقد ينتهي';
             statusType = 'expiring';
           } else if ((rawP.overallRating || (rawP as any).rating || 65) >= 78) {
-            priceMultiplier = 1.2;
+            priceMultiplier = 1.0;
             statusLabel = 'نجم بارز';
             statusType = 'star';
           }
@@ -2914,7 +2915,7 @@ export const TransfersTab: React.FC<TransfersTabProps> = ({
             sellingClub={negotiatingSellingClub}
             askingPrice={negotiatingAskingPrice}
             userClub={userClub}
-            existingNegotiation={selectedNegotiation}
+            existingNegotiation={(selectedNegotiation && activeNegotiations.find(n => n.id === selectedNegotiation.id)) || selectedNegotiation}
             isOpen={isNegotiationModalOpen}
             onClose={() => {
               setIsNegotiationModalOpen(false);
@@ -2932,6 +2933,17 @@ export const TransfersTab: React.FC<TransfersTabProps> = ({
                 console.error('[TransfersTab] startPlayerNegotiation exception:', err);
                 setNotification({ text: err?.message || 'حدث خطأ أثناء إرسال العرض', type: 'error' });
                 setTimeout(() => setNotification(null), 3500);
+              }
+            }}
+            onRebid={(negId, newFee) => {
+              try {
+                const res = rebidNegotiation(negId, newFee);
+                setNotification({ text: res.message, type: res.success ? 'success' : 'error' });
+                setTimeout(() => setNotification(null), 3500);
+                return res;
+              } catch (err: any) {
+                console.error('[TransfersTab] rebidNegotiation exception:', err);
+                return { success: false, message: err?.message || 'تعذر إرسال العرض الجديد' };
               }
             }}
             onRespondToCounter={(negId, action, extraVal) => {

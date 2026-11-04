@@ -2796,26 +2796,22 @@ export function pickGoalScorer(players: Player[]): Player {
     };
   }
 
-  const fwds = outfield.filter(p => p.positionCategory === 'FWD');
-  const mids = outfield.filter(p => p.positionCategory === 'MID');
-  const defs = outfield.filter(p => p.positionCategory === 'DEF');
-
-  const roll = Math.random();
-  // 75% chance for a Forward if available
-  if (roll < 0.75 && fwds.length > 0) {
-    return fwds[Math.floor(Math.random() * fwds.length)];
+  // Weighted pick: striker > winger > attacking mid >> midfield >> defence, scaled by finishing ability and level,
+  // so goals concentrate on real finishers instead of being spread evenly (or piled on one mid-table winger).
+  const POS_W: Record<string, number> = { ST: 1.0, CF: 1.0, LW: 0.62, RW: 0.62, CAM: 0.5, LM: 0.4, RM: 0.4, CM: 0.2, CDM: 0.07, LB: 0.06, RB: 0.06, CB: 0.1 };
+  const weights = outfield.map(pl => {
+    const base = POS_W[String(pl.position)] ?? (pl.positionCategory === 'FWD' ? 0.7 : pl.positionCategory === 'MID' ? 0.2 : 0.08);
+    const shoot = Number((pl as any).attributes?.shooting ?? (pl as any).overallRating ?? 65) || 65;
+    const ovr = Number((pl as any).overallRating ?? 65) || 65;
+    return Math.max(0.001, base * Math.pow(Math.max(30, shoot) / 70, 2) * Math.pow(Math.max(40, ovr) / 75, 1.5));
+  });
+  const total = weights.reduce((sum, w) => sum + w, 0);
+  let roll = Math.random() * total;
+  for (let i = 0; i < outfield.length; i++) {
+    roll -= weights[i];
+    if (roll <= 0) return outfield[i];
   }
-  // 20% chance for a Midfielder if available
-  if (roll < 0.95 && mids.length > 0) {
-    return mids[Math.floor(Math.random() * mids.length)];
-  }
-  // 5% chance for a Defender if available
-  if (defs.length > 0) {
-    return defs[Math.floor(Math.random() * defs.length)];
-  }
-  if (fwds.length > 0) return fwds[Math.floor(Math.random() * fwds.length)];
-  if (mids.length > 0) return mids[Math.floor(Math.random() * mids.length)];
-  return outfield[Math.floor(Math.random() * outfield.length)];
+  return outfield[outfield.length - 1];
 }
 
 /**

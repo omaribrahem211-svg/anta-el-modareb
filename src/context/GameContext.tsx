@@ -376,6 +376,7 @@ interface GameContextType {
     action: 'accept_counter' | 'raise_salary' | 'complete_now' | 'cancel',
     extraValue?: number
   ) => { success: boolean; message: string };
+  rebidNegotiation: (negotiationId: string, newFee: number) => { success: boolean; message: string };
   cancelNegotiation: (negotiationId: string) => void;
   acceptSellNegotiation: (negotiationId: string) => { success: boolean; message: string };
   counterSellNegotiation: (negotiationId: string, demandedFee: number) => { success: boolean; message: string };
@@ -6086,7 +6087,12 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       });
 
       if (atomicRes.success) {
-        setTeams(atomicRes.updatedTeams);
+        // The transfer fee becomes the player's new market price (and he is no longer "listed"): buying him back
+        // later costs about what he was sold for, never far more (and never far less).
+        const repricedValue = Math.max(25000, Math.round((saleAmount * 1.04) / 1000) * 1000);
+        setTeams(atomicRes.updatedTeams.map(t => (t && t.id === chosenBuyer!.id)
+          ? { ...t, players: (t.players || []).map(p => (p && p.id === playerId) ? { ...p, marketValue: repricedValue, isListedForTransfer: false } : p) }
+          : t));
         if (atomicRes.transferEntry) {
           setTransferHistory(prev => [atomicRes.transferEntry!, ...prev]);
         }
@@ -6102,12 +6108,12 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           date: `الجولة ${currentRound}`,
           type: 'transfer',
           read: false,
-          content: `تم بيع اللاعب ${targetPlayer.name} رسمياً إلى نادي ${chosenBuyer.name} بالسعر الثابت (${saleAmount.toLocaleString()} ج.م) وتم إيداع المبلغ في خزينة النادي وانضم اللاعب لتشكيلة ناديه الجديد.`,
+          content: `تم بيع اللاعب ${targetPlayer.name} رسمياً إلى نادي ${chosenBuyer.name} بالسعر المتفق عليه (${saleAmount.toLocaleString()} ج.م) وتم إيداع المبلغ في خزينة النادي وانضم اللاعب لتشكيلة ناديه الجديد.`,
         };
         setInbox(prev => [sellMsg, ...prev]);
         return {
           success: true,
-          message: `تم بيع ${targetPlayer.name} إلى نادي ${chosenBuyer.name} بالسعر الثابت (${saleAmount.toLocaleString()} ج.م)!`,
+          message: `تم بيع ${targetPlayer.name} إلى نادي ${chosenBuyer.name} بمبلغ ${saleAmount.toLocaleString()} ج.م!`,
         };
       }
     }
@@ -7902,6 +7908,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   // ---- Post-league continental competition actions ----
+  const contWatchdogRef = useRef<{ key: string; tries: number }>({ key: '', tries: 0 });
   const forceAutoSimUserRef = useRef<string | null>(null);
   const isStartingSeasonRef = useRef<boolean>(false);
   const continentalRewardRef = useRef<{ season: number; prize: number; xp: number; rep: number; text: string; trophy?: string; extraTrophies?: string[]; managerBonus?: number } | null>(null);
@@ -8097,7 +8104,11 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const ph = continentalPhase;
     if (!ph || ph.status !== 'done' || ph.seasonNumber !== season.seasonNumber) return;
     if (showSeasonTransitionModal) return;
+    const wdKey = `${ph.seasonNumber}`;
+    if (contWatchdogRef.current.key !== wdKey) contWatchdogRef.current = { key: wdKey, tries: 0 };
+    if (contWatchdogRef.current.tries >= 3) return; // never loop forever re-opening the season screen
     const timer = setTimeout(() => {
+      contWatchdogRef.current.tries += 1;
       try {
         openSeasonModal();
       } catch (err) {
@@ -9839,6 +9850,70 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     } catch (err: any) {
       console.error('[startPlayerNegotiation] Exception caught:', err);
       return { success: false, message: err?.message || 'حدث خطأ أثناء بدء المفاوضات.' };
+    }
+  };
+
+  // The buyer changes his offer at any time (raise to close the deal, or lower to haggle): the selling club judges it again.
+  const rebidNegotiation = (negotiationId: string, newFee: number): { success: boolean; message: string } => {
+    try {
+      const neg = activeNegotiations.find(n => n.id === negotiationId);
+      if (!neg || neg.type !== 'buy') return { success: false, message: 'المفاوضات غير موجودة.' };
+      if (!userClub) return { success: false, message: 'أنت غير مرتبط بنادٍ!' };
+      const fee = Math.max(0, Math.round(Number(newFee) || 0));
+      if (fee <= 0) return { success: false, message: 'اكتب مبلغاً صحيحاً للعرض.' };
+      if (fee > (userClub.budget || 0)) {
+        return { success: false, message: `ميزانية النادي (${(userClub.budget || 0).toLocaleString()} ج.م) لا تكفي لهذا العرض.` };
+      }
+      const fullPlayer = resolveFullPlayerObject(neg, teams, transferMarket);
+      const sellingClub = teams.find(t => t.id === neg.playerClubId) || teams.find(t => !t.isUserClub && (t.players || []).some(p => p && p.id === neg.playerId));
+      const { fairMarketValue, recommendedMonthlyWage } = calculatePlayerFairValue(fullPlayer, sellingClub);
+      const years = Math.min(5, Math.max(1, neg.contractYears || 3));
+      const required = calculateContractDurationTransferFee(fairMarketValue, years, false);
+      const verdict = judgeTransferBid(fee, required, fullPlayer, sellingClub);
+      const requiredWage = Math.max(1500, Number(fullPlayer.salary) || recommendedMonthlyWage || 2500);
+      const dateStr = calendarDate?.rawDateStr || new Date().toISOString().slice(0, 10);
+
+      let stage: ActiveNegotiation['stage'];
+      let demandedFee: number | undefined;
+      let demandedSalary: number | undefined;
+      let message: string;
+      if (verdict.decision === 'accept') {
+        if ((neg.offeredSalary || 0) < Math.round(requiredWage * 0.85)) {
+          stage = 'player_counter';
+          demandedSalary = requiredWage;
+          message = `وافق ${neg.sellingClubName || 'النادي'} على ${fee.toLocaleString()} ج.م، وطلب وكيل اللاعب راتباً شهرياً ${requiredWage.toLocaleString()} ج.م.`;
+        } else {
+          stage = 'player_terms';
+          message = `✅ وافق ${neg.sellingClubName || 'النادي'} على عرضك (${fee.toLocaleString()} ج.م). أتمم التعاقد الآن.`;
+        }
+      } else if (verdict.decision === 'counter') {
+        stage = 'club_counter';
+        demandedFee = verdict.demandedFee;
+        message = `رد ${neg.sellingClubName || 'النادي'}: عرضك (${fee.toLocaleString()} ج.م) غير كافٍ، المطلوب ${verdict.demandedFee.toLocaleString()} ج.م. ${verdict.note}`;
+      } else {
+        stage = 'club_counter';
+        demandedFee = required;
+        message = `رفض ${neg.sellingClubName || 'النادي'} عرضك (${fee.toLocaleString()} ج.م) لأنه بعيد جداً عن القيمة. عدّل العرض؛ السعر المعلن ${required.toLocaleString()} ج.م.`;
+      }
+
+      setActiveNegotiations(prev => prev.map(n => n.id !== negotiationId ? n : {
+        ...n,
+        bidFee: fee,
+        demandedFee,
+        demandedSalary,
+        stage,
+        actionRequired: true,
+        statusMessage: message,
+        history: [
+          ...(n.history || []),
+          { dateStr, message: `عرض جديد منك: ${fee.toLocaleString()} ج.م`, from: 'manager' as const },
+          { dateStr, message, from: stage === 'club_counter' ? 'club' as const : 'player' as const },
+        ],
+      }));
+      return { success: verdict.decision === 'accept', message };
+    } catch (err: any) {
+      console.error('[rebidNegotiation] failed', err);
+      return { success: false, message: err?.message || 'تعذر إرسال العرض الجديد.' };
     }
   };
 
@@ -11877,6 +11952,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         negotiatePlayerTransfer,
         startPlayerNegotiation,
         respondToNegotiationOffer,
+        rebidNegotiation,
         cancelNegotiation,
         acceptSellNegotiation,
         counterSellNegotiation,

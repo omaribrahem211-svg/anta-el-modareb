@@ -36,6 +36,8 @@ interface NegotiationModalProps {
     action: 'accept_counter' | 'raise_salary' | 'complete_now' | 'cancel',
     extraValue?: number
   ) => void;
+  /** Change the offer during an open negotiation (raise or lower it). */
+  onRebid?: (negotiationId: string, newFee: number) => { success: boolean; message: string } | void;
 }
 
 export const NegotiationModal: React.FC<NegotiationModalProps> = ({
@@ -48,6 +50,7 @@ export const NegotiationModal: React.FC<NegotiationModalProps> = ({
   onClose,
   onSubmitProposal,
   onRespondToCounter,
+  onRebid,
 }) => {
   // Safely unwrap player in case a wrapper { player: Player } was passed
   const unwrappedPlayer: Player | null =
@@ -160,6 +163,8 @@ export const NegotiationModal: React.FC<NegotiationModalProps> = ({
 
   // Buyer's own bid: starts at the asking price, can be lowered to haggle (the club may counter or refuse)
   const [offerFee, setOfferFee] = useState<number | null>(null);
+  const [rebidFee, setRebidFee] = useState<number | null>(null);
+  const [rebidNote, setRebidNote] = useState<string>('');
   const bidFee = isFreeAgent ? 0 : offerFee !== null ? Math.max(0, Math.round(offerFee)) : fixedPrice;
 
   useEffect(() => {
@@ -171,6 +176,8 @@ export const NegotiationModal: React.FC<NegotiationModalProps> = ({
       setRole('first_team');
     }
     setOfferFee(null);
+    setRebidFee(null);
+    setRebidNote('');
   }, [targetPlayer?.id, existingNegotiation?.id, isFreeAgent]);
 
   if (!isOpen || (!player && !existingNegotiation) || !targetPlayer) {
@@ -321,6 +328,45 @@ export const NegotiationModal: React.FC<NegotiationModalProps> = ({
                   </span>
                 </div>
                 <p className="text-slate-300 text-xs leading-relaxed">{existingNegotiation.statusMessage}</p>
+
+                {existingNegotiation.stage === 'club_counter' && onRebid && (
+                  <div className="space-y-2 pt-2 border-t border-slate-800">
+                    <div className="text-[11px] font-bold text-slate-300">أو قدّم عرضاً جديداً (ارفع أو اخفض كما تريد)</div>
+                    <input
+                      type="number"
+                      min={0}
+                      value={rebidFee ?? existingNegotiation.bidFee ?? 0}
+                      onChange={e => { setRebidFee(Number(e.target.value) || 0); setRebidNote(''); }}
+                      className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-white font-bold focus:outline-none focus:border-emerald-500"
+                    />
+                    <div className="flex gap-1.5 flex-wrap">
+                      {[-0.1, -0.05, 0.05, 0.1, 0.2].map(d => {
+                        const ref = existingNegotiation.demandedFee || existingNegotiation.bidFee || fixedPrice;
+                        return (
+                          <button
+                            type="button"
+                            key={d}
+                            onClick={() => { setRebidFee(Math.round(ref * (1 + d))); setRebidNote(''); }}
+                            className={`flex-1 min-w-[48px] text-[11px] font-bold rounded-lg py-1 border ${d > 0 ? 'bg-amber-900/30 border-amber-700/70 text-amber-300' : 'bg-slate-800 border-slate-700 text-slate-200'}`}
+                          >
+                            {d > 0 ? '+' : ''}{Math.round(d * 100)}%
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const res = onRebid(existingNegotiation.id, rebidFee ?? existingNegotiation.bidFee ?? 0);
+                        if (res && res.message) setRebidNote(res.message);
+                      }}
+                      className="w-full py-2 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black rounded-xl text-xs cursor-pointer"
+                    >
+                      إرسال العرض الجديد
+                    </button>
+                    {rebidNote && <div className="text-[11px] text-amber-200 leading-relaxed">{rebidNote}</div>}
+                  </div>
+                )}
 
                 {existingNegotiation.stage === 'club_counter' && onRespondToCounter && (
                   <div className="space-y-2 pt-2 border-t border-slate-800">
@@ -535,13 +581,21 @@ export const NegotiationModal: React.FC<NegotiationModalProps> = ({
                           onChange={e => setOfferFee(Number(e.target.value) || 0)}
                           className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-white font-bold focus:outline-none focus:border-emerald-500"
                         />
-                        <div className="flex gap-2 mt-2">
-                          {[0.95, 0.9, 0.8].map(m => (
-                            <button type="button" key={m} onClick={() => setOfferFee(Math.round(fixedPrice * m))} className="flex-1 text-[11px] font-bold bg-slate-800 border border-slate-700 rounded-lg py-1 text-slate-200">
+                        <div className="flex gap-1.5 mt-2 flex-wrap">
+                          {[0.8, 0.9, 0.95].map(m => (
+                            <button type="button" key={m} onClick={() => setOfferFee(Math.round(fixedPrice * m))} className="flex-1 min-w-[48px] text-[11px] font-bold bg-slate-800 border border-slate-700 rounded-lg py-1 text-slate-200">
                               -{Math.round((1 - m) * 100)}%
                             </button>
                           ))}
-                          <button type="button" onClick={() => setOfferFee(null)} className="flex-1 text-[11px] font-bold bg-emerald-900/40 border border-emerald-700 rounded-lg py-1 text-emerald-300">السعر المعلن</button>
+                          <button type="button" onClick={() => setOfferFee(null)} className="flex-1 min-w-[64px] text-[11px] font-bold bg-emerald-900/40 border border-emerald-700 rounded-lg py-1 text-emerald-300">السعر المعلن</button>
+                          {[1.05, 1.1, 1.2].map(m => (
+                            <button type="button" key={m} onClick={() => setOfferFee(Math.round(fixedPrice * m))} className="flex-1 min-w-[48px] text-[11px] font-bold bg-amber-900/30 border border-amber-700/70 rounded-lg py-1 text-amber-300">
+                              +{Math.round((m - 1) * 100)}%
+                            </button>
+                          ))}
+                        </div>
+                        <div className="text-[11px] mt-1 font-bold text-slate-300">
+                          {bidFee === 0 ? '' : `عرضك ${bidFee > fixedPrice ? 'أعلى' : bidFee < fixedPrice ? 'أقل' : 'يساوي'} السعر المعلن بنسبة ${Math.abs(Math.round((bidFee / Math.max(1, fixedPrice) - 1) * 100))}%`}
                         </div>
                         <div className="text-[11px] text-slate-400 mt-1">كل ناد له حد أدنى خفي، والعروض المنخفضة جدا تُرفض والمتوسطة تُقابَل بعرض مضاد.</div>
                       </div>
