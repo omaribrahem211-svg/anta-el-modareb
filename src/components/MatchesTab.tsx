@@ -1519,6 +1519,45 @@ export const MatchesTab: React.FC = () => {
           </div>
         </div>
 
+        {!seasonFinished && userFixture && !userFixture.isPlayed && (
+          <>
+        {/* World Star Loan Banner (عقد إعارة نجم عالمي لمباراة واحدة) */}
+        <div 
+          id="btn_open_world_star_loan_modal"
+          onClick={() => setShowWorldStarModal(true)}
+          className="p-3.5 rounded-2xl bg-gradient-to-r from-amber-500/15 via-purple-500/15 to-slate-900 border border-amber-500/40 hover:border-amber-400 transition-all cursor-pointer shadow-lg active:scale-[0.99] flex items-center justify-between gap-3 group"
+        >
+          <div className="flex items-center gap-2.5">
+            <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-amber-500 to-purple-600 text-slate-950 font-black flex items-center justify-center shrink-0 shadow-md group-hover:scale-105 transition-transform">
+              <Sparkles className="w-5 h-5 text-amber-200" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-xs font-bold text-white group-hover:text-amber-300 transition-colors">
+                  {activeGuestStar 
+                    ? `🌟 النجم العالمي: ${activeGuestStar.name} (${activeGuestStar.overallRating}) في تشكيلتك!` 
+                    : '🌟 استعارة نجم عالمي لمباراتك القادمة (2x Ads)'}
+                </span>
+                <span className="text-[10px] bg-amber-500/20 text-amber-300 border border-amber-500/30 px-2 py-0.2 rounded-full font-bold">
+                  {activeGuestStar ? 'مباراة واحدة' : 'عقد ذهبي 2x'}
+                </span>
+              </div>
+              <p className="text-[11px] text-slate-400 mt-0.5">
+                {activeGuestStar 
+                  ? `${activeGuestStar.nickname} جاهز في الخطة الأساسية، وسيغادر فور نهاية المباراة.`
+                  : 'احصل على نجم عالمي عشوائي (ميسي، رونالدو، مبابي، صلاح، أو بطاقة حظ) لخوض مباراتك القادمة!'}
+              </p>
+            </div>
+          </div>
+
+          <div className="shrink-0 flex items-center gap-1 text-xs font-bold text-amber-400 group-hover:text-amber-300">
+            <span>{activeGuestStar ? 'تفاصيل / استبدال' : 'استدعاء النجم'}</span>
+            <ChevronLeft className="w-4 h-4 rtl:rotate-0 ltr:rotate-180" />
+          </div>
+        </div>
+          </>
+        )}
+
         {/* Dynamic Match Day State Dispatch */}
         {seasonFinished ? (
           <button
@@ -1648,41 +1687,6 @@ export const MatchesTab: React.FC = () => {
                 <span>اليوم موعد مباراة رسمية: {userFixture?.stageName || userFixture?.tournamentBadge || `الجولة ${currentRound}`}! ⚽</span>
               </div>
               <span className="text-[10px] text-emerald-400 font-mono">{userFixture?.tournamentBadge || `الجولة ${currentRound}`}</span>
-            </div>
-
-            {/* World Star Loan Banner (عقد إعارة نجم عالمي لمباراة واحدة) */}
-            <div 
-              id="btn_open_world_star_loan_modal"
-              onClick={() => setShowWorldStarModal(true)}
-              className="p-3.5 rounded-2xl bg-gradient-to-r from-amber-500/15 via-purple-500/15 to-slate-900 border border-amber-500/40 hover:border-amber-400 transition-all cursor-pointer shadow-lg active:scale-[0.99] flex items-center justify-between gap-3 group"
-            >
-              <div className="flex items-center gap-2.5">
-                <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-amber-500 to-purple-600 text-slate-950 font-black flex items-center justify-center shrink-0 shadow-md group-hover:scale-105 transition-transform">
-                  <Sparkles className="w-5 h-5 text-amber-200" />
-                </div>
-                <div>
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className="text-xs font-bold text-white group-hover:text-amber-300 transition-colors">
-                      {activeGuestStar 
-                        ? `🌟 النجم العالمي: ${activeGuestStar.name} (${activeGuestStar.overallRating}) في تشكيلتك!` 
-                        : '🌟 استعارة نجم عالمي لمباراة اليوم (2x Ads)'}
-                    </span>
-                    <span className="text-[10px] bg-amber-500/20 text-amber-300 border border-amber-500/30 px-2 py-0.2 rounded-full font-bold">
-                      {activeGuestStar ? 'مباراة واحدة' : 'عقد ذهبي 2x'}
-                    </span>
-                  </div>
-                  <p className="text-[11px] text-slate-400 mt-0.5">
-                    {activeGuestStar 
-                      ? `${activeGuestStar.nickname} جاهز في الخطة الأساسية، وسيغادر فور نهاية المباراة.`
-                      : 'احصل على نجم عالمي عشوائي (ميسي، رونالدو، مبابي، صلاح، أو بطاقة حظ) لخوض مباراة اليوم!'}
-                  </p>
-                </div>
-              </div>
-
-              <div className="shrink-0 flex items-center gap-1 text-xs font-bold text-amber-400 group-hover:text-amber-300">
-                <span>{activeGuestStar ? 'تفاصيل / استبدال' : 'استدعاء النجم'}</span>
-                <ChevronLeft className="w-4 h-4 rtl:rotate-0 ltr:rotate-180" />
-              </div>
             </div>
 
             <div className="w-full">
