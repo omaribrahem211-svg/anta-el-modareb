@@ -21,7 +21,7 @@ import {
 } from '../types/game';
 import { applyPyramidMovements, hasLowerDivision } from './pyramidEngine';
 import { evolveAIClubs, evolveWorldLeagues } from './worldEvolution';
-import { runWorldBatch, getLeagueByCountryAndTier, getLeagueById, GLOBAL_LEAGUES, updateLeagueRosterInWorld, getCustomLeagues, getAllClubsForCountry, findClubInWorld, createClub } from '../data/leaguesData';
+import { runWorldBatch, getLeagueByCountryAndTier, getLeagueById, GLOBAL_LEAGUES, updateLeagueRosterInWorld, getCustomLeagues, getAllClubsForCountry, findClubInWorld, createClub, evenUpWorldLeagues } from '../data/leaguesData';
 import { GLOBAL_COUNTRIES } from '../data/countriesData';
 import { generateLeagueSchedule, generateInitialStandings } from '../data/initialData';
 import { simulateMatch } from './engine';
@@ -2152,6 +2152,13 @@ export function processNewSeasonAdvancement(
       evolveWorldLeagues([nextActiveLeague.id], c => !!c && (c.id === userClub?.id || c.id === acceptedJobOffer?.clubId));
     } catch (e) {
       console.warn('[WorldEvolution] failed', e);
+    }
+    // 2c. Every league must have an even club count (no bye rounds for the user).
+    try {
+      evenUpWorldLeagues();
+      nextActiveLeague = getLeagueById(nextActiveLeague.id);
+    } catch (e) {
+      console.warn('[Season] could not even-up leagues', e);
     }
   });
 

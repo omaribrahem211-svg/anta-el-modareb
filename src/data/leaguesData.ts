@@ -451,6 +451,39 @@ export function updateLeagueRosterInWorld(leagueId: string, updatedTeams: Club[]
   saveCustomLeagues(currentLeagues);
 }
 
+
+/**
+ * Guarantees every league in the (possibly saved/older) world has an even number of clubs, so no round leaves
+ * the user's club without a fixture. Called at season rollover, before the new fixtures are generated.
+ */
+export function evenUpWorldLeagues(): string[] {
+  const fixed: string[] = [];
+  const current = getCustomLeagues();
+  const ids = new Set<string>([...Object.keys(GLOBAL_LEAGUES), ...Object.keys(current)]);
+  const worldIds = new Set<string>();
+  ids.forEach(i => (current[i] || GLOBAL_LEAGUES[i])?.teams?.forEach(t => t && worldIds.add(t.id)));
+  ids.forEach(id => {
+    const lg = current[id] || GLOBAL_LEAGUES[id];
+    if (!lg || !Array.isArray(lg.teams) || lg.teams.length === 0 || lg.teams.length % 2 === 0) return;
+    const have = new Set(lg.teams.map(t => t && t.id));
+    // 1) prefer a bundled club of the same league that this (older) world is missing
+    const staticExtra = (GLOBAL_LEAGUES[id]?.teams || []).find(t => t && !have.has(t.id) && !worldIds.has(t.id));
+    let filler: Club | undefined = staticExtra ? { ...staticExtra } : undefined;
+    // 2) otherwise create a neutral club
+    if (!filler) {
+      const code = lg.teams[0]?.countryCode || 'EGY';
+      const rep = Math.max(20, Math.round(lg.teams.reduce((a, t) => a + (t?.reputation || 40), 0) / lg.teams.length) - 4);
+      filler = createClub(`${id}_fill_${lg.teams.length + 1}`, `نادي ${lg.country} الرياضي ${lg.teams.length + 1}`, `رياضي ${lg.teams.length + 1}`, lg.teams[0]?.city || lg.country, lg.country, code, lg.tier, id, rep, Math.max(45, rep), '#475569', '#ffffff', 400000, 150000, 100000, 'الاستاد البلدي', 5000, 2);
+    }
+    filler.leagueId = id;
+    filler.division = lg.tier;
+    worldIds.add(filler.id);
+    updateLeagueRosterInWorld(id, [...lg.teams, filler]);
+    fixed.push(id);
+  });
+  return fixed;
+}
+
 export function getLeagueById(leagueId: string): LeagueDefinition {
   const custom = getCustomLeagues();
   return custom[leagueId] || GLOBAL_LEAGUES[leagueId] || EGYPT_TIER_4_LEAGUE;
