@@ -72,7 +72,7 @@ export function isArabOrAfricanClub(club?: Club): boolean {
     'egy_tier_1', 'egy_tier_2', 'egy_tier_3', 'egy_tier_4',
     'sau_tier_1', 'sau_tier_2',
     'uae_tier_1', 'qat_tier_1',
-    'mar_tier_1', 'tun_tier_1', 'alg_tier_1'
+    'mar_tier_1', 'tun_tier_1', 'alg_tier_1', 'sdn_tier_1', 'lby_tier_1', 'jor_tier_1'
   ].includes(leagueId);
 }
 

@@ -25,6 +25,15 @@ export function inferClubCountry(club: Partial<Club>): { countryCode: string; co
   const shortName = club.shortName || '';
   const text = `${id} ${name} ${shortName}`;
 
+  if (id.startsWith('sdn') || text.includes('سودان')) {
+    return { countryCode: 'SDN', countryName: 'السودان' };
+  }
+  if (id.startsWith('lby') || text.includes('ليبيا')) {
+    return { countryCode: 'LBY', countryName: 'ليبيا' };
+  }
+  if (id.startsWith('jor') || text.includes('الأردن')) {
+    return { countryCode: 'JOR', countryName: 'الأردن' };
+  }
   if (id.startsWith('esp') || text.includes('مدريد') || text.includes('بلوغرانا') || text.includes('برشلونة') || text.includes('إسباني') || text.includes('فالنسيا') || text.includes('إشبيلية') || text.includes('بيلباو') || text.includes('بيتيس') || text.includes('خيخون') || text.includes('سرقسطة')) {
     return { countryCode: 'ESP', countryName: 'إسبانيا' };
   }

@@ -25,18 +25,22 @@ export function resolveCountryContinent(
     code === 'KSA' ||
     code === 'UAE' ||
     code === 'QAT' ||
+    code === 'JOR' ||
     code === 'JPN' ||
     code === 'KOR' ||
     lg.startsWith('sau_') ||
     lg.startsWith('sa_') ||
     lg.startsWith('uae_') ||
     lg.startsWith('qat_') ||
+    lg.startsWith('jor_') ||
     id.startsWith('sau') ||
     id.startsWith('uae_') ||
     id.startsWith('qat_') ||
+    id.startsWith('jor_') ||
     c.includes('السعودية') ||
     c.includes('الإمارات') ||
     c.includes('قطر') ||
+    c.includes('الأردن') ||
     c.toLowerCase().includes('saudi') ||
     c.toLowerCase().includes('uae') ||
     c.toLowerCase().includes('qatar')

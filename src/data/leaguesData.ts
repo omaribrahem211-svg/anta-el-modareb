@@ -9,7 +9,10 @@ import {
   SAUDI_TIER_2_CLUBS, 
   MOROCCO_BOTOLA_CLUBS, 
   TUNISIA_LIGUE_CLUBS, 
-  ALGERIA_LIGUE_CLUBS, 
+  ALGERIA_LIGUE_CLUBS,
+  SUDAN_PREMIER_CLUBS,
+  LIBYA_PREMIER_CLUBS,
+  JORDAN_PRO_CLUBS, 
   UAE_PRO_CLUBS, 
   QATAR_STARS_CLUBS 
 } from './arabClubsData';
@@ -113,6 +116,9 @@ export const QATAR_TIER_1_TEAMS = QATAR_STARS_CLUBS;
 export const MOROCCO_TIER_1_TEAMS = MOROCCO_BOTOLA_CLUBS;
 export const TUNISIA_TIER_1_TEAMS = TUNISIA_LIGUE_CLUBS;
 export const ALGERIA_TIER_1_TEAMS = ALGERIA_LIGUE_CLUBS;
+export const SUDAN_TIER_1_TEAMS = SUDAN_PREMIER_CLUBS;
+export const LIBYA_TIER_1_TEAMS = LIBYA_PREMIER_CLUBS;
+export const JORDAN_TIER_1_TEAMS = JORDAN_PRO_CLUBS;
 
 // ----------------------------------------------------
 // 5. EUROPEAN LEAGUES (ENGLAND 4 TIERS, SPAIN 4 TIERS, GERMANY, ITALY, FRANCE)
@@ -167,6 +173,9 @@ export const GLOBAL_LEAGUES: Record<string, LeagueDefinition> = {
   'mar_tier_1': { id: 'mar_tier_1', name: 'البطولة الوطنية المغربية الاحترافية (إنوي)', shortName: 'البطولة المغربية', country: 'المغرب', continent: 'AFRICA', region: 'africa', tier: 1, reputation: 84, promotionSpots: 0, relegationSpots: 1, playoffSpots: 0, teams: MOROCCO_TIER_1_TEAMS },
   'tun_tier_1': { id: 'tun_tier_1', name: 'الرابطة المحترفة التونسية الأولى لكرة القدم', shortName: 'الرابطة الأولى', country: 'تونس', continent: 'AFRICA', region: 'africa', tier: 1, reputation: 81, promotionSpots: 0, relegationSpots: 1, playoffSpots: 0, teams: TUNISIA_TIER_1_TEAMS },
   'alg_tier_1': { id: 'alg_tier_1', name: 'الرابطة الجزائرية المحترفة الأولى موبيليس', shortName: 'الرابطة الجزائرية', country: 'الجزائر', continent: 'AFRICA', region: 'africa', tier: 1, reputation: 82, promotionSpots: 0, relegationSpots: 1, playoffSpots: 0, teams: ALGERIA_TIER_1_TEAMS },
+  'sdn_tier_1': { id: 'sdn_tier_1', name: 'الدوري السوداني الممتاز', shortName: 'الممتاز السوداني', country: 'السودان', continent: 'AFRICA', region: 'africa', tier: 1, reputation: 62, promotionSpots: 0, relegationSpots: 2, playoffSpots: 0, teams: SUDAN_TIER_1_TEAMS },
+  'lby_tier_1': { id: 'lby_tier_1', name: 'الدوري الليبي الممتاز', shortName: 'الممتاز الليبي', country: 'ليبيا', continent: 'AFRICA', region: 'africa', tier: 1, reputation: 62, promotionSpots: 0, relegationSpots: 2, playoffSpots: 0, teams: LIBYA_TIER_1_TEAMS },
+  'jor_tier_1': { id: 'jor_tier_1', name: 'دوري المحترفين الأردني', shortName: 'المحترفين الأردني', country: 'الأردن', continent: 'ASIA', region: 'asia', tier: 1, reputation: 66, promotionSpots: 0, relegationSpots: 1, playoffSpots: 0, teams: JORDAN_TIER_1_TEAMS },
 
   // England (4 tiers) - EUROPE
   'eng_tier_1': { id: 'eng_tier_1', name: 'الدوري الإنجليزي الممتاز (البريميرليغ)', shortName: 'البريميرليغ', country: 'إنجلترا', continent: 'EUROPE', region: 'europe', tier: 1, reputation: 97, promotionSpots: 0, relegationSpots: 2, playoffSpots: 0, teams: ENGLAND_TIER_1_TEAMS },
@@ -639,6 +648,9 @@ export function findClubInWorld(clubId: string): Club | undefined {
     ...MOROCCO_BOTOLA_CLUBS,
     ...TUNISIA_LIGUE_CLUBS,
     ...ALGERIA_LIGUE_CLUBS,
+    ...SUDAN_PREMIER_CLUBS,
+    ...LIBYA_PREMIER_CLUBS,
+    ...JORDAN_PRO_CLUBS,
     ...SPAIN_LA_LIGA_CLUBS,
     ...SPAIN_LA_LIGA_2_CLUBS,
     ...SPAIN_TIER_3_CLUBS,
