@@ -152,16 +152,11 @@ export function judgeTransferBid(
 }
 
 /**
- * Synchronizes and increases a player's marketValue to match their current overallRating
- * whenever the player is trained or upgraded.
+ * What a player is worth purely from his rating, age and potential (no history / no inflation).
+ * Market values and sale prices are bounded around this number so training cannot snowball into absurd prices.
  */
-export function syncPlayerMarketValueWithRating(
-  player: Player,
-  previousOverallRating?: number
-): number {
+export function ratingBenchmarkValue(player: Player): number {
   const ovr = Math.max(40, Math.min(99, Math.round(player?.overallRating || 60)));
-  const prevOvr = previousOverallRating !== undefined ? Math.round(previousOverallRating) : ovr;
-  const ovrDelta = Math.max(0, ovr - prevOvr);
   const pot = Math.max(ovr, Math.round(player?.potentialRating || ovr));
   const age = Math.max(16, Math.min(45, Math.round(player?.age || 24)));
 
@@ -217,7 +212,7 @@ export function syncPlayerMarketValueWithRating(
   let ageMultiplier = 1.0;
   if (age <= 21) {
     const potDiff = Math.max(0, pot - ovr);
-    ageMultiplier = 1.2 + potDiff * 0.04;
+    ageMultiplier = Math.min(1.6, 1.2 + potDiff * 0.04);
   } else if (age <= 25) {
     ageMultiplier = 1.12;
   } else if (age <= 29) {
@@ -228,19 +223,35 @@ export function syncPlayerMarketValueWithRating(
     ageMultiplier = 0.55;
   }
 
-  const benchmarkValue = Math.max(25000, Math.round((interpolatedBase * ageMultiplier) / 1000) * 1000);
+  return Math.max(25000, Math.round((interpolatedBase * ageMultiplier) / 1000) * 1000);
+}
+
+/**
+ * Synchronizes a player's marketValue with his rating whenever he is trained or upgraded.
+ * Growth is smooth but BOUNDED around the rating benchmark: the old "+18% per OVR point, compounded" and
+ * "+4% per attribute point" ratchets let a free academy kid snowball into a 50M player.
+ */
+export function syncPlayerMarketValueWithRating(
+  player: Player,
+  previousOverallRating?: number
+): number {
+  const ovr = Math.max(40, Math.min(99, Math.round(player?.overallRating || 60)));
+  const prevOvr = previousOverallRating !== undefined ? Math.round(previousOverallRating) : ovr;
+  const ovrDelta = Math.max(0, ovr - prevOvr);
+  const benchmarkValue = ratingBenchmarkValue(player);
+  const growthCeiling = Math.round(benchmarkValue * 1.2);
   const existingMv = Math.max(0, Math.round(player?.marketValue || 0));
 
   if (ovrDelta > 0 && existingMv > 0) {
-    // Each +1 OVR boosts market value by at least +18% compounded OR jumps to the new rating benchmark
-    const compoundedBoost = Math.round((existingMv * Math.pow(1.18, ovrDelta)) / 1000) * 1000;
-    return Math.max(benchmarkValue, compoundedBoost, existingMv + ovrDelta * 15000);
+    // Each +1 OVR adds ~10% (compounded) but never beyond 120% of the rating benchmark
+    const boosted = Math.round((existingMv * Math.pow(1.1, ovrDelta)) / 1000) * 1000;
+    return Math.max(benchmarkValue, Math.min(boosted, growthCeiling));
   }
 
   if (previousOverallRating !== undefined && ovrDelta === 0 && existingMv > 0) {
-    // Sub-attribute upgrade before crossing next OVR integer still adds +4% value
-    const attrBoost = Math.round((existingMv * 1.04) / 1000) * 1000;
-    return Math.max(benchmarkValue, attrBoost, existingMv + 5000);
+    // Sub-attribute upgrade before crossing the next OVR integer: +1%, same ceiling
+    const attrBoost = Math.round((existingMv * 1.01) / 1000) * 1000;
+    return Math.max(benchmarkValue, Math.min(attrBoost, growthCeiling));
   }
 
   return Math.max(benchmarkValue, existingMv);
@@ -249,6 +260,26 @@ export function syncPlayerMarketValueWithRating(
 /**
  * Calculates realistic player market valuation (3-season baseline) and wage recommendation.
  */
+/**
+ * Effective transfer value: caps inflated market values relative to the rating benchmark,
+ * discounts unproven youngsters (few appearances) and applies a market-saturation penalty
+ * when the manager keeps flipping players in the same season.
+ */
+export function getEffectiveTransferValue(player: Player, salesThisSeason: number = 0): number {
+  const mv = Math.max(0, Math.round(player?.marketValue || 0));
+  const bench = ratingBenchmarkValue(player);
+  const cap = Math.round(bench * 1.4);
+  let v = mv > 0 ? Math.min(mv, cap) : bench;
+  const age = player?.age || 26;
+  if (age <= 23) {
+    const apps = player?.stats?.appearances || 0;
+    v *= 0.8 + 0.2 * Math.min(1, apps / 25);
+  }
+  const saturation = Math.min(0.15, Math.max(0, salesThisSeason - 2) * 0.03);
+  v *= 1 - saturation;
+  return Math.max(25000, Math.round(v / 1000) * 1000);
+}
+
 export function calculatePlayerFairValue(
   player: Player,
   club?: Club
@@ -1114,9 +1145,10 @@ export function evaluatePlayerSaleOffer(
   askFee: number,
   allTeams: Club[],
   userClubId: string | undefined,
-  seasonNumber: number
+  seasonNumber: number,
+  salesThisSeason: number = 0
 ): SaleOfferResult {
-  const fair = Math.max(25000, Math.round(player.marketValue || 50000));
+  const fair = getEffectiveTransferValue(player, salesThisSeason);
   const ask = Math.max(0, Math.round(askFee || 0));
   const buyers = findEligibleBuyerClubs(player, allTeams, userClubId);
   if (buyers.length === 0) {
@@ -1138,7 +1170,7 @@ export function evaluatePlayerSaleOffer(
   const scored = buyers.map(b => {
     const noise = (stableUnit(`${player.id}|${b.club.id}|${seasonNumber}`) - 0.5) * 0.14; // ±7%
     const need = stableUnit(`need|${player.id}|${b.club.id}`) < 0.3 ? 0.06 : 0;           // some clubs badly need this role
-    const premium = Math.max(0.9, Math.min(1.4, base + noise + need));
+    const premium = Math.max(0.9, Math.min(1.25, base + noise + need));
     const willing = Math.max(0, Math.min(b.maxAffordableFee, Math.round(fair * premium)));
     return { club: b.club, willing };
   }).sort((a, b) => b.willing - a.willing);

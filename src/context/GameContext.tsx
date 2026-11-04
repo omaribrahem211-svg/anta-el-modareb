@@ -6032,7 +6032,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const evaluatePlayerSale = (playerId: string, askFee: number): SaleOfferResult | null => {
     const p = userClub?.players?.find(x => x.id === playerId);
     if (!userClub || !p) return null;
-    return evaluatePlayerSaleOffer(p, askFee, teams, userClub.id, season.seasonNumber);
+    return evaluatePlayerSaleOffer(p, askFee, teams, userClub.id, season.seasonNumber, transferHistory.filter(h => h.type === 'sell' && h.seasonNumber === season.seasonNumber).length);
   };
 
   const sellPlayer = (playerId: string, opts?: { fee: number; buyerId?: string }): { success: boolean; message: string } => {
@@ -6061,7 +6061,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     // Negotiated sale: the asking price is re-validated here (never trust the UI) against what buyers would really pay
     if (opts && Number.isFinite(opts.fee)) {
-      const check = evaluatePlayerSaleOffer(targetPlayer, Math.round(opts.fee), teams, userClub.id, season.seasonNumber);
+      const check = evaluatePlayerSaleOffer(targetPlayer, Math.round(opts.fee), teams, userClub.id, season.seasonNumber, transferHistory.filter(h => h.type === 'sell' && h.seasonNumber === season.seasonNumber).length);
       if (check.status !== 'accepted' || !check.buyerId) {
         return { success: false, message: check.message };
       }
