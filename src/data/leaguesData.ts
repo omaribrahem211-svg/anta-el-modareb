@@ -93,6 +93,18 @@ export const EGYPT_TIER_3_TEAMS: Club[] = [
 // تركيبة موسم 2026/27 (الصاعدون والهابطون) — تُطبّق على المصفوفات نفسها
 applySeason2627(EGYPT_TIER_3_TEAMS);
 
+// ضمان عدد زوجي من الفرق في كل دوري (لتفادي جولات بلا مباراة للمستخدم)
+if (EGYPT_TIER_3_TEAMS.length % 2 !== 0) {
+  EGYPT_TIER_3_TEAMS.push(
+    createClub('eg3_sidi_salem', 'نادي سيدي سالم الرياضي', 'سيدي سالم', 'كفر الشيخ', 'مصر', 'EGY', 3, 'egy_tier_3', 38, 58, '#0284c7', '#eab308', 300000, 105000, 92000, 'ملعب سيدي سالم', 4000, 2)
+  );
+}
+if (SAUDI_TIER_3_CLUBS.length % 2 !== 0) {
+  SAUDI_TIER_3_CLUBS.push(
+    createClub('sau3_al_jabalain', 'نادي الجبلين', 'الجبلين', 'حائل', 'المملكة العربية السعودية', 'SAU', 3, 'sau_tier_3', 52, 62, '#16a34a', '#ffffff', 3800000, 1600000, 340000, 'ملعب الجبلين', 6000, 2)
+  );
+}
+
 export const EGYPT_TIER_2_TEAMS = EGYPT_TIER_2_CLUBS;
 export const EGYPT_TIER_1_TEAMS = EGYPT_PREMIER_CLUBS;
 
