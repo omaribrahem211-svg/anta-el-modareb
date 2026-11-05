@@ -1895,6 +1895,35 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
   }, [fixtures, teams, liveMatch, isSimulationRunning, season?.seasonNumber, currentRound, userClub?.id]);
 
+  // Standings audit: the table is always derivable from the played league fixtures. If any club's played / points
+  // drifted (a match applied twice, or never applied), rebuild it so one club can't "play more than the others".
+  const standingsAuditKeyRef = useRef<string>('');
+  useEffect(() => {
+    try {
+      if (liveMatch || isSimulationRunning || !Array.isArray(fixtures) || !Array.isArray(standings) || standings.length < 4) return;
+      const playedCount = fixtures.filter(f => f && f.isPlayed).length;
+      const key = `${season?.seasonNumber}_${playedCount}_${standings.length}`;
+      if (standingsAuditKeyRef.current === key) return;
+      standingsAuditKeyRef.current = key;
+
+      const ids = new Set(standings.map(s => s.teamId));
+      const leagueClubs = (teams || []).filter(t => t && ids.has(t.id));
+      if (leagueClubs.length < 4) return;
+      const rebuilt = recalculateStandingsFromFixtures(standings, leagueClubs, fixtures);
+      const byId = new Map(rebuilt.map(r => [r.teamId, r]));
+      const drift = standings.some(s => {
+        const r = byId.get(s.teamId);
+        return !r || r.played !== s.played || r.points !== s.points || r.goalsFor !== s.goalsFor;
+      });
+      if (drift) {
+        console.warn('[StandingsAudit] standings drifted from fixtures; rebuilding');
+        setStandings(rebuilt.filter(r => ids.has(r.teamId)));
+      }
+    } catch (e) {
+      console.warn('[StandingsAudit] failed', e);
+    }
+  }, [fixtures, standings, teams, liveMatch, isSimulationRunning, season?.seasonNumber]);
+
   // Warm the season-snapshot cache so "restart season" can read it synchronously after an app reload
   useEffect(() => {
     gameStateRepository.loadSeasonSnapshot(season?.seasonNumber || 1).catch(() => {});
@@ -6032,6 +6061,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const evaluatePlayerSale = (playerId: string, askFee: number): SaleOfferResult | null => {
     const p = userClub?.players?.find(x => x.id === playerId);
     if (!userClub || !p) return null;
+    if (p.isGuestStar) return { status: 'rejected', fairValue: 0, maxWilling: 0, fee: 0, hasBuyers: false, message: 'النجم العالمي معار لمباراة واحدة فقط ولا يمكن بيعه أو التصرف في عقده.' } as SaleOfferResult;
     return evaluatePlayerSaleOffer(p, askFee, teams, userClub.id, season.seasonNumber, transferHistory.filter(h => h.type === 'sell' && h.seasonNumber === season.seasonNumber).length);
   };
 
@@ -6046,6 +6076,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       return { success: false, message: 'اللاعب غير موجود بالفريق' };
     }
 
+    if (targetPlayer.isGuestStar) return { success: false, message: 'النجم العالمي معار لمباراة واحدة فقط ولا يمكن بيعه أو التصرف في عقده.' };
     if (squadPlayers.length <= 14) {
       return { success: false, message: 'لا يمكن بيع اللاعب؛ يجب أن يحتوي الفريق على 14 لاعباً على الأقل!' };
     }
@@ -6206,6 +6237,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const targetPlayer = squadPlayers.find(p => p.id === playerId);
     if (!targetPlayer) return { success: false, message: 'اللاعب غير موجود في قائمة الفريق!' };
 
+    if (targetPlayer.isGuestStar) return { success: false, message: 'النجم العالمي معار لمباراة واحدة فقط ولا يمكن بيعه أو التصرف في عقده.' };
     setTeams(prev => prev.map(t => {
       if (!t.isUserClub && t.id !== userClub.id) return t;
       return {
@@ -6322,6 +6354,8 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       return { success: false, message: 'اللاعب لم يعد موجوداً في فريقك!' };
     }
 
+    if (player.isGuestStar) return { success: false, message: 'النجم العالمي معار لمباراة واحدة فقط ولا يمكن بيعه أو التصرف في عقده.' };
+
     if (squadPlayers.length <= 14) {
       return { success: false, message: 'لا يمكن بيع اللاعب؛ الحد الأدنى لقائمة الفريق 14 لاعباً!' };
     }
@@ -6427,6 +6461,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const targetPlayer = squadPlayers.find(p => p.id === playerId);
     if (!targetPlayer) return { success: false, message: 'اللاعب غير موجود في الفريق!' };
 
+    if (targetPlayer.isGuestStar) return { success: false, message: 'النجم العالمي معار لمباراة واحدة فقط ولا يمكن بيعه أو التصرف في عقده.' };
     if (squadPlayers.length <= 14) {
       return { success: false, message: 'لا يمكن تسريح اللاعب؛ الحد الأدنى للقائمة 14 لاعباً.' };
     }
@@ -6486,6 +6521,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const player = squadPlayers.find(p => p.id === bid.playerId);
     if (!player) return { success: false, message: 'اللاعب لم يعد موجوداً في فريقك!' };
 
+    if (player.isGuestStar) return { success: false, message: 'النجم العالمي معار لمباراة واحدة فقط ولا يمكن بيعه أو التصرف في عقده.' };
     if (squadPlayers.length <= 14) {
       return { success: false, message: 'لا يمكن بيع اللاعب؛ الحد الأدنى لقائمة الفريق 14 لاعباً!' };
     }
@@ -6561,6 +6597,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     if (!userClub) return { success: false, message: 'أنت غير مرتبط بنادٍ!' };
 
     const targetP = (userClub.players || []).find(p => p.id === playerId);
+    if (targetP?.isGuestStar) return { success: false, message: 'النجم العالمي معار لمباراة واحدة فقط ولا يمكن بيعه أو التصرف في عقده.' };
     const updatedSalary = Math.max(500, Math.round(wage || targetP?.salary || 2500));
     const currentOtherWages = (userClub.players || [])
       .filter(p => p.id !== playerId)

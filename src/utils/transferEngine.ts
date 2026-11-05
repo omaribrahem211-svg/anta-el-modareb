@@ -1267,7 +1267,7 @@ export function generateIncomingAiBids(
     return { bids, inboxMessages };
   }
 
-  const players = userClub.players.filter(p => p && p.id);
+  const players = userClub.players.filter(p => p && p.id && !p.isGuestStar);
   if (players.length === 0) return { bids, inboxMessages };
 
   // 1. Identify candidate categories:

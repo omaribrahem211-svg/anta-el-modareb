@@ -531,6 +531,13 @@ export class CalendarManager {
       f => f && !f.isPlayed && f.date && f.date >= currentDateStr && f.date <= targetDateStr
     );
 
+    // Backlog catch-up: any CPU league fixture dated BEFORE today that is still unplayed (missed by an earlier
+    // step) is resolved now, so one club can never end up with far more matches than the rest of the league.
+    const overdueAiMatches = leagueSchedule.filter(
+      f => f && !f.isPlayed && f.date && f.date < currentDateStr &&
+        !(userClubId && (f.homeTeamId === userClubId || f.awayTeamId === userClubId))
+    );
+
     const userMatchToday = userClubId
       ? matchesOnDate.find(m => m.homeTeamId === userClubId || m.awayTeamId === userClubId) || null
       : null;
@@ -542,7 +549,7 @@ export class CalendarManager {
         .filter(e => e && (e.type === 'goal' || e.type === 'red_card'))
         .slice(0, 8);
 
-    matchesOnDate.forEach(fix => {
+    [...overdueAiMatches, ...matchesOnDate].forEach(fix => {
       if (userClubId && (fix.homeTeamId === userClubId || fix.awayTeamId === userClubId)) {
         return;
       }

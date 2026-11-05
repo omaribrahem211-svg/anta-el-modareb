@@ -3034,12 +3034,23 @@ export function recalculateStandingsFromFixtures(
     if (!f || !(f.isPlayed || (f as any).played) || typeof f.homeScore !== 'number' || typeof f.awayScore !== 'number') {
       return false;
     }
-    if (!f.competitionType) return true;
+    const fid = String(f.id || '');
+    if (fid.startsWith('cont_') || fid.startsWith('cup_') || fid.startsWith('wc_')) return false;
+    if (!f.competitionType) return (f.round ?? 1) > 0;
     const comp = String(f.competitionType).toLowerCase().trim();
     return comp === 'league' || (!comp.includes('cup') && !comp.includes('cop') && !comp.includes('cont') && !comp.includes('ccl'));
   });
 
-  playedLeagueFixtures.forEach(fix => {
+  // Count every real league match exactly once (guards against duplicated fixture rows).
+  const seenMatchKeys = new Set<string>();
+  const uniqueLeagueFixtures = playedLeagueFixtures.filter(fix => {
+    const key = `${fix.round ?? ''}|${fix.homeTeamId}|${fix.awayTeamId}`;
+    if (seenMatchKeys.has(key)) return false;
+    seenMatchKeys.add(key);
+    return true;
+  });
+
+  uniqueLeagueFixtures.forEach(fix => {
     const home = teamMap.get(fix.homeTeamId);
     const away = teamMap.get(fix.awayTeamId);
     const hs = fix.homeScore;
