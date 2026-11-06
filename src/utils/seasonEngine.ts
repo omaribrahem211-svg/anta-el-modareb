@@ -20,8 +20,9 @@ import {
   PositionCategory,
 } from '../types/game';
 import { applyPyramidMovements, hasLowerDivision } from './pyramidEngine';
+import { evolveWorldLeaguesAsync } from './worldEvolution';
 import { evolveAIClubs, evolveWorldLeagues } from './worldEvolution';
-import { runWorldBatch, getLeagueByCountryAndTier, getLeagueById, GLOBAL_LEAGUES, updateLeagueRosterInWorld, getCustomLeagues, getAllClubsForCountry, findClubInWorld, createClub, evenUpWorldLeagues } from '../data/leaguesData';
+import { runWorldBatch, getLeagueByCountryAndTier, getLeagueById, GLOBAL_LEAGUES, updateLeagueRosterInWorld, getCustomLeagues, getAllClubsForCountry, findClubInWorld, createClub, evenUpWorldLeagues, beginWorldBatch, endWorldBatch } from '../data/leaguesData';
 import { GLOBAL_COUNTRIES } from '../data/countriesData';
 import { generateLeagueSchedule, generateInitialStandings } from '../data/initialData';
 import { simulateMatch } from './engine';
@@ -2054,14 +2055,16 @@ export function repairCupProgressionIntegrity(
 // 4. NEW SEASON ADVANCEMENT & TRANSITION
 // ----------------------------------------------------
 
-export function processNewSeasonAdvancement(
+const yieldToUI = (): Promise<void> => new Promise(resolve => setTimeout(resolve, 12));
+
+export async function processNewSeasonAdvancement(
   currentSeason: SeasonInfo,
   summary: SeasonEndSummary,
   userClub: Club | null,
   manager: ManagerProfile,
   allTeams: Club[],
   acceptedJobOffer?: JobOffer
-): {
+): Promise<{
   nextSeason: SeasonInfo;
   nextActiveLeague: LeagueDefinition;
   nextTeams: Club[];
@@ -2071,7 +2074,7 @@ export function processNewSeasonAdvancement(
   nextCup: CupTournament;
   historyEntry: SeasonHistoryEntry;
   newRetiredPlayers: RetiredPlayer[];
-} {
+}> {
   const nextSeasonNumber = currentSeason.seasonNumber + 1;
 
   // 1. Determine active user club & league
@@ -2104,7 +2107,9 @@ export function processNewSeasonAdvancement(
     }
   }
 
-  runWorldBatch(() => {
+  beginWorldBatch();
+  try {
+  await yieldToUI();
   // 2-pre. Season events carry over: sync the LIVE clubs of the season just played (transfers, injuries,
     // form, budgets, managers) into the persistent world roster BEFORE promotion/relegation and evolution.
     try {
@@ -2126,6 +2131,7 @@ export function processNewSeasonAdvancement(
       console.warn('[Season] live sync failed', e);
     }
 
+    await yieldToUI();
     // 2a. Apply promotion/relegation across the WHOLE world pyramid (AI clubs included).
     // The user's club outcome comes from the real standings; everything else is rating-simulated.
     if (userClub) {
@@ -2158,9 +2164,10 @@ export function processNewSeasonAdvancement(
         console.warn('[Season] could not re-resolve the offered club league', e);
       }
     }
+    await yieldToUI();
     // 2b. Living world: every other league ages, develops, retires + clubs/managers improve.
     try {
-      evolveWorldLeagues([nextActiveLeague.id], c => !!c && (c.id === userClub?.id || c.id === acceptedJobOffer?.clubId));
+      await evolveWorldLeaguesAsync([nextActiveLeague.id], c => !!c && (c.id === userClub?.id || c.id === acceptedJobOffer?.clubId), Math.random, yieldToUI);
     } catch (e) {
       console.warn('[WorldEvolution] failed', e);
     }
@@ -2171,7 +2178,10 @@ export function processNewSeasonAdvancement(
     } catch (e) {
       console.warn('[Season] could not even-up leagues', e);
     }
-  });
+  } finally {
+    endWorldBatch();
+  }
+  await yieldToUI();
 
   // 2. Prepare clubs for the next season & apply promotions/relegations to world leagues
   let leagueTeams = [...nextActiveLeague.teams];
@@ -2377,6 +2387,7 @@ export function processNewSeasonAdvancement(
     }
   }
 
+  await yieldToUI();
   // 3. Flexible Retirement System (strictly between age 35 and 40) + Player Age & Contract Updates
   const newRetiredPlayers: RetiredPlayer[] = [];
 
@@ -2665,6 +2676,7 @@ export function processNewSeasonAdvancement(
 
   const nextCup = null as any;
 
+  await yieldToUI();
   // 4. Generate New Season Schedule & Standings (League Only)
   const nextFixtures = generateMasterSeasonAgenda(
     nextSeasonNumber,

@@ -179,3 +179,15 @@ export function evolveWorldLeagues(excludeLeagueIds: string[], isUser: (c: Club)
     updateLeagueRosterInWorld(league.id, evolveAIClubs(league.teams, isUser, rng));
   }
 }
+
+
+/** Same as evolveWorldLeagues, but hands control back to the browser between leagues so the UI never freezes. */
+export async function evolveWorldLeaguesAsync(excludeLeagueIds: string[], isUser: (c: Club) => boolean, rng: Rng = Math.random, yieldFn: () => Promise<void> = () => Promise.resolve()): Promise<void> {
+  const all = { ...GLOBAL_LEAGUES, ...getCustomLeagues() };
+  let n = 0;
+  for (const league of Object.values(all)) {
+    if (!league || excludeLeagueIds.includes(league.id) || !Array.isArray(league.teams) || !league.teams.length) continue;
+    updateLeagueRosterInWorld(league.id, evolveAIClubs(league.teams, isUser, rng));
+    if (++n % 3 === 0) await yieldFn();
+  }
+}

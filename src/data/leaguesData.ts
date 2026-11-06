@@ -432,6 +432,18 @@ export function runWorldBatch<T>(fn: () => T): T {
   }
 }
 
+export function beginWorldBatch(): void {
+  worldBatchDepth++;
+}
+
+export function endWorldBatch(): void {
+  worldBatchDepth = Math.max(0, worldBatchDepth - 1);
+  if (worldBatchDepth === 0 && worldBatchDirty) {
+    worldBatchDirty = false;
+    saveCustomLeagues(getCustomLeagues());
+  }
+}
+
 export function updateLeagueRosterInWorld(leagueId: string, updatedTeams: Club[]): void {
   const currentLeagues = getCustomLeagues();
   const targetLeague = currentLeagues[leagueId] || GLOBAL_LEAGUES[leagueId];

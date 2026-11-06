@@ -8332,12 +8332,17 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     seasonStartPendingRef.current = true;
     setIsStartingSeasonUi(true);
     const run = () => {
+      let p: Promise<void>;
       try {
-        startNextSeasonNow(chosenOfferId);
-      } finally {
+        p = startNextSeasonNow(chosenOfferId);
+      } catch (e) {
+        console.error('[startNextSeason] crashed', e);
+        p = Promise.resolve();
+      }
+      p.catch(e => console.error('[startNextSeason] async failure', e)).finally(() => {
         seasonStartPendingRef.current = false;
         setTimeout(() => setIsStartingSeasonUi(false), 600);
-      }
+      });
     };
     try {
       requestAnimationFrame(() => setTimeout(run, 120));
@@ -8346,7 +8351,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
   };
 
-  const startNextSeasonNow = (chosenOfferId?: string) => {
+  const startNextSeasonNow = async (chosenOfferId?: string): Promise<void> => {
     if (isStartingSeasonRef.current) return; // double tap while the new season is being built
     isStartingSeasonRef.current = true;
     setTimeout(() => { isStartingSeasonRef.current = false; }, 4000);
@@ -8391,14 +8396,20 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         ? safeJobOffers.find(o => o.id === chosenOfferId)
         : safeJobOffers.find(o => o.status === 'accepted');
 
-      const result = timed('processNewSeasonAdvancement', () => processNewSeasonAdvancement(
+      const advStart = typeof performance !== 'undefined' ? performance.now() : Date.now();
+      const result = await processNewSeasonAdvancement(
         season,
         summary,
         summaryClub,
         manager,
         teams,
         acceptedOffer
-      ));
+      );
+      try {
+        const took = (typeof performance !== 'undefined' ? performance.now() : Date.now()) - advStart;
+        if (took > 150) console.warn(`[SlowStep] processNewSeasonAdvancement (async) took ${Math.round(took)}ms`);
+      } catch (_) {}
+      await new Promise<void>(r => setTimeout(r, 12));
       if (contMgrBonus > 0) {
         // Coach's personal continental bonus (paid once, after the rollover so it cannot be overwritten)
         result.updatedManager = { ...result.updatedManager, personalWallet: (result.updatedManager.personalWallet || 0) + contMgrBonus };
@@ -8414,6 +8425,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       });
 
       // 1. Process Free Agents (contractYears === 0) & AI Club Transfers for the new season
+      await new Promise<void>(r => setTimeout(r, 12));
       const freeAgencyAndAiResult = timed('startNextSeason.processFreeAgentsAndAiTransfers', () => processFreeAgentsAndAiTransfers(
         baseNextTeams,
         transferMarket,
@@ -8455,6 +8467,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       setAfricanChampionsLeague(null);
 
       // Build unified Master Schedule (League Only) cleanly from scratch
+      await new Promise<void>(r => setTimeout(r, 12));
       const nextFixturesWithContinental = timed('startNextSeason.generateMasterSeasonAgenda', () => generateMasterSeasonAgenda(
         result.nextSeason.seasonNumber,
         result.nextActiveLeague,
