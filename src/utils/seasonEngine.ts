@@ -60,9 +60,20 @@ export function calculateSeasonEndSummary(
   manager: ManagerProfile,
   continentalTournament?: ContinentalTournament | null
 ): SeasonEndSummary {
-  const userRankIndex = userClub ? standings.findIndex(s => s.teamId === userClub.id) : -1;
-  const finalPosition = userRankIndex >= 0 ? userRankIndex + 1 : (standings.length > 0 ? standings.length : 1);
-  const userStanding = (userRankIndex >= 0 && standings[userRankIndex]) ? standings[userRankIndex] : (standings[0] || null);
+  // Locate the user's row. Never fall back to "last place" / "the leader's row" if the id lookup fails (that used to
+  // relegate champions and show someone else's points): try the club name, and as a last resort assume a safe mid-table
+  // position that neither promotes nor relegates.
+  const norm = (v?: string) => String(v || '').replace(/\s+/g, ' ').trim();
+  let userRankIndex = userClub ? standings.findIndex(s => s && s.teamId === userClub.id) : -1;
+  if (userRankIndex < 0 && userClub) {
+    userRankIndex = standings.findIndex(s => s && norm(s.teamName) !== '' && (norm(s.teamName) === norm(userClub.name) || norm(s.teamName) === norm((userClub as any).shortName)));
+    if (userRankIndex >= 0) console.warn('[SeasonSummary] user row matched by name, id mismatch:', userClub.id, standings[userRankIndex]?.teamId);
+  }
+  const userRowMissing = userRankIndex < 0;
+  if (userRowMissing) console.warn('[SeasonSummary] user club missing from standings; using neutral position');
+  const safeMidIndex = Math.max(0, Math.floor((standings.length > 0 ? standings.length : 20) / 2) - 1);
+  const finalPosition = !userRowMissing ? userRankIndex + 1 : (standings.length > 0 ? safeMidIndex + 1 : 1);
+  const userStanding = (!userRowMissing && standings[userRankIndex]) ? standings[userRankIndex] : (standings[safeMidIndex] || standings[0] || null);
   const totalTeams = standings.length > 0 ? standings.length : 20;
   const expectedLeagueMatches = totalTeams > 1 ? (totalTeams - 1) * 2 : (season.totalRounds || 38);
 

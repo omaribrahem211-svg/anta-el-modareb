@@ -1906,12 +1906,27 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       if (standingsAuditKeyRef.current === key) return;
       standingsAuditKeyRef.current = key;
 
-      const ids = new Set(standings.map(s => s.teamId));
+      let baseStandings = standings;
+      const ids = new Set(baseStandings.map(s => s.teamId));
+      // The user's club must be in its own league table (otherwise the season summary can't find its position).
+      if (userClub && !ids.has(userClub.id)) {
+        const nm = (v?: string) => String(v || '').replace(/\s+/g, ' ').trim();
+        const byName = baseStandings.find(s => s && nm(s.teamName) === nm(userClub.name));
+        if (byName) {
+          console.warn('[StandingsAudit] re-keying user row', byName.teamId, '->', userClub.id);
+          ids.delete(byName.teamId);
+          baseStandings = baseStandings.map(s => (s === byName ? { ...s, teamId: userClub.id } : s));
+          ids.add(userClub.id);
+        } else if (fixtures.some(f => f && (f.round ?? 0) > 0 && (f.homeTeamId === userClub.id || f.awayTeamId === userClub.id))) {
+          console.warn('[StandingsAudit] user club missing from standings; adding');
+          ids.add(userClub.id);
+        }
+      }
       const leagueClubs = (teams || []).filter(t => t && ids.has(t.id));
       if (leagueClubs.length < 4) return;
-      const rebuilt = recalculateStandingsFromFixtures(standings, leagueClubs, fixtures);
+      const rebuilt = recalculateStandingsFromFixtures(baseStandings, leagueClubs, fixtures);
       const byId = new Map(rebuilt.map(r => [r.teamId, r]));
-      const drift = standings.some(s => {
+      const drift = baseStandings !== standings || rebuilt.length !== standings.length || standings.some(s => {
         const r = byId.get(s.teamId);
         return !r || r.played !== s.played || r.points !== s.points || r.goalsFor !== s.goalsFor;
       });
@@ -9065,7 +9080,11 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       const monthlyWages = (club.players || []).reduce((sum: number, p: any) => sum + (p?.salary || 0), 0);
       const cushion = monthlyWages * 12;
       const thinness = cushion > 0 ? Math.min(1, Math.max(0, (cushion - (club.budget || 0)) / cushion)) : 0;
-      return { due: monthlyWages * diff, support: Math.round(monthlyWages * 0.7 * thinness) * diff };
+      // Big clubs earn TV / commercial / merchandising money roughly in proportion to their prestige, so a
+      // top-reputation club with a star-studded payroll is not bled dry month after month.
+      const repFactor = Math.min(1, Math.max(0, ((club.reputation || 50) - 60) / 35));
+      const commercial = Math.round(monthlyWages * 0.55 * repFactor * repFactor);
+      return { due: monthlyWages * diff, support: (Math.round(monthlyWages * 0.7 * thinness) + commercial) * diff };
     };
     const uc = (teams || []).find(t => t && t.isUserClub);
     const ud = uc ? monthlyDue(uc) : { due: 0, support: 0 };
