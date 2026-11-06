@@ -47,6 +47,7 @@ public class MainActivity extends BridgeActivity {
     public void onCreate(Bundle savedInstanceState) {
         // Register the Google Play in-app update plugin before the bridge initializes
         registerPlugin(InAppUpdatePlugin.class);
+        registerPlugin(IntegrityPlugin.class);
         // Step 1: Let BridgeActivity complete core framework initialization without blocking
         super.onCreate(savedInstanceState);
         Log.d(TAG_APP, "Activity onCreate initiated");

@@ -1,3 +1,4 @@
+import IntegrityGate from './components/IntegrityGate';
 import React, { useState, useEffect, useCallback, startTransition } from 'react';
 import { Capacitor } from '@capacitor/core';
 import { App as CapApp } from '@capacitor/app';
@@ -462,6 +463,7 @@ export default function App() {
           <SeasonSafeBoundary name="SeasonEvent"><SeasonEventModal /></SeasonSafeBoundary>
           <ContinentalSafe />
           <SeasonStartingOverlay />
+          <IntegrityGate />
         </GameProvider>
       </AuthProvider>
     </LanguageProvider>
