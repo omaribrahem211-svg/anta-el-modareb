@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { useGame } from '../context/GameContext';
 import {
   ROUND_LABEL,
@@ -20,6 +21,7 @@ function nameOf(st: ContinentalPhaseState, id: string): string {
 export default function ContinentalPhaseModal() {
   const { userClub, continentalPhase, season, playContinentalStep, playContinentalLiveMatch, simulateContinentalToEnd, finishContinentalPhase, liveMatch, finishLiveMatchAndAdvance } = useGame() as any;
   const st: ContinentalPhaseState | null = continentalPhase;
+  const [minimized, setMinimized] = useState(false);
 
   if (!st || st.status === 'done' || st.seasonNumber !== season?.seasonNumber) return null;
   // While the user is watching a continental match the normal match screen is shown instead
@@ -45,11 +47,24 @@ export default function ContinentalPhaseModal() {
     );
   }
 
+  // Minimised: the whole app (squad, tactics, training...) is usable; a floating button brings the tournament back.
+  if (minimized && st.status !== 'finished') {
+    return (
+      <button
+        onClick={() => setMinimized(false)}
+        className="fixed bottom-24 left-1/2 -translate-x-1/2 z-[9500] bg-amber-400 text-slate-950 font-black text-sm px-5 py-3 rounded-full shadow-2xl border-2 border-white/70"
+        dir="rtl"
+      >
+        🏆 العودة إلى {st.compName}
+      </button>
+    );
+  }
+
   const roundTies: ContTie[] = st.ties.filter(t => t.round === st.round);
   const userTie = roundTies.find(t => t.a === st.userId || t.b === st.userId);
   const finished = st.status === 'finished';
-  const outcome = finished ? getContinentalOutcome(st) : null;
-  const goesToWorldCup = finished && qualifiesForWorldCup(st);
+  const outcome = (() => { if (!finished) return null; try { return getContinentalOutcome(st); } catch { return { resultText: 'انتهت مشاركتك في البطولة', isChampion: false, xp: 0, reputation: 0, stageReached: st.round } as any; } })();
+  const goesToWorldCup = (() => { try { return finished && qualifiesForWorldCup(st); } catch { return false; } })();
   const isCwc = st.compId === 'cwc';
   const th = themeOf(st.compId);
   const fmt = (n: number) => Math.round(n).toLocaleString('en-US');
@@ -211,6 +226,15 @@ export default function ContinentalPhaseModal() {
               <button onClick={() => (userTie ? playContinentalLiveMatch() : playContinentalStep())} className={`w-full ${th.button} font-black py-3.5 rounded-2xl active:scale-[0.99]`}>
                 {nextLegLabel}
               </button>
+              <div className="grid grid-cols-2 gap-2">
+                <button onClick={() => { setMinimized(true); try { window.dispatchEvent(new CustomEvent('set-active-tab', { detail: { tab: 'tactics' } })); } catch (_) {} }} className="bg-slate-800 text-slate-100 font-bold py-3 rounded-2xl border border-slate-700 text-sm">
+                  ⚙️ التكتيكات
+                </button>
+                <button onClick={() => { setMinimized(true); try { window.dispatchEvent(new CustomEvent('set-active-tab', { detail: { tab: 'squad' } })); } catch (_) {} }} className="bg-slate-800 text-slate-100 font-bold py-3 rounded-2xl border border-slate-700 text-sm">
+                  👥 التشكيلة
+                </button>
+              </div>
+              <p className="text-[10px] text-slate-500 text-center">بين كل مباراة وأخرى 6 أيام راحة: اللياقة بتتجدد والإصابات بتتحسن.</p>
               {userTie && (
                 <button onClick={() => playContinentalStep()} className="w-full bg-slate-800 text-slate-200 font-bold py-3 rounded-2xl border border-slate-700">
                   محاكاة هذه المباراة فقط

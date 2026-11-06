@@ -7982,9 +7982,36 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const isStartingSeasonRef = useRef<boolean>(false);
   const continentalRewardRef = useRef<{ season: number; prize: number; xp: number; rep: number; text: string; trophy?: string; extraTrophies?: string[]; managerBonus?: number } | null>(null);
 
+  // Between two continental matches the squad gets 6 rest days (like the league's weekly rhythm): fitness recovers
+  // and injuries heal a little, so playing the tournament back-to-back no longer wears the team out unfairly.
+  const applyContinentalRestDays = (days: number = 6) => {
+    try {
+      setTeams(prev => prev.map(t => {
+        if (!t || !(t.isUserClub || (userClub && t.id === userClub.id))) return t;
+        return {
+          ...t,
+          players: (t.players || []).map(p => {
+            if (!p) return p;
+            const inj = p.injury && (p.injury.daysRemaining || 0) > 0
+              ? { ...p.injury, daysRemaining: Math.max(0, p.injury.daysRemaining - days) }
+              : p.injury;
+            return {
+              ...p,
+              fitness: Math.min(100, (typeof p.fitness === 'number' ? p.fitness : 100) + days * 6),
+              injury: inj && (inj.daysRemaining || 0) <= 0 ? null : inj,
+            };
+          }),
+        };
+      }));
+    } catch (e) {
+      console.warn('[Continental] rest days failed', e);
+    }
+  };
+
   const playContinentalStep = () => {
     const st = continentalPhaseRef.current;
     if (!st || st.status !== 'active') return;
+    applyContinentalRestDays(6);
     try {
       setContinentalPhase(playContinentalNextLeg(st));
     } catch (err) {
@@ -8006,6 +8033,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       }
       const pending = getContinentalUserPendingLeg(st);
       if (!pending) { playContinentalStep(); return; }
+      applyContinentalRestDays(6);
 
       const continent = resolveClubContinent(userClub, activeLeague);
       const poolClubs: Club[] = (() => { try { return getLiveTopFlightPool(String(continent)) as Club[]; } catch { return []; } })();
