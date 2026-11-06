@@ -424,6 +424,7 @@ interface GameContextType {
 
   // Multi-Season & Career Transitions
   startNextSeason: (offerId?: string) => void;
+  isStartingSeasonUi: boolean;
   selectNextSeasonLeague: (leagueId: string) => JobOffer[];
   acceptJobOffer: (offerId: string) => void;
   rejectJobOffer: (offerId: string) => void;
@@ -8321,7 +8322,31 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     return { success: true, message: `توليت رسمياً تدريب نادي ${offer.clubName}!` };
   };
 
+  // Building a new season is a heavy synchronous job (world simulation, fixtures, AI transfers). Running it straight from the
+  // tap froze the WebView before anything could be painted (a "white screen"). We show a loading overlay first, let the browser
+  // paint it, and only then run the heavy work.
+  const [isStartingSeasonUi, setIsStartingSeasonUi] = useState(false);
+  const seasonStartPendingRef = useRef(false);
   const startNextSeason = (chosenOfferId?: string) => {
+    if (isStartingSeasonRef.current || seasonStartPendingRef.current) return;
+    seasonStartPendingRef.current = true;
+    setIsStartingSeasonUi(true);
+    const run = () => {
+      try {
+        startNextSeasonNow(chosenOfferId);
+      } finally {
+        seasonStartPendingRef.current = false;
+        setTimeout(() => setIsStartingSeasonUi(false), 600);
+      }
+    };
+    try {
+      requestAnimationFrame(() => setTimeout(run, 120));
+    } catch (_) {
+      setTimeout(run, 120);
+    }
+  };
+
+  const startNextSeasonNow = (chosenOfferId?: string) => {
     if (isStartingSeasonRef.current) return; // double tap while the new season is being built
     isStartingSeasonRef.current = true;
     setTimeout(() => { isStartingSeasonRef.current = false; }, 4000);
@@ -12091,6 +12116,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         clearAllMessages,
         markAllMessagesRead,
         startNextSeason,
+        isStartingSeasonUi,
         selectNextSeasonLeague,
         acceptJobOffer,
         rejectJobOffer,

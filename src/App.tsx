@@ -440,6 +440,18 @@ function ContinentalSafe() {
   );
 }
 
+function SeasonStartingOverlay() {
+  const { isStartingSeasonUi } = useGame() as any;
+  if (!isStartingSeasonUi) return null;
+  return (
+    <div className="fixed inset-0 z-[10000] bg-slate-950 flex flex-col items-center justify-center gap-4" dir="rtl">
+      <div className="w-14 h-14 rounded-full border-4 border-emerald-500/30 border-t-emerald-400 animate-spin" />
+      <div className="text-white font-black text-lg">جاري تجهيز الموسم الجديد...</div>
+      <div className="text-slate-400 text-xs">لحظات من فضلك، لا تغلق اللعبة</div>
+    </div>
+  );
+}
+
 export default function App() {
   return (
     <LanguageProvider>
@@ -449,6 +461,7 @@ export default function App() {
           <GameApp />
           <SeasonSafeBoundary name="SeasonEvent"><SeasonEventModal /></SeasonSafeBoundary>
           <ContinentalSafe />
+          <SeasonStartingOverlay />
         </GameProvider>
       </AuthProvider>
     </LanguageProvider>
