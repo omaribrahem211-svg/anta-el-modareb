@@ -63,8 +63,8 @@ export function simulateMultipleLeagueRounds(
     // Simulate each fixture of this round defensively
     currentRoundFixtures.forEach(fix => {
       try {
-        const homeTeam = simTeams.find(t => t && t.id === fix.homeTeamId) || simTeams[0];
-        const awayTeam = simTeams.find(t => t && t.id === fix.awayTeamId) || simTeams[1];
+        const homeTeam = simTeams.find(t => t && t.id === fix.homeTeamId);
+        const awayTeam = simTeams.find(t => t && t.id === fix.awayTeamId);
 
         if (!homeTeam || !awayTeam) return;
 

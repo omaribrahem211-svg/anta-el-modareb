@@ -1880,6 +1880,23 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         console.warn('[FixtureWatchdog] removing unplayable league fixtures:', brokenCount);
         repaired = repaired.filter(f => !broken(f));
       }
+      // A club can only play once per round: drop unplayed league fixtures that put a club in a second match of the same round.
+      {
+        const seenInRound = new Map<string, Set<string>>();
+        const extra = new Set<string>();
+        [...repaired].filter(f => f && isLeagueFix(f) && (f.round ?? 0) > 0)
+          .sort((a, b) => Number(!!b.isPlayed) - Number(!!a.isPlayed))
+          .forEach(f => {
+            const key = String(f.round);
+            const seen = seenInRound.get(key) || new Set<string>();
+            if (!f.isPlayed && (seen.has(f.homeTeamId) || seen.has(f.awayTeamId))) { extra.add(String(f.id)); return; }
+            seen.add(f.homeTeamId); seen.add(f.awayTeamId); seenInRound.set(key, seen);
+          });
+        if (extra.size > 0) {
+          console.warn('[FixtureWatchdog] removing duplicate same-round league fixtures:', extra.size);
+          repaired = repaired.filter(f => !(f && extra.has(String(f.id))));
+        }
+      }
       const leagueLeft = repaired.some(f => f && !f.isPlayed && isLeagueFix(f));
       if (!leagueLeft && userClub) {
         const orphan = (f: Fixture) => !!f && !f.isPlayed && !isLeagueFix(f) && (f.homeTeamId === userClub.id || f.awayTeamId === userClub.id)
