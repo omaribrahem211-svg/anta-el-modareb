@@ -449,9 +449,16 @@ export function updateLeagueRosterInWorld(leagueId: string, updatedTeams: Club[]
   const targetLeague = currentLeagues[leagueId] || GLOBAL_LEAGUES[leagueId];
   if (!targetLeague) return;
 
+  // A club listed twice would play two matches per round: keep one entry per club id.
+  const seenIds = new Set<string>();
+  const uniqueTeams = (updatedTeams || []).filter(t => {
+    if (!t || !t.id || seenIds.has(t.id)) return false;
+    seenIds.add(t.id);
+    return true;
+  });
   const updated: LeagueDefinition = {
     ...targetLeague,
-    teams: updatedTeams,
+    teams: uniqueTeams,
   };
 
   modifiedLeagueIds.add(leagueId);

@@ -1,6 +1,6 @@
 import { App as CapacitorApp } from '@capacitor/app';
 import { getLiveTopFlightPool, getLiveTopFlightPoolsByContinent } from '../services/worldClubPools';
-import { healStaleLeagueFixtures } from '../utils/leagueHeal';
+import { healStaleLeagueFixtures, dedupeClubsById, repairLeagueFixtures } from '../utils/leagueHeal';
 import {
   ContinentalPhaseState,
   CONTINENTAL_PHASE_ENABLED,
@@ -1876,7 +1876,22 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           (!teamIds.has(f.homeTeamId) && !findClubInWorld(f.homeTeamId)) ||
           (!teamIds.has(f.awayTeamId) && !findClubInWorld(f.awayTeamId)));
       let repaired = fixtures;
-      const brokenCount = fixtures.filter(broken).length;
+      // A club listed twice in the league makes the schedule give it two matches per round: dedupe the roster and
+      // rebuild the broken fixture list (keeps every played result that is valid, re-adds the missing pairs).
+      {
+        const uniqueTeams = dedupeClubsById(teams);
+        if (uniqueTeams.length !== teams.length) {
+          console.warn('[FixtureWatchdog] duplicate clubs in league roster:', teams.length - uniqueTeams.length);
+          setTeams(uniqueTeams);
+        }
+        const fixedAll = repairLeagueFixtures(repaired, uniqueTeams, currentRound);
+        if (fixedAll) {
+          console.warn('[FixtureWatchdog] rebuilt league fixtures (club had >1 match in a round)');
+          repaired = fixedAll;
+          fixtureRepairKeyRef.current = '';
+        }
+      }
+      const brokenCount = repaired.filter(broken).length;
       if (brokenCount > 0 && teamIds.size >= 4) {
         console.warn('[FixtureWatchdog] removing unplayable league fixtures:', brokenCount);
         repaired = repaired.filter(f => !broken(f));

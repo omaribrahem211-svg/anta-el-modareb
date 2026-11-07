@@ -313,7 +313,8 @@ export class CalendarManager {
     };
 
     // GENERATE DOMESTIC LEAGUE FIXTURES ONLY (Double Round Robin on Weekly Saturdays)
-    const leagueTeams = Array.isArray(teams) && teams.length > 0 ? teams : activeLeague.teams;
+    const leagueTeamsRaw = Array.isArray(teams) && teams.length > 0 ? teams : activeLeague.teams;
+    const leagueTeams = leagueTeamsRaw.filter((t, i, arr) => !!t && !!t.id && arr.findIndex(x => x && x.id === t.id) === i);
     const teamIds = leagueTeams.map(t => t.id);
     const n = teamIds.length;
     const isOdd = n % 2 !== 0;

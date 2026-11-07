@@ -63,3 +63,115 @@ export function healStaleLeagueFixtures(params: {
   });
   return { fixtures, standings, healed };
 }
+
+/** Keeps the first club for each id (a club listed twice in a league plays two matches per round). */
+export function dedupeClubsById<T extends { id?: string }>(clubs: T[]): T[] {
+  const seen = new Set<string>();
+  return (clubs || []).filter(c => {
+    if (!c || !c.id) return false;
+    if (seen.has(c.id)) return false;
+    seen.add(c.id);
+    return true;
+  });
+}
+
+const shiftDate = (d: string | undefined, days: number): string | undefined => {
+  if (!d) return undefined;
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(d);
+  if (!m) return undefined;
+  const dt = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+  dt.setDate(dt.getDate() + days);
+  const p = (n: number) => String(n).padStart(2, '0');
+  return `${dt.getFullYear()}-${p(dt.getMonth() + 1)}-${p(dt.getDate())}`;
+};
+
+/**
+ * Repairs a league whose schedule was generated with a club listed twice (or otherwise gives a club two
+ * matches in one round): extra same-round fixtures are dropped, then every missing home/away pair is
+ * scheduled in the rounds that are still ahead, so each club ends with exactly (n-1)*2 league matches.
+ * Returns null when nothing is wrong.
+ */
+export function repairLeagueFixtures(fixtures: Fixture[], teams: Club[], currentRound: number): Fixture[] | null {
+  const ids = new Set(dedupeClubsById(teams as any[]).map((t: any) => t.id as string));
+  if (ids.size < 4) return null;
+  const league = fixtures.filter(f => f && isLeague(f) && (f.round ?? 0) > 0);
+  if (league.length === 0) return null;
+
+  // 1. detect a club with 2 matches in one round, or a repeated ordered pair
+  const perRound = new Map<number, Set<string>>();
+  const pairSeen = new Set<string>();
+  let corrupt = false;
+  for (const f of league) {
+    const s = perRound.get(f.round) || new Set<string>();
+    if (s.has(f.homeTeamId) || s.has(f.awayTeamId)) corrupt = true;
+    s.add(f.homeTeamId); s.add(f.awayTeamId); perRound.set(f.round, s);
+    const pk = `${f.homeTeamId}>${f.awayTeamId}`;
+    if (pairSeen.has(pk)) corrupt = true;
+    pairSeen.add(pk);
+  }
+  if (!corrupt) return null;
+
+  // 2. keep a valid subset (played ones first, in round order)
+  const ordered = [...league].sort((a, b) => Number(!!b.isPlayed) - Number(!!a.isPlayed) || a.round - b.round);
+  const busy = new Map<number, Set<string>>();
+  const havePair = new Set<string>();
+  const keep = new Set<string>();
+  for (const f of ordered) {
+    if (!ids.has(f.homeTeamId) || !ids.has(f.awayTeamId) || f.homeTeamId === f.awayTeamId) continue;
+    const pk = `${f.homeTeamId}>${f.awayTeamId}`;
+    const s = busy.get(f.round) || new Set<string>();
+    if (havePair.has(pk) || s.has(f.homeTeamId) || s.has(f.awayTeamId)) continue;
+    s.add(f.homeTeamId); s.add(f.awayTeamId); busy.set(f.round, s);
+    havePair.add(pk);
+    keep.add(String(f.id));
+  }
+  const kept = league.filter(f => keep.has(String(f.id)));
+  const others = fixtures.filter(f => !(f && isLeague(f) && (f.round ?? 0) > 0));
+
+  // 3. schedule missing pairs in rounds that have not been played yet
+  const roundDate = new Map<number, { date?: string; timestamp?: number }>();
+  kept.forEach(f => { if (!roundDate.has(f.round) && f.date) roundDate.set(f.round, { date: f.date, timestamp: f.timestamp }); });
+  const sample = kept.find(f => !f.isPlayed) || kept[0];
+  const lastRound = Math.max(...kept.map(f => f.round));
+  const firstOpen = Math.max(1, kept.filter(f => f.isPlayed).reduce((m, f) => Math.max(m, f.round), 0) + 1, 1);
+  const startRound = Math.max(firstOpen, Math.min(currentRound || firstOpen, firstOpen));
+  const list = [...ids];
+  const missing: Array<[string, string]> = [];
+  for (const h of list) for (const a of list) if (h !== a && !havePair.has(`${h}>${a}`)) missing.push([h, a]);
+
+  const added: Fixture[] = [];
+  let seq = 0;
+  for (const [h, a] of missing) {
+    let r = startRound;
+    for (;; r++) {
+      const s = busy.get(r) || new Set<string>();
+      if (!s.has(h) && !s.has(a)) { s.add(h); s.add(a); busy.set(r, s); break; }
+    }
+    let rd = roundDate.get(r);
+    if (!rd) {
+      const base = roundDate.get(lastRound) || roundDate.get(Math.max(...Array.from(roundDate.keys()), 1));
+      const date = shiftDate(base?.date, 7 * (r - lastRound));
+      rd = { date, timestamp: date ? new Date(date + 'T12:00:00').getTime() : undefined };
+      roundDate.set(r, rd);
+    }
+    added.push({
+      ...(sample as Fixture),
+      id: `fix_repair_r${r}_${h}_${a}_${seq++}`,
+      round: r,
+      homeTeamId: h,
+      awayTeamId: a,
+      isPlayed: false,
+      homeScore: undefined,
+      awayScore: undefined,
+      events: undefined,
+      stats: undefined,
+      revenueClaimed: undefined,
+      matchRevenue: undefined,
+      date: rd.date,
+      timestamp: rd.timestamp,
+      stage: `الجولة ${r}`,
+      stageName: `${(sample as any)?.competitionName || ''} - الجولة ${r}`,
+    } as Fixture);
+  }
+  return [...others, ...kept, ...added];
+}
