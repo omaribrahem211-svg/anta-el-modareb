@@ -11,6 +11,7 @@ import {
   BannerAdPluginEvents,
   AdMobRewardItem,
 } from '@capacitor-community/admob';
+import { gatherConsent } from './consentService';
 import { ADMOB_CONFIG, TEST_AD_IDS } from '../config/admobConfig';
 import { AdManagerState, ActiveTrainingBoost, TrainingBoostType } from '../types/game';
 import { AdRewardManager, AdRewardType, AdRewardClaimResult } from './adRewardService';
@@ -131,6 +132,13 @@ class AdManagerService {
 
       try {
         if (this.isNative) {
+          // 1) UMP consent (TC string) must be resolved BEFORE initialize / any ad request
+          const consent = await gatherConsent();
+          if (!consent.canRequestAds) {
+            this.isInitializing = false;
+            console.warn('[ADMOB] Consent not granted/available yet; ads postponed');
+            return false;
+          }
           await AdMob.initialize({
             testingDevices: ADMOB_CONFIG.IS_TEST_MODE ? ['EMULATOR'] : undefined,
             initializeForTesting: ADMOB_CONFIG.IS_TEST_MODE,
