@@ -29,8 +29,6 @@ export async function detectCheatTools(): Promise<string[]> {
   try {
     const r = await Integrity.scan();
     const out = [...(r.packages || [])];
-    if (r.debugger) out.push('debugger');
-    if (r.suBinary) out.push('su');
     return out;
   } catch {
     return [];
