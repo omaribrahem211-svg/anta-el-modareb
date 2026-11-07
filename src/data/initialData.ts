@@ -1353,7 +1353,8 @@ export function generateLeagueSchedule(teams: Club[]): Fixture[] {
 }
 
 export function generateInitialStandings(teams: Club[]): LeagueStanding[] {
-  return teams.map(team => ({
+  const seen = new Set<string>();
+  return (teams || []).filter(t => !!t && !!t.id && !seen.has(t.id) && !!seen.add(t.id)).map(team => ({
     teamId: team.id,
     teamName: team.name,
     played: 0,
