@@ -1,3 +1,4 @@
+import { reportAppError } from '../utils/errorLog';
 import React, { Component, ErrorInfo, ReactNode } from 'react';
 import { AlertTriangle, RefreshCw, Home, Wrench, ChevronDown, CheckCircle2 } from 'lucide-react';
 import { autoRepairStorage } from '../utils/storageSanitizer';
@@ -33,6 +34,7 @@ export class ErrorBoundary extends Component<Props, State> {
   }
 
   public componentDidCatch(error: Error, errorInfo: ErrorInfo) {
+    reportAppError('ui', error?.message || String(error), (error?.stack || '') + '\n' + (errorInfo?.componentStack || ''));
     console.error('[ErrorBoundary] Uncaught UI error:', error, errorInfo);
     this.setState({ errorInfo });
     // Proactively auto-repair storage so reload or retry does not crash again

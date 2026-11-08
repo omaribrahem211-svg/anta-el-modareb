@@ -43,9 +43,26 @@ export function installGlobalErrorLogging(): void {
   installed = true;
   window.addEventListener('error', (ev: ErrorEvent) => {
     pushDebugLog('error', `${ev.message || 'error'} @ ${ev.filename || ''}:${ev.lineno || 0}`);
+    reportAppError('error', ev.message || 'error', (ev.error && ev.error.stack) || `${ev.filename || ''}:${ev.lineno || 0}:${ev.colno || 0}`);
   });
   window.addEventListener('unhandledrejection', (ev: PromiseRejectionEvent) => {
     const reason: any = ev.reason;
     pushDebugLog('rejection', reason?.message || String(reason));
+    reportAppError('rejection', reason?.message || String(reason), reason?.stack || '');
   });
+}
+
+
+export interface AppErrorDetail { id: number; t: string; kind: string; msg: string; stack: string }
+const IGNORED = [/ResizeObserver loop/i, /^Script error\.?$/i, /AbortError/i, /Non-Error promise rejection/i];
+let errSeq = 0;
+
+/** Emits a lightweight event so the on-screen reporter can show the real error (message + stack). */
+export function reportAppError(kind: string, msg: string, stack: string): void {
+  try {
+    const m = String(msg || '');
+    if (!m || IGNORED.some(r => r.test(m))) return;
+    const detail: AppErrorDetail = { id: ++errSeq, t: new Date().toISOString(), kind, msg: m.slice(0, 500), stack: String(stack || '').slice(0, 1500) };
+    window.dispatchEvent(new CustomEvent('app-error', { detail }));
+  } catch {}
 }

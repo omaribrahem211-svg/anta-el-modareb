@@ -1,3 +1,4 @@
+import { reportAppError } from '../utils/errorLog';
 import React, { Component, ErrorInfo, ReactNode } from 'react';
 import { AlertTriangle, RefreshCw, RotateCcw } from 'lucide-react';
 
@@ -32,6 +33,7 @@ export class MatchErrorBoundary extends Component<Props, State> {
   }
 
   public componentDidCatch(error: Error, errorInfo: ErrorInfo) {
+    reportAppError('match', error?.message || String(error), (error?.stack || '') + '\n' + (errorInfo?.componentStack || ''));
     console.error(`[CRITICAL_MATCH_ERROR] Runtime exception in ${this.props.componentName || 'MatchFlow'}:`, error);
     console.error('[CRITICAL_MATCH_ERROR] Component stack trace:', errorInfo.componentStack);
     this.setState({ errorInfo });

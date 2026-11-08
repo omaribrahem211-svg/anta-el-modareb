@@ -1,4 +1,5 @@
 import IntegrityGate from './components/IntegrityGate';
+import ErrorReporter from './components/ErrorReporter';
 import React, { useState, useEffect, useCallback, startTransition } from 'react';
 import { Capacitor } from '@capacitor/core';
 import { App as CapApp } from '@capacitor/app';
@@ -464,6 +465,7 @@ export default function App() {
           <ContinentalSafe />
           <SeasonStartingOverlay />
           <IntegrityGate />
+          <ErrorReporter />
         </GameProvider>
       </AuthProvider>
     </LanguageProvider>

@@ -1,3 +1,4 @@
+import { reportAppError } from '../utils/errorLog';
 import React, { Component, ErrorInfo, ReactNode } from 'react';
 
 interface Props {
@@ -21,6 +22,7 @@ export class SeasonSafeBoundary extends Component<Props, State> {
   }
 
   componentDidCatch(error: Error, info: ErrorInfo) {
+    reportAppError('ui:' + this.props.name, error?.message || String(error), (error?.stack || '') + '\n' + (info?.componentStack || ''));
     console.error(`[SeasonSafeBoundary:${this.props.name}]`, error, info?.componentStack);
   }
 
