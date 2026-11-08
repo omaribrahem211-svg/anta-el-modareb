@@ -294,7 +294,7 @@ class AdManagerService {
         };
 
         console.log(`[ADMOB_BANNER] Requesting ${isTest ? 'TEST' : 'PRODUCTION'} banner ad:`, bannerAdId, 'position: BOTTOM_CENTER');
-        await AdMob.showBanner(options);
+        await this.queueBannerOp(() => AdMob.showBanner(options));
         this.isBannerCreated = true;
         this.isBannerVisible = true;
         this.isBannerActive = true;
@@ -343,17 +343,32 @@ class AdManagerService {
     return this.ensureBannerActive();
   }
 
+  // Native banner calls are serialised: the plugin's hide/remove/show run on the UI thread and racing them
+  // (e.g. hide right after a failed load / removal) crashed with a NullPointerException in BannerExecutor.hideBanner.
+  private bannerOpChain: Promise<unknown> = Promise.resolve();
+  private queueBannerOp<T>(fn: () => Promise<T>): Promise<T> {
+    const run = this.bannerOpChain.then(fn, fn);
+    this.bannerOpChain = run.catch(() => undefined);
+    return run;
+  }
+
   public async hideBanner(): Promise<boolean> {
     if (!ADMOB_CONFIG.ENABLE_BANNER) return true;
-    if (!this.isBannerCreated) return true;
+    if (!this.isBannerCreated && !this.isBannerActive) return true;
     this.isBannerVisible = false;
 
     if (this.isNative) {
-      try {
-        await AdMob.hideBanner();
-      } catch (e) {
-        console.warn('[ADMOB] hideBanner notice:', e);
-      }
+      // removeBanner is null-safe in the plugin (hideBanner is not); resumeBanner() recreates it when needed.
+      this.isBannerCreated = false;
+      this.isBannerActive = false;
+      this.isBannerLoading = false;
+      await this.queueBannerOp(async () => {
+        try {
+          await AdMob.removeBanner();
+        } catch (e) {
+          console.warn('[ADMOB] hideBanner(remove) notice:', e);
+        }
+      });
     }
     return true;
   }
@@ -365,7 +380,7 @@ class AdManagerService {
       this.isBannerVisible = true;
       if (this.isNative) {
         try {
-          await AdMob.resumeBanner();
+          await this.queueBannerOp(() => AdMob.resumeBanner());
           return true;
         } catch (e) {
           console.warn('[ADMOB] resumeBanner notice, re-ensuring banner:', e);
@@ -390,11 +405,13 @@ class AdManagerService {
     }
 
     if (this.isNative) {
-      try {
-        await AdMob.removeBanner();
-      } catch (e) {
-        this.log('Banner destroy notice:', e);
-      }
+      await this.queueBannerOp(async () => {
+        try {
+          await AdMob.removeBanner();
+        } catch (e) {
+          this.log('Banner destroy notice:', e);
+        }
+      });
     }
     return true;
   }
