@@ -50,6 +50,15 @@ jobs:
               f.write(base64.b64decode(raw))
           "
 
+      - name: Cache Gradle distribution and dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/wrapper
+            ~/.gradle/caches
+          key: gradle-${{ runner.os }}-${{ hashFiles('android/gradle/wrapper/gradle-wrapper.properties', 'android/**/*.gradle*') }}
+          restore-keys: gradle-${{ runner.os }}-
+
       - name: Build and Sign AAB
         working-directory: android
         env:
@@ -58,12 +67,20 @@ jobs:
           ALIAS: ${{ secrets.KEY_ALIAS }}
         run: |
           chmod +x gradlew
-          ./gradlew bundleRelease \
-            -PautoVersionCode=${{ github.run_number }} \
-            -Pandroid.injected.signing.store.file="${{ github.workspace }}/release.p12" \
-            -Pandroid.injected.signing.store.password="$KS_PASS" \
-            -Pandroid.injected.signing.key.alias="$ALIAS" \
-            -Pandroid.injected.signing.key.password="$KEY_PASS"
+          # services.gradle.org occasionally times out: retry the build (downloads are resumed from cache)
+          for attempt in 1 2 3; do
+            echo "Gradle build attempt $attempt"
+            if ./gradlew bundleRelease \
+              -PautoVersionCode=${{ github.run_number }} \
+              -Pandroid.injected.signing.store.file="${{ github.workspace }}/release.p12" \
+              -Pandroid.injected.signing.store.password="$KS_PASS" \
+              -Pandroid.injected.signing.key.alias="$ALIAS" \
+              -Pandroid.injected.signing.key.password="$KEY_PASS"; then
+              exit 0
+            fi
+            sleep $((attempt * 20))
+          done
+          exit 1
 
       - name: Upload Signed AAB
         uses: actions/upload-artifact@v4
