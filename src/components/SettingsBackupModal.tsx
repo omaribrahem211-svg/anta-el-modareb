@@ -45,6 +45,7 @@ import {
 } from 'lucide-react';
 import { ModalPortal } from './common/ModalPortal';
 import { getDebugLogText } from '../utils/errorLog';
+import { getPerfSetting, setPerfSetting, isLiteMode } from '../utils/perfMode';
 
 interface SettingsBackupModalProps {
   isOpen: boolean;
@@ -704,6 +705,18 @@ export const SettingsBackupModal: React.FC<SettingsBackupModalProps> = ({
             <p className="text-[11px] text-slate-400 leading-relaxed">
               لو حصل تهنيج أو شاشة بيضاء، افتح اللعبة وانسخ سجل الأخطاء وأرسله للمطور.
             </p>
+            <button
+              type="button"
+              id="btn_toggle_perf_mode"
+              onClick={() => {
+                const cur = isLiteMode();
+                setPerfSetting(cur ? 'off' : 'on');
+                setFeedback({ type: 'success', title: cur ? 'تم إيقاف وضع الأداء' : 'تم تفعيل وضع الأداء', message: cur ? 'رجعت التأثيرات والحركات.' : 'اتقفلت الحركات والتمويه لحل الشاشات البيضا وتخفيف الحمل.' });
+              }}
+              className="w-full py-2 px-3 bg-slate-800 hover:bg-slate-700 border border-slate-600 text-slate-200 text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer active:scale-[0.98] mb-2"
+            >
+              <span>⚡ وضع الأداء (يحل الشاشة البيضا): {getPerfSetting() === 'auto' ? 'تلقائي' : getPerfSetting() === 'on' ? 'مفعّل' : 'متوقف'}</span>
+            </button>
             <button
               type="button"
               id="btn_copy_debug_log"

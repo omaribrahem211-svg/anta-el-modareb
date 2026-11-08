@@ -5,8 +5,10 @@ import App from './App.tsx';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import './index.css';
 import { installGlobalErrorLogging } from './utils/errorLog';
+import { installPerfMode } from './utils/perfMode';
 
 installGlobalErrorLogging();
+installPerfMode();
 
 // Prevent uncaught async promise rejections or bridge errors from crashing the WebView thread
 window.addEventListener('unhandledrejection', (event) => {

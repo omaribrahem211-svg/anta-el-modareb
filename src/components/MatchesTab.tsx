@@ -1,3 +1,4 @@
+import { forceRepaint } from '../utils/perfMode';
 import React, { useEffect, useRef, useState, useMemo } from 'react';
 import { useGame } from '../context/GameContext';
 import { TacticalPitch2D } from './TacticalPitch2D';
@@ -171,6 +172,15 @@ export const MatchesTab: React.FC = () => {
   const [snoozedTacticalAlerts, setSnoozedTacticalAlerts] = useState<Record<string, number>>({});
   const [teamTalkChosen, setTeamTalkChosen] = useState<string | null>(null);
   const [showCommentary, setShowCommentary] = useState<boolean>(true);
+
+  // Weak GPUs sometimes leave the live-match panel unpainted (white): nudge a repaint when a match opens.
+  useEffect(() => {
+    if (!liveMatch?.fixture?.id) return;
+    forceRepaint();
+    const t1 = setTimeout(forceRepaint, 300);
+    const t2 = setTimeout(forceRepaint, 1200);
+    return () => { clearTimeout(t1); clearTimeout(t2); };
+  }, [liveMatch?.fixture?.id]);
 
   // Reset tactical alert snoozes when match starts
   useEffect(() => {

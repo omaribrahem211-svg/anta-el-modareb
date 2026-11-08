@@ -59,3 +59,13 @@ html, body {
   animation: pitchBallFloat 0.45s ease-in-out infinite;
 }
 
+
+/* Lite mode (weak GPUs): no animations / blur so WebView paints reliably */
+html.perf-lite *, html.perf-lite *::before, html.perf-lite *::after {
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}
+html.perf-lite *:not(.animate-spin):not(.animate-spin *) {
+  animation: none !important;
+}
+html.perf-lite [class*="blur"] { filter: none !important; }
