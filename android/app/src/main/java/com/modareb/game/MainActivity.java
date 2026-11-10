@@ -6,6 +6,10 @@ import android.os.Build;
 import android.os.Bundle;
 import android.util.Log;
 import android.view.View;
+import android.view.WindowManager;
+import androidx.core.view.WindowCompat;
+import androidx.core.view.WindowInsetsCompat;
+import androidx.core.view.WindowInsetsControllerCompat;
 import android.webkit.RenderProcessGoneDetail;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
@@ -31,7 +35,7 @@ import java.util.concurrent.Executors;
 public class MainActivity extends BridgeActivity {
     private static final String TAG_APP = "ModarebApp";
     private static final String TAG_WEBVIEW = "ModarebWebView";
-    private static final String THEME_BACKGROUND_COLOR = "#020617";
+    private static final String THEME_BACKGROUND_COLOR = "#070B16";
 
     // Dedicated background thread for non-UI initialization tasks
     private final ExecutorService backgroundExecutor = Executors.newSingleThreadExecutor(r -> {
@@ -48,9 +52,13 @@ public class MainActivity extends BridgeActivity {
         // Register the Google Play in-app update plugin before the bridge initializes
         registerPlugin(InAppUpdatePlugin.class);
         registerPlugin(IntegrityPlugin.class);
+        registerPlugin(NativePlugin.class);
         // Step 1: Let BridgeActivity complete core framework initialization without blocking
         super.onCreate(savedInstanceState);
         Log.d(TAG_APP, "Activity onCreate initiated");
+        // Landscape game: keep the screen on and use immersive mode
+        getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        goImmersive();
 
         // Step 2: Clear all heavy work from the UI thread.
         // Using decorView.post() guarantees the Window surface is created, measured, drawn,
@@ -60,6 +68,21 @@ public class MainActivity extends BridgeActivity {
             setupWebViewSafely();
             scheduleBackgroundWarmup();
         });
+    }
+
+    private void goImmersive() {
+        try {
+            WindowCompat.setDecorFitsSystemWindows(getWindow(), false);
+            WindowInsetsControllerCompat c = WindowCompat.getInsetsController(getWindow(), getWindow().getDecorView());
+            c.hide(WindowInsetsCompat.Type.systemBars());
+            c.setSystemBarsBehavior(WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
+        } catch (Exception ignored) {}
+    }
+
+    @Override
+    public void onWindowFocusChanged(boolean hasFocus) {
+        super.onWindowFocusChanged(hasFocus);
+        if (hasFocus) goImmersive();
     }
 
     /**

@@ -3,7 +3,7 @@ import type { CapacitorConfig } from '@capacitor/cli';
 const config: CapacitorConfig = {
   appId: 'com.modareb.game',
   appName: 'أنت المدرب',
-  webDir: 'dist',
+  webDir: 'www',
   server: {
     androidScheme: 'https',
     cleartext: true,
