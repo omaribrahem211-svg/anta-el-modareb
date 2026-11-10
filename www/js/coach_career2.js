@@ -37,3 +37,6 @@ function trainModal(c){const S=mySquad(c);const avg=Math.round(S.reduce((s,p)=>s
 const _rhC2=renderHub;renderHub=function(){_rhC2();const c=App.c;if(!c||!c.coachMode)return;const t=$('tNext');if(!t||!c.sched[c.si])return;const old=$('trainBtn');if(old)old.remove();
  const b=document.createElement('button');b.id='trainBtn';b.className='btn sm '+(trainInfo(c)?'ghost':'gold');b.style.cssText='position:absolute;left:14px;bottom:10px';b.textContent=trainInfo(c)?'التدريب خلص ✓':'🏋️ جلسة تدريب';b.disabled=trainInfo(c);b.onclick=()=>trainModal(c);t.appendChild(b);};
 window.cc2=cc2;window.salaryM=salaryM;
+
+/* ---- عروض الاهتمام اللي اتفتحت في نص الموسم بتتضاف لعروض آخر الموسم ---- */
+const _coC2=coachOffers;coachOffers=function(c,stayTier,sacked,perf){const out=_coC2(c,stayTier,sacked,perf)||[];try{if(c.interest&&!sacked){const t=Math.min(7,Math.max(c.interest.tier,stayTier));const {ti,cl}=clubFor(c,t);if(!out.some(o=>o.tier===t))out.unshift({tier:t,abroad:ti.country,club:{name:cl.name,short:cl.short,kit:cl.kit,kitArr:cl.kitArr,cc:ti.country,real:cl.real,R:cl.R},clubR:cl.R,wage:Math.round(tsOf(c)*.4*(1+c.rep/60)*(1+(t-stayTier)*.3)),years:RI(2,4),tierName:ti.name,role:'مدرب الفريق الأول',fee:0,why:'اهتمام سابق'});}c.interest=null;}catch(e){console.warn(e);}return out.slice(0,3);};
