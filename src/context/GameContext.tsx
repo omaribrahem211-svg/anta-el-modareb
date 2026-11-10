@@ -9158,6 +9158,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   // skipping a match) every club pays one month of player wages. Non-match income (TV / commercial deals) arrives the
   // same way, as a safety net that fades once a club holds 12 months of wages in the bank.
   const lastPayrollMonthRef = useRef<number | null>(null);
+  const lastPayrollSeasonRef = useRef<number | null>(null);
   useEffect(() => {
     const raw = calendarDate?.rawDateStr;
     const m = raw ? /^(\d{4})-(\d{2})/.exec(raw) : null;
@@ -9172,6 +9173,12 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const diff = monthIdx - (lastPayrollMonthRef.current as number);
     lastPayrollMonthRef.current = monthIdx;
     try { localStorage.setItem(key, String(monthIdx)); } catch (_) {}
+    // A new season starting is never a payroll month: clubs that finished late (continental cups / Club World Cup
+    // run into June-July) used to be billed a full month of wages the moment the new season began (85M -> 13M).
+    const curSeasonNo = season?.seasonNumber ?? null;
+    const prevSeasonNo = lastPayrollSeasonRef.current;
+    lastPayrollSeasonRef.current = curSeasonNo;
+    if (prevSeasonNo !== null && curSeasonNo !== null && prevSeasonNo !== curSeasonNo) return;
     // Backwards (new game / reload) or a long jump (season rollover) never bills; only normal 1-2 month steps do.
     if (diff < 1 || diff > 2) return;
     const monthlyDue = (club: any) => {
