@@ -1,4 +1,6 @@
 // أنت المدرب — لوحة المدرب التكتيكية: ملعب من فوق + شريط سيطرة + تعليق مباشر
+/* 3D متشال: ستاب بسيط عشان اللعبة تفضل 2D وخفيفة */
+window.R3D=window.R3D||class R3D{constructor(){throw new Error("3D off");}render(){}};
 'use strict';
 (function(){
 const PAD=7;const BD={on:false,m:null,view3d:false,speed:1,mom:.5,trail:[],trT:0,feed:[],sel:null,goalFlash:0,goalTxt:'',raf:0,sw:0,sh:0,pitch:null,lastSide:0};
@@ -9,7 +11,7 @@ root.innerHTML=`<div class="bd-main"><div class="bd-head"><div class="bd-team" i
 <aside class="bd-side"><div class="bd-card"><div class="bd-lbl">مين مسيطر على الماتش؟</div><div class="bd-mom" id="bdMom"><i id="bdMomFill"></i></div><div class="bd-momn"><span id="bdMomA"></span><span id="bdMomB"></span></div><div class="bd-stats" id="bdStats"></div></div>
 <div class="bd-card bd-pl" id="bdPl" hidden></div>
 <div class="bd-card bd-feedc"><div class="bd-lbl">التعليق المباشر</div><div class="bd-feed" id="bdFeed"></div></div>
-<div class="bd-ctl"><button class="bd-btn on2" id="bdPanel">لوحة المدرب</button><button class="bd-btn" id="bd3d">3D</button></div></aside>`;
+<div class="bd-ctl"><button class="bd-btn on2" id="bdPanel">لوحة المدرب</button><button class="bd-btn" id="bdSp">السرعة ×4</button></div></aside>`;
 document.body.appendChild(root);
 const back=document.createElement('button');back.id='bdBack';back.textContent='رجوع للوحة';document.body.appendChild(back);
 const cp=document.getElementById('coachP');if(cp)document.body.appendChild(cp);
@@ -124,7 +126,7 @@ BD.ev=function(type,d,m){if(!BD.on)return;const nm=d&&d.p?esc(lastName(d.p.name)
 /* controls */
 root.querySelectorAll('[data-sp]').forEach(b=>b.onclick=()=>{BD.speed=+b.dataset.sp;root.querySelectorAll('[data-sp]').forEach(x=>x.classList.toggle('on',x===b));});
 $b('bdPanel').onclick=()=>window.togglePause();
-$b('bd3d').onclick=()=>setView(true);back.onclick=()=>setView(false);
+const SPD=[2,4,8];$b('bdSp').onclick=()=>{const i=(SPD.indexOf(BD.speed)+1)%SPD.length;BD.speed=SPD[i];$b('bdSp').textContent='السرعة ×'+BD.speed;};back.style.display='none';
 function setView(v3){BD.view3d=v3;document.body.classList.toggle('view3d',v3);if(!v3){BD.pitch=null;setTimeout(layout,30);}}
 cv.addEventListener('pointerdown',e=>{const m=BD.m;if(!m)return;const r=cv.getBoundingClientRect(),px=e.clientX-r.left,py=e.clientY-r.top;let best=null,bd=1e9;
   for(const p of m.all){const d=Math.hypot((p.x+PAD)*BD.k-px,(p.y+PAD)*BD.k-py);if(d<bd){bd=d;best=p;}}
@@ -132,9 +134,9 @@ cv.addEventListener('pointerdown',e=>{const m=BD.m;if(!m)return;const r=cv.getBo
 addEventListener('resize',()=>{if(BD.on){BD.pitch=null;setTimeout(layout,50);}});
 
 BD.setView=v=>setView(v);
-BD.start=function(m){BD.m=m;BD.on=true;BD.view3d=false;BD.speed=8;BD.mom=.5;BD.trail=[];BD.sel=null;BD.pitch=null;BD.lt=performance.now();
+BD.start=function(m){BD.m=m;BD.on=true;BD.view3d=false;BD.speed=4;BD.mom=.5;BD.trail=[];BD.sel=null;BD.pitch=null;BD.lt=performance.now();
   document.body.classList.add('boardmode');document.body.classList.remove('view3d');root.classList.add('on');
-  root.querySelectorAll('[data-sp]').forEach(x=>x.classList.toggle('on',+x.dataset.sp===BD.speed));$b('bdFeed').innerHTML='';
+  $b('bdSp').textContent='السرعة ×4';$b('bdFeed').innerHTML='';
   const t0=m.t[0],t1=m.t[1];root.style.setProperty('--c0',colOf(t0,t1));root.style.setProperty('--c1',colOf(t1,t0));const ch=(t,c)=>`<i style="background:${c}"></i><span>${esc(t.name)}</span>`;$b('bdA').innerHTML=ch(t0,colOf(t0,t1));$b('bdB').innerHTML=ch(t1,colOf(t1,t0));
   const u=m.update;m.update=function(dt){if(BD.on&&!BD.view3d&&(this.phase==='replay'||this.phase==='intro'))this.skip();const n=this.paused?1:BD.speed;for(let i=0;i<n;i++)u.call(this,dt);};
   setTimeout(layout,60);cancelAnimationFrame(BD.raf);BD.raf=requestAnimationFrame(tick);add('الفريقين نزلوا الملعب. إنت المدرب، وجّه فريقك','hot');if(App.settings&&+App.settings.view===1)setTimeout(()=>setView(true),50);};

@@ -3,11 +3,16 @@
 const LG_PFX='anta_el_modareb_save_v1';
 const LG_CC={EGY:'EG',SAU:'SA',MAR:'MA',DZA:'DZ',ALG:'DZ',TUN:'TN',ARE:'AE',UAE:'AE',QAT:'QA',JOR:'JO',IRQ:'IQ',ENG:'EN',GBR:'EN',ESP:'ES',ITA:'IT',DEU:'DE',GER:'DE',FRA:'FR',PRT:'PT',POR:'PT',NLD:'NL',NED:'NL',TUR:'TR',BRA:'BR',ARG:'AR',USA:'US'};
 function lgRead(k){try{const s=localStorage.getItem(LG_PFX+k);return s?JSON.parse(s):null;}catch(e){return null;}}
-function legacyFind(){try{
- if(localStorage.getItem('anta-legacy-done'))return null;
- const mg=lgRead('_manager'),teams=lgRead('_teams');if(!mg||!Array.isArray(teams)||!teams.length)return null;
- const club=teams.find(t=>t&&t.isUserClub)||teams.find(t=>mg.currentClubId&&t.id===mg.currentClubId);if(!club||!Array.isArray(club.players)||club.players.length<11)return null;
- return{mg,club};}catch(e){return null;}}
+function lgPick(mg,teams){if(!mg||!Array.isArray(teams)||!teams.length)return null;
+ const club=teams.find(t=>t&&t.isUserClub)||teams.find(t=>mg.currentClubId&&t.id===mg.currentClubId);if(!club||!Array.isArray(club.players)||club.players.length<11)return null;return{mg,club};}
+// النسخة القديمة كانت بتحفظ التيمز في IndexedDB (مش localStorage) — نقرا من الاتنين
+function idbGet(db,store,key){return new Promise(res=>{try{const rq=indexedDB.open(db);rq.onerror=()=>res(null);rq.onupgradeneeded=()=>{try{rq.transaction.abort();}catch(e){}res(null);};
+ rq.onsuccess=()=>{try{const d=rq.result;if(!d.objectStoreNames.contains(store)){d.close();return res(null);}const g=d.transaction([store],'readonly').objectStore(store).get(key);g.onsuccess=()=>{d.close();res(g.result===undefined?null:g.result);};g.onerror=()=>{d.close();res(null);};}catch(e){res(null);}};}catch(e){res(null);}});}
+async function legacyLoad(){try{if(localStorage.getItem('anta-legacy-done'))return null;}catch(e){}
+ const srcs=[()=>idbGet('keyval-store','keyval','anta_el_modareb_idb_current_save_v2_current_save'),()=>idbGet('AntaElModareb_DB_v2','game_state_store','current_save')];
+ for(const f of srcs){try{const v=await f();if(v){const L=lgPick(v.manager||lgRead('_manager'),v.teams);if(L)return L;}}catch(e){}}
+ try{const L=lgPick(lgRead('_manager'),lgRead('_teams'));if(L)return L;}catch(e){}return null;}
+function legacyFind(){return window._lgCache||null;}
 function lgRole(p){const c=p.positionCategory,q=p.position;if(c==='GK'||q==='GK')return'GK';if(c==='DEF'||['CB','RB','LB'].includes(q))return'DF';if(c==='FWD'||['ST','RW','LW'].includes(q))return'FW';return'MF';}
 function legacyImport(L){const mg=L.mg,old=L.club;
  const cc=LG_CC[String(old.countryCode||'').toUpperCase()]||LG_CC[String(old.countryId||'').toUpperCase()]||'EG';
@@ -32,10 +37,12 @@ function legacyImport(L){const mg=L.mg,old=L.club;
  mail(c,'club','إدارة '+club.name,'أهلاً بعودتك يا كابتن','مسيرتك القديمة اتنقلت كاملة: الفريق والتشكيلة والميزانية ('+money(c.money)+'). كمّل من مكانك.');
  try{localStorage.setItem('anta-legacy-done','1');}catch(e){}
  return c;}
-function legacyButton(){const L=legacyFind();const old=$('mLegacy');if(old)old.remove();if(!L||App.c)return;const nb=$('mNew');if(!nb)return;
- const b=document.createElement('button');b.id='mLegacy';b.className='btn gold';b.style.cssText='margin-top:8px;width:100%';b.innerHTML='كمّل مسيرتك القديمة · '+esc(L.club.name);
- b.onclick=()=>{try{App.c=legacyImport(L);store();toast('اتنقلت مسيرتك بنجاح');show('hub');}catch(e){console.warn(e);toast('حصل خطأ في النقل، ابدأ مسيرة جديدة');}};
+function legacyDo(L){try{App.c=legacyImport(L);store();toast('رجّعنا مسيرتك القديمة مع '+L.club.name);show('hub');return true;}catch(e){console.warn(e);return false;}}
+function legacyButton(){const L=legacyFind();const old=$('mLegacy');if(old)old.remove();if(!L)return;const nb=$('mNew');if(!nb)return;
+ const b=document.createElement('button');b.id='mLegacy';b.className='btn gold';b.style.cssText='margin-top:8px;width:100%';b.innerHTML=(App.c?'استرجع مسيرتك القديمة (بتستبدل الحالية) · ':'كمّل مسيرتك القديمة · ')+esc(L.club.name);
+ b.onclick=()=>{if(App.c&&!confirm('المسيرة الحالية هتتستبدل بمسيرتك القديمة. متأكد؟'))return;if(!legacyDo(L))toast('حصل خطأ في النقل، ابدأ مسيرة جديدة');};
  nb.parentNode.insertBefore(b,nb);}
 renderTitle=(function(o){return function(){o();try{legacyButton();}catch(e){}};})(renderTitle);
-window.legacyFind=legacyFind;window.legacyImport=legacyImport;
-try{legacyButton();}catch(e){}
+// أول ما اللعبة تفتح: لو فيه مسيرة قديمة ومفيش مسيرة جديدة، ترجع تلقائياً لنفس النادي
+setTimeout(async()=>{try{const L=await legacyLoad();if(!L)return;window._lgCache=L;if(App.c){try{renderTitle();}catch(e){}return;}legacyDo(L);}catch(e){console.warn(e);}},1200);
+window.legacyFind=legacyFind;window.legacyImport=legacyImport;window.legacyLoad=legacyLoad;

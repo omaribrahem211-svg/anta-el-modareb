@@ -102,14 +102,13 @@ function guestCard(el,c){if(!el)return;if(c.guest){const g=c.guest;el.innerHTML=
 /* ===== الإعدادات ===== */
 function buildSettings(){const sec=$('scr-settings');if(sec.dataset.coach)return;sec.dataset.coach=1;const P=sec.querySelector('.panel');
  const seg=(label,k,opts,extra)=>`<div class="field"><label>${label}</label><div class="seg" data-k="${k}">${opts.map(([v,n])=>`<button data-v="${v}">${n}</button>`).join('')}</div>${extra||''}</div>`;
- P.innerHTML=`<div class="lbl">الماتش</div>`+seg('عرض الماتش','view',[[0,'لوحة تكتيكية (أخف)'],[1,'3D مباشر']])+seg('مدة الماتش (قبل التسريع)','halfLen',[[30,'دقيقة'],[60,'دقيقتين'],[120,'4 دقايق'],[180,'6 دقايق']])+seg('الصعوبة','diff',[[-6,'سهل'],[0,'عادي'],[5,'صعب'],[10,'أسطوري']])
- +`<div class="lbl" style="margin-top:6px">الرسوميات</div>`+seg('جودة الجرافيكس (في وضع 3D)','gfx',[[2,'عالية'],[1,'متوسطة (أسرع)']])+seg('شكل اللاعيبة','plm',[[0,'موديلات حقيقية'],[1,'بسيط (للموبايلات الضعيفة)']])+seg('الكاميرا (في وضع 3D)','cam',[[0,'عادية'],[1,'قريبة'],[2,'بعيدة']])
- +`<div class="lbl" style="margin-top:6px">الصوت</div>`+seg('الأصوات','sound',[[1,'شغّالة'],[0,'مقفولة']])+seg('التعليق الصوتي العربي','voice',[[1,'شغّال'],[0,'مقفول']],'<div class="sub" id="voiceInfo"></div>')+seg('لهجة المعلّق','dial',[[0,'مصري'],[1,'خليجي']])+seg('التعليق المكتوب فوق الشاشة (3D)','ctext',[[0,'مقفول'],[1,'سطر صغير فوق']])
+ P.innerHTML=`<div class="lbl">الماتش</div>`+seg('مدة الماتش','halfLen',[[240,'قصير'],[360,'متوسط'],[480,'كامل (نتايج واقعية)']])+seg('الصعوبة','diff',[[-6,'سهل'],[0,'عادي'],[5,'صعب'],[10,'أسطوري']])
+ +`<div class="lbl" style="margin-top:6px">الصوت</div>`+seg('الأصوات','sound',[[1,'شغّالة'],[0,'مقفولة']])+seg('التعليق الصوتي العربي','voice',[[1,'شغّال'],[0,'مقفول']],'<div class="sub" id="voiceInfo"></div>')+seg('لهجة المعلّق','dial',[[0,'مصري'],[1,'خليجي']])
  +`<div class="lbl" style="margin-top:6px">المسيرة</div><div class="field"><div class="row" style="gap:8px;flex-wrap:wrap"><button class="btn ghost sm" id="stCopy">نسخ بيانات المسيرة</button><button class="btn ghost sm" id="stReset">مسح المسيرة الحالية</button></div><div class="sub">المسيرة بتتحفظ تلقائياً على جهازك بعد كل ماتش.</div></div>`;
  $('stCopy').onclick=async()=>{try{await navigator.clipboard.writeText(packSave());toast('اتنسخت بيانات المسيرة');}catch(e){toast('النسخ مش متاح هنا');}};
  let arm=0;$('stReset').onclick=()=>{if(!arm){arm=1;$('stReset').textContent='متأكد؟ دوس تاني';setTimeout(()=>{arm=0;$('stReset').textContent='مسح المسيرة الحالية';},3000);return;}App.c=null;try{localStorage.removeItem(SAVE);}catch(e){}arm=0;toast('اتمسحت المسيرة');show('title');};}
 const _rs=renderSettings;renderSettings=function(){buildSettings();_rs();};
-App.settings=Object.assign({view:0,spd:4},App.settings);if(!App.settings.v201){App.settings.spd=8;App.settings.v201=1;}if(!App.settings.v200){App.settings.halfLen=60;App.settings.spd=4;App.settings.view=0;App.settings.v200=1;}
+App.settings=Object.assign({view:0,spd:4},App.settings);if(!App.settings.v201){App.settings.spd=8;App.settings.v201=1;}if(!App.settings.v200){App.settings.halfLen=60;App.settings.spd=4;App.settings.view=0;App.settings.v200=1;}if(!App.settings.v202){App.settings.halfLen=480;App.settings.view=0;App.settings.v202=1;}
 /* ===== فرع الهب ===== */
 function hubHook(c){rebuildEv(c);}
 return{afterMatch,guestCard,hubHook,maybeEvent,showModal,closeModal};})();

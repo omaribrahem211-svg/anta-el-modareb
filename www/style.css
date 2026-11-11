@@ -136,7 +136,7 @@ table.tbl{width:100%;border-collapse:collapse;font-size:clamp(12px,2.6vh,15px)}
 #rotate{position:fixed;inset:0;background:var(--bg);z-index:99;display:none;align-items:center;justify-content:center;flex-direction:column;gap:16px;text-align:center;padding:30px}
 #rotate svg{animation:rot 2s ease-in-out infinite}
 @keyframes rot{0%,30%{transform:rotate(0)}60%,100%{transform:rotate(-90deg)}}
-@media (orientation:portrait) and (max-width:900px){#rotate{display:flex}}
+/* portrait مدعوم */
 .hidden{display:none!important}
 .toast{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:var(--panel2);box-shadow:inset 0 0 0 1px var(--acc);padding:8px 18px;font-weight:700;z-index:50;display:none}
 .toast.on{display:block}
@@ -896,3 +896,24 @@ body.bnr .screen.tab:not(#scr-hub){padding-bottom:calc(140px + env(safe-area-ins
 #scr-hub .tile{overflow:visible}
 #scr-hub #tObj,#scr-hub #tNews,#scr-hub #tTable,#scr-hub #tPlayer{min-height:140px}
 #scr-hub{padding-bottom:84px!important}
+/* ===== الوضع الطولي ===== */
+@media (orientation:portrait){
+ .cmh{height:auto!important;flex-wrap:wrap;align-content:flex-start;padding-top:calc(env(safe-area-inset-top) + 6px);padding-bottom:2px;gap:2px 8px}
+ .cmclub{order:1;flex:1;max-width:none}
+ .cmclub #cmName{max-width:60vw;font-size:16px}
+ .cmright{order:2}
+ .cmtabs{order:3;flex:0 0 100%;justify-content:flex-start;border-top:1px solid rgba(255,255,255,.07)}
+ .cmtabs button{min-height:40px}
+ .screen.tab{padding-top:calc(104px + env(safe-area-inset-top))!important}
+ #scr-hub .hubg{grid-template-columns:repeat(2,minmax(0,1fr));grid-template-rows:none!important;grid-auto-rows:minmax(110px,auto)}
+ #scr-hub #tNext{grid-column:1/-1;order:-1;min-height:230px}
+ #scr-hub .tile{padding:12px}
+ #scr-hub .tile h4{font-size:13px}
+ .hubg .tile .big,.hubg .tile .num{font-size:30px}
+ #scr-hub .tile .sub,#scr-hub .tile small{font-size:12px}
+ .cmmoney{display:inline-block!important}
+ #scr-player .sqwrap{flex-direction:column}
+ .screen.tab:not(#scr-hub){padding-bottom:calc(84px + env(safe-area-inset-bottom))!important}
+}
+@media (max-width:760px) and (orientation:portrait){.bd-main{width:100%}.bd-stage{height:auto!important;aspect-ratio:1.5;min-height:0}#bdBack{display:none!important}.bd-ctl{display:flex;gap:8px}.bd-ctl .bd-btn{flex:1}}
+@media (orientation:portrait){#crSide{display:none!important}#scr-create .panels,#scr-create .body{grid-template-columns:1fr!important}}
