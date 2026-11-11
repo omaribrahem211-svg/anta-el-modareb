@@ -1,0 +1,363 @@
+const fs = require('fs');
+const path = require('path');
+const sharp = require('sharp');
+
+const svgLogo = `
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <defs>
+    <!-- Background Radial Glow -->
+    <radialGradient id="bgGlow" cx="50%" cy="40%" r="60%">
+      <stop offset="0%" stop-color="#047857" stop-opacity="0.4"/>
+      <stop offset="60%" stop-color="#022c22" stop-opacity="0.9"/>
+      <stop offset="100%" stop-color="#020617" stop-opacity="1"/>
+    </radialGradient>
+
+    <!-- Shield Pitch Gradient -->
+    <linearGradient id="shieldGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#065f46"/>
+      <stop offset="45%" stop-color="#044e39"/>
+      <stop offset="85%" stop-color="#022c22"/>
+      <stop offset="100%" stop-color="#011812"/>
+    </linearGradient>
+
+    <!-- Gold Metallic Gradient Primary -->
+    <linearGradient id="goldGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FFFBEB"/>
+      <stop offset="25%" stop-color="#FCD34D"/>
+      <stop offset="50%" stop-color="#F59E0B"/>
+      <stop offset="75%" stop-color="#B45309"/>
+      <stop offset="100%" stop-color="#78350F"/>
+    </linearGradient>
+
+    <!-- Gold Metallic Highlight -->
+    <linearGradient id="goldHighlight" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#FEF08A"/>
+      <stop offset="50%" stop-color="#F59E0B"/>
+      <stop offset="100%" stop-color="#92400E"/>
+    </linearGradient>
+
+    <!-- Banner Gradient -->
+    <linearGradient id="bannerGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#1e1b4b"/>
+      <stop offset="25%" stop-color="#0f172a"/>
+      <stop offset="50%" stop-color="#022c22"/>
+      <stop offset="75%" stop-color="#0f172a"/>
+      <stop offset="100%" stop-color="#1e1b4b"/>
+    </linearGradient>
+
+    <!-- Ball Shading Gradient -->
+    <radialGradient id="ballShade" cx="38%" cy="32%" r="65%">
+      <stop offset="0%" stop-color="#FFFFFF"/>
+      <stop offset="45%" stop-color="#E2E8F0"/>
+      <stop offset="75%" stop-color="#94A3B8"/>
+      <stop offset="100%" stop-color="#334155"/>
+    </radialGradient>
+
+    <!-- Ball Shadow -->
+    <radialGradient id="dropShadowGrad" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#000000" stop-opacity="0.8"/>
+      <stop offset="100%" stop-color="#000000" stop-opacity="0"/>
+    </radialGradient>
+
+    <!-- Tactical Arrow Marker -->
+    <marker id="arrow" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1 L 10 5 L 0 9 z" fill="#FCD34D"/>
+    </marker>
+    <marker id="arrowCyan" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1 L 10 5 L 0 9 z" fill="#38BDF8"/>
+    </marker>
+
+    <!-- Drop Shadow Filter -->
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="16" stdDeviation="20" flood-color="#000" flood-opacity="0.7"/>
+    </filter>
+    <filter id="glow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="8" result="blur" />
+      <feComposite in="SourceGraphic" in2="blur" operator="over"/>
+    </filter>
+  </defs>
+
+  <!-- Base Dark Canvas with Deep Stadium Vignette -->
+  <rect width="1024" height="1024" rx="180" fill="#020617"/>
+  <circle cx="512" cy="480" r="480" fill="url(#bgGlow)"/>
+
+  <!-- Stadium Floodlights Rays Effect -->
+  <path d="M 512 0 L 200 480 L 150 480 Z" fill="#ffffff" opacity="0.03"/>
+  <path d="M 512 0 L 824 480 L 874 480 Z" fill="#ffffff" opacity="0.03"/>
+  <path d="M 512 0 L 350 480 L 400 480 Z" fill="#ffffff" opacity="0.02"/>
+  <path d="M 512 0 L 674 480 L 624 480 Z" fill="#ffffff" opacity="0.02"/>
+
+  <!-- Four Golden Champion Stars Above Shield -->
+  <g filter="url(#shadow)">
+    <!-- Star 1 (Left) -->
+    <path d="M 330 115 L 336 130 L 352 131 L 340 141 L 344 156 L 330 147 L 316 156 L 320 141 L 308 131 L 324 130 Z" fill="url(#goldGrad)" stroke="#FEF08A" stroke-width="1.5"/>
+    <!-- Star 2 (Center Left - Higher) -->
+    <path d="M 440 85 L 448 105 L 470 106 L 453 119 L 458 140 L 440 128 L 422 140 L 427 119 L 410 106 L 432 105 Z" fill="url(#goldGrad)" stroke="#FEF08A" stroke-width="2"/>
+    <!-- Star 3 (Center Right - Higher) -->
+    <path d="M 584 85 L 592 105 L 614 106 L 597 119 L 602 140 L 584 128 L 566 140 L 571 119 L 554 106 L 576 105 Z" fill="url(#goldGrad)" stroke="#FEF08A" stroke-width="2"/>
+    <!-- Star 4 (Right) -->
+    <path d="M 694 115 L 700 130 L 716 131 L 704 141 L 708 156 L 694 147 L 680 156 L 684 141 L 672 131 L 688 130 Z" fill="url(#goldGrad)" stroke="#FEF08A" stroke-width="1.5"/>
+  </g>
+
+  <!-- MAIN SHIELD CREST -->
+  <g filter="url(#shadow)">
+    <!-- Outer Golden Shield Bevel -->
+    <path d="M 512,140 C 730,140 850,190 850,330 C 850,630 690,810 512,940 C 334,810 174,630 174,330 C 174,190 294,140 512,140 Z" 
+          fill="url(#goldGrad)" stroke="#FFE57F" stroke-width="4"/>
+
+    <!-- Shield Inset Dark Border -->
+    <path d="M 512,156 C 716,156 830,202 830,336 C 830,618 678,788 512,912 C 346,788 194,618 194,336 C 194,202 308,156 512,156 Z" 
+          fill="#0f172a"/>
+
+    <!-- Inner Golden Trim Line -->
+    <path d="M 512,168 C 704,168 812,212 812,342 C 812,606 666,768 512,886 C 358,768 212,606 212,342 C 212,212 320,168 512,168 Z" 
+          fill="none" stroke="url(#goldGrad)" stroke-width="5"/>
+
+    <!-- Shield Turf Surface -->
+    <path d="M 512,176 C 696,176 800,218 800,344 C 800,598 658,756 512,870 C 366,756 224,598 224,344 C 224,218 328,176 512,176 Z" 
+          fill="url(#shieldGrad)"/>
+  </g>
+
+  <!-- TACTICAL FOOTBALL PITCH MARKINGS ON SHIELD -->
+  <g opacity="0.32" stroke="#ffffff" stroke-width="3.5" fill="none">
+    <!-- Center Circle -->
+    <circle cx="512" cy="460" r="140"/>
+    <circle cx="512" cy="460" r="6" fill="#ffffff"/>
+
+    <!-- Halfway Line -->
+    <line x1="230" y1="460" x2="794" y2="460"/>
+
+    <!-- Penalty Area Top Arc -->
+    <path d="M 400 240 C 400 300 624 300 624 240"/>
+    <rect x="370" y="176" width="284" height="120"/>
+
+    <!-- Penalty Area Bottom Arc -->
+    <path d="M 400 680 C 400 620 624 620 624 680"/>
+    <rect x="370" y="620" width="284" height="150"/>
+  </g>
+
+  <!-- TACTICAL STRATEGY PLAYBOOK ARROWS & MARKERS -->
+  <g>
+    <!-- Tactical Curved Attack Arrow (Gold) -->
+    <path d="M 330 520 C 320 440 380 370 450 360" fill="none" stroke="#FCD34D" stroke-width="6" stroke-dasharray="8 6" marker-end="url(#arrow)"/>
+
+    <!-- Tactical Curved Counter-Attack Arrow (Cyan) -->
+    <path d="M 680 540 C 700 450 640 380 580 370" fill="none" stroke="#38BDF8" stroke-width="6" stroke-dasharray="8 6" marker-end="url(#arrowCyan)"/>
+
+    <!-- Tactical X Marks (Attackers) -->
+    <g stroke="#FCD34D" stroke-width="5" stroke-linecap="round">
+      <line x1="330" y1="360" x2="350" y2="380"/>
+      <line x1="350" y1="360" x2="330" y2="380"/>
+
+      <line x1="660" y1="360" x2="680" y2="380"/>
+      <line x1="680" y1="360" x2="660" y2="380"/>
+    </g>
+
+    <!-- Tactical O Marks (Defenders / Target Zones) -->
+    <circle cx="420" cy="270" r="14" fill="none" stroke="#38BDF8" stroke-width="4.5"/>
+    <circle cx="604" cy="270" r="14" fill="none" stroke="#38BDF8" stroke-width="4.5"/>
+  </g>
+
+  <!-- SOCCER BALL SHADOW -->
+  <ellipse cx="512" cy="540" rx="140" ry="36" fill="url(#dropShadowGrad)"/>
+
+  <!-- 3D SOCCER BALL CENTERPIECE -->
+  <g filter="url(#shadow)">
+    <!-- Ball Base Sphere -->
+    <circle cx="512" cy="460" r="120" fill="url(#ballShade)" stroke="#0f172a" stroke-width="4"/>
+
+    <!-- Central Black & Gold Hexagon / Pentagon Patterns -->
+    <!-- Center Pentagon -->
+    <polygon points="512,420 546,445 533,485 491,485 478,445" 
+             fill="#0f172a" stroke="url(#goldGrad)" stroke-width="3"/>
+
+    <!-- Top Left Seam & Polygon -->
+    <line x1="512" y1="420" x2="512" y2="370" stroke="#1e293b" stroke-width="4.5"/>
+    <polygon points="512,370 460,350 430,380 478,445" 
+             fill="none" stroke="#1e293b" stroke-width="4"/>
+
+    <!-- Top Right Seam & Polygon -->
+    <polygon points="512,370 564,350 594,380 546,445" 
+             fill="none" stroke="#1e293b" stroke-width="4"/>
+
+    <!-- Bottom Left Seam & Polygon -->
+    <line x1="491" y1="485" x2="465" y2="530" stroke="#1e293b" stroke-width="4.5"/>
+    <polygon points="465,530 420,530 400,470 430,380" 
+             fill="#1e293b" stroke="url(#goldGrad)" stroke-width="3"/>
+
+    <!-- Bottom Right Seam & Polygon -->
+    <line x1="533" y1="485" x2="559" y2="530" stroke="#1e293b" stroke-width="4.5"/>
+    <polygon points="559,530 604,530 624,470 594,380" 
+             fill="#1e293b" stroke="url(#goldGrad)" stroke-width="3"/>
+
+    <!-- Bottom Center Polygon -->
+    <polygon points="465,530 512,565 559,530 533,485 491,485" 
+             fill="none" stroke="#1e293b" stroke-width="4"/>
+
+    <!-- Top Edge Pentagon -->
+    <polygon points="480,340 512,365 544,340 530,340 494,340" fill="#0f172a"/>
+
+    <!-- Ball Specular Light Reflection -->
+    <path d="M 445 385 C 465 365 510 355 545 365 C 520 375 480 380 460 410 C 450 400 445 390 445 385 Z" 
+          fill="#ffffff" opacity="0.65"/>
+  </g>
+
+  <!-- COACH'S GOLDEN WHISTLE (EMBLEM OF THE MANAGER) -->
+  <g filter="url(#shadow)" transform="rotate(-15 620 540)">
+    <!-- Whistle Lanyard Ring -->
+    <ellipse cx="610" cy="505" rx="14" ry="7" fill="none" stroke="url(#goldGrad)" stroke-width="6"/>
+    <!-- Whistle Body -->
+    <path d="M 620 510 L 680 525 C 700 530 710 545 710 565 C 710 585 695 600 670 600 C 645 600 630 585 630 565 L 620 530 Z" 
+          fill="url(#goldHighlight)" stroke="#78350F" stroke-width="3"/>
+    <!-- Whistle Sound Hole / Vent -->
+    <rect x="635" y="525" width="16" height="8" rx="2" fill="#0f172a"/>
+    <!-- Whistle Cylinder Chamber -->
+    <circle cx="670" cy="565" r="26" fill="url(#goldGrad)" stroke="#FFE57F" stroke-width="3"/>
+    <circle cx="670" cy="565" r="14" fill="#78350F" opacity="0.6"/>
+  </g>
+
+  <!-- PRESTIGIOUS RIBBON BANNER FOR ARABIC LOGO TITLE -->
+  <g filter="url(#shadow)">
+    <!-- Ribbon Back Folds (Dark Gold / Shadow) -->
+    <polygon points="200,750 140,790 200,820 180,785" fill="#78350F"/>
+    <polygon points="824,750 884,790 824,820 844,785" fill="#78350F"/>
+
+    <!-- Ribbon Main Body (Emerald & Dark Obsidian) -->
+    <path d="M 190,740 L 834,740 C 850,740 864,754 858,770 L 840,825 C 836,838 824,846 810,846 L 214,846 C 200,846 188,838 184,825 L 166,770 C 160,754 174,740 190,740 Z" 
+          fill="url(#bannerGrad)" stroke="url(#goldGrad)" stroke-width="5"/>
+
+    <!-- Inner Ribbon Gold Border Accent -->
+    <path d="M 200,750 L 824,750 L 804,834 L 220,834 Z" 
+          fill="none" stroke="#FCD34D" stroke-width="2" opacity="0.7"/>
+
+    <!-- ARABIC LOGO TITLE: "أنت المدرب" -->
+    <!-- Rendered in stylized, bold high-contrast gold Arabic calligraphy style -->
+    <text x="512" y="808" 
+          font-family="'Cairo', 'KacstTitle', 'KacstPoster', 'DejaVu Sans', 'Arial', sans-serif" 
+          font-size="64" 
+          font-weight="900" 
+          text-anchor="middle" 
+          fill="url(#goldHighlight)"
+          stroke="#451a03"
+          stroke-width="2.5"
+          letter-spacing="1">أنت المدرب</text>
+
+    <!-- Small Golden Diamonds on Ribbon Ends -->
+    <polygon points="230,790 240,780 250,790 240,800" fill="#FEF08A"/>
+    <polygon points="794,790 784,780 774,790 784,800" fill="#FEF08A"/>
+  </g>
+
+  <!-- SUBTITLE: "FOOTBALL MANAGER" -->
+  <g filter="url(#shadow)">
+    <!-- Subtitle Pill -->
+    <rect x="362" y="860" width="300" height="34" rx="17" 
+          fill="#022c22" stroke="url(#goldGrad)" stroke-width="2"/>
+    <text x="512" y="883" 
+          font-family="'Cairo', 'Arial', sans-serif" 
+          font-size="15" 
+          font-weight="800" 
+          text-anchor="middle" 
+          fill="#FDE68A" 
+          letter-spacing="5">FOOTBALL MANAGER</text>
+  </g>
+
+  <!-- Subtle Outer Shield Gloss Accent -->
+  <path d="M 512,180 C 680,180 780,220 780,340 C 780,480 730,580 680,640 C 620,530 512,380 340,320 C 380,220 440,180 512,180 Z" 
+        fill="#ffffff" opacity="0.06"/>
+</svg>
+`;
+
+async function main() {
+  console.log('Generating Anta El Modareb logo assets...');
+
+  const publicDir = path.join(__dirname, '..', 'public');
+  const resDir = path.join(__dirname, '..', 'android', 'app', 'src', 'main', 'res');
+
+  // 1. Save SVG
+  const svgPath = path.join(publicDir, 'anta_elmodareb_logo.svg');
+  fs.writeFileSync(svgPath, svgLogo.trim());
+  console.log('Saved:', svgPath);
+
+  // 2. Generate 1024x1024 Master PNG
+  const masterPngPath = path.join(publicDir, 'anta_elmodareb_logo.png');
+  await sharp(Buffer.from(svgLogo))
+    .resize(1024, 1024)
+    .png({ quality: 100 })
+    .toFile(masterPngPath);
+  console.log('Saved 1024x1024 master PNG:', masterPngPath);
+
+  // 3. Generate 512x512 Store & App Icon
+  const storeIconPath = path.join(publicDir, 'icon-512.png');
+  await sharp(Buffer.from(svgLogo))
+    .resize(512, 512)
+    .png({ quality: 100 })
+    .toFile(storeIconPath);
+  console.log('Saved 512x512 icon:', storeIconPath);
+
+  // 4. Generate 192x192 Favicon & Web Manifest Icon
+  const icon192Path = path.join(publicDir, 'icon-192.png');
+  await sharp(Buffer.from(svgLogo))
+    .resize(192, 192)
+    .png({ quality: 100 })
+    .toFile(icon192Path);
+  console.log('Saved 192x192 icon:', icon192Path);
+
+  // 5. Generate Favicon 64x64 and 32x32
+  const faviconPath = path.join(publicDir, 'favicon.png');
+  await sharp(Buffer.from(svgLogo))
+    .resize(64, 64)
+    .png()
+    .toFile(faviconPath);
+  console.log('Saved favicon.png:', faviconPath);
+
+  // 6. Generate Android Mipmap Icons
+  const androidMipmaps = [
+    { dir: 'mipmap-mdpi', size: 48 },
+    { dir: 'mipmap-hdpi', size: 72 },
+    { dir: 'mipmap-xhdpi', size: 96 },
+    { dir: 'mipmap-xxhdpi', size: 144 },
+    { dir: 'mipmap-xxxhdpi', size: 192 }
+  ];
+
+  for (const item of androidMipmaps) {
+    const targetDir = path.join(resDir, item.dir);
+    if (!fs.existsSync(targetDir)) {
+      fs.mkdirSync(targetDir, { recursive: true });
+    }
+
+    // Standard Launcher Icon
+    const launcherPath = path.join(targetDir, 'ic_launcher.png');
+    await sharp(Buffer.from(svgLogo))
+      .resize(item.size, item.size)
+      .png()
+      .toFile(launcherPath);
+
+    // Round Launcher Icon (with circular mask)
+    const roundPath = path.join(targetDir, 'ic_launcher_round.png');
+    const radius = Math.floor(item.size / 2);
+    const circleMask = Buffer.from(
+      `<svg width="${item.size}" height="${item.size}"><circle cx="${radius}" cy="${radius}" r="${radius}" fill="black"/></svg>`
+    );
+    await sharp(Buffer.from(svgLogo))
+      .resize(item.size, item.size)
+      .composite([{ input: circleMask, blend: 'dest-in' }])
+      .png()
+      .toFile(roundPath);
+
+    // Adaptive Foreground Icon
+    const fgPath = path.join(targetDir, 'ic_launcher_foreground.png');
+    await sharp(Buffer.from(svgLogo))
+      .resize(item.size, item.size)
+      .png()
+      .toFile(fgPath);
+
+    console.log(`Generated Android icons for ${item.dir} (${item.size}x${item.size})`);
+  }
+
+  console.log('All logo assets generated successfully!');
+}
+
+main().catch(err => {
+  console.error('Error generating logo:', err);
+  process.exit(1);
+});

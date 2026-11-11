@@ -2,11 +2,6 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
-    <uses-feature android:name="android.hardware.screen.landscape" android:required="false" />
-    <uses-feature android:name="android.hardware.screen.portrait" android:required="false" />
-    <uses-feature android:name="android.hardware.faketouch" android:required="false" />
-    <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
-
     <application
         android:allowBackup="true"
         android:hardwareAccelerated="true"
@@ -48,7 +43,6 @@
             android:label="@string/title_activity_main"
             android:theme="@style/AppTheme.NoActionBarLaunch"
             android:launchMode="singleTask"
-            android:screenOrientation="portrait"
             android:windowSoftInputMode="adjustResize"
             android:hardwareAccelerated="true"
             android:exported="true">
@@ -95,26 +89,6 @@
         <package android:name="com.xmodgames" />
         <package android:name="com.cheatengine.ceserver" />
         <package android:name="com.sbgames.speedhack" />
-            <package android:name="com.gameguardian.app" />
-        <package android:name="com.forpda.lp" />
-        <package android:name="com.chelpus.luckypatcher" />
-        <package android:name="com.android.vending.billing.InAppBillingService.CLON" />
-        <package android:name="com.android.vending.billing.InAppBillingService.LOCK" />
-        <package android:name="com.android.vending.billing.InAppBillingService.CRAC" />
-        <package android:name="org.sbtools.gamehack" />
-        <package android:name="cn.mc.sq" />
-        <package android:name="cc.madkite.freedom" />
-        <package android:name="cc.cz.madkite.freedom" />
-        <package android:name="madkite.freedom" />
-        <package android:name="com.allinone.free" />
-        <package android:name="com.github.ggmodder" />
-        <package android:name="com.hacker.cheat.engine" />
-        <package android:name="org.cheatengine.cegui" />
-        <package android:name="com.happymod.apk" />
-        <package android:name="de.robv.android.xposed.installer" />
-        <package android:name="org.lsposed.manager" />
-        <package android:name="org.meowcat.edxposed.manager" />
-        <package android:name="com.saurik.substrate" />
     </queries>
 
     <!-- Permissions: Only essential network access for online sync and ads -->

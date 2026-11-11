@@ -1,0 +1,8 @@
+{
+  "name": "أنت المدرب - Anta El Modareb",
+  "description": "لعبة تدريب وإدارة كرة قدم مصرية تحاكي قيادة نادي في الدرجة الرابعة للصعود وتحقيق البطولات وبناء مسيرة تدريبية أسطورية.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
