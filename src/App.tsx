@@ -42,6 +42,8 @@ import { ActiveTab, Player } from './types/game';
 import { AdminLayout } from './components/admin/AdminLayout';
 import { AdminAccessDenied } from './components/admin/AdminAccessDenied';
 import { MatchErrorBoundary } from './components/MatchErrorBoundary';
+import { SocialTab } from './components/SocialTab';
+import { PressConferenceModal } from './components/PressConferenceModal';
 import { PrivacyPolicyPage } from './components/PrivacyPolicyPage';
 
 function GameApp() {
@@ -60,9 +62,26 @@ function GameApp() {
     liveMatch,
     startLiveMatch,
     showDailyRewardModal,
-    setShowDailyRewardModal
+    setShowDailyRewardModal,
+    userClub,
+    fixtures
   } = useGame();
   const [activeTab, setActiveTab] = useState<ActiveTab>('dashboard');
+  const [pressFixture, setPressFixture] = useState<any>(null);
+  useEffect(() => {
+    if (!userClub || liveMatch || showDaySummaryModal || pressFixture) return;
+    const played = (fixtures || []).filter((f: any) => f.isPlayed && (f.homeTeamId === userClub.id || f.awayTeamId === userClub.id));
+    if (!played.length) return;
+    const last = played.reduce((a: any, b: any) => ((b.round || 0) > (a.round || 0) ? b : a));
+    const k = `anta_press_seen_${userClub.id}`;
+    let seen: string | null = null;
+    try { seen = localStorage.getItem(k); } catch { /* */ }
+    if (seen === null) { try { localStorage.setItem(k, String(last.id)); } catch { /* */ } return; }
+    if (seen !== String(last.id)) {
+      try { localStorage.setItem(k, String(last.id)); } catch { /* */ }
+      setPressFixture(last);
+    }
+  }, [fixtures, userClub, liveMatch, showDaySummaryModal, pressFixture]);
 
   const handleTabChange = useCallback((newTab: ActiveTab) => {
     startTransition(() => {
@@ -350,6 +369,12 @@ function GameApp() {
           </ErrorBoundary>
         )}
 
+        {activeTab === 'social' && (
+          <ErrorBoundary fallbackTitle="تنبيه السوشيال">
+            <SocialTab />
+          </ErrorBoundary>
+        )}
+
         {activeTab === 'challenges' && (
           <ErrorBoundary fallbackTitle="تنبيه سجل التحديات">
             <ChallengesTab />
@@ -359,6 +384,7 @@ function GameApp() {
 
       {/* Persistent Mobile Bottom Navigation Bar */}
       <BottomNav activeTab={activeTab} setActiveTab={handleTabChange} />
+      {pressFixture && <PressConferenceModal fixture={pressFixture} onClose={() => setPressFixture(null)} />}
 
       {/* Detail Player Inspector Modal */}
       {selectedPlayer && (

@@ -390,6 +390,7 @@ interface GameContextType {
   rejectIncomingBid: (bidId: string) => { success: boolean; message: string };
   renewPlayerContract: (playerId: string, wage: number, years: number) => { success: boolean; message: string };
   boostPlayerMorale: (playerId: string) => void;
+  applyPressEffects: (fx: { board?: number; fans?: number; morale?: number; rep?: number }) => void;
   holdPlayerMeeting: (playerId: string, topic: 'praise' | 'encourage' | 'promise_gametime' | 'wage_review') => { success: boolean; message: string };
   addBonusToPlayer: (playerId: string, amount: number, source?: 'club' | 'manager' | 'grant') => { success: boolean; message: string };
   addBonusToAllPlayers: (amountPerPlayer: number, source?: 'club' | 'manager' | 'grant') => { success: boolean; message: string };
@@ -3095,6 +3096,27 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         })
       };
     }));
+  };
+
+  // تأثيرات المؤتمر الصحفي والسوشيال (ثقة الإدارة / الجماهير / معنويات الفريق / سمعة المدرب)
+  const applyPressEffects = (fx: { board?: number; fans?: number; morale?: number; rep?: number }) => {
+    const cl = (n: number) => Math.max(0, Math.min(100, n));
+    if (fx.board || fx.fans) {
+      setBoardSystem(prev => ({
+        ...prev,
+        confidence: cl((prev.confidence ?? 50) + (fx.board || 0)),
+        fanConfidence: cl((prev.fanConfidence ?? 50) + (fx.fans || 0)),
+      }));
+    }
+    if (fx.morale) {
+      setTeams(prev => prev.map(t => {
+        if (!t.isUserClub) return t;
+        return { ...t, players: (t.players || []).map(p => ({ ...p, morale: cl((p.morale ?? 70) + (fx.morale || 0)) })) };
+      }));
+    }
+    if (fx.rep) {
+      setManager(prev => ({ ...prev, reputation: Math.max(1, Math.min(100, (prev.reputation || 50) + (fx.rep || 0))) }));
+    }
   };
 
   // Lineup Validation & Match Blocker Controls
@@ -12041,6 +12063,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         incomingBids,
         inbox,
         unreadMessagesCount,
+        applyPressEffects,
         liveMatch,
         discardSavedLiveMatch,
         seasonFinished,

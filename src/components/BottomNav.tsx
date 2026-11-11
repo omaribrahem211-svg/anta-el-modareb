@@ -17,6 +17,7 @@ import {
   MoreHorizontal,
   Globe2,
   Zap,
+  MessageCircle,
   X
 } from 'lucide-react';
 
@@ -72,6 +73,7 @@ export const BottomNav: React.FC<BottomNavProps> = ({ activeTab, setActiveTab })
     { id: 'career', label: t('tab_career', 'مسيرة المدرب'), category: 'الرخص والإنجازات', icon: UserCheck, accentColor: 'text-purple-400 bg-purple-500/15 border-purple-500/30' },
     { id: 'rankings', label: t('tab_rankings', 'التصنيف العالمي'), category: 'الأندية والمدربين', icon: Globe2, accentColor: 'text-sky-400 bg-sky-500/15 border-sky-500/30' },
     { id: 'online_pvp', label: t('tab_pvp', 'تحدي أونلاين'), category: 'ضد الأصدقاء', icon: Swords, tag: 'مباشر', accentColor: 'text-rose-400 bg-rose-500/15 border-rose-500/30' },
+    { id: 'social', label: 'السوشيال', category: 'الجمهور والصحافة', icon: MessageCircle, tag: 'جديد', accentColor: 'text-sky-400 bg-sky-500/15 border-sky-500/30' },
     { id: 'inbox', label: t('tab_inbox', 'صندوق الوارد'), category: 'البريد والقرارات', icon: Mail, badge: unreadMessagesCount, accentColor: 'text-blue-400 bg-blue-500/15 border-blue-500/30' },
   ];
 
