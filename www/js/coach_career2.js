@@ -40,3 +40,21 @@ window.cc2=cc2;window.salaryM=salaryM;
 
 /* ---- عروض الاهتمام اللي اتفتحت في نص الموسم بتتضاف لعروض آخر الموسم ---- */
 const _coC2=coachOffers;coachOffers=function(c,stayTier,sacked,perf){const out=_coC2(c,stayTier,sacked,perf)||[];try{if(c.interest&&!sacked){const t=Math.min(7,Math.max(c.interest.tier,stayTier));const {ti,cl}=clubFor(c,t);if(!out.some(o=>o.tier===t))out.unshift({tier:t,abroad:ti.country,club:{name:cl.name,short:cl.short,kit:cl.kit,kitArr:cl.kitArr,cc:ti.country,real:cl.real,R:cl.R},clubR:cl.R,wage:Math.round(tsOf(c)*.4*(1+c.rep/60)*(1+(t-stayTier)*.3)),years:RI(2,4),tierName:ti.name,role:'مدرب الفريق الأول',fee:0,why:'اهتمام سابق'});}c.interest=null;}catch(e){console.warn(e);}return out.slice(0,3);};
+
+/* ---- الكاس لكل الدرجات: فرق من الدرجات الأعلى تدخل الكاس مع فرق دوريك ---- */
+const _bcC2=buildCup;buildCup=function(c,ti,Y,s){_bcC2(c,ti,Y,s);if(!c.coachMode||!c.cup)return;try{const cp=c.cup;const t0=c.path.tier;if(t0>=3||c.path.home!==ti.country)return;
+ const have=new Set(cp.teams.map(t=>t.name));const pool=[];for(let t=t0+1;t<=3;t++){const L=worldClubs(c,t,tierInfo(c.path,t));shuffle(L.clubs.slice()).forEach(x=>{if(!have.has(x.name))pool.push(x);});}
+ let k=0;cp.teams.forEach((t,i)=>{if(t.li==null&&pool[k]){const x=pool[k++];have.add(x.name);cp.teams[i]={name:x.name,short:x.short,kit:x.kit,kitArr:x.kitArr,R:x.R,cc:x.cc||ti.country,real:x.real,hi:1};}});}catch(e){console.warn(e);}};
+/* ---- تحذير الطاقة قبل الماتش ---- */
+function tiredXI(c){const S=mySquad(c);const by=new Map(S.map(p=>[p.id,p]));return(c.cl&&c.cl.xi||[]).map(id=>by.get(id)).filter(p=>p&&p.fit<55&&!p.inj);}
+function restTired(c){const S=mySquad(c);const xi=c.cl.xi;const used=new Set(xi);let n=0;
+ xi.forEach((id,i)=>{const p=S.find(x=>x.id===id);if(!p||p.fit>=55||p.inj)return;const sub=S.filter(x=>!used.has(x.id)&&!x.inj&&x.fit>=60&&x.r===p.r).sort((a,b)=>b.ov-a.ov)[0]||S.filter(x=>!used.has(x.id)&&!x.inj&&x.fit>=60).sort((a,b)=>b.ov-a.ov)[0];if(sub){used.delete(id);used.add(sub.id);xi[i]=sub.id;c.cl.bench=(c.cl.bench||[]).filter(b=>b!==sub.id);n++;}});
+ updR(c);store();return n;}
+function tiredModal(c,list,go){const nm=list.slice(0,6).map(p=>`<div class="mrow"><span>${esc(p.n)} <small>${ROLE_AR[p.r]}</small></span><b style="color:#FF5A5F">${Math.round(p.fit)}%</b></div>`).join('');
+ Media.showModal(`<div class="evh">⚠ لاعيبة تعبانين</div><div class="ttl" style="font-size:17px;margin:6px 0">${list.length} من التشكيلة الأساسية طاقتهم قليلة</div><div class="sub" style="margin-bottom:6px">اللعب بيهم بيزوّد خطر الإصابة وبيضعف الأداء.</div>${nm}
+ <div class="col" style="gap:8px;margin-top:10px"><button class="btn" id="tdRest">ريّحهم الماتش ده (بدلاء مكانهم)</button><button class="btn gold" id="tdAd">شوف إعلان ← رجّع +40% طاقة لهم</button><button class="btn ghost" id="tdGo">كمّل بيهم (مخاطرة)</button></div>`,m=>{
+  $('tdRest').onclick=()=>{const n=restTired(c);Media.closeModal();toast(n?'اتغيّر '+n+' لاعب بدلاء مرتاحين':'مفيش بدلاء مرتاحين كفاية');go();};
+  $('tdGo').onclick=()=>{Media.closeModal();go();};
+  $('tdAd').onclick=async()=>{const b=$('tdAd');if(!Ads.ready){toast('مفيش إعلان متاح دلوقتي');return;}b.disabled=true;b.textContent='بيحمّل الإعلان…';let x='err';try{x=await Ads.reward();}catch(e){}
+   if(x!=='ok'){b.disabled=false;b.textContent='شوف إعلان ← رجّع +40% طاقة لهم';toast('الإعلان محملش — الطاقة ماترجعتش');return;}list.forEach(p=>{p.fit=Math.min(100,p.fit+40);});updR(c);store();Media.closeModal();toast('الطاقة رجعت');go();};});}
+const _opC2=openPre;openPre=function(){_opC2.apply(this,arguments);const c=App.c;if(!c||!c.coachMode||!$('preGo'))return;const g=$('preGo'),orig=g.onclick;g.onclick=()=>{const t=tiredXI(c);if(!t.length)return orig();tiredModal(c,t,orig);};};

@@ -294,7 +294,7 @@ function finishFix(r,simmed,absent){const c=App.c,f=c.sched[c.si],info=fixInfo(c
  feedPost(c,'@'+shortOf(c.club.name).replace(/\s/g,'')+'_fans',pick(win?POSTS.win:res<0?POSTS.loss:['تعادل… كان ممكن أحسن','نقطة من بره مش وحشة']));
  // national call-up
  const avg=c.ss.apps?c.ss.rs/c.ss.apps:0;
- if(!c.intl.called&&ovr(c)>=natReq(c)&&avg>=6.8&&c.ss.apps>=4){c.intl.called=true;news.push('استدعاء لمنتخب '+CBY[c.nat].n+'!');addNews(c,'me','رسمياً: '+c.name+' في قايمة منتخب '+CBY[c.nat].n,true);mail(c,'national','اتحاد الكورة','استدعاء رسمي للمنتخب!','مدرب منتخب '+CBY[c.nat].n+' اختارك في القايمة. ده شرف كبير، ورّينا مستواك.');c.morale=clamp(c.morale+8,0,100);c.followers+=2000;
+ if(!c.coachMode&&!c.intl.called&&ovr(c)>=natReq(c)&&avg>=6.8&&c.ss.apps>=4){c.intl.called=true;news.push('استدعاء لمنتخب '+CBY[c.nat].n+'!');addNews(c,'me','رسمياً: '+c.name+' في قايمة منتخب '+CBY[c.nat].n,true);mail(c,'national','اتحاد الكورة','استدعاء رسمي للمنتخب!','مدرب منتخب '+CBY[c.nat].n+' اختارك في القايمة. ده شرف كبير، ورّينا مستواك.');c.morale=clamp(c.morale+8,0,100);c.followers+=2000;
   for(const md of [5,11]){const idx=c.sched.findIndex((x,i)=>i>c.si&&x.t==='L'&&x.md===md);if(idx>0)c.sched.splice(idx+1,0,{t:'N',press:true});}}
  // sponsors
  const lv=[3000,25000,200000,2000000,15000000];if(c.spLevel<lv.length&&c.followers>=lv[c.spLevel]){const v=Math.round([300,1500,9000,40000,150000][c.spLevel]);mail(c,'sponsor',pick(['ماركة رياضية','شركة مشروبات','شركة اتصالات','ماركة ساعات']),'عرض رعاية','عندنا عرض رعاية ليك بـ '+money(v)+' كل أسبوع لمدة طويلة.',{k:'sponsor',v});c.spLevel++;news.push('عرض رعاية جديد في الرسايل');}

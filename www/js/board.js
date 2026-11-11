@@ -9,7 +9,7 @@ root.innerHTML=`<div class="bd-main"><div class="bd-head"><div class="bd-team" i
 <aside class="bd-side"><div class="bd-card"><div class="bd-lbl">مين مسيطر على الماتش؟</div><div class="bd-mom" id="bdMom"><i id="bdMomFill"></i></div><div class="bd-momn"><span id="bdMomA"></span><span id="bdMomB"></span></div><div class="bd-stats" id="bdStats"></div></div>
 <div class="bd-card bd-pl" id="bdPl" hidden></div>
 <div class="bd-card bd-feedc"><div class="bd-lbl">التعليق المباشر</div><div class="bd-feed" id="bdFeed"></div></div>
-<div class="bd-ctl"><button class="bd-btn" data-sp="1">×1</button><button class="bd-btn" data-sp="2">×2</button><button class="bd-btn" data-sp="4">×4</button><button class="bd-btn" data-sp="8">×8</button><button class="bd-btn on2" id="bdPanel">لوحة المدرب</button><button class="bd-btn" id="bd3d">3D</button></div></aside>`;
+<div class="bd-ctl"><button class="bd-btn on2" id="bdPanel">لوحة المدرب</button><button class="bd-btn" id="bd3d">3D</button></div></aside>`;
 document.body.appendChild(root);
 const back=document.createElement('button');back.id='bdBack';back.textContent='رجوع للوحة';document.body.appendChild(back);
 const cp=document.getElementById('coachP');if(cp)document.body.appendChild(cp);
@@ -132,7 +132,7 @@ cv.addEventListener('pointerdown',e=>{const m=BD.m;if(!m)return;const r=cv.getBo
 addEventListener('resize',()=>{if(BD.on){BD.pitch=null;setTimeout(layout,50);}});
 
 BD.setView=v=>setView(v);
-BD.start=function(m){BD.m=m;BD.on=true;BD.view3d=false;BD.speed=(App.settings&&+App.settings.spd)||1;BD.mom=.5;BD.trail=[];BD.sel=null;BD.pitch=null;BD.lt=performance.now();
+BD.start=function(m){BD.m=m;BD.on=true;BD.view3d=false;BD.speed=8;BD.mom=.5;BD.trail=[];BD.sel=null;BD.pitch=null;BD.lt=performance.now();
   document.body.classList.add('boardmode');document.body.classList.remove('view3d');root.classList.add('on');
   root.querySelectorAll('[data-sp]').forEach(x=>x.classList.toggle('on',+x.dataset.sp===BD.speed));$b('bdFeed').innerHTML='';
   const t0=m.t[0],t1=m.t[1];root.style.setProperty('--c0',colOf(t0,t1));root.style.setProperty('--c1',colOf(t1,t0));const ch=(t,c)=>`<i style="background:${c}"></i><span>${esc(t.name)}</span>`;$b('bdA').innerHTML=ch(t0,colOf(t0,t1));$b('bdB').innerHTML=ch(t1,colOf(t1,t0));
