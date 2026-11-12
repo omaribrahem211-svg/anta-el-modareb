@@ -12,6 +12,8 @@ export default defineConfig(({ mode }) => {
       'import.meta.env.VITE_WS_URL': JSON.stringify(wsUrl),
     },
     plugins: [react(), tailwindcss()],
+    // Compile JS for older Android WebViews too (e.g. Android 8 devices with a stale WebView)
+    build: { target: 'es2019' },
     resolve: {
       alias: {
         '@': path.resolve(__dirname, '.'),

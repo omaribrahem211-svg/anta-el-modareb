@@ -19,6 +19,28 @@
       <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;500;600;700;800;900&family=Tajawal:wght@400;500;700;800&display=swap" crossorigin="anonymous">
     </noscript>
     <script>
+      // Old Android System WebView guard: the UI needs a modern WebView (Chrome 111+). On older ones the screen can stay white.
+      (function () {
+        try {
+          var ok = window.CSS && CSS.supports && CSS.supports('color', 'color-mix(in srgb, red, blue)');
+          if (ok) return;
+          var m = /Chrome\/(\d+)/.exec(navigator.userAgent || '');
+          var ver = m ? m[1] : '?';
+          window.addEventListener('DOMContentLoaded', function () {
+            if (sessionStorage.getItem('webview_warn_dismissed')) return;
+            var d = document.createElement('div');
+            d.setAttribute('dir', 'rtl');
+            d.style.cssText = 'position:fixed;left:0;right:0;bottom:0;z-index:2147483647;background:#0f172a;color:#fff;border-top:2px solid #f59e0b;padding:14px 16px;font:14px/1.6 sans-serif;text-align:right';
+            d.innerHTML = '<b style="color:#fbbf24">تنبيه: نسخة WebView قديمة (' + ver + ')</b><br>للحصول على أفضل أداء وتفادي الشاشة البيضاء، حدّث «Android System WebView» من متجر Play.' +
+              '<div style="margin-top:10px;display:flex;gap:8px"><a href="https://play.google.com/store/apps/details?id=com.google.android.webview" style="background:#f59e0b;color:#000;padding:8px 14px;border-radius:10px;font-weight:bold;text-decoration:none">تحديث الآن</a>' +
+              '<button id="wvx" style="background:#334155;color:#fff;border:0;padding:8px 14px;border-radius:10px">متابعة</button></div>';
+            document.body.appendChild(d);
+            document.getElementById('wvx').onclick = function () { try { sessionStorage.setItem('webview_warn_dismissed', '1'); } catch (e) {} d.remove(); };
+          });
+        } catch (e) {}
+      })();
+    </script>
+    <script>
       console.log('[STARTUP] index loaded', Math.round(performance.now()) + 'ms');
     </script>
     <style>
