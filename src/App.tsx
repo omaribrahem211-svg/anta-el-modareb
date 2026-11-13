@@ -43,6 +43,7 @@ import { AdminLayout } from './components/admin/AdminLayout';
 import { AdminAccessDenied } from './components/admin/AdminAccessDenied';
 import { MatchErrorBoundary } from './components/MatchErrorBoundary';
 import { SocialTab } from './components/SocialTab';
+import { applyPerfMode, forceRepaint } from './utils/perfMode';
 import { PressConferenceModal } from './components/PressConferenceModal';
 import { PrivacyPolicyPage } from './components/PrivacyPolicyPage';
 
@@ -64,8 +65,25 @@ function GameApp() {
     showDailyRewardModal,
     setShowDailyRewardModal,
     userClub,
-    fixtures
-  } = useGame();
+    fixtures,
+    showSeasonTransitionModal,
+    isStartingSeasonUi
+  } = useGame() as any;
+  // While the season-end / club-choice screens are up, unmount the heavy app screens underneath (they re-render on every
+  // state change and keep large DOM trees in memory: the main cause of hangs and white flicker on 4GB phones).
+  const seasonFocus = !!(showSeasonTransitionModal || isStartingSeasonUi);
+  // Season end / club choice: always use the flat, animation-free rendering path (no blur/backdrop filters) so parts of the
+  // screen do not flash white on weak GPUs. The user's own performance setting is restored afterwards.
+  useEffect(() => {
+    try {
+      if (seasonFocus) {
+        document.documentElement.classList.add('perf-lite');
+      } else {
+        applyPerfMode();
+        forceRepaint();
+      }
+    } catch { /* */ }
+  }, [seasonFocus]);
   const [activeTab, setActiveTab] = useState<ActiveTab>('dashboard');
   const [pressFixture, setPressFixture] = useState<any>(null);
   useEffect(() => {
@@ -274,17 +292,17 @@ function GameApp() {
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-['Cairo',sans-serif] safe-area-inset">
       {/* Top Header Bar */}
-      <Header 
+      {!seasonFocus && <Header 
         activeTab={activeTab} 
         setActiveTab={handleTabChange} 
         onOpenAdmin={() => {
           setIsAdminMode(true);
           window.location.hash = '#admin';
         }}
-      />
+      />}
 
       {/* Main Content Stage */}
-      <main className="flex-1 max-w-5xl w-full mx-auto p-3 sm:p-4 pb-36">
+      {!seasonFocus && <main className="flex-1 max-w-5xl w-full mx-auto p-3 sm:p-4 pb-36">
         {/* Facebook Community Banner at the top of dashboard */}
         {activeTab === 'dashboard' && <FacebookBanner />}
 
@@ -380,10 +398,10 @@ function GameApp() {
             <ChallengesTab />
           </ErrorBoundary>
         )}
-      </main>
+      </main>}
 
       {/* Persistent Mobile Bottom Navigation Bar */}
-      <BottomNav activeTab={activeTab} setActiveTab={handleTabChange} />
+      {!seasonFocus && <BottomNav activeTab={activeTab} setActiveTab={handleTabChange} />}
       {pressFixture && <PressConferenceModal fixture={pressFixture} onClose={() => setPressFixture(null)} />}
 
       {/* Detail Player Inspector Modal */}
