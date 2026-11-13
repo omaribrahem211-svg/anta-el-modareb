@@ -19,7 +19,7 @@ import {
   CheckCircle2,
   Play,
 } from 'lucide-react';
-import { fetchDailyManagersLeaderboard, fetchWeeklyManagersLeaderboard, getWeekKey, DailyManagerLeaderboardEntry } from '../services/managerRankingService';
+import { fetchDailyManagersLeaderboard, fetchWeeklyManagersLeaderboard, getWeekKey, getLeaderboardUpdatedAt, LEADERBOARD_REFRESH_HOURS, DailyManagerLeaderboardEntry } from '../services/managerRankingService';
 import { getClubDisplayName } from '../data/leaguesData';
 import { AfricanChampionsLeagueView } from './continental/AfricanChampionsLeagueView';
 import { getDomesticCupDefinitionForCountry } from '../data/competitionsData';
@@ -55,7 +55,7 @@ export const LeagueTab: React.FC = () => {
   const myPeriodMatches = isWeekly ? (manager.weeklyKey === wkNow ? manager.weeklyMatches || 0 : 0) : manager.dailyMatchesPlayed || 0;
   const myPeriodWins = isWeekly ? (manager.weeklyKey === wkNow ? manager.weeklyWins || 0 : 0) : manager.dailyWins || 0;
 
-  const loadDailyRanking = async (manual: boolean = false) => {
+  const loadDailyRanking = async () => {
     setLoadingDaily(true);
     try {
       const fetcher = isWeekly ? fetchWeeklyManagersLeaderboard : fetchDailyManagersLeaderboard;
@@ -63,8 +63,7 @@ export const LeagueTab: React.FC = () => {
         user?.uid,
         manager,
         userClub?.name,
-        activeLeague?.name,
-        isWeekly ? manual : false
+        activeLeague?.name
       );
       setDailyLeaders(entries);
     } catch (e) {
@@ -410,7 +409,7 @@ export const LeagueTab: React.FC = () => {
                 <span>{isWeekly ? 'ترتيب المدربين الأسبوعي 🏆' : 'ترتيب مدربي اللعبة اليومي'}</span>
               </h3>
               <p className="text-xs text-slate-400 mt-1">
-                {isWeekly ? 'النقاط من المباريات اللي بتلعبها بنفسك بس (3 للفوز، 1 للتعادل). المباراة اللي بتتخطاها أو تتحسب تلقائياً مش بتدّي نقاط. بيتجدد كل سبت.' : 'النقاط من المباريات اللي بتلعبها بنفسك النهارده (3 للفوز، 1 للتعادل). المباراة اللي بتتخطاها مش بتدّي نقاط. بيتجدد كل 24 ساعة.'}
+                {isWeekly ? 'النقاط من المباريات اللي بتلعبها بنفسك بس (3 للفوز، 1 للتعادل). المباراة اللي بتتخطاها أو تتحسب تلقائياً مش بتدّي نقاط. بيتجدد كل سبت (الترتيب بيتحدّث كل 3 ساعات).' : 'النقاط من المباريات اللي بتلعبها بنفسك النهارده (3 للفوز، 1 للتعادل). المباراة اللي بتتخطاها مش بتدّي نقاط. بيتجدد كل 24 ساعة.'}
               </p>
               <div className="flex gap-2 mt-2.5">
                 <button type="button" onClick={() => setRankPeriod('weekly')} className={`px-3.5 py-1.5 rounded-full text-xs font-bold border ${isWeekly ? 'bg-amber-500 text-slate-950 border-amber-400' : 'bg-slate-900 text-slate-300 border-slate-700'}`}>الأسبوع</button>
@@ -418,14 +417,14 @@ export const LeagueTab: React.FC = () => {
               </div>
             </div>
 
-            <button
-              onClick={() => loadDailyRanking(true)}
-              disabled={loadingDaily}
-              className="flex items-center justify-center gap-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 px-3 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer shrink-0 disabled:opacity-50"
-            >
-              <RefreshCw className={`w-3.5 h-3.5 ${loadingDaily ? 'animate-spin text-amber-400' : ''}`} />
-              <span>تحديث الترتيب</span>
-            </button>
+            <div className="text-[11px] text-slate-400 shrink-0 sm:text-left leading-relaxed">
+              <div>بيتحدّث تلقائياً كل {LEADERBOARD_REFRESH_HOURS} ساعات</div>
+              {(() => {
+                const t = getLeaderboardUpdatedAt(isWeekly ? 'weekly' : 'daily');
+                return t ? <div className="text-slate-500">آخر تحديث: {new Date(t).toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' })}</div> : null;
+              })()}
+              <div className="text-amber-400/80">نقاطك إنت بتتحدّث فوراً</div>
+            </div>
           </div>
 
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">

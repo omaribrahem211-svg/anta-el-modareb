@@ -57,7 +57,8 @@ export function weeklyScoreOf(weekKey: number, points: number): number {
 
 const WEEKLY_CACHE_KEY = 'anta_elmodareb_weekly_leaderboard_cache';
 const LEADERBOARD_CACHE_KEY = 'anta_elmodareb_daily_leaderboard_cache';
-const LEADERBOARD_CACHE_TTL = 10 * 60 * 1000; // 10 minutes cache to stay well within free tier
+export const LEADERBOARD_REFRESH_HOURS = 3;
+const LEADERBOARD_CACHE_TTL = LEADERBOARD_REFRESH_HOURS * 60 * 60 * 1000; // refresh automatically every 3 hours (Firebase free tier)
 
 /**
  * Update the user's daily points in Firestore upon finishing a match (Zero read version)
@@ -303,11 +304,11 @@ export async function fetchWeeklyManagersLeaderboard(
   let entries: DailyManagerLeaderboardEntry[] = [];
 
   let usedCache = false;
-  // Free-tier protection: one read of 25 documents per device per 30 minutes at most (a manual refresh waits 3 minutes)
+  // Free-tier protection: one read of 25 documents per device every 3 hours at most (manual refresh is not offered)
   {
     try {
       const c = JSON.parse(localStorage.getItem(WEEKLY_CACHE_KEY) || 'null');
-      if (c && c.week === wk && Array.isArray(c.entries) && (isRecentQuotaExceeded() || Date.now() - c.timestamp < (forceRefresh ? 3 * 60 * 1000 : 30 * 60 * 1000))) {
+      if (c && c.week === wk && Array.isArray(c.entries) && (isRecentQuotaExceeded() || Date.now() - c.timestamp < LEADERBOARD_CACHE_TTL)) {
         entries = c.entries;
         usedCache = true;
       }
@@ -373,4 +374,12 @@ export async function fetchWeeklyManagersLeaderboard(
 
   entries.sort((a, b) => b.dailyPoints - a.dailyPoints || b.dailyWins - a.dailyWins || a.dailyMatchesPlayed - b.dailyMatchesPlayed);
   return entries;
+}
+
+/** When the cached leaderboard of this device was last fetched from the cloud (ms), or 0 if never. */
+export function getLeaderboardUpdatedAt(period: 'weekly' | 'daily'): number {
+  try {
+    const c = JSON.parse(localStorage.getItem(period === 'weekly' ? WEEKLY_CACHE_KEY : LEADERBOARD_CACHE_KEY) || 'null');
+    return c && typeof c.timestamp === 'number' ? c.timestamp : 0;
+  } catch { return 0; }
 }
