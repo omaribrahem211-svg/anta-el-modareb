@@ -164,7 +164,6 @@ import { calculateMatchRevenue, MatchRevenueBreakdown, getBenchmarkTicketPrice }
 import { AdManager } from '../services/adManager';
 import { getWeekKey } from '../services/managerRankingService';
 import { ADMOB_CONFIG } from '../config/admobConfig';
-import { notificationService } from '../services/notificationService';
 import { DIAGNOSTIC_CONFIG } from '../config/diagnosticConfig';
 import { AdRewardType, AdRewardClaimResult } from '../services/adRewardService';
 import { getRandomWorldStarTemplate, createGuestStarPlayer, WorldStarTemplate } from '../services/worldStarService';

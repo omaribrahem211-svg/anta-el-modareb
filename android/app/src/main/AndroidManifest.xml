@@ -97,7 +97,6 @@
 
     <!-- Notifications: ONLY the normal notification permission (asked once, from an in-app prompt).
          Exact-alarm / alarm-and-reminder permissions stay stripped, so Android never shows the "alarms & reminders" pop-up. -->
-    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <!-- Strip alarm, reminder and background wake permissions pulled in by libraries -->
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" tools:node="remove" />
     <uses-permission android:name="android.permission.USE_EXACT_ALARM" tools:node="remove" />

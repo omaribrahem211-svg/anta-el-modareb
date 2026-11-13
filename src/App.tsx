@@ -44,7 +44,6 @@ import { AdminAccessDenied } from './components/admin/AdminAccessDenied';
 import { MatchErrorBoundary } from './components/MatchErrorBoundary';
 import { SocialTab } from './components/SocialTab';
 import { applyPerfMode, forceRepaint } from './utils/perfMode';
-import { notificationService } from './services/notificationService';
 import { PressConferenceModal } from './components/PressConferenceModal';
 import { PrivacyPolicyPage } from './components/PrivacyPolicyPage';
 
@@ -102,11 +101,6 @@ function GameApp() {
   const [activeTab, setActiveTab] = useState<ActiveTab>('dashboard');
   const [pressFixture, setPressFixture] = useState<any>(null);
 
-  // Notifications are removed: once, cancel anything an earlier version scheduled so nothing ever fires.
-  useEffect(() => {
-    const t = setTimeout(() => { try { notificationService.cancelAllScheduledNotifications().catch(() => {}); } catch { /* */ } }, 4000);
-    return () => clearTimeout(t);
-  }, []);
   useEffect(() => {
     if (!userClub || liveMatch || showDaySummaryModal || pressFixture) return;
     const played = (fixtures || []).filter((f: any) => f.isPlayed && (f.homeTeamId === userClub.id || f.awayTeamId === userClub.id));
