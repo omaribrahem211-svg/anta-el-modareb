@@ -2,6 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { Mic, X, Check, ChevronLeft } from 'lucide-react';
 import { Fixture } from '../types/game';
 import { useGame } from '../context/GameContext';
+import { EXTRA, GENERAL } from '../data/pressBank';
 
 type Tone = 'humble' | 'bold' | 'fire';
 interface Answer { tone: Tone; text: string; fx: { board: number; fans: number; morale: number; rep: number }; reply: string }
@@ -95,12 +96,20 @@ const BANK: Record<Kind, Question[]> = {
 };
 
 function hash(s: string) { let h = 0; for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0; return Math.abs(h); }
-function pickQs(kind: Kind, seed: string): Question[] {
-  const bank = BANK[kind].slice();
-  const h = hash(seed);
-  const out: Question[] = [];
-  for (let i = 0; i < Math.min(3, bank.length); i++) out.push(bank.splice((h + i * 7) % bank.length, 1)[0]);
-  return out;
+function pickQs(kind: Kind, seed: string, opp: string): Question[] {
+  // 3 questions per conference: 2 about the result (from a big pool) + 1 general. Seeded by fixture, but offset by the
+  // time so two conferences after similar results are never the same.
+  const h = hash(seed) + (Date.now() % 997);
+  const kindPool = [...BANK[kind], ...(EXTRA[kind] || [])];
+  const pickFrom = (pool: Question[], n: number, off: number) => {
+    const p = pool.slice();
+    const res: Question[] = [];
+    for (let i = 0; i < Math.min(n, p.length); i++) res.push(p.splice((h * (i + 3) + off + i * 11) % p.length, 1)[0]);
+    return res;
+  };
+  const out = [...pickFrom(kindPool, 2, 0), ...pickFrom(GENERAL as Question[], 1, 5)];
+  const fill = (t: string) => t.split('{opp}').join(opp);
+  return out.map(q => ({ q: fill(q.q), a: q.a.map(a => ({ ...a, text: fill(a.text), reply: fill(a.reply) })) }));
 }
 
 interface Props { fixture: Fixture; onClose: () => void }
@@ -113,7 +122,7 @@ export const PressConferenceModal: React.FC<Props> = ({ fixture, onClose }) => {
   const oppId = isHome ? fixture.awayTeamId : fixture.homeTeamId;
   const oppName = teams.find(t => t.id === oppId)?.name || 'الخصم';
   const kind: Kind = my - op >= 3 ? 'bigwin' : my > op ? 'win' : my === op ? 'draw' : op - my >= 3 ? 'heavyloss' : 'loss';
-  const qs = useMemo(() => pickQs(kind, fixture.id), [kind, fixture.id]);
+  const qs = useMemo(() => pickQs(kind, fixture.id, oppName), [kind, fixture.id, oppName]);
   const [i, setI] = useState(0);
   const [picked, setPicked] = useState<Answer | null>(null);
   const [total, setTotal] = useState({ board: 0, fans: 0, morale: 0, rep: 0 });
