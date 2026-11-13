@@ -3716,9 +3716,13 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     setLiveMatch(null);
 
     try {
+      // Give the WebView two real frames + a short pause to paint the "finishing" overlay BEFORE the heavy synchronous work,
+      // otherwise weak phones show a blank white screen for seconds while the season-end maths blocks the main thread.
       await new Promise<void>(resolve =>
         requestAnimationFrame(() => {
-          setTimeout(resolve, 16);
+          requestAnimationFrame(() => {
+            setTimeout(resolve, 90);
+          });
         })
       );
       console.log('[MatchEndingFlow] Processing match finalization for fixture:', currentFixtureId);
