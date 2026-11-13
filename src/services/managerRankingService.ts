@@ -303,10 +303,11 @@ export async function fetchWeeklyManagersLeaderboard(
   let entries: DailyManagerLeaderboardEntry[] = [];
 
   let usedCache = false;
-  if (!forceRefresh || isRecentQuotaExceeded()) {
+  // Free-tier protection: one read of 25 documents per device per 30 minutes at most (a manual refresh waits 3 minutes)
+  {
     try {
       const c = JSON.parse(localStorage.getItem(WEEKLY_CACHE_KEY) || 'null');
-      if (c && c.week === wk && Array.isArray(c.entries) && (isRecentQuotaExceeded() || Date.now() - c.timestamp < LEADERBOARD_CACHE_TTL)) {
+      if (c && c.week === wk && Array.isArray(c.entries) && (isRecentQuotaExceeded() || Date.now() - c.timestamp < (forceRefresh ? 3 * 60 * 1000 : 30 * 60 * 1000))) {
         entries = c.entries;
         usedCache = true;
       }
@@ -315,7 +316,7 @@ export async function fetchWeeklyManagersLeaderboard(
 
   if (!usedCache && !isRecentQuotaExceeded()) {
     try {
-      const snapshot = await getDocs(query(collection(db, 'users'), orderBy('weeklyScore', 'desc'), limit(40)));
+      const snapshot = await getDocs(query(collection(db, 'users'), orderBy('weeklyScore', 'desc'), limit(25)));
       snapshot.forEach(docSnap => {
         const u = docSnap.data() as UserProfile;
         if (u.weeklyKey !== wk) return; // an older week

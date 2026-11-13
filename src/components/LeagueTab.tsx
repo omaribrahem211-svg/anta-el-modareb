@@ -55,7 +55,7 @@ export const LeagueTab: React.FC = () => {
   const myPeriodMatches = isWeekly ? (manager.weeklyKey === wkNow ? manager.weeklyMatches || 0 : 0) : manager.dailyMatchesPlayed || 0;
   const myPeriodWins = isWeekly ? (manager.weeklyKey === wkNow ? manager.weeklyWins || 0 : 0) : manager.dailyWins || 0;
 
-  const loadDailyRanking = async () => {
+  const loadDailyRanking = async (manual: boolean = false) => {
     setLoadingDaily(true);
     try {
       const fetcher = isWeekly ? fetchWeeklyManagersLeaderboard : fetchDailyManagersLeaderboard;
@@ -63,7 +63,8 @@ export const LeagueTab: React.FC = () => {
         user?.uid,
         manager,
         userClub?.name,
-        activeLeague?.name
+        activeLeague?.name,
+        isWeekly ? manual : false
       );
       setDailyLeaders(entries);
     } catch (e) {
@@ -418,7 +419,7 @@ export const LeagueTab: React.FC = () => {
             </div>
 
             <button
-              onClick={loadDailyRanking}
+              onClick={() => loadDailyRanking(true)}
               disabled={loadingDaily}
               className="flex items-center justify-center gap-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 px-3 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer shrink-0 disabled:opacity-50"
             >
