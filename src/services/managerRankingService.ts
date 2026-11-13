@@ -207,8 +207,20 @@ export async function fetchDailyManagersLeaderboard(
         limit(25)
       );
 
-      const snapshot = await getDocs(q);
-      snapshot.forEach(docSnap => {
+      // The (equality on date + order by points) query needs a Firestore composite index. If that index was never created the
+      // query fails and the list stays empty, so fall back to an equality-only query (no index needed) sorted on the device.
+      let snapshot: any;
+      try {
+        snapshot = await getDocs(q);
+      } catch (idxErr) {
+        if (isQuotaExceededError(idxErr)) throw idxErr;
+        console.warn('Daily leaderboard index query failed, using fallback', idxErr);
+        snapshot = await getDocs(query(usersCol, where('lastDailyPointsDate', '==', today), limit(50)));
+      }
+      const docsArr: any[] = [];
+      snapshot.forEach((d: any) => docsArr.push(d));
+      docsArr.sort((a, b) => ((b.data().dailyPoints || 0) - (a.data().dailyPoints || 0)));
+      docsArr.slice(0, 25).forEach(docSnap => {
         const u = docSnap.data() as UserProfile;
         entries.push({
           uid: u.uid,
