@@ -102,7 +102,8 @@ export const SeasonTransitionModal: React.FC = () => {
   return (
     <div
       id="season_transition_modal_backdrop"
-      className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-slate-950/95 overflow-y-auto"
+      className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 overflow-y-auto"
+      style={{ background: '#020617', overscrollBehavior: 'contain', WebkitOverflowScrolling: 'touch', transform: 'translateZ(0)' }}
       dir="rtl"
     >
       <div
