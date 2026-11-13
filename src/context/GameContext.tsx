@@ -157,6 +157,7 @@ import {
   simulateDailySquadTraining,
   parseDateString,
 } from '../utils/calendarEngine';
+import { generateMatchReactions } from '../services/matchReactionEngine';
 import { generateImmersiveNewsBatch, getInitialFootballNews } from '../services/footballNewsEngine';
 import { evaluateMatchImpactOnConfidence, updateDailyBoardConfidence, getClubLeagueTarget } from '../utils/boardEngine';
 import { EGYPT_TIER_4_LEAGUE, getLeagueById, GLOBAL_LEAGUES, findClubInWorld, getClubDisplayName, updateLeagueRosterInWorld, getCustomLeagues } from '../data/leaguesData';
@@ -4692,6 +4693,44 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       AdManager.consumeTrainingBoost();
     } catch (e) {
       console.warn('Non-fatal error consuming training boost:', e);
+    }
+
+    // After-match news & statements built from the real result (opponent coach, scorers, fans, referee, table, other results)
+    try {
+      if (userClub && (homeTeam?.id === userClub.id || awayTeam?.id === userClub.id)) {
+        const uHome = homeTeam?.id === userClub.id;
+        const opp = uHome ? awayTeam : homeTeam;
+        const sorted = [...(updatedStandings || [])].filter(Boolean).sort((a: any, b: any) =>
+          (b.points || 0) - (a.points || 0) || ((b.goalsFor || 0) - (b.goalsAgainst || 0)) - ((a.goalsFor || 0) - (a.goalsAgainst || 0)) || (b.goalsFor || 0) - (a.goalsFor || 0));
+        const standingsWithPos = sorted.map((st: any, i: number) => ({ teamId: st.teamId, position: i + 1, points: st.points }));
+        const playedUser = (updatedFixtures || [])
+          .filter((f: any) => f && f.isPlayed && (f.homeTeamId === userClub.id || f.awayTeamId === userClub.id))
+          .sort((a: any, b: any) => (b.round || 0) - (a.round || 0));
+        const formArr = playedUser.slice(0, 6).map((f: any) => {
+          const mine = f.homeTeamId === userClub.id ? f.homeScore : f.awayScore;
+          const theirs = f.homeTeamId === userClub.id ? f.awayScore : f.homeScore;
+          return (mine > theirs ? 'W' : mine < theirs ? 'L' : 'D') as 'W' | 'D' | 'L';
+        });
+        const reacts = generateMatchReactions({
+          dateStr: calendarDate?.formattedArabic || 'اليوم',
+          userClub,
+          opponent: opp,
+          isHome: uHome,
+          userScore,
+          oppScore,
+          events: rawMatchEvents,
+          managerName: manager?.name || 'المدرب',
+          standings: standingsWithPos,
+          form: formArr,
+          otherResults: (allRoundMatches || []).filter((m: any) => m && m.homeTeamId !== userClub.id && m.awayTeamId !== userClub.id)
+            .map((m: any) => ({ homeId: m.homeTeamId, awayId: m.awayTeamId, homeScore: m.homeScore, awayScore: m.awayScore, events: m.events })),
+          teams,
+          recentTitles: new Set((dailyNews || []).slice(0, 40).map(n => n.title)),
+        }, 6);
+        if (reacts.length > 0) setDailyNews(prev => [...reacts, ...(prev || [])].slice(0, 60));
+      }
+    } catch (reactErr) {
+      console.warn('[MatchReactions] skipped', reactErr);
     }
 
     // Track match in challengesManager
