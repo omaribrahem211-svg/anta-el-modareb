@@ -251,7 +251,9 @@ async function executeSave(payload: LocalGameSavePayload): Promise<void> {
 
   // 3. Asynchronous write to IndexedDB (off main thread, no 5MB quota restriction)
   try {
-    await idbSet('current_save', timestampedPayload);
+    const savedOk = await idbSet('current_save', timestampedPayload);
+    // Disk copy is safe: release the in-memory duplicate (a full second copy of fixtures/cups/news on 4GB phones).
+    if (savedOk && inMemorySaveCache === timestampedPayload) inMemorySaveCache = null;
   } catch (err) {
     console.warn('[GameStateRepo] Notice writing to IndexedDB (state safely held in memory cache):', err);
   }
@@ -355,7 +357,6 @@ export const gameStateRepository = {
     try {
       const idbSave = await idbGet<LocalGameSavePayload>('current_save');
       if (idbSave && idbSave.manager && Array.isArray(idbSave.teams) && idbSave.teams.length > 0) {
-        inMemorySaveCache = idbSave;
         evictHeavyLocalStorageKeys(LEGACY_STORAGE_PREFIX);
         return idbSave;
       }
