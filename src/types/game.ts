@@ -593,6 +593,7 @@ export interface SeasonEndSummary {
   developmentPointsEarned?: number;
   developmentPointsBreakdown?: { reason: string; points: number }[];
   worldDominationInfo?: { percentage: number; conqueredCount: number; totalCount: number; isNewConquest: boolean; leagueName: string };
+  playerAwards?: string[];
   licenseSettlement?: {
     previousLicense: CoachingLicenseTier;
     previousLicenseTitle: string;

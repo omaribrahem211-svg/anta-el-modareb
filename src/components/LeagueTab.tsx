@@ -19,6 +19,7 @@ import {
   CheckCircle2,
   Play,
 } from 'lucide-react';
+import { getLedger } from '../utils/seasonLedger';
 import { fetchDailyManagersLeaderboard, fetchWeeklyManagersLeaderboard, getWeekKey, getLeaderboardUpdatedAt, LEADERBOARD_REFRESH_HOURS, DailyManagerLeaderboardEntry } from '../services/managerRankingService';
 import { getClubDisplayName } from '../data/leaguesData';
 import { AfricanChampionsLeagueView } from './continental/AfricanChampionsLeagueView';
@@ -96,18 +97,34 @@ export const LeagueTab: React.FC = () => {
       .filter(Boolean)
       .flatMap(t => (Array.isArray(t.players) ? t.players.filter(Boolean) : []));
 
-    const scorers = [...players]
+    // Merge each player's own counters with the season ledger (fed from every simulated league match) and keep the larger
+    // number, so scorers/assisters can't "lose" goals when a player object was rebuilt or moved.
+    const ledger = getLedger(activeLeague?.id, season?.seasonNumber);
+    const byId = new Map<string, any>();
+    for (const p of players) byId.set(p.id, { ...p, stats: { ...(p.stats || {}) } });
+    for (const e of ledger) {
+      const cur = byId.get(e.id);
+      if (cur) {
+        cur.stats.goals = Math.max(cur.stats.goals || 0, e.goals);
+        cur.stats.assists = Math.max(cur.stats.assists || 0, e.assists);
+      } else {
+        byId.set(e.id, { id: e.id, name: e.name || 'لاعب', position: '', currentClubId: e.clubId, stats: { goals: e.goals, assists: e.assists } });
+      }
+    }
+    const merged = [...byId.values()];
+
+    const scorers = merged
       .filter(p => (p.stats?.goals || 0) > 0)
       .sort((a, b) => (b.stats?.goals || 0) - (a.stats?.goals || 0))
       .slice(0, 50);
 
-    const assisters = [...players]
+    const assisters = merged
       .filter(p => (p.stats?.assists || 0) > 0)
       .sort((a, b) => (b.stats?.assists || 0) - (a.stats?.assists || 0))
       .slice(0, 50);
 
     return { topScorers: scorers, topAssisters: assisters };
-  }, [teams]);
+  }, [teams, activeLeague?.id, season?.seasonNumber, fixtures]);
 
   const effectiveStandings = useMemo(() => {
     const isAllZero = standings.length === 0 || standings.every(s => (s.played || 0) === 0);

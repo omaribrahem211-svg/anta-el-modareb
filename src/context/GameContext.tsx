@@ -180,6 +180,7 @@ import { migrateSavePayload, CURRENT_SAVE_FORMAT_VERSION } from '../services/sav
 import { smartSyncManager, SmartSyncInput } from '../services/smartSyncManager';
 import { rollSeasonEvent, resolveSeasonEvent as resolveSeasonEventEngine, recordSeasonEvent, rolloverSeasonEventHistory, emptySeasonEventHistory, SeasonEventHistory, SeasonEvent } from '../services/seasonEventsEngine';
 import { canPlayerJoinClub, DEFAULT_ECONOMY_CONFIG, calculateClubMonthlyIncome, calculateClubTotalMonthlyWages, validateTransferFinancials } from '../services/economyService';
+import { recordLeagueMatchesToLedger, applySeasonAwards } from '../utils/seasonLedger';
 import { fetchActiveBroadcasts, applyWorldOverridesToClubs, applyWorldOverridesToMarket, isPlayerDeletedInOverrides, SUPER_ADMIN_EMAIL } from '../services/adminService';
 import {
   redeemPromoCode,
@@ -4100,6 +4101,10 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       }));
     }
 
+    try {
+      if (fixtureCompType === 'LEAGUE') recordLeagueMatchesToLedger(allRoundMatches, season?.seasonNumber, activeLeague?.id);
+    } catch (_) { /* ledger is best-effort */ }
+
     // Update player fitness, morale, and comprehensive stats across ALL teams in the league
     let updatedAllTeams = teams;
     if (DIAGNOSTIC_CONFIG.ENABLE_PLAYER_PROCESSING) {
@@ -4983,6 +4988,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     let simCupBonusDevPoints = 0;
     const simCupRewardMessages: InboxMessage[] = [];
 
+    try { recordLeagueMatchesToLedger(allRoundMatches, season?.seasonNumber, activeLeague?.id); } catch (_) { /* best-effort */ }
     // 3. Update Teams & Players Stats
     let updatedAllTeams = teams.map(t => {
       const matchAsHome = allRoundMatches.find(m => m.homeTeamId === t.id);
@@ -8457,6 +8463,19 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           reputationChange: (summary.reputationChange || 0) + contReward.rep,
         };
       }
+      // The club budget carried into the new season must be the CURRENT live budget + this season's prize money.
+      // A cached summary holds a snapshot taken on the last matchday: anything bought/sold since (or a missing/NaN value)
+      // used to overwrite the real budget, which players saw as "the budget reset to zero at season end".
+      try {
+        const liveClub = teams.find(t => t && t.isUserClub && t.id === summaryClub?.id) || teams.find(t => t && t.isUserClub) || summaryClub;
+        const liveBudget = Number(liveClub?.budget);
+        const prize = Number(summary.prizeMoney) || 0;
+        if (Number.isFinite(liveBudget) && liveBudget >= 0) {
+          summary = { ...summary, finalBudget: Math.round(liveBudget + prize) };
+        } else if (!Number.isFinite(Number(summary.finalBudget)) || Number(summary.finalBudget) < 0) {
+          summary = { ...summary, finalBudget: Math.max(0, prize) };
+        }
+      } catch (_) { /* keep the summary as is */ }
       const contMgrBonus = contReward && contReward.season === summary.seasonNumber ? (contReward.managerBonus || 0) : 0;
       continentalRewardRef.current = null;
       setContinentalPhase(null);
@@ -8466,13 +8485,35 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         ? safeJobOffers.find(o => o.id === chosenOfferId)
         : safeJobOffers.find(o => o.status === 'accepted');
 
+      // League awards (top scorer / assister / Golden Ball) boost the user's winning players before the season rolls over
+      let teamsForAdvance = teams;
+      try {
+        const aw = applySeasonAwards(teams, summaryClub?.id, activeLeague?.id, season?.seasonNumber);
+        teamsForAdvance = aw.teams;
+        if (aw.messages.length > 0) {
+          const stamp = Date.now();
+          setInbox(prev => [
+            ...aw.messages.map((m, i) => ({
+              id: `msg_award_${stamp}_${i}`,
+              title: m.title,
+              sender: 'رابطة الدوري',
+              date: `نهاية الموسم ${season?.seasonNumber}`,
+              type: 'board',
+              read: false,
+              content: m.content,
+            } as InboxMessage)),
+            ...prev,
+          ]);
+        }
+        if (aw.lines.length > 0) summary = { ...summary, playerAwards: aw.lines } as any;
+      } catch (_) { /* optional */ }
       const advStart = typeof performance !== 'undefined' ? performance.now() : Date.now();
       const result = await processNewSeasonAdvancement(
         season,
         summary,
         summaryClub,
         manager,
-        teams,
+        teamsForAdvance,
         acceptedOffer
       );
       try {
