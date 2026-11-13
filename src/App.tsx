@@ -72,12 +72,23 @@ function GameApp() {
     showSeasonTransitionModal,
     isStartingSeasonUi,
     teams,
+    continentalPhase,
+    season,
     canClaimDailyReward,
     dailyRewardState
   } = useGame() as any;
   // While the season-end / club-choice screens are up, unmount the heavy app screens underneath (they re-render on every
   // state change and keep large DOM trees in memory: the main cause of hangs and white flicker on 4GB phones).
-  const seasonFocus = !!(showSeasonTransitionModal || isStartingSeasonUi);
+  const [contMinimized, setContMinimized] = useState(false);
+  useEffect(() => {
+    const h = (e: any) => setContMinimized(!!e?.detail?.minimized);
+    window.addEventListener('continental-ui', h);
+    return () => window.removeEventListener('continental-ui', h);
+  }, []);
+  // The continental tournament / Club World Cup is a full-screen overlay too: unmount the app underneath while it is shown
+  // (but keep it when minimized, or while a continental match is on the live match screen, which lives in the main tree).
+  const contFocus = !!(continentalPhase && continentalPhase.status !== 'done' && continentalPhase.seasonNumber === season?.seasonNumber && !contMinimized && !liveMatch);
+  const seasonFocus = !!(showSeasonTransitionModal || isStartingSeasonUi || contFocus);
   // Season end / club choice: always use the flat, animation-free rendering path (no blur/backdrop filters) so parts of the
   // screen do not flash white on weak GPUs. The user's own performance setting is restored afterwards.
   useEffect(() => {

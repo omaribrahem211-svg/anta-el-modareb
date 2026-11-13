@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useGame } from '../context/GameContext';
 import {
   ROUND_LABEL,
@@ -22,6 +22,10 @@ export default function ContinentalPhaseModal() {
   const { userClub, continentalPhase, season, playContinentalStep, playContinentalLiveMatch, simulateContinentalToEnd, finishContinentalPhase, liveMatch, finishLiveMatchAndAdvance } = useGame() as any;
   const st: ContinentalPhaseState | null = continentalPhase;
   const [minimized, setMinimized] = useState(false);
+  // Tells the app shell whether the normal screens must stay mounted (minimized) or can be unmounted while the tournament is full screen
+  useEffect(() => {
+    try { window.dispatchEvent(new CustomEvent('continental-ui', { detail: { minimized } })); } catch (_) { /* */ }
+  }, [minimized]);
 
   if (!st || st.status === 'done' || st.seasonNumber !== season?.seasonNumber) return null;
   // While the user is watching a continental match the normal match screen is shown instead

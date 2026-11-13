@@ -69,3 +69,5 @@ html.perf-lite *:not(.animate-spin):not(.animate-spin *) {
   animation: none !important;
 }
 html.perf-lite [class*="blur"] { filter: none !important; }
+/* big blurred drop shadows are expensive on weak GPUs (rings are kept) */
+html.perf-lite [class*="shadow-"] { box-shadow: none !important; }
