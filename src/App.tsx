@@ -1,3 +1,4 @@
+import { AwardCeremonyModal } from './components/AwardCeremonyModal';
 import IntegrityGate from './components/IntegrityGate';
 import ErrorReporter from './components/ErrorReporter';
 import React, { useState, useEffect, useCallback, useRef, startTransition } from 'react';
@@ -523,6 +524,7 @@ export default function App() {
           <SeasonSafeBoundary name="SeasonEvent"><SeasonEventModal /></SeasonSafeBoundary>
           <ContinentalSafe />
           <SeasonStartingOverlay />
+          <SeasonSafeBoundary name="Award"><AwardCeremonyModal /></SeasonSafeBoundary>
           <IntegrityGate />
           <ErrorReporter />
         </GameProvider>

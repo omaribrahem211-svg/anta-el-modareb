@@ -180,6 +180,7 @@ import { migrateSavePayload, CURRENT_SAVE_FORMAT_VERSION } from '../services/sav
 import { smartSyncManager, SmartSyncInput } from '../services/smartSyncManager';
 import { rollSeasonEvent, resolveSeasonEvent as resolveSeasonEventEngine, recordSeasonEvent, rolloverSeasonEventHistory, emptySeasonEventHistory, SeasonEventHistory, SeasonEvent } from '../services/seasonEventsEngine';
 import { canPlayerJoinClub, DEFAULT_ECONOMY_CONFIG, calculateClubMonthlyIncome, calculateClubTotalMonthlyWages, validateTransferFinancials } from '../services/economyService';
+import { rollSeasonAwards, applyPlayerAwardBoosts, AwardItem } from '../utils/worldAwards';
 import { recordLeagueMatchesToLedger, applySeasonAwards } from '../utils/seasonLedger';
 import { fetchActiveBroadcasts, applyWorldOverridesToClubs, applyWorldOverridesToMarket, isPlayerDeletedInOverrides, SUPER_ADMIN_EMAIL } from '../services/adminService';
 import {
@@ -319,6 +320,8 @@ interface GameContextType {
   playContinentalLiveMatch: () => void;
   simulateContinentalToEnd: () => void;
   finishContinentalPhase: () => void;
+  awardCeremony: any[];
+  dismissAwardCeremony: () => void;
   resolveSeasonEvent: (choiceId: string) => { message: string } | null;
   autoFixUserStartingLineup: (reopenAsMatchToday?: boolean) => void;
   validateUserLineup: () => SquadValidationResult;
@@ -8057,6 +8060,10 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const contWatchdogRef = useRef<{ key: string; tries: number }>({ key: '', tries: 0 });
   const forceAutoSimUserRef = useRef<string | null>(null);
   const isStartingSeasonRef = useRef<boolean>(false);
+  // Seasonal world awards (best coach / best player of the continent and of the world)
+  const [awardCeremony, setAwardCeremony] = useState<AwardItem[]>([]);
+  const pendingAwardsRef = useRef<AwardItem[]>([]);
+  const dismissAwardCeremony = () => setAwardCeremony(prev => prev.slice(1));
   const continentalRewardRef = useRef<{ season: number; prize: number; xp: number; rep: number; text: string; trophy?: string; extraTrophies?: string[]; managerBonus?: number } | null>(null);
 
   // Between two continental matches the squad gets 6 rest days (like the league's weekly rhythm): fitness recovers
@@ -8198,6 +8205,23 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             extraTrophies: [...(prevRw.extraTrophies || []), ...(prevRw.trophy && outcome.trophyName ? [outcome.trophyName] : [])],
           }
         : { season: st.seasonNumber, prize, xp: outcome.xp, rep: outcome.reputation, text: outcome.resultText, trophy: outcome.trophyName, managerBonus: mgrBonus };
+      try {
+        const items = rollSeasonAwards({
+          state: st,
+          userClub,
+          findClub: (id: string) => teams.find(t => t && t.id === id) || findClubInWorld(id),
+          coachName: manager?.name || 'المدرب',
+        });
+        if (items.length > 0) {
+          pendingAwardsRef.current = [...pendingAwardsRef.current, ...items];
+          const cash = items.reduce((sum, i) => sum + (i.kind === 'coach' ? i.prize : 0), 0);
+          if (cash > 0 && continentalRewardRef.current) {
+            // paid into the coach's personal wallet right after the rollover (same path as the continental bonus)
+            continentalRewardRef.current = { ...continentalRewardRef.current, managerBonus: (continentalRewardRef.current.managerBonus || 0) + cash };
+          }
+          setAwardCeremony(prev => [...prev, ...items]);
+        }
+      } catch (_) { /* awards are optional */ }
       setContinentalPhase({ ...st, status: 'done' });
 
       setSeasonEndSummary(prev => prev ? {
@@ -8507,6 +8531,9 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         }
         if (aw.lines.length > 0) summary = { ...summary, playerAwards: aw.lines } as any;
       } catch (_) { /* optional */ }
+      const worldAwardItems = pendingAwardsRef.current.filter(a => a.seasonNumber === season?.seasonNumber);
+      pendingAwardsRef.current = [];
+      try { teamsForAdvance = applyPlayerAwardBoosts(teamsForAdvance, summaryClub?.id, worldAwardItems); } catch (_) { /* optional */ }
       const advStart = typeof performance !== 'undefined' ? performance.now() : Date.now();
       const result = await processNewSeasonAdvancement(
         season,
@@ -8521,6 +8548,15 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         if (took > 150) console.warn(`[SlowStep] processNewSeasonAdvancement (async) took ${Math.round(took)}ms`);
       } catch (_) {}
       await new Promise<void>(r => setTimeout(r, 12));
+      if (worldAwardItems.length > 0) {
+        // award records + reputation (the personal-wallet cash comes through contMgrBonus below)
+        const repGain = worldAwardItems.reduce((r, a) => r + (a.kind === 'coach' ? (a.scope === 'world' ? 6 : 3) : 0), 0);
+        result.updatedManager = {
+          ...result.updatedManager,
+          reputation: Math.min(100, (result.updatedManager.reputation || 50) + repGain),
+          worldAwards: [...(((result.updatedManager as any).worldAwards) || []), ...worldAwardItems.map(a => ({ title: a.title, kind: a.kind, scope: a.scope, season: a.seasonNumber, winner: a.winnerName, club: a.clubName, isUser: a.isUser }))].slice(-40),
+        } as any;
+      }
       if (contMgrBonus > 0) {
         // Coach's personal continental bonus (paid once, after the rollover so it cannot be overwritten)
         result.updatedManager = { ...result.updatedManager, personalWallet: (result.updatedManager.personalWallet || 0) + contMgrBonus };
@@ -12172,6 +12208,8 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         playContinentalLiveMatch,
         simulateContinentalToEnd,
         finishContinentalPhase,
+        awardCeremony,
+        dismissAwardCeremony,
         resolveSeasonEvent,
         autoFixUserStartingLineup,
         validateUserLineup,
