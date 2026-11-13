@@ -8063,7 +8063,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   // Seasonal world awards (best coach / best player of the continent and of the world)
   const [awardCeremony, setAwardCeremony] = useState<AwardItem[]>([]);
   const pendingAwardsRef = useRef<AwardItem[]>([]);
-  const dismissAwardCeremony = () => setAwardCeremony(prev => prev.slice(1));
+  const dismissAwardCeremony = () => setAwardCeremony([]);
   const continentalRewardRef = useRef<{ season: number; prize: number; xp: number; rep: number; text: string; trophy?: string; extraTrophies?: string[]; managerBonus?: number } | null>(null);
 
   // Between two continental matches the squad gets 6 rest days (like the league's weekly rhythm): fitness recovers

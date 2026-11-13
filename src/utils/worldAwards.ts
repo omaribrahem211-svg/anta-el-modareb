@@ -23,6 +23,14 @@ const CONTINENT_NAME: Record<string, string> = {
   AFRICA: 'أفريقيا', EUROPE: 'أوروبا', ASIA: 'آسيا', SOUTH_AMERICA: 'أمريكا الجنوبية',
 };
 
+const AI_FIRST = ['كارلو','أوليفر','ماركو','جوزيه','دييغو','ستيفان','فرانك','ماتيو','رودريغو','يورغن','أندريا','باولو','ميشيل','تيو','لوكا','ساندرو'];
+const AI_LAST = ['روسي','مارتينيز','شميدت','فيرنانديز','بيريرا','دوبوا','أندرسن','كوفاتش','مورينيو','سيلفا','بيانكي','ويبر','غارسيا','ليمان','نوفاك','رينالدي'];
+export function aiCoachName(clubId: string): string {
+  let h = 0;
+  for (let i = 0; i < clubId.length; i++) h = (h * 31 + clubId.charCodeAt(i)) >>> 0;
+  return `${AI_FIRST[h % AI_FIRST.length]} ${AI_LAST[(h >>> 5) % AI_LAST.length]}`;
+}
+
 const num = (v: any, d = 0) => (Number.isFinite(Number(v)) ? Number(v) : d);
 
 function scorePlayer(p: any, isUser: boolean, champion: boolean, world: boolean, rnd: () => number) {
@@ -67,9 +75,13 @@ export function rollSeasonAwards(args: {
     const userChampion = state.championId === state.userId;
     const seasonNumber = state.seasonNumber;
 
-    // ---- Coach of the year (the user only): 80% when he won the continental title / reached the World Cup final
+    // ---- Coach of the year. Not automatic: the user wins it only when he earned it (title / World Cup final) AND the vote
+    // goes his way (80%); otherwise the award goes to the coach of the champion (or the runner-up when the user was champion).
     const qualifies = world ? userInFinal : userChampion;
-    if (qualifies && rnd() < COACH_AWARD_CHANCE) {
+    const userWins = qualifies && rnd() < COACH_AWARD_CHANCE;
+    const otherId = userChampion ? (finalTie.a === state.userId ? finalTie.b : finalTie.a)
+      : (userInFinal && !userChampion ? state.championId : state.championId);
+    if (userWins) {
       out.push({
         id: `coach_${scope}_${seasonNumber}`,
         kind: 'coach', scope,
@@ -80,7 +92,22 @@ export function rollSeasonAwards(args: {
         isUser: true,
         prize: world ? COACH_WORLD_PRIZE : COACH_CONTINENT_PRIZE,
         seasonNumber,
-        detail: userChampion ? `🏆 ${state.compName} ${seasonNumber}` : `🥈 وصيف ${state.compName}`,
+        detail: userChampion ? `🏆 بطل ${state.compName} ${seasonNumber}` : `🥈 وصيف ${state.compName}`,
+      });
+    } else if (otherId) {
+      const club = findClub(otherId);
+      const cname = club?.manager?.name || aiCoachName(otherId);
+      out.push({
+        id: `coach_${scope}_${seasonNumber}`,
+        kind: 'coach', scope,
+        title: `أفضل مدرب في ${place}`,
+        winnerName: cname,
+        clubName: club?.name || state.teams.find(t => t.id === otherId)?.name || '',
+        clubId: otherId,
+        isUser: false,
+        prize: 0,
+        seasonNumber,
+        detail: otherId === state.championId ? `🏆 قاد فريقه لبطولة ${state.compName}` : `🥈 قاد فريقه لنهائي ${state.compName}`,
       });
     }
 
