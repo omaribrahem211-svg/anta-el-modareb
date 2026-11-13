@@ -126,7 +126,7 @@ export const SocialTab: React.FC = () => {
     return [...saved.mine.map(m => ({ ...m, order: 2000 + m.order })), ...out].sort((a, b) => b.order - a.order);
   }, [userClub, teams, fixtures, standings, manager, currentRound, dailyNews, saved.mine]);
 
-  if (!userClub) return <div className="text-center text-slate-400 p-8">اختار نادي الأول.</div>;
+  if (!userClub) return <div className="text-center text-[#94a3b8] p-8">اختار نادي الأول.</div>;
 
   const shown = posts.filter(p => filter === 'all' || (filter === 'fans' ? (p.kind === 'fan' || p.kind === 'page' || p.kind === 'me') : p.kind === filter));
   const like = (id: string) => setSaved(s => { const l = { ...s.liked }; if (l[id]) delete l[id]; else l[id] = 1; return { ...s, liked: l }; });
@@ -150,24 +150,24 @@ export const SocialTab: React.FC = () => {
   };
 
   return (
-    <div className="space-y-3 max-w-xl mx-auto" dir="rtl">
+    <div className="space-y-3 max-w-xl mx-auto" dir="rtl" style={{ colorScheme: 'dark', color: '#e2e8f0' }}>
       <div className="flex items-center gap-2">
-        <div className="p-2 rounded-xl bg-sky-500/15 border border-sky-500/30 text-sky-300"><Globe2 className="w-4 h-4" /></div>
-        <div><h2 className="font-black text-white text-base">السوشيال</h2><p className="text-[11px] text-slate-400">بوستات جمهور {userClub.shortName || userClub.name} والصفحات الرياضية</p></div>
+        <div className="p-2 rounded-xl bg-[rgba(14,165,233,0.15)] border border-[rgba(14,165,233,0.3)] text-[#7dd3fc]"><Globe2 className="w-4 h-4" /></div>
+        <div><h2 className="font-black text-white text-base">السوشيال</h2><p className="text-[11px] text-[#94a3b8]">بوستات جمهور {userClub.shortName || userClub.name} والصفحات الرياضية</p></div>
       </div>
 
-      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-3">
+      <div className="bg-[#0f172a] border border-[#1e293b] rounded-2xl p-3">
         <textarea value={compose} onChange={e => setCompose(e.target.value)} rows={2} maxLength={200} placeholder="اكتب بوست للجمهور... (بوست كل جولة بيرفع الحماس)"
-          className="w-full bg-slate-950 border border-slate-700 rounded-xl p-2.5 text-sm text-white placeholder-slate-500 resize-none outline-none focus:border-sky-500" />
+          className="w-full bg-[#020617] border border-[#334155] rounded-xl p-2.5 text-sm text-white placeholder-[#64748b] resize-none outline-none focus:border-[#0ea5e9]" />
         <div className="flex items-center justify-between mt-2">
-          <span className="text-[11px] text-slate-500">{saved.lastPostRound === currentRound ? 'نشرت بوست في الجولة دي' : '+ حماس الجمهور لو نشرت بوست الجولة دي'}</span>
-          <button onClick={publish} disabled={!compose.trim()} className="px-4 py-1.5 rounded-xl bg-sky-500 text-white text-xs font-bold disabled:opacity-40 flex items-center gap-1"><Send className="w-3 h-3" /> نشر</button>
+          <span className="text-[11px] text-[#64748b]">{saved.lastPostRound === currentRound ? 'نشرت بوست في الجولة دي' : '+ حماس الجمهور لو نشرت بوست الجولة دي'}</span>
+          <button onClick={publish} disabled={!compose.trim()} className="px-4 py-1.5 rounded-xl bg-[#0ea5e9] text-white text-xs font-bold disabled:opacity-40 flex items-center gap-1"><Send className="w-3 h-3" /> نشر</button>
         </div>
       </div>
 
       <div className="flex gap-1.5 overflow-x-auto pb-1">
         {([['all', 'الكل'], ['fans', 'جماهيرنا'], ['press', 'الصحافة'], ['rival', 'الخصوم']] as const).map(([k, l]) => (
-          <button key={k} onClick={() => setFilter(k)} className={`px-3.5 py-1.5 rounded-full text-xs font-bold whitespace-nowrap border ${filter === k ? 'bg-sky-500 text-white border-sky-400' : 'bg-slate-900 text-slate-300 border-slate-700'}`}>{l}</button>
+          <button key={k} onClick={() => setFilter(k)} className={`px-3.5 py-1.5 rounded-full text-xs font-bold whitespace-nowrap border ${filter === k ? 'bg-[#0ea5e9] text-white border-[#38bdf8]' : 'bg-[#0f172a] text-[#cbd5e1] border-[#334155]'}`}>{l}</button>
         ))}
       </div>
 
@@ -175,37 +175,37 @@ export const SocialTab: React.FC = () => {
         const liked = !!saved.liked[p.id];
         const allComments = [...p.comments, ...(saved.extra[p.id] || [])];
         return (
-          <article key={p.id} className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden">
+          <article key={p.id} className="bg-[#0f172a] border border-[#1e293b] rounded-2xl overflow-hidden">
             <div className="p-3 flex items-center gap-2.5">
               <div className="w-10 h-10 rounded-full flex items-center justify-center text-white font-black text-sm shrink-0" style={{ background: colorFor(p.author) }}>{p.author.replace(/^(ألتراس|عشاق)\s*/, '').trim().charAt(0) || '؟'}</div>
               <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-1 text-sm font-bold text-white truncate">{p.author}{p.verified && <BadgeCheck className="w-3.5 h-3.5 text-sky-400 shrink-0" />}</div>
-                <div className="text-[11px] text-slate-500">{timeAgo(idx)}{p.tag ? ` · ${p.tag}` : ''} · 🌐</div>
+                <div className="flex items-center gap-1 text-sm font-bold text-white truncate">{p.author}{p.verified && <BadgeCheck className="w-3.5 h-3.5 text-[#38bdf8] shrink-0" />}</div>
+                <div className="text-[11px] text-[#64748b]">{timeAgo(idx)}{p.tag ? ` · ${p.tag}` : ''} · 🌐</div>
               </div>
             </div>
-            <div className="px-3 pb-2.5 text-sm text-slate-100 leading-relaxed whitespace-pre-line">{p.text}</div>
-            <div className="px-3 pb-2 flex items-center justify-between text-[11px] text-slate-400">
+            <div className="px-3 pb-2.5 text-sm text-[#f1f5f9] leading-relaxed whitespace-pre-line">{p.text}</div>
+            <div className="px-3 pb-2 flex items-center justify-between text-[11px] text-[#94a3b8]">
               <span>👍❤️ {fmt(p.base + (liked ? 1 : 0))}</span>
               <span>{allComments.length} تعليق · {fmt(Math.round(p.base / 12) + (saved.shared[p.id] ? 1 : 0))} مشاركة</span>
             </div>
-            <div className="border-t border-slate-800 grid grid-cols-3 text-xs font-bold">
-              <button onClick={() => like(p.id)} className={`py-2.5 flex items-center justify-center gap-1.5 ${liked ? 'text-sky-400' : 'text-slate-300'}`}><ThumbsUp className={`w-4 h-4 ${liked ? 'fill-sky-400' : ''}`} /> أعجبني</button>
-              <button onClick={() => setOpen(o => ({ ...o, [p.id]: !o[p.id] }))} className="py-2.5 flex items-center justify-center gap-1.5 text-slate-300"><MessageCircle className="w-4 h-4" /> تعليق</button>
-              <button onClick={() => share(p.id, p.text)} className={`py-2.5 flex items-center justify-center gap-1.5 ${saved.shared[p.id] ? 'text-emerald-400' : 'text-slate-300'}`}><Share2 className="w-4 h-4" /> مشاركة</button>
+            <div className="border-t border-[#1e293b] grid grid-cols-3 text-xs font-bold">
+              <button onClick={() => like(p.id)} className={`py-2.5 flex items-center justify-center gap-1.5 ${liked ? 'text-[#38bdf8]' : 'text-[#cbd5e1]'}`}><ThumbsUp className={`w-4 h-4 ${liked ? 'fill-[#38bdf8]' : ''}`} /> أعجبني</button>
+              <button onClick={() => setOpen(o => ({ ...o, [p.id]: !o[p.id] }))} className="py-2.5 flex items-center justify-center gap-1.5 text-[#cbd5e1]"><MessageCircle className="w-4 h-4" /> تعليق</button>
+              <button onClick={() => share(p.id, p.text)} className={`py-2.5 flex items-center justify-center gap-1.5 ${saved.shared[p.id] ? 'text-[#34d399]' : 'text-[#cbd5e1]'}`}><Share2 className="w-4 h-4" /> مشاركة</button>
             </div>
             {(open[p.id] || allComments.length > 0) && (
-              <div className="border-t border-slate-800 p-3 space-y-2 bg-slate-950/40">
+              <div className="border-t border-[#1e293b] p-3 space-y-2 bg-[rgba(2,6,23,0.4)]">
                 {(open[p.id] ? allComments : allComments.slice(0, 2)).map((c, i) => (
                   <div key={i} className="flex gap-2">
                     <div className="w-7 h-7 rounded-full shrink-0 flex items-center justify-center text-[11px] font-black text-white" style={{ background: c.me ? '#10b981' : colorFor(c.n) }}>{c.n.charAt(0)}</div>
-                    <div className="bg-slate-800 rounded-2xl px-3 py-1.5 min-w-0"><div className="text-[11px] font-bold text-slate-200">{c.n}</div><div className="text-xs text-slate-100 leading-snug">{c.t}</div></div>
+                    <div className="bg-[#1e293b] rounded-2xl px-3 py-1.5 min-w-0"><div className="text-[11px] font-bold text-[#e2e8f0]">{c.n}</div><div className="text-xs text-[#f1f5f9] leading-snug">{c.t}</div></div>
                   </div>
                 ))}
-                {!open[p.id] && allComments.length > 2 && <button onClick={() => setOpen(o => ({ ...o, [p.id]: true }))} className="text-[11px] text-slate-400">عرض كل التعليقات ({allComments.length})</button>}
+                {!open[p.id] && allComments.length > 2 && <button onClick={() => setOpen(o => ({ ...o, [p.id]: true }))} className="text-[11px] text-[#94a3b8]">عرض كل التعليقات ({allComments.length})</button>}
                 {open[p.id] && (
                   <div className="flex gap-2 pt-1">
-                    <input value={draft[p.id] || ''} onChange={e => setDraft(d => ({ ...d, [p.id]: e.target.value }))} onKeyDown={e => e.key === 'Enter' && sendComment(p.id)} placeholder="اكتب تعليق..." className="flex-1 min-w-0 bg-slate-900 border border-slate-700 rounded-full px-3 py-1.5 text-xs text-white outline-none focus:border-sky-500" />
-                    <button onClick={() => sendComment(p.id)} className="px-3 rounded-full bg-sky-500 text-white"><Send className="w-3.5 h-3.5" /></button>
+                    <input value={draft[p.id] || ''} onChange={e => setDraft(d => ({ ...d, [p.id]: e.target.value }))} onKeyDown={e => e.key === 'Enter' && sendComment(p.id)} placeholder="اكتب تعليق..." className="flex-1 min-w-0 bg-[#0f172a] border border-[#334155] rounded-full px-3 py-1.5 text-xs text-white outline-none focus:border-[#0ea5e9]" />
+                    <button onClick={() => sendComment(p.id)} className="px-3 rounded-full bg-[#0ea5e9] text-white"><Send className="w-3.5 h-3.5" /></button>
                   </div>
                 )}
               </div>
@@ -213,8 +213,8 @@ export const SocialTab: React.FC = () => {
           </article>
         );
       })}
-      {shown.length > limit && <button onClick={() => setLimit(l => l + 14)} className="w-full py-3 rounded-2xl bg-slate-900 border border-slate-800 text-sm font-bold text-slate-300">اعرض بوستات أكتر</button>}
-      {shown.length === 0 && <div className="text-center text-slate-500 text-sm p-8">لسه مفيش بوستات. العب ماتش وهتلاقي الجمهور بيتكلم 😄</div>}
+      {shown.length > limit && <button onClick={() => setLimit(l => l + 14)} className="w-full py-3 rounded-2xl bg-[#0f172a] border border-[#1e293b] text-sm font-bold text-[#cbd5e1]">اعرض بوستات أكتر</button>}
+      {shown.length === 0 && <div className="text-center text-[#64748b] text-sm p-8">لسه مفيش بوستات. العب ماتش وهتلاقي الجمهور بيتكلم 😄</div>}
     </div>
   );
 };
