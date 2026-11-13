@@ -1,6 +1,6 @@
 import IntegrityGate from './components/IntegrityGate';
 import ErrorReporter from './components/ErrorReporter';
-import React, { useState, useEffect, useCallback, startTransition } from 'react';
+import React, { useState, useEffect, useCallback, useRef, startTransition } from 'react';
 import { Capacitor } from '@capacitor/core';
 import { App as CapApp } from '@capacitor/app';
 import ForcedUpdateGate from './components/ForcedUpdateGate';
@@ -44,6 +44,9 @@ import { AdminAccessDenied } from './components/admin/AdminAccessDenied';
 import { MatchErrorBoundary } from './components/MatchErrorBoundary';
 import { SocialTab } from './components/SocialTab';
 import { applyPerfMode, forceRepaint } from './utils/perfMode';
+import { NotificationPrompt } from './components/NotificationPrompt';
+import { notificationService } from './services/notificationService';
+import { App as CapApp } from '@capacitor/app';
 import { PressConferenceModal } from './components/PressConferenceModal';
 import { PrivacyPolicyPage } from './components/PrivacyPolicyPage';
 
@@ -67,7 +70,10 @@ function GameApp() {
     userClub,
     fixtures,
     showSeasonTransitionModal,
-    isStartingSeasonUi
+    isStartingSeasonUi,
+    teams,
+    canClaimDailyReward,
+    dailyRewardState
   } = useGame() as any;
   // While the season-end / club-choice screens are up, unmount the heavy app screens underneath (they re-render on every
   // state change and keep large DOM trees in memory: the main cause of hangs and white flicker on 4GB phones).
@@ -86,6 +92,49 @@ function GameApp() {
   }, [seasonFocus]);
   const [activeTab, setActiveTab] = useState<ActiveTab>('dashboard');
   const [pressFixture, setPressFixture] = useState<any>(null);
+
+  // ---- Daily push notifications (max 2/day, plain non-exact alarms; see notificationService) ----
+  const [showNotifPrompt, setShowNotifPrompt] = useState(false);
+  const notifCtxRef = useRef<any>(null);
+  notifCtxRef.current = { userClub, teams, fixtures, canClaimDailyReward, dailyRewardState };
+  const scheduleNotifs = useCallback(() => {
+    try {
+      const c = notifCtxRef.current;
+      if (!c?.userClub) return;
+      const nextFx = (c.fixtures || [])
+        .filter((f: any) => !f.isPlayed && (f.homeTeamId === c.userClub.id || f.awayTeamId === c.userClub.id))
+        .sort((a: any, b: any) => (a.round || 0) - (b.round || 0))[0];
+      const oppId = nextFx ? (nextFx.homeTeamId === c.userClub.id ? nextFx.awayTeamId : nextFx.homeTeamId) : null;
+      const opp = oppId ? (c.teams || []).find((t: any) => t.id === oppId) : null;
+      notificationService.scheduleDailyMotivationalNotifications({
+        userClub: c.userClub,
+        nextOpponentName: opp?.name,
+        rewardClaimedToday: !c.canClaimDailyReward,
+        streak: Number(c.dailyRewardState?.streak) || 0,
+      });
+    } catch { /* never break the game because of notifications */ }
+  }, []);
+  useEffect(() => {
+    const t = setTimeout(scheduleNotifs, 8000);
+    let handle: any = null;
+    try {
+      CapApp.addListener('appStateChange', (st: any) => { if (st && st.isActive === false) scheduleNotifs(); }).then((h: any) => { handle = h; }).catch(() => {});
+    } catch { /* web preview */ }
+    const onVis = () => { if (document.hidden) scheduleNotifs(); };
+    document.addEventListener('visibilitychange', onVis);
+    return () => { clearTimeout(t); document.removeEventListener('visibilitychange', onVis); try { handle?.remove?.(); } catch { /* */ } };
+  }, [scheduleNotifs]);
+  // one-time friendly permission prompt, only after the player has actually played a match and nothing else is on screen
+  useEffect(() => {
+    if (!userClub || liveMatch || showDaySummaryModal || pressFixture || seasonFocus || showDailyRewardModal) return;
+    if (notificationService.hasAskedPermission()) return;
+    if (!(fixtures || []).some((f: any) => f.isPlayed && (f.homeTeamId === userClub.id || f.awayTeamId === userClub.id))) return;
+    const t = setTimeout(async () => {
+      if ((await notificationService.getPermissionState()) === 'prompt') setShowNotifPrompt(true);
+      else notificationService.markAsked();
+    }, 6000);
+    return () => clearTimeout(t);
+  }, [userClub, fixtures, liveMatch, showDaySummaryModal, pressFixture, seasonFocus, showDailyRewardModal]);
   useEffect(() => {
     if (!userClub || liveMatch || showDaySummaryModal || pressFixture) return;
     const played = (fixtures || []).filter((f: any) => f.isPlayed && (f.homeTeamId === userClub.id || f.awayTeamId === userClub.id));
@@ -402,6 +451,7 @@ function GameApp() {
 
       {/* Persistent Mobile Bottom Navigation Bar */}
       {!seasonFocus && <BottomNav activeTab={activeTab} setActiveTab={handleTabChange} />}
+      {showNotifPrompt && <NotificationPrompt onDone={(ok) => { setShowNotifPrompt(false); if (ok) scheduleNotifs(); }} />}
       {pressFixture && <PressConferenceModal fixture={pressFixture} onClose={() => setPressFixture(null)} />}
 
       {/* Detail Player Inspector Modal */}

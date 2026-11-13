@@ -46,6 +46,7 @@ import {
 import { ModalPortal } from './common/ModalPortal';
 import { getDebugLogText } from '../utils/errorLog';
 import { getPerfSetting, setPerfSetting, isLiteMode } from '../utils/perfMode';
+import { notificationService } from '../services/notificationService';
 
 interface SettingsBackupModalProps {
   isOpen: boolean;
@@ -102,6 +103,7 @@ export const SettingsBackupModal: React.FC<SettingsBackupModalProps> = ({
   const [pending, setPending] = useState<ImportSaveResult | null>(null);
   const [isRestoring, setIsRestoring] = useState(false);
   const [undoInfo, setUndoInfo] = useState<SafetySnapshotInfo | null>(null);
+  const [notifOn, setNotifOn] = useState<boolean>(() => notificationService.getSettings().enabled);
   const [feedback, setFeedback] = useState<{
     type: 'success' | 'error';
     title: string;
@@ -705,6 +707,34 @@ export const SettingsBackupModal: React.FC<SettingsBackupModalProps> = ({
             <p className="text-[11px] text-slate-400 leading-relaxed">
               لو حصل تهنيج أو شاشة بيضاء، افتح اللعبة وانسخ سجل الأخطاء وأرسله للمطور.
             </p>
+            <button
+              type="button"
+              id="btn_toggle_notifications"
+              onClick={async () => {
+                const on = notificationService.getSettings().enabled;
+                if (on) {
+                  notificationService.saveSettings({ enabled: false });
+                  await notificationService.cancelAllScheduledNotifications();
+                  setNotifOn(false);
+                  setFeedback({ type: 'success', title: 'تم إيقاف الإشعارات', message: 'مش هتوصلك إشعارات من اللعبة.' });
+                  return;
+                }
+                notificationService.saveSettings({ enabled: true });
+                setNotifOn(true);
+                const st = await notificationService.getPermissionState();
+                if (st === 'granted') {
+                  setFeedback({ type: 'success', title: 'تم تفعيل الإشعارات', message: 'هتوصلك أخبار حماسية قبل ماتشاتك (واحد أو اتنين في اليوم).' });
+                } else if (st === 'prompt') {
+                  const ok = await notificationService.requestPermissions();
+                  setFeedback({ type: ok ? 'success' : 'error', title: ok ? 'تم تفعيل الإشعارات' : 'الإذن مش مفعّل', message: ok ? 'هتوصلك أخبار حماسية قبل ماتشاتك.' : 'لازم تسمح بالإشعارات علشان توصلك.' });
+                } else if (st === 'denied') {
+                  setFeedback({ type: 'error', title: 'الإشعارات مقفولة من الموبايل', message: 'افتح إعدادات الموبايل ثم التطبيقات ثم أنت المدرب ثم الإشعارات، وفعّلها.' });
+                }
+              }}
+              className="w-full py-2 px-3 bg-slate-800 hover:bg-slate-700 border border-slate-600 text-slate-200 text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer active:scale-[0.98] mb-2"
+            >
+              <span>🔔 إشعارات الماتشات والأخبار: {notifOn ? 'مفعّلة' : 'متوقفة'}</span>
+            </button>
             <button
               type="button"
               id="btn_toggle_perf_mode"
