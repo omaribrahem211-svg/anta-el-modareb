@@ -521,6 +521,15 @@ function capInbox(list: InboxMessage[]): InboxMessage[] {
   return out;
 }
 
+
+// Lets the WebView paint a frame (spinner keeps moving) between heavy synchronous chunks of work.
+const yieldToPaint = (): Promise<void> => new Promise<void>(resolve => {
+  let done = false;
+  const fin = () => { if (!done) { done = true; resolve(); } };
+  try { requestAnimationFrame(() => setTimeout(fin, 0)); } catch { /* */ }
+  setTimeout(fin, 60);
+});
+
 export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const { user } = useAuth();
 
@@ -3948,6 +3957,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     if (DIAGNOSTIC_CONFIG.ENABLE_CPU_SIMULATION) {
       console.log('[DIAG] CPU_SIMULATION_STARTED');
+      await yieldToPaint();
       const otherRoundFixtures = updatedFixtures.filter(f => {
         if (!f || f.id === fixture.id || f.isPlayed) return false;
         const isUserFix = Boolean(userClub && (f.homeTeamId === userClub.id || f.awayTeamId === userClub.id));
@@ -4009,6 +4019,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     // Self-heal: CPU fixtures of this/earlier rounds that failed to simulate must not freeze the season
     try {
+      await yieldToPaint();
       const heal = healStaleLeagueFixtures({
         fixtures: updatedFixtures,
         standings: updatedStandings,
@@ -4093,6 +4104,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     let updatedAllTeams = teams;
     if (DIAGNOSTIC_CONFIG.ENABLE_PLAYER_PROCESSING) {
       console.log('[DIAG] PLAYER_PROCESSING_STARTED');
+      await yieldToPaint();
       updatedAllTeams = teams.map(t => {
         const matchAsHome = allRoundMatches.find(m => m.homeTeamId === t.id);
         const matchAsAway = allRoundMatches.find(m => m.awayTeamId === t.id);
@@ -4490,6 +4502,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         }
       }
 
+      await yieldToPaint();
       // Rival AI clubs actively buy players, strengthen weakest positions, and train squads for multi-team competition
       try {
         const aiCompRes = executeCompetitiveAiTransfersAndGrowth({
@@ -4542,6 +4555,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         }),
       }));
 
+      await yieldToPaint();
       try {
         const endSeasonFreeAgentRes = processFreeAgentsAndAiTransfers(
           updatedAllTeams,
@@ -4564,6 +4578,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         console.warn('[MatchEndingFlow] End-of-season contract expiry transfer notice:', faErr);
       }
 
+      await yieldToPaint();
       const summaryClub =
         updatedAllTeams.find(t => t.isUserClub || (userClub && t.id === userClub.id)) ||
         userClub ||
@@ -4639,6 +4654,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     // Robust Single Source of Truth: Reconstruct exact league standings from all played fixtures
     try {
+      await yieldToPaint();
       updatedStandings = recalculateStandingsFromFixtures(updatedStandings, teams, updatedFixtures);
     } catch (stErr) {
       console.warn('[MatchEndingFlow] Standings recalculate error:', stErr);
