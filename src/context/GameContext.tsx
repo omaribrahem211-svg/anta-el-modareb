@@ -162,6 +162,7 @@ import { evaluateMatchImpactOnConfidence, updateDailyBoardConfidence, getClubLea
 import { EGYPT_TIER_4_LEAGUE, getLeagueById, GLOBAL_LEAGUES, findClubInWorld, getClubDisplayName, updateLeagueRosterInWorld, getCustomLeagues } from '../data/leaguesData';
 import { calculateMatchRevenue, MatchRevenueBreakdown, getBenchmarkTicketPrice } from '../utils/matchRevenue';
 import { AdManager } from '../services/adManager';
+import { getWeekKey } from '../services/managerRankingService';
 import { ADMOB_CONFIG } from '../config/admobConfig';
 import { notificationService } from '../services/notificationService';
 import { DIAGNOSTIC_CONFIG } from '../config/diagnosticConfig';
@@ -527,6 +528,8 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   // Concurrency guard to prevent multiple simultaneous simulations and UI freezing
   const [isSimulationRunning, setIsSimulationRunning] = useState(false);
   const isSimulationRunningRef = useRef(false);
+  // true once the player pressed "skip to end" in the current live match: such a match gives no ranking points
+  const liveMatchSkippedRef = useRef(false);
   const liveMatchTimerRef = useRef<NodeJS.Timeout | null>(null);
   const isFinishingMatchRef = useRef(false);
   const isMatchFinishedRef = useRef(false);
@@ -3175,6 +3178,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   // Match management
   const startLiveMatch = (fixtureId?: string) => {
     if (seasonFinished) return;
+    liveMatchSkippedRef.current = false;
 
     // Reset blocker immediately
     setMatchBlocker(null);
@@ -3533,6 +3537,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   const skipLiveMatchToEnd = () => {
     if (isSimulationRunningRef.current) return;
+    liveMatchSkippedRef.current = true;
     if (liveMatchTimerRef.current) {
       clearInterval(liveMatchTimerRef.current);
       liveMatchTimerRef.current = null;
@@ -4332,18 +4337,26 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const currentWins = isSameDay ? (manager.dailyWins || 0) : 0;
     const currentDraws = isSameDay ? (manager.dailyDraws || 0) : 0;
     const currentLosses = isSameDay ? (manager.dailyLosses || 0) : 0;
-    const pointsEarned = isUserWin ? 3 : isUserDraw ? 1 : 0;
+    // Ranking points (daily + weekly) only for matches the coach actually played live: a skipped match gives nothing
+    const countsForRanking = !liveMatchSkippedRef.current;
+    const pointsEarned = countsForRanking ? (isUserWin ? 3 : isUserDraw ? 1 : 0) : 0;
+    const weekKeyNow = getWeekKey();
+    const sameWeek = manager.weeklyKey === weekKeyNow;
 
     const dynamicRating = calculateDynamicManagerRating(initialUpdatedManager);
     let updatedManager: ManagerProfile = {
       ...initialUpdatedManager,
       managerRating: dynamicRating,
       dailyPoints: currentDailyPoints + pointsEarned,
-      dailyMatchesPlayed: currentMatches + 1,
-      dailyWins: currentWins + (isUserWin ? 1 : 0),
-      dailyDraws: currentDraws + (isUserDraw ? 1 : 0),
-      dailyLosses: currentLosses + (!isUserWin && !isUserDraw ? 1 : 0),
+      dailyMatchesPlayed: currentMatches + (countsForRanking ? 1 : 0),
+      dailyWins: currentWins + (countsForRanking && isUserWin ? 1 : 0),
+      dailyDraws: currentDraws + (countsForRanking && isUserDraw ? 1 : 0),
+      dailyLosses: currentLosses + (countsForRanking && !isUserWin && !isUserDraw ? 1 : 0),
       lastDailyResetDate: todayStr,
+      weeklyKey: weekKeyNow,
+      weeklyPoints: (sameWeek ? (manager.weeklyPoints || 0) : 0) + pointsEarned,
+      weeklyMatches: (sameWeek ? (manager.weeklyMatches || 0) : 0) + (countsForRanking ? 1 : 0),
+      weeklyWins: (sameWeek ? (manager.weeklyWins || 0) : 0) + (countsForRanking && isUserWin ? 1 : 0),
     };
 
     // 6. Dynamic Board & Fan Confidence Evaluation based on Club Target Position
@@ -5158,7 +5171,8 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         // Daily points calculation
         const todayStr = new Date().toISOString().split('T')[0];
         const isSameDailyDate = manager.lastDailyResetDate === todayStr;
-        const ptsGainedToday = isUserWin ? 3 : isUserDraw ? 1 : 0;
+        // auto-simulated (not played live) matches give no ranking points
+        const ptsGainedToday = 0;
         const currentDayPts = isSameDailyDate ? (manager.dailyPoints || 0) : 0;
         const currentDayMatches = isSameDailyDate ? (manager.dailyMatchesPlayed || 0) : 0;
         const currentDayWins = isSameDailyDate ? (manager.dailyWins || 0) : 0;
@@ -5166,10 +5180,10 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         const currentDayLosses = isSameDailyDate ? (manager.dailyLosses || 0) : 0;
 
         const updatedDailyPoints = currentDayPts + ptsGainedToday;
-        const updatedDailyMatches = currentDayMatches + 1;
-        const updatedDailyWins = currentDayWins + (isUserWin ? 1 : 0);
-        const updatedDailyDraws = currentDayDraws + (isUserDraw ? 1 : 0);
-        const updatedDailyLosses = currentDayLosses + (!isUserWin && !isUserDraw ? 1 : 0);
+        const updatedDailyMatches = currentDayMatches;
+        const updatedDailyWins = currentDayWins;
+        const updatedDailyDraws = currentDayDraws;
+        const updatedDailyLosses = currentDayLosses;
 
         const oppTier = activeLeague.tier || 1;
         const oppRep = activeLeague.reputation || 50;

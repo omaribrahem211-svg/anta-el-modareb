@@ -19,7 +19,7 @@ import {
   CheckCircle2,
   Play,
 } from 'lucide-react';
-import { fetchDailyManagersLeaderboard, DailyManagerLeaderboardEntry } from '../services/managerRankingService';
+import { fetchDailyManagersLeaderboard, fetchWeeklyManagersLeaderboard, getWeekKey, DailyManagerLeaderboardEntry } from '../services/managerRankingService';
 import { getClubDisplayName } from '../data/leaguesData';
 import { AfricanChampionsLeagueView } from './continental/AfricanChampionsLeagueView';
 import { getDomesticCupDefinitionForCountry } from '../data/competitionsData';
@@ -48,11 +48,18 @@ export const LeagueTab: React.FC = () => {
   >('standings');
   const [dailyLeaders, setDailyLeaders] = useState<DailyManagerLeaderboardEntry[]>([]);
   const [loadingDaily, setLoadingDaily] = useState(false);
+  const [rankPeriod, setRankPeriod] = useState<'weekly' | 'daily'>('weekly');
+  const isWeekly = rankPeriod === 'weekly';
+  const wkNow = getWeekKey();
+  const myPeriodPoints = isWeekly ? (manager.weeklyKey === wkNow ? manager.weeklyPoints || 0 : 0) : manager.dailyPoints || 0;
+  const myPeriodMatches = isWeekly ? (manager.weeklyKey === wkNow ? manager.weeklyMatches || 0 : 0) : manager.dailyMatchesPlayed || 0;
+  const myPeriodWins = isWeekly ? (manager.weeklyKey === wkNow ? manager.weeklyWins || 0 : 0) : manager.dailyWins || 0;
 
   const loadDailyRanking = async () => {
     setLoadingDaily(true);
     try {
-      const entries = await fetchDailyManagersLeaderboard(
+      const fetcher = isWeekly ? fetchWeeklyManagersLeaderboard : fetchDailyManagersLeaderboard;
+      const entries = await fetcher(
         user?.uid,
         manager,
         userClub?.name,
@@ -70,7 +77,7 @@ export const LeagueTab: React.FC = () => {
     if (activeSubTab === 'daily_managers') {
       loadDailyRanking();
     }
-  }, [activeSubTab, manager.dailyPoints, user?.uid]);
+  }, [activeSubTab, manager.dailyPoints, manager.weeklyPoints, user?.uid, rankPeriod]);
 
   const getPlayerClubName = (player: any) => {
     if (!player) return userClub?.name || 'النادي';
@@ -399,11 +406,15 @@ export const LeagueTab: React.FC = () => {
             <div>
               <h3 className="font-black text-base text-amber-300 flex items-center gap-2">
                 <Crown className="w-5 h-5 text-amber-400" />
-                <span>ترتيب مدربي اللعبة اليومي (Live Daily Points)</span>
+                <span>{isWeekly ? 'ترتيب المدربين الأسبوعي 🏆' : 'ترتيب مدربي اللعبة اليومي'}</span>
               </h3>
               <p className="text-xs text-slate-400 mt-1">
-                يُحسب الترتيب يومياً بناءً على عدد النقاط المكتسبة من لعب المباريات اليوم (3 نقاط للفوز، 1 للتعادل). يتجدد كل 24 ساعة.
+                {isWeekly ? 'النقاط من المباريات اللي بتلعبها بنفسك بس (3 للفوز، 1 للتعادل). المباراة اللي بتتخطاها أو تتحسب تلقائياً مش بتدّي نقاط. بيتجدد كل سبت.' : 'النقاط من المباريات اللي بتلعبها بنفسك النهارده (3 للفوز، 1 للتعادل). المباراة اللي بتتخطاها مش بتدّي نقاط. بيتجدد كل 24 ساعة.'}
               </p>
+              <div className="flex gap-2 mt-2.5">
+                <button type="button" onClick={() => setRankPeriod('weekly')} className={`px-3.5 py-1.5 rounded-full text-xs font-bold border ${isWeekly ? 'bg-amber-500 text-slate-950 border-amber-400' : 'bg-slate-900 text-slate-300 border-slate-700'}`}>الأسبوع</button>
+                <button type="button" onClick={() => setRankPeriod('daily')} className={`px-3.5 py-1.5 rounded-full text-xs font-bold border ${!isWeekly ? 'bg-amber-500 text-slate-950 border-amber-400' : 'bg-slate-900 text-slate-300 border-slate-700'}`}>اليوم</button>
+              </div>
             </div>
 
             <button
@@ -422,9 +433,9 @@ export const LeagueTab: React.FC = () => {
                 <Zap className="w-5 h-5" />
               </div>
               <div>
-                <div className="text-[11px] text-slate-400">نقاطك اليوم</div>
+                <div className="text-[11px] text-slate-400">{isWeekly ? 'نقاطك هذا الأسبوع' : 'نقاطك اليوم'}</div>
                 <div className="text-xl font-black text-amber-400 font-mono">
-                  {manager.dailyPoints || 0} <span className="text-xs font-normal">نقطة</span>
+                  {myPeriodPoints} <span className="text-xs font-normal">نقطة</span>
                 </div>
               </div>
             </div>
@@ -434,8 +445,8 @@ export const LeagueTab: React.FC = () => {
                 <Medal className="w-5 h-5" />
               </div>
               <div>
-                <div className="text-[11px] text-slate-400">مباريات لعبتها اليوم</div>
-                <div className="text-xl font-black text-blue-400 font-mono">{manager.dailyMatchesPlayed || 0}</div>
+                <div className="text-[11px] text-slate-400">{isWeekly ? 'مباريات لعبتها هذا الأسبوع' : 'مباريات لعبتها اليوم'}</div>
+                <div className="text-xl font-black text-blue-400 font-mono">{myPeriodMatches}</div>
               </div>
             </div>
 
@@ -444,8 +455,8 @@ export const LeagueTab: React.FC = () => {
                 ⚽
               </div>
               <div>
-                <div className="text-[11px] text-slate-400">انتصارات اليوم</div>
-                <div className="text-xl font-black text-emerald-400 font-mono">{manager.dailyWins || 0}</div>
+                <div className="text-[11px] text-slate-400">{isWeekly ? 'انتصارات الأسبوع' : 'انتصارات اليوم'}</div>
+                <div className="text-xl font-black text-emerald-400 font-mono">{myPeriodWins}</div>
               </div>
             </div>
 
@@ -468,7 +479,7 @@ export const LeagueTab: React.FC = () => {
           ) : dailyLeaders.length === 0 ? (
             <div className="text-center py-12 bg-slate-950/50 rounded-2xl border border-slate-800">
               <Crown className="w-10 h-10 mx-auto text-slate-600 mb-2" />
-              <h4 className="font-bold text-sm text-slate-300">كن أول مدرب يحصد نقاط اليوم!</h4>
+              <h4 className="font-bold text-sm text-slate-300">{isWeekly ? 'كن أول مدرب يحصد نقاط الأسبوع!' : 'كن أول مدرب يحصد نقاط اليوم!'}</h4>
               <p className="text-xs text-slate-500 mt-1">العب مباريات الدوري واحصد نقاط الفوز والتعادل لتتصدر القائمة.</p>
             </div>
           ) : (
@@ -529,7 +540,7 @@ export const LeagueTab: React.FC = () => {
                       <div className="hidden sm:flex flex-col items-end text-xs text-slate-400 font-mono">
                         <span>{lead.dailyMatchesPlayed} مباريات</span>
                         <span className="text-[11px] text-emerald-400">
-                          {lead.dailyWins}ف - {lead.dailyDraws}ت - {lead.dailyLosses}خ
+                          {isWeekly ? `${lead.dailyWins} فوز` : `${lead.dailyWins}ف - ${lead.dailyDraws}ت - ${lead.dailyLosses}خ`}
                         </span>
                       </div>
 

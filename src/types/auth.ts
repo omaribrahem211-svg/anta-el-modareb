@@ -64,6 +64,11 @@ export interface UserProfile {
   dailyDraws?: number;
   dailyLosses?: number;
   lastDailyPointsDate?: string; // YYYY-MM-DD
+  weeklyPoints?: number;
+  weeklyMatches?: number;
+  weeklyWins?: number;
+  weeklyKey?: number;
+  weeklyScore?: number; // weeklyKey * 100000 + points: single-field sortable (no composite index needed)
 
   // Cloud-synced Career & Manager data
   managerProfile?: ManagerProfile;

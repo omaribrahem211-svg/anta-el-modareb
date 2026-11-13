@@ -43,6 +43,19 @@ export function getTodayDateString(): string {
   return `${year}-${month}-${day}`;
 }
 
+/** Week number counted from Saturday (Egyptian week start), in local time. Increases by 1 every Saturday. */
+export function getWeekKey(date: Date = new Date()): number {
+  const localMs = date.getTime() - date.getTimezoneOffset() * 60000;
+  const days = Math.floor(localMs / 86400000); // day 0 = Thursday 1970-01-01
+  return Math.floor((days + 5) / 7);
+}
+
+/** Single sortable number: newer weeks always sort above older ones, then by points. */
+export function weeklyScoreOf(weekKey: number, points: number): number {
+  return weekKey * 100000 + Math.max(0, Math.min(99999, Math.round(points)));
+}
+
+const WEEKLY_CACHE_KEY = 'anta_elmodareb_weekly_leaderboard_cache';
 const LEADERBOARD_CACHE_KEY = 'anta_elmodareb_daily_leaderboard_cache';
 const LEADERBOARD_CACHE_TTL = 10 * 60 * 1000; // 10 minutes cache to stay well within free tier
 
@@ -271,5 +284,92 @@ export async function fetchDailyManagersLeaderboard(
     return (b.dailyMatchesPlayed || 0) - (a.dailyMatchesPlayed || 0);
   });
 
+  return entries;
+}
+
+
+/**
+ * Weekly leaderboard (week = Saturday to Friday). Points come only from matches the coach played live.
+ * Uses a single-field query on `weeklyScore` (no composite index required) and filters the current week client-side.
+ */
+export async function fetchWeeklyManagersLeaderboard(
+  currentUserId?: string,
+  localManagerFallback?: ManagerProfile,
+  localClubName?: string,
+  localLeagueName?: string,
+  forceRefresh: boolean = false
+): Promise<DailyManagerLeaderboardEntry[]> {
+  const wk = getWeekKey();
+  let entries: DailyManagerLeaderboardEntry[] = [];
+
+  let usedCache = false;
+  if (!forceRefresh || isRecentQuotaExceeded()) {
+    try {
+      const c = JSON.parse(localStorage.getItem(WEEKLY_CACHE_KEY) || 'null');
+      if (c && c.week === wk && Array.isArray(c.entries) && (isRecentQuotaExceeded() || Date.now() - c.timestamp < LEADERBOARD_CACHE_TTL)) {
+        entries = c.entries;
+        usedCache = true;
+      }
+    } catch { /* */ }
+  }
+
+  if (!usedCache && !isRecentQuotaExceeded()) {
+    try {
+      const snapshot = await getDocs(query(collection(db, 'users'), orderBy('weeklyScore', 'desc'), limit(40)));
+      snapshot.forEach(docSnap => {
+        const u = docSnap.data() as UserProfile;
+        if (u.weeklyKey !== wk) return; // an older week
+        entries.push({
+          uid: u.uid,
+          managerName: u.managerProfile?.name || u.displayName || 'مدرب محترف',
+          clubName: u.currentClub?.name || 'نادٍ رياضي',
+          leagueName: u.currentClub?.leagueName || 'دوري المحترفين',
+          divisionTier: u.currentClub?.division || 4,
+          dailyPoints: u.weeklyPoints || 0,
+          dailyMatchesPlayed: u.weeklyMatches || 0,
+          dailyWins: u.weeklyWins || 0,
+          dailyDraws: 0,
+          dailyLosses: 0,
+          lastUpdated: u.lastSeenAt || Date.now(),
+          level: u.managerProfile?.level || 1,
+          reputation: u.managerProfile?.reputation || 50,
+          isCurrentUser: currentUserId ? u.uid === currentUserId : false,
+        });
+      });
+      entries = entries.slice(0, 25);
+      if (entries.length > 0) {
+        try { localStorage.setItem(WEEKLY_CACHE_KEY, JSON.stringify({ week: wk, timestamp: Date.now(), entries })); } catch { /* */ }
+      }
+    } catch (err) {
+      if (isQuotaExceededError(err)) markQuotaExceeded();
+      console.warn('Weekly leaderboard unavailable (offline / limit):', err);
+    }
+  }
+
+  // always show the player's own current numbers (works offline and before the first cloud sync)
+  if (localManagerFallback) {
+    const own = localManagerFallback.weeklyKey === wk ? (localManagerFallback.weeklyPoints || 0) : 0;
+    const ownMatches = localManagerFallback.weeklyKey === wk ? (localManagerFallback.weeklyMatches || 0) : 0;
+    const ownWins = localManagerFallback.weeklyKey === wk ? (localManagerFallback.weeklyWins || 0) : 0;
+    const i = entries.findIndex(e => e.isCurrentUser || (currentUserId && e.uid === currentUserId));
+    if (i >= 0) {
+      entries[i] = { ...entries[i], dailyPoints: Math.max(entries[i].dailyPoints, own), dailyMatchesPlayed: Math.max(entries[i].dailyMatchesPlayed, ownMatches), dailyWins: Math.max(entries[i].dailyWins, ownWins), isCurrentUser: true };
+    } else if (own > 0 || ownMatches > 0) {
+      entries.push({
+        uid: currentUserId || 'current_user',
+        managerName: localManagerFallback.name || 'أنت (المدرب)',
+        clubName: localClubName || 'فريقك',
+        leagueName: localLeagueName || 'الدوري الحالي',
+        divisionTier: 4,
+        dailyPoints: own, dailyMatchesPlayed: ownMatches, dailyWins: ownWins, dailyDraws: 0, dailyLosses: 0,
+        lastUpdated: Date.now(),
+        level: localManagerFallback.level || 1,
+        reputation: localManagerFallback.reputation || 50,
+        isCurrentUser: true,
+      });
+    }
+  }
+
+  entries.sort((a, b) => b.dailyPoints - a.dailyPoints || b.dailyWins - a.dailyWins || a.dailyMatchesPlayed - b.dailyMatchesPlayed);
   return entries;
 }

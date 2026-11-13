@@ -863,6 +863,11 @@ export interface ManagerProfile {
   dailyDraws?: number;
   dailyLosses?: number;
   lastDailyResetDate?: string; // YYYY-MM-DD
+  // Weekly ranking (only matches the player actually plays live count; skipped / auto-simulated matches do not)
+  weeklyPoints?: number;
+  weeklyMatches?: number;
+  weeklyWins?: number;
+  weeklyKey?: number;
   monthlyRankingPoints?: number;
   previousMonthRank?: number;
   currentRank?: number;

@@ -13,6 +13,7 @@ import { doc, setDoc, getDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { UserProfile } from '../types/auth';
 import { Club, ManagerProfile, SeasonHistoryEntry, TransferHistoryEntry } from '../types/game';
+import { weeklyScoreOf } from './managerRankingService';
 import { isQuotaExceededError, markQuotaExceeded, isRecentQuotaExceeded } from '../utils/firestoreErrorHelper';
 
 export interface CloudSaveSyncState {
@@ -201,7 +202,7 @@ export function computeStateHashes(input: SmartSyncInput): {
   const { manager, userClub, standings, season, activeLeague, currentRound, transferHistory, clubEconomy } = input;
   const userStanding = userClub ? (standings.find(s => s.teamId === userClub.id) || null) : null;
 
-  const managerHash = `${manager.level}_${manager.xp}_${manager.rankingPoints || 0}_${manager.dailyPoints || 0}_${(manager.trophies || []).length}_${(manager.history || []).length}_${manager.personalWallet || 0}`;
+  const managerHash = `${manager.level}_${manager.xp}_${manager.rankingPoints || 0}_${manager.dailyPoints || 0}_${manager.weeklyPoints || 0}_${(manager.trophies || []).length}_${(manager.history || []).length}_${manager.personalWallet || 0}`;
   const clubHash = userClub
     ? `${userClub.id}_${userClub.budget}_${userClub.reputation}_${userClub.facilities?.stadiumLevel || 1}_${userClub.players?.length || 0}_${clubEconomy?.currentSeasonNetProfit || 0}`
     : 'no_club';
@@ -278,6 +279,13 @@ export function buildMinimalCloudSavePayload(input: SmartSyncInput, saveVersion:
     dailyDraws: manager.dailyDraws || 0,
     dailyLosses: manager.dailyLosses || 0,
     lastDailyPointsDate: manager.lastDailyResetDate || new Date().toISOString().split('T')[0],
+    ...(manager.weeklyKey ? {
+      weeklyKey: manager.weeklyKey,
+      weeklyPoints: manager.weeklyPoints || 0,
+      weeklyMatches: manager.weeklyMatches || 0,
+      weeklyWins: manager.weeklyWins || 0,
+      weeklyScore: weeklyScoreOf(manager.weeklyKey, manager.weeklyPoints || 0),
+    } : {}),
     isOnline: true,
     lastSeenAt: Date.now(),
     managerProfile: {
