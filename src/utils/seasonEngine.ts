@@ -19,7 +19,7 @@ import {
   Position,
   PositionCategory,
 } from '../types/game';
-import { applyPyramidMovements, hasLowerDivision } from './pyramidEngine';
+import { applyPyramidMovements, hasLowerDivision, normalizeLeagueSizes } from './pyramidEngine';
 import { evolveWorldLeaguesAsync } from './worldEvolution';
 import { evolveAIClubs, evolveWorldLeagues } from './worldEvolution';
 import { runWorldBatch, getLeagueByCountryAndTier, getLeagueById, GLOBAL_LEAGUES, updateLeagueRosterInWorld, getCustomLeagues, getAllClubsForCountry, findClubInWorld, createClub, evenUpWorldLeagues, beginWorldBatch, endWorldBatch } from '../data/leaguesData';
@@ -2163,6 +2163,14 @@ export async function processNewSeasonAdvancement(
       } catch (e) {
         console.warn('[Season] could not re-resolve the offered club league', e);
       }
+    }
+    // 2a-2. Heal worlds whose league sizes drifted (too many clubs, no relegation) so the next season is correct.
+    try {
+      const fixedLeagues = normalizeLeagueSizes(userClub?.id);
+      if (fixedLeagues.length) console.warn('[Pyramid] repaired league sizes', fixedLeagues);
+      nextActiveLeague = getLeagueById(nextActiveLeague.id);
+    } catch (e) {
+      console.warn('[Pyramid] size repair failed', e);
     }
     await yieldToUI();
     // 2b. Living world: every other league ages, develops, retires + clubs/managers improve.

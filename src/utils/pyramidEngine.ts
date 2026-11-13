@@ -131,3 +131,64 @@ export function applyPyramidMovements(
   }
   return movements;
 }
+
+/**
+ * Self-healing pass for saved worlds whose league sizes drifted (e.g. a Premier League with 24 clubs, 46 rounds, and nobody
+ * ever relegated). Every league with a bundled definition is brought back to its original club count:
+ *  - surplus clubs (weakest first, never the user's club) are pushed one division down, cascading to the bottom tier,
+ *    where the extra clubs are simply dropped;
+ *  - missing clubs are filled by promoting the strongest clubs of the division below.
+ * No-op on healthy worlds. Returns the ids of the leagues that were repaired.
+ */
+export function normalizeLeagueSizes(userClubId?: string): string[] {
+  const repaired: string[] = [];
+  const pyramids = getCountryPyramids();
+  for (const country of Object.keys(pyramids)) {
+    const list = pyramids[country];
+    const rosters = new Map<string, Club[]>();
+    list.forEach(l => rosters.set(l.id, [...(l.teams || [])]));
+    const target = (l: LeagueDefinition): number => {
+      const bundled = GLOBAL_LEAGUES[l.id]?.teams?.length || 0;
+      if (!bundled) return 0;
+      return bundled % 2 === 0 ? bundled : bundled + 1;
+    };
+    const touched = new Set<string>();
+    const weakest = (arr: Club[]) => [...arr].filter(c => c.id !== userClubId).sort((a, b) => clubStrength(a) - clubStrength(b));
+
+    // 1) Trim surplus top-down so overflow cascades into the next division
+    for (let i = 0; i < list.length; i++) {
+      const l = list[i];
+      const want = target(l);
+      const cur = rosters.get(l.id)!;
+      if (!want || cur.length <= want) continue;
+      const surplus = weakest(cur).slice(0, cur.length - want);
+      const ids = new Set(surplus.map(c => c.id));
+      rosters.set(l.id, cur.filter(c => !ids.has(c.id)));
+      touched.add(l.id);
+      const lower = list[i + 1];
+      if (lower && lower.tier === l.tier + 1) {
+        const tagged = surplus.map(c => ({ ...c, division: lower.tier, leagueId: lower.id, country: lower.country, previousDivision: l.tier, isNewlyPromoted: false }));
+        rosters.set(lower.id, [...rosters.get(lower.id)!, ...tagged]);
+        touched.add(lower.id);
+      }
+    }
+    // 2) Fill shortages bottom-up from the division below
+    for (let i = list.length - 2; i >= 0; i--) {
+      const l = list[i];
+      const lower = list[i + 1];
+      const want = target(l);
+      const cur = rosters.get(l.id)!;
+      if (!want || cur.length >= want || !lower || lower.tier !== l.tier + 1) continue;
+      const low = rosters.get(lower.id)!;
+      const need = Math.min(want - cur.length, Math.max(0, low.length - Math.floor(target(lower) * 0.75)));
+      if (need <= 0) continue;
+      const best = [...low].filter(c => c.id !== userClubId).sort((a, b) => clubStrength(b) - clubStrength(a)).slice(0, need);
+      const ids = new Set(best.map(c => c.id));
+      rosters.set(lower.id, low.filter(c => !ids.has(c.id)));
+      rosters.set(l.id, [...cur, ...best.map(c => ({ ...c, division: l.tier, leagueId: l.id, country: l.country, previousDivision: lower.tier, isNewlyPromoted: true }))]);
+      touched.add(l.id); touched.add(lower.id);
+    }
+    touched.forEach(id => { updateLeagueRosterInWorld(id, rosters.get(id)!); repaired.push(id); });
+  }
+  return repaired;
+}
