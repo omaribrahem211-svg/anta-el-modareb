@@ -358,11 +358,40 @@ export function getCustomLeagues(): Record<string, LeagueDefinition> {
   return memoryCustomLeagues;
 }
 
+// Persisting the whole world (prune + JSON + localStorage + IndexedDB) costs ~0.2s on a desktop and seconds on a 4GB phone.
+// Season end calls saveCustomLeagues several times in a row, so the memory copy is updated immediately but the expensive
+// write is coalesced into ONE deferred write (and flushed right away when the app goes to the background).
+let persistTimer: ReturnType<typeof setTimeout> | null = null;
+let persistPending = false;
+
+export function flushCustomLeagues(): void {
+  if (persistTimer) { clearTimeout(persistTimer); persistTimer = null; }
+  if (!persistPending) return;
+  persistPending = false;
+  persistCustomLeaguesNow(memoryCustomLeagues);
+}
+
+if (typeof window !== 'undefined' && typeof document !== 'undefined') {
+  try {
+    document.addEventListener('visibilitychange', () => { if (document.hidden) flushCustomLeagues(); });
+    window.addEventListener('pagehide', () => flushCustomLeagues());
+  } catch { /* */ }
+}
+
 export function saveCustomLeagues(leagues: Record<string, LeagueDefinition>): void {
   if (typeof window === 'undefined') return;
 
   // Always keep in-memory representation updated
   memoryCustomLeagues = { ...memoryCustomLeagues, ...leagues };
+
+  persistPending = true;
+  if (!persistTimer) {
+    persistTimer = setTimeout(() => { persistTimer = null; flushCustomLeagues(); }, 1500);
+  }
+}
+
+function persistCustomLeaguesNow(leagues: Record<string, LeagueDefinition>): void {
+  if (typeof window === 'undefined') return;
 
   try {
     // Only persist modified or custom leagues to avoid quota overflow (5MB limit)
