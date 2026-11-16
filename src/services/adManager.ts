@@ -154,11 +154,7 @@ class AdManagerService {
 
         if (ADMOB_CONFIG.ENABLE_BANNER && this.isNative) {
           await this.attachBannerListeners();
-          setTimeout(() => {
-            this.ensureBannerActive().catch((err) => {
-              console.warn('[ADMOB] Initial banner notice:', err);
-            });
-          }, 150);
+          // The banner itself is created by BannerAdContainer once the game shell is visible (never over splash/login screens).
         }
 
         if (this.isNative) {

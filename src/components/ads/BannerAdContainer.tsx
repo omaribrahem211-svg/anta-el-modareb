@@ -31,14 +31,15 @@ export const BannerAdContainer: React.FC<BannerAdContainerProps> = ({ isMatchAct
       return;
     }
 
-    // Ensure the native AdMob banner is requested and kept active
-    AdManager.ensureBannerActive();
+    // The banner is NOT created here any more: it is shown only once the real game shell (bottom nav) is on screen,
+    // so it can never sit on top of the splash, login, club-selection or loading screens (Google policy: ads obscuring content).
   }, [isPremium]);
 
   // Policy: the native banner floats above the WebView, so it must never cover app content.
   // 1) Sit exactly on top of the real bottom-nav (measured, includes gesture-bar safe area).
   // 2) Hide it while any full-screen overlay/modal or live match is open.
   const [overlayOpen, setOverlayOpen] = useState(false);
+  const [navPresent, setNavPresent] = useState(false);
 
   const matchActiveRef = React.useRef<boolean>(!!isMatchActive);
   matchActiveRef.current = !!isMatchActive;
@@ -59,6 +60,9 @@ export const BannerAdContainer: React.FC<BannerAdContainerProps> = ({ isMatchAct
         return z >= 40 && r.width > 0 && r.height > 0 && cs.display !== 'none' && cs.visibility !== 'hidden' && cs.pointerEvents !== 'none';
       });
       setOverlayOpen(prev => (prev === open ? prev : open));
+      const navEl = document.querySelector('nav.fixed.bottom-0') as HTMLElement | null;
+      const navOk = !!navEl && navEl.getBoundingClientRect().height > 0;
+      setNavPresent(prev => (prev === navOk ? prev : navOk));
 
       // Re-creating the native banner makes the screen flash, so only do it for a real, stable change of the nav
       // height, never while an overlay / live match is showing, and at most once every few seconds.
@@ -94,7 +98,7 @@ export const BannerAdContainer: React.FC<BannerAdContainerProps> = ({ isMatchAct
     };
   }, [isPremium]);
 
-  const shouldHide = overlayOpen || !!isMatchActive;
+  const shouldHide = overlayOpen || !!isMatchActive || !navPresent;
   useEffect(() => {
     if (!ADMOB_CONFIG.ENABLE_BANNER || isPremium) return;
     // Hide at once (so it never covers content), but resume only after the state was stable for a moment (no flapping)
