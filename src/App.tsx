@@ -32,7 +32,6 @@ import { MatchDayBlockerModal } from './components/MatchDayBlockerModal';
 import { WelcomeModalHandler } from './components/WelcomeModalHandler';
 import { FacebookBanner } from './components/FacebookBanner';
 import { ChallengesTab } from './components/ChallengesTab';
-import { BannerAdContainer } from './components/ads/BannerAdContainer';
 import { RewardedAdCenterModal } from './components/ads/RewardedAdCenterModal';
 import { DailyLoginRewardModal } from './components/DailyLoginRewardModal';
 import { ErrorBoundary } from './components/ErrorBoundary';
@@ -457,9 +456,6 @@ function GameApp() {
       {/* Auth / Guest Check Welcome Modal */}
       <WelcomeModalHandler />
 
-      {/* Google AdMob Persistent Smart Banner (Android & Safe Preview) */}
-      <BannerAdContainer activeTab={activeTab} isMatchActive={!!liveMatch} />
-
       {/* Daily Login Reward Modal */}
       <ErrorBoundary fallbackTitle="تنبيه المكافأة اليومية" fallbackMessage="يمكنك متابعة اللعب واستلام المكافأة مباشرة من القائمة أو شريط التحكم.">
         <DailyLoginRewardModal
@@ -468,7 +464,7 @@ function GameApp() {
         />
       </ErrorBoundary>
 
-      {/* Google AdMob Rewarded Video Center Modal (Temporarily Disabled) */}
+      {/* Google AdMob Rewarded Video Center Modal */}
       {ADMOB_CONFIG.ENABLE_REWARDS && (
         <RewardedAdCenterModal
           isOpen={isRewardedModalOpen}
@@ -531,4 +527,5 @@ export default function App() {
       </AuthProvider>
     </LanguageProvider>
   );
-}
+            }
+      
