@@ -46,7 +46,7 @@ export const ADMOB_CONFIG: AdMobConfigType = {
   ENABLE_LOGS: true,
   ENABLE_REWARDS: true,  // تفعيل إعلانات المكافأة
   ENABLE_BANNER: false, // تم تعطيل إعلانات البانر
-  REWARDED_COOLDOWN_SECONDS: 0,
+  REWARDED_COOLDOWN_SECONDS: 1800, // 30 min between rewarded boosts: no more "boost every match"
   APP_ID: PRODUCTION_AD_IDS.APP_ID,
   TOP_BANNER_ID: PRODUCTION_AD_IDS.TOP_BANNER_ID,
   BOTTOM_BANNER_ID: PRODUCTION_AD_IDS.BOTTOM_BANNER_ID,

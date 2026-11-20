@@ -3,6 +3,7 @@ import { AdManager } from '../services/adManager';
 import { getClubStaffBonuses, executeSmartAutoSub } from './staffEngine';
 import { MatchRevenueBreakdown } from './matchRevenue';
 import { generateTacticalMatchReport, evaluateSquadTacticalSynergy } from './tacticalKnowledgeEngine';
+import { getOrCreateClubManager } from '../data/worldManagersData';
 
 // Egyptian football commentary phrases pool
 const GOAL_COMMENTARIES = [
@@ -87,6 +88,8 @@ export interface LiveSimulationState {
   homeFatigueMap: Record<string, number>; // remaining stamina (0-100)
   awayFatigueMap: Record<string, number>;
   aiSubstitutionsCount: number;
+  aiTrailingReacted?: boolean; // AI manager already chased the game (one guaranteed reaction)
+  aiLeadingReacted?: boolean;  // AI manager already protected the lead
   autoSubsEnabled?: boolean;
   matchRevenue?: MatchRevenueBreakdown;
   tacticalMatchReport?: TacticalMatchReport;
@@ -858,88 +861,117 @@ export function generateAdaptiveAiTactics(
   const oppAvg = calcAvg(oppPlayers, opponentTeam?.reputation || 68) + (!isAiHome ? 1.5 : 0);
   const diff = aiAvg - oppAvg; // negative means opponent is stronger
 
-  if (diff <= -3.5) {
-    // Weaker AI team: plays a standard cautious setup without omniscient counter-traps
-    return {
-      formation: '4-4-2',
-      tacticalStyle: 'balanced',
-      mentality: 'defensive',
-      attackingStyle: 'mixed',
-      passingStyle: 'mixed',
-      tempo: 'normal',
-      pressingIntensity: 'low',
-      defensiveLine: 'balanced' as any,
-      teamWidth: 'normal' as any,
-      width: 'normal',
-      buildUpStyle: 'mixed',
-      pressingTrap: 'none',
-      fullbackRole: 'balanced',
-      strikerRole: 'target_man',
-      defensiveBlock: 'balanced',
-      markingStyle: 'zonal',
-      timeWasting: 'never',
-      startingPlayerIds: startingIds,
-      benchPlayerIds: benchIds,
-      captainId: startingIds[0] || '',
-      penaltyTakerId: startingIds[startingIds.length - 1] || '',
-      freeKickTakerId: startingIds[1] || '',
-      cornerTakerId: startingIds[2] || '',
-    };
-  } else if (diff <= 2.5) {
-    // Closely matched AI team: standard balanced tactical setup
-    return {
-      formation: isAiHome ? '4-3-3' : '4-2-3-1',
-      tacticalStyle: 'balanced',
-      mentality: 'balanced',
-      attackingStyle: 'mixed',
-      passingStyle: 'mixed',
-      tempo: 'normal',
-      pressingIntensity: 'medium',
-      defensiveLine: 'balanced' as any,
-      teamWidth: 'normal' as any,
-      width: 'normal',
-      buildUpStyle: 'mixed',
-      pressingTrap: 'none',
-      fullbackRole: 'balanced',
-      strikerRole: 'poacher',
-      defensiveBlock: 'balanced',
-      markingStyle: 'zonal',
-      timeWasting: 'never',
-      startingPlayerIds: startingIds,
-      benchPlayerIds: benchIds,
-      captainId: startingIds[0] || '',
-      penaltyTakerId: startingIds[startingIds.length - 1] || '',
-      freeKickTakerId: startingIds[1] || '',
-      cornerTakerId: startingIds[2] || '',
-    };
-  }
+  // Manager personality: each AI club plays the way ITS manager believes in.
+  const aiMgr = (aiTeam as any)?.manager && typeof (aiTeam as any).manager.rating === 'number'
+    ? (aiTeam as any).manager
+    : getOrCreateClubManager(aiTeam);
+  const mgrFormation = (aiMgr?.preferredFormation as TeamTactics['formation'] | undefined) || undefined;
+  const mgrStyle: string = aiMgr?.tacticalStyle || 'balanced';
+  const personality: Partial<TeamTactics> =
+    mgrStyle === 'attacking'
+      ? { tacticalStyle: 'wing_play', mentality: 'attacking', tempo: 'fast', pressingIntensity: 'high', teamWidth: 'wide' }
+      : mgrStyle === 'possession' || mgrStyle === 'tiki_taka'
+      ? { tacticalStyle: 'tiki_taka', mentality: 'balanced', tempo: 'slow', passingStyle: 'short', pressingIntensity: 'medium' as any }
+      : mgrStyle === 'counter_attack'
+      ? { tacticalStyle: 'counter_attack', mentality: 'balanced', tempo: 'fast', passingStyle: 'direct', pressingIntensity: 'medium' as any }
+      : mgrStyle === 'defensive'
+      ? { tacticalStyle: 'park_the_bus', mentality: 'defensive', tempo: 'slow', pressingIntensity: 'low', defensiveLine: 'deep' as any }
+      : mgrStyle === 'high_press'
+      ? { tacticalStyle: 'gegenpress', mentality: 'attacking', tempo: 'fast', pressingIntensity: 'gegenpress', defensiveLine: 'high' }
+      : {};
 
-  // Strongly superior AI team: attacking setup
-  return {
-    formation: '4-3-3',
-    tacticalStyle: 'wing_play',
-    mentality: 'attacking',
-    attackingStyle: 'possession',
-    passingStyle: 'short',
-    tempo: 'fast',
-    pressingIntensity: 'high',
-    defensiveLine: 'high',
-    teamWidth: 'wide' as any,
-    width: 'wide',
-    buildUpStyle: 'from_back',
-    pressingTrap: 'none',
-    fullbackRole: 'overlapping',
-    strikerRole: 'poacher',
-    defensiveBlock: 'high',
-    markingStyle: 'zonal',
-    timeWasting: 'never',
+  // Base profile by strength gap; the manager's identity (personality) overrides the generic
+  // style keys, with sanity clamps so a weak side never plays fully open and a strong side
+  // never fully parks.
+  const baseProfile: TeamTactics = diff <= -3.5
+    ? {
+        formation: '4-4-2',
+        tacticalStyle: 'balanced',
+        mentality: 'defensive',
+        attackingStyle: 'mixed',
+        passingStyle: 'mixed',
+        tempo: 'normal',
+        pressingIntensity: 'low',
+        defensiveLine: 'balanced' as any,
+        teamWidth: 'normal' as any,
+        width: 'normal',
+        buildUpStyle: 'mixed',
+        pressingTrap: 'none',
+        fullbackRole: 'balanced',
+        strikerRole: 'target_man',
+        defensiveBlock: 'balanced',
+        markingStyle: 'zonal',
+        timeWasting: 'never',
+        startingPlayerIds: startingIds,
+        benchPlayerIds: benchIds,
+        captainId: startingIds[0] || '',
+        penaltyTakerId: startingIds[startingIds.length - 1] || '',
+        freeKickTakerId: startingIds[1] || '',
+        cornerTakerId: startingIds[2] || '',
+      } as unknown as TeamTactics
+    : diff <= 2.5
+    ? {
+        formation: isAiHome ? '4-3-3' : '4-2-3-1',
+        tacticalStyle: 'balanced',
+        mentality: 'balanced',
+        attackingStyle: 'mixed',
+        passingStyle: 'mixed',
+        tempo: 'normal',
+        pressingIntensity: 'medium',
+        defensiveLine: 'balanced' as any,
+        teamWidth: 'normal' as any,
+        width: 'normal',
+        buildUpStyle: 'mixed',
+        pressingTrap: 'none',
+        fullbackRole: 'balanced',
+        strikerRole: 'poacher',
+        defensiveBlock: 'balanced',
+        markingStyle: 'zonal',
+        timeWasting: 'never',
+        startingPlayerIds: startingIds,
+        benchPlayerIds: benchIds,
+        captainId: startingIds[0] || '',
+        penaltyTakerId: startingIds[startingIds.length - 1] || '',
+        freeKickTakerId: startingIds[1] || '',
+        cornerTakerId: startingIds[2] || '',
+      } as unknown as TeamTactics
+    : {
+        formation: '4-3-3',
+        tacticalStyle: 'wing_play',
+        mentality: 'attacking',
+        attackingStyle: 'possession',
+        passingStyle: 'short',
+        tempo: 'fast',
+        pressingIntensity: 'high',
+        defensiveLine: 'high',
+        teamWidth: 'wide' as any,
+        width: 'wide',
+        buildUpStyle: 'from_back',
+        pressingTrap: 'none',
+        fullbackRole: 'overlapping',
+        strikerRole: 'poacher',
+        defensiveBlock: 'high',
+        markingStyle: 'zonal',
+        timeWasting: 'never',
+        startingPlayerIds: startingIds,
+        benchPlayerIds: benchIds,
+        captainId: startingIds[0] || '',
+        penaltyTakerId: startingIds[startingIds.length - 1] || '',
+        freeKickTakerId: startingIds[1] || '',
+        cornerTakerId: startingIds[2] || '',
+      } as unknown as TeamTactics;
+
+  const merged: TeamTactics = {
+    ...baseProfile,
+    ...personality,
+    formation: mgrFormation || baseProfile.formation,
     startingPlayerIds: startingIds,
     benchPlayerIds: benchIds,
-    captainId: startingIds[0] || '',
-    penaltyTakerId: startingIds[startingIds.length - 1] || '',
-    freeKickTakerId: startingIds[1] || '',
-    cornerTakerId: startingIds[2] || '',
-  };
+  } as TeamTactics;
+  // Sanity clamps: a much weaker side never plays fully open; a much stronger side never fully parks.
+  if (diff <= -3.5 && merged.mentality === 'ultra_attacking') merged.mentality = 'attacking';
+  if (diff > 2.5 && (merged.mentality === 'defensive' || merged.mentality === 'ultra_defensive')) merged.mentality = 'balanced';
+  return merged;
 }
 
 /**
@@ -1442,36 +1474,50 @@ export function simulateMatchStep(
   const aiScore = isAiHome ? prevState.homeScore : prevState.awayScore;
   const userScore = isAiHome ? prevState.awayScore : prevState.homeScore;
 
-  // AI Tactical Reaction around minutes 60-80
-  if (nextMinute >= 60 && nextMinute <= 85) {
-    // 1. AI is trailing -> Goes attacking & makes aggressive offensive sub
-    if (aiScore < userScore && aiTactics.mentality !== 'ultra_attacking' && Math.random() < 0.15) {
+  // AI Tactical Reaction: every AI manager reacts to the scoreline, guaranteed.
+  // Personality (from the club's manager profile) decides WHEN and HOW:
+  // attacking managers chase earlier and harder; defensive managers protect leads earlier.
+  const aiManagerProfile = (aiTeam as any)?.manager;
+  const aiMgrStyle: string = aiManagerProfile?.tacticalStyle || 'balanced';
+  const aiMgrName: string = aiManagerProfile?.name || `مدرب ${aiTeam.shortName || aiTeam.name}`;
+  const chaseMinute = aiMgrStyle === 'attacking' ? 52 : aiMgrStyle === 'high_press' ? 55 : 60;
+  const protectMinute = aiMgrStyle === 'defensive' ? 65 : aiMgrStyle === 'counter_attack' ? 70 : 75;
+  let aiTrailingReacted = prevState.aiTrailingReacted || false;
+  let aiLeadingReacted = prevState.aiLeadingReacted || false;
+  if (nextMinute >= 52 && nextMinute <= 88) {
+    // 1. AI is trailing -> chases the game (once, guaranteed, at its personality's minute)
+    if (aiScore < userScore && nextMinute >= chaseMinute && !aiTrailingReacted && aiTactics.mentality !== 'ultra_attacking') {
+      aiTrailingReacted = true;
+      const bigDeficit = userScore - aiScore >= 2;
       aiTactics = {
         ...aiTactics,
-        mentality: (userScore - aiScore >= 2) ? 'ultra_attacking' : 'attacking',
-        pressingIntensity: 'high',
-      };
-      
-      newEvents.push({
-        minute: nextMinute,
-        type: 'commentary',
-        teamId: aiTeam.id,
-        description: `⚡ تعليمات فنية من مدرب ${aiTeam.shortName}: تكثيف الضغط الهجومي واللعب باندفاع كامل للعودة في النتيجة!`
-      });
-    }
-    // 2. AI is leading at minute 75+ -> Goes defensive to hold the lead
-    else if (aiScore > userScore && nextMinute >= 75 && aiTactics.mentality !== 'defensive' && aiTactics.mentality !== 'ultra_defensive' && Math.random() < 0.15) {
-      aiTactics = {
-        ...aiTactics,
-        mentality: 'defensive',
-        pressingIntensity: 'low',
+        mentality: bigDeficit || aiMgrStyle === 'attacking' ? 'ultra_attacking' : 'attacking',
+        pressingIntensity: aiMgrStyle === 'defensive' ? 'medium' : 'high',
+        tempo: 'fast',
       };
 
       newEvents.push({
         minute: nextMinute,
         type: 'commentary',
         teamId: aiTeam.id,
-        description: `🛡️ قرار تكتيكي من مدرب ${aiTeam.shortName}: إغلاق المساحات والاعتماد على التكتل الدفاعي للحفاظ على التقدم.`
+        description: `⚡ تعليمات فنية من ${aiMgrName}: تكثيف الضغط الهجومي واللعب باندفاع كامل للعودة في النتيجة!`
+      });
+    }
+    // 2. AI is leading -> protects it (once, guaranteed, at its personality's minute)
+    else if (aiScore > userScore && nextMinute >= protectMinute && !aiLeadingReacted && aiTactics.mentality !== 'defensive' && aiTactics.mentality !== 'ultra_defensive') {
+      aiLeadingReacted = true;
+      aiTactics = {
+        ...aiTactics,
+        mentality: aiMgrStyle === 'defensive' ? 'ultra_defensive' : 'defensive',
+        pressingIntensity: 'low',
+        timeWasting: 'sometimes',
+      };
+
+      newEvents.push({
+        minute: nextMinute,
+        type: 'commentary',
+        teamId: aiTeam.id,
+        description: `🛡️ قرار تكتيكي من ${aiMgrName}: إغلاق المساحات والاعتماد على التكتل الدفاعي للحفاظ على التقدم.`
       });
     }
 
@@ -1740,7 +1786,12 @@ export function simulateMatchStep(
   const managerDiff = (homeStrength.managerRating - awayStrength.managerRating) * LIVE_DIFF_DAMP;
   const overallDiff = (homeStrength.overall - awayStrength.overall) * LIVE_DIFF_DAMP;
   // Bounded so a huge rating gap makes the favourite clearly better but never makes the underdog's goals impossible
-  const compositeDiff = Math.max(-8, Math.min(8, (squadDiff * 0.50) + (overallDiff * 0.30) + (managerDiff * 0.25)));
+  // Tactical edge: formation/style counters and squad-plan synergy count as real power,
+  // so a well-coached underdog can genuinely overturn a stronger squad (ceiling widened to ±10).
+  const homeTacEdge = ((matchup.homeAttackMod * homeSynergy.attackMod) + (matchup.homeMidfieldMod * homeSynergy.midfieldMod) + (matchup.homeDefenseMod * homeSynergy.defenseMod)) / 3;
+  const awayTacEdge = ((matchup.awayAttackMod * awaySynergy.attackMod) + (matchup.awayMidfieldMod * awaySynergy.midfieldMod) + (matchup.awayDefenseMod * awaySynergy.defenseMod)) / 3;
+  const tacticalDiff = Math.max(-7, Math.min(7, (homeTacEdge - awayTacEdge) * 11));
+  const compositeDiff = Math.max(-10, Math.min(10, (squadDiff * 0.50) + (overallDiff * 0.30) + (managerDiff * 0.25) + tacticalDiff));
 
   const rawQualityAdv = (overallDiff * 0.022) + (squadDiff * 0.018) + (managerDiff * 0.012);
   const qualityAdvantage = Math.max(-0.3, Math.min(0.3, rawQualityAdv));
@@ -2420,6 +2471,8 @@ export function simulateMatchStep(
     homeFatigueMap: updatedHomeFatigue,
     awayFatigueMap: updatedAwayFatigue,
     aiSubstitutionsCount: aiSubsCount,
+    aiTrailingReacted,
+    aiLeadingReacted,
     substitutionsCount: userSubsCount,
     autoSubsEnabled: prevState.autoSubsEnabled ?? true,
     userClubId: prevState.userClubId,
@@ -2527,8 +2580,8 @@ export function simulateMatch(
 
   // 2. Tactical Matchup Advantage & Defensive Block Impact
   const matchup = calculateTacticalMatchup(homeTac, awayTac);
-  const homeTacBonus = (matchup.homeAttackMod - 1.0) * 8 + (matchup.homeDefenseMod - 1.0) * 6;
-  const awayTacBonus = (matchup.awayAttackMod - 1.0) * 8 + (matchup.awayDefenseMod - 1.0) * 6;
+  const homeTacBonus = (matchup.homeAttackMod - 1.0) * 13 + (matchup.homeDefenseMod - 1.0) * 10;
+  const awayTacBonus = (matchup.awayAttackMod - 1.0) * 13 + (matchup.awayDefenseMod - 1.0) * 10;
 
   // 3. Squad Energy & Stamina (Fitness) + Goalkeeper & Defense Unit Power
   const homePlayers = Array.isArray(safeHome.players) ? safeHome.players.filter(p => p && p.id) : [];

@@ -111,7 +111,9 @@ class AdRewardService {
   public getCooldownRemaining(rewardType: AdRewardType): number {
     const configCooldown = ADMOB_CONFIG.REWARDED_COOLDOWN_SECONDS ?? 0;
     if (configCooldown <= 0) return 0;
-    const lastTimestamp = this.lastClaimTimestamps[rewardType] || 0;
+    // Global cooldown: the most recent claim of ANY reward type starts the timer,
+    // so the player cannot rotate boost types to stay permanently boosted.
+    const lastTimestamp = Math.max(0, ...Object.values(this.lastClaimTimestamps).map(v => v || 0));
     if (lastTimestamp <= 0) return 0;
     const elapsedSec = (Date.now() - lastTimestamp) / 1000;
     return Math.max(0, Math.ceil(configCooldown - elapsedSec));
