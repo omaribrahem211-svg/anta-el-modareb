@@ -434,6 +434,8 @@ interface GameContextType {
   // Multi-Season & Career Transitions
   startNextSeason: (offerId?: string) => void;
   isStartingSeasonUi: boolean;
+  /** Arabic label of the current new-season build step, or null when idle. Shown on SeasonStartingOverlay. */
+  seasonStartStep: string | null;
   selectNextSeasonLeague: (leagueId: string) => JobOffer[];
   acceptJobOffer: (offerId: string) => void;
   rejectJobOffer: (offerId: string) => void;
@@ -8481,6 +8483,8 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   // tap froze the WebView before anything could be painted (a "white screen"). We show a loading overlay first, let the browser
   // paint it, and only then run the heavy work.
   const [isStartingSeasonUi, setIsStartingSeasonUi] = useState(false);
+  // Current sub-step of the new-season build, shown on the loading overlay so players see progress instead of a frozen spinner.
+  const [seasonStartStep, setSeasonStartStep] = useState<string | null>(null);
   const seasonStartPendingRef = useRef(false);
   const startNextSeason = (chosenOfferId?: string) => {
     if (isStartingSeasonRef.current || seasonStartPendingRef.current) return;
@@ -8496,6 +8500,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       }
       p.catch(e => console.error('[startNextSeason] async failure', e)).finally(() => {
         seasonStartPendingRef.current = false;
+        setSeasonStartStep(null);
         setTimeout(() => setIsStartingSeasonUi(false), 600);
       });
     };
@@ -8511,6 +8516,8 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     isStartingSeasonRef.current = true;
     setTimeout(() => { isStartingSeasonRef.current = false; }, 4000);
     try {
+      setSeasonStartStep('جاري مراجعة نتائج الموسم...');
+      await new Promise<void>(r => setTimeout(r, 12));
       const summaryClub = userClub || teams.find(t => t.isUserClub) || teams[0];
       // Always rebuild the summary from the FINAL standings: a summary cached earlier (e.g. on the last matchday,
       // computed from the previous day's table) can say "stayed" even though the club won the league / got promoted.
@@ -8589,6 +8596,8 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       const worldAwardItems = pendingAwardsRef.current.filter(a => a.seasonNumber === season?.seasonNumber);
       pendingAwardsRef.current = [];
       try { teamsForAdvance = applyPlayerAwardBoosts(teamsForAdvance, summaryClub?.id, worldAwardItems); } catch (_) { /* optional */ }
+      setSeasonStartStep('جاري تجهيز أندية العالم للموسم الجديد...');
+      await new Promise<void>(r => setTimeout(r, 12));
       const advStart = typeof performance !== 'undefined' ? performance.now() : Date.now();
       const result = await processNewSeasonAdvancement(
         season,
@@ -8627,6 +8636,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       });
 
       // 1. Process Free Agents (contractYears === 0) & AI Club Transfers for the new season
+      setSeasonStartStep('جاري إتمام الانتقالات والتعاقدات...');
       await new Promise<void>(r => setTimeout(r, 12));
       const freeAgencyAndAiResult = timed('startNextSeason.processFreeAgentsAndAiTransfers', () => processFreeAgentsAndAiTransfers(
         baseNextTeams,
@@ -8669,6 +8679,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       setAfricanChampionsLeague(null);
 
       // Build unified Master Schedule (League Only) cleanly from scratch
+      setSeasonStartStep('جاري بناء جدول الموسم الجديد...');
       await new Promise<void>(r => setTimeout(r, 12));
       const nextFixturesWithContinental = timed('startNextSeason.generateMasterSeasonAgenda', () => generateMasterSeasonAgenda(
         result.nextSeason.seasonNumber,
@@ -8703,6 +8714,8 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         localStorage.setItem(`${STORAGE_KEY}_season_archives`, JSON.stringify(updatedSeasonArchives));
       } catch (_) {}
 
+      setSeasonStartStep('جاري حفظ الموسم الجديد...');
+      await new Promise<void>(r => setTimeout(r, 12));
       setSeason(result.nextSeason);
       setActiveLeague(result.nextActiveLeague);
       setTeams(finalNextTeams);
@@ -12354,6 +12367,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         markAllMessagesRead,
         startNextSeason,
         isStartingSeasonUi,
+        seasonStartStep,
         selectNextSeasonLeague,
         acceptJobOffer,
         rejectJobOffer,
