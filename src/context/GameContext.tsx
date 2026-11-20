@@ -375,6 +375,7 @@ interface GameContextType {
     monthlySalary: number;
     contractYears: number;
     squadRole: 'key_player' | 'first_team' | 'rotation' | 'prospect';
+    player?: Player;
   }) => { success: boolean; message: string };
   respondToNegotiationOffer: (
     negotiationId: string,
@@ -10042,6 +10043,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     monthlySalary: number;
     contractYears: number;
     squadRole: 'key_player' | 'first_team' | 'rotation' | 'prospect';
+    player?: Player;
   }): { success: boolean; message: string } => {
     try {
       if (!userClub) return { success: false, message: 'أنت غير مرتبط بنادٍ حالياً.' };
@@ -10055,6 +10057,11 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         if (foundItem) {
           targetPlayer = foundItem.player;
         }
+      }
+
+      // The list on screen can be built from a different world snapshot than the live one; trust the player the user picked.
+      if (!targetPlayer && proposal.player && proposal.player.id === proposal.playerId) {
+        targetPlayer = proposal.player;
       }
 
       if (!targetPlayer) {

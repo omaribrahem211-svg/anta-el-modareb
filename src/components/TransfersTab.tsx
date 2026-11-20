@@ -743,7 +743,8 @@ export const TransfersTab: React.FC<TransfersTabProps> = ({
   // Stable cache key for local league + free agents
   const refreshKey = `${userClub?.id || ''}_${userClub?.players?.length || 0}_${season?.seasonNumber || 1}_${transferCounter}_${(teams || []).length}_${(transferMarket || []).length}`;
   // Separate key for external world clubs so buying/selling does not reload the entire world from scratch
-  const worldLoadKey = `${userClub?.id || ''}_${season?.seasonNumber || 1}_${(teams || []).length}`;
+  // The world list is also reloaded about every 10 in-game days so it follows the AI transfers instead of freezing for a season.
+  const worldLoadKey = `${userClub?.id || ''}_${season?.seasonNumber || 1}_${(teams || []).length}_${currentDate.slice(0, 7)}_${Math.floor(Number(currentDate.slice(8, 10) || 1) / 10)}`;
 
   const leagueNameMap = useMemo(() => {
     const map: Record<string, string> = {};
@@ -2924,7 +2925,7 @@ export const TransfersTab: React.FC<TransfersTabProps> = ({
             }}
             onSubmitProposal={proposal => {
               try {
-                const res = startPlayerNegotiation(proposal);
+                const res = startPlayerNegotiation({ ...proposal, player: (negotiatingPlayer as any) || undefined });
                 setNotification({ text: res.message, type: res.success ? 'success' : 'error' });
                 setTimeout(() => setNotification(null), 3500);
                 setIsNegotiationModalOpen(false);
