@@ -170,6 +170,10 @@ async function idbSet<T>(key: string, value: T): Promise<boolean> {
   });
 }
 
+// Set when a save certainly existed on this phone (localStorage header says so) but the disk read failed or came back empty.
+// While set, autosave must NOT write: otherwise a fresh/empty state would overwrite the real career.
+let writesBlockedBySuspectRead = false;
+
 let isSavingToStorage = false;
 let pendingSavePayload: LocalGameSavePayload | null = null;
 let saveResolveQueue: Array<() => void> = [];
@@ -232,6 +236,10 @@ function pruneSavePayload(payload: LocalGameSavePayload): LocalGameSavePayload {
 }
 
 async function executeSave(payload: LocalGameSavePayload): Promise<void> {
+  if (writesBlockedBySuspectRead) {
+    console.warn('[GameStateRepo] Save skipped: the stored career could not be read, refusing to overwrite it.');
+    return;
+  }
   const pruned = pruneSavePayload(payload);
   const timestampedPayload: LocalGameSavePayload = {
     ...pruned,
@@ -353,15 +361,24 @@ export const gameStateRepository = {
    * Load local game state, prioritizing IndexedDB, then In-Memory Cache, then legacy localStorage migration
    */
   async loadLocalGameState(): Promise<LocalGameSavePayload | null> {
-    // 1. Try loading from IndexedDB first
+    // 1. Try loading from IndexedDB first (retry: right after an update / cold start the WebView storage can be slow or busy)
+    let hadSaveBefore = false;
     try {
-      const idbSave = await idbGet<LocalGameSavePayload>('current_save');
-      if (idbSave && idbSave.manager && Array.isArray(idbSave.teams) && idbSave.teams.length > 0) {
-        evictHeavyLocalStorageKeys(LEGACY_STORAGE_PREFIX);
-        return idbSave;
+      hadSaveBefore = Number(localStorage.getItem(`${LEGACY_STORAGE_PREFIX}_meta_save_version`) || 0) > 0;
+    } catch {}
+    for (let attempt = 0; attempt < 4; attempt++) {
+      try {
+        const idbSave = await idbGet<LocalGameSavePayload>('current_save');
+        if (idbSave && idbSave.manager && Array.isArray(idbSave.teams) && idbSave.teams.length > 0) {
+          writesBlockedBySuspectRead = false;
+          evictHeavyLocalStorageKeys(LEGACY_STORAGE_PREFIX);
+          return idbSave;
+        }
+      } catch (err) {
+        console.warn('[GameStateRepo] Error reading from IndexedDB:', err);
       }
-    } catch (err) {
-      console.warn('[GameStateRepo] Error reading from IndexedDB:', err);
+      if (!hadSaveBefore) break; // first launch ever: nothing to wait for
+      await new Promise(r => setTimeout(r, 400 * (attempt + 1)));
     }
 
     // 2. Try in-memory cache
@@ -372,7 +389,12 @@ export const gameStateRepository = {
     // 3. Fallback to migrating legacy localStorage save into IndexedDB
     try {
       const managerRaw = localStorage.getItem(`${LEGACY_STORAGE_PREFIX}_manager`);
-      if (!managerRaw) return null;
+      const legacyTeamsRaw = localStorage.getItem(`${LEGACY_STORAGE_PREFIX}_teams`);
+      if (!managerRaw || !legacyTeamsRaw) {
+        // A career existed but cannot be read now: never let the autosave replace it with a brand-new one.
+        if (hadSaveBefore) writesBlockedBySuspectRead = true;
+        return null;
+      }
 
       const safeParse = (key: string, fallback: any) => {
         try {
@@ -466,7 +488,13 @@ export const gameStateRepository = {
   /**
    * Reset local storage completely
    */
+  /** A career was loaded from the cloud / a backup, or a new career was started on purpose: saving is allowed again. */
+  allowWrites(): void {
+    writesBlockedBySuspectRead = false;
+  },
+
   async clearLocalGameState(): Promise<void> {
+    writesBlockedBySuspectRead = false;
     inMemorySaveCache = null;
     try {
       await idbKeyvalDel(`${IDB_KEYVAL_SAVE_KEY}_current_save`);

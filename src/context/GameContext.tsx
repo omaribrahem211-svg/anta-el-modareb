@@ -2294,6 +2294,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const applyLoadedSave = useCallback(async (save: any) => {
     if (!save) return;
     isInitialLoadDoneRef.current = true;
+    gameStateRepository.allowWrites();
 
     // Migrate and standardize payload via Migration Manager
     const { migratedPayload: migrated, upgraded } = runSaveDataMigration(save);
