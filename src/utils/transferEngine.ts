@@ -4,6 +4,21 @@ import { isRealClub, loadRealClubSquad, REAL_SQUADS_BY_CLUB_ID } from '../data/r
 import { VERIFIED_REAL_PLAYERS, convertVerifiedRealPlayerToPlayer } from '../data/playersData';
 import { generateClubSquad } from '../utils/playerGenerator';
 import { calculateClubMonthlyIncome, calculateClubTotalMonthlyWages, calculateRealisticSalary } from '../services/economyService';
+import { getTransferWindow } from './worldTransferEngine';
+
+/**
+ * Transfer window check for the in-game date (season runs Aug 15 -> May 30, so in practice
+ * the open periods are Aug 15-31 at season start and the whole of January).
+ * Free agents stay signable all year; callers exempt them.
+ */
+export function isTransferWindowOpen(rawDateStr?: string): boolean {
+  const d = rawDateStr ? new Date(`${rawDateStr.slice(0, 10)}T00:00:00`) : new Date();
+  if (isNaN(d.getTime())) return true;
+  return getTransferWindow(d.getMonth() + 1, d.getDate()) !== null;
+}
+
+export const TRANSFER_WINDOW_CLOSED_MESSAGE =
+  'سوق الانتقالات مغلق حالياً! فترتا القيد: الصيفية من 15 يونيو حتى 31 أغسطس، والشتوية طوال شهر يناير. (اللاعبون الأحرار متاحون للتوقيع طوال العام).';
 
 export type PlayerTransferStatus = 
   | 'available' 
@@ -1271,13 +1286,19 @@ export function generateIncomingAiBids(
   allTeams: Club[],
   userClub: Club | null,
   round: number,
-  seasonNumber: number
+  seasonNumber: number,
+  rawDateStr?: string
 ): {
   bids: TransferOffer[];
   inboxMessages: InboxMessage[];
 } {
   const bids: TransferOffer[] = [];
   const inboxMessages: InboxMessage[] = [];
+
+  // Clubs only approach with official bids while the transfer window is open
+  if (!isTransferWindowOpen(rawDateStr)) {
+    return { bids, inboxMessages };
+  }
 
   if (!userClub || !userClub.id || !Array.isArray(userClub.players) || userClub.players.length <= 14) {
     return { bids, inboxMessages };
@@ -2362,8 +2383,10 @@ export function processFreeAgentsAndAiTransfers(
     const buyer = richAiClubs[d];
     if (!buyer) continue;
 
+    // The market holds free agents (their contracts already expired), so do not require a running
+    // contract here: the old contractYears > 0 condition could never match and AI clubs never bought.
     const marketCandidates = safeMarket.filter(
-      p => p && !p.isLegend && (p.contractYears || 0) > 0 && (p.marketValue || 50000) <= (buyer.budget || 0) * 0.75
+      p => p && !p.isLegend && (p.marketValue || 50000) <= (buyer.budget || 0) * 0.75
     );
 
     if (marketCandidates.length > 0) {
@@ -2380,6 +2403,7 @@ export function processFreeAgentsAndAiTransfers(
           ...target,
           currentClubId: buyer.id,
           currentLeagueId: buyer.leagueId || '',
+          isFreeAgent: false,
           contractYears: years,
           salary: wage,
           isListedForTransfer: false,
