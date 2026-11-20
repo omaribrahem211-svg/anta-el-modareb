@@ -111,7 +111,8 @@ export function applySeason2627(egyptTier3: Club[]): void {
   }
 
   // ---------------- مصر (20 ناديًا) ----------------
-  ['eg1_pharco', 'eg1_petrojet', 'eg1_haras', 'eg1_elentag', 'eg1_eastern'].forEach(id => move(id, 'egy2'));
+  // الهابطون الفعليون 2026: الإسماعيلي وفاركو وحرس الحدود (+ إيسترن/الإنتاج غير موجودين في النسخة الحقيقية 2026/27)
+  ['eg1_pharco', 'eg1_ismaily', 'eg1_haras', 'eg1_elentag', 'eg1_eastern'].forEach(id => move(id, 'egy2'));
   ['eg2_degla', 'eg2_arabcont', 'eg2_qanah', 'eg3_petrol'].forEach(id => move(id, 'egy1'));
   add('egy1', mk('eg1_abuqir', 'أبو قير للأسمدة', 'أبو قير للأسمدة', 'الإسكندرية', 'مصر', 'EGY', 1, 'egy_tier_1',
     68, 70, '#16a34a', '#ffffff', 1300000, 'استاد الإسكندرية', 12000));
