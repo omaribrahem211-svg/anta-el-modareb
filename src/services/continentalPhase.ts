@@ -583,10 +583,27 @@ export function getContinentalOutcome(state: ContinentalPhaseState): Continental
 
 export function tieScoreText(state: ContinentalPhaseState, tie: ContTie): string {
   if (!tie.legs.length) return 'لم تُلعب';
-  const legs = tie.legs.map(l => `${l.homeGoals}-${l.awayGoals}`).join(' | ');
+  // One orientation for everything: the user's side first (or tie.a for other ties), so legs and aggregate agree.
+  const first = (tie.a === state.userId || tie.b === state.userId) ? state.userId : tie.a;
+  const mine = (l: ContTie['legs'][number]) => (l.homeId === first ? [l.homeGoals, l.awayGoals] : [l.awayGoals, l.homeGoals]);
+  const legs = tie.legs.map(l => { const [x, y] = mine(l); return `${x}-${y}`; }).join(' | ');
   const agg = aggregate(tie);
-  const pens = tie.pens ? ` (ركلات ${tie.pens.a}-${tie.pens.b})` : '';
-  return tie.legs.length > 1 ? `${legs} ⟵ مجموع ${agg.a}-${agg.b}${pens}` : `${legs}${pens}`;
+  const [ag, bg] = first === tie.a ? [agg.a, agg.b] : [agg.b, agg.a];
+  const pens = tie.pens ? ` (ركلات ${first === tie.a ? tie.pens.a : tie.pens.b}-${first === tie.a ? tie.pens.b : tie.pens.a})` : '';
+  return tie.legs.length > 1 ? `${legs} ⟵ مجموع ${ag}-${bg}${pens}` : `${legs}${pens}`;
+}
+
+/** Plain-language verdict for the user's finished tie, e.g. "خسرت الذهاب 1-3 وفزت في الإياب 2-1 لكن المجموع 3-4 ضدك". */
+export function userTieVerdict(state: ContinentalPhaseState, tie: ContTie): string {
+  if (!tie.winnerId || tie.legs.length < 2) return '';
+  const first = state.userId;
+  const res = tie.legs.map(l => (l.homeId === first ? [l.homeGoals, l.awayGoals] : [l.awayGoals, l.homeGoals]));
+  const word = (x: number, y: number) => (x > y ? 'فزت' : x < y ? 'خسرت' : 'تعادلت');
+  const [a, b] = [res[0], res[1]];
+  const agg = aggregate(tie);
+  const [ug, og] = first === tie.a ? [agg.a, agg.b] : [agg.b, agg.a];
+  const won = tie.winnerId === state.userId;
+  return `${word(a[0], a[1])} الذهاب ${a[0]}-${a[1]} و${word(b[0], b[1])} الإياب ${b[0]}-${b[1]} — المجموع ${ug}-${og}${ug === og ? ' (حسمتها ركلات الترجيح)' : won ? ' لصالحك' : ' ضدك'}`;
 }
 
 export function loadContinentalPhase(raw: string | null): ContinentalPhaseState | null {

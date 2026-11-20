@@ -8,6 +8,7 @@ import {
   REWARD_SCHEDULE,
   qualifiesForWorldCup,
   tieScoreText,
+  userTieVerdict,
   type ContinentalPhaseState,
   type ContTie,
   type ContRoundKey,
@@ -187,6 +188,9 @@ export default function ContinentalPhaseModal() {
               <div className={`text-center text-xs font-bold ${lastTie.winnerId === st.userId ? 'text-emerald-300' : 'text-red-300'}`}>
                 {lastTie.winnerId === st.userId ? '✅ تأهلت للدور التالي' : '❌ خرجت من البطولة'} — {tieScoreText(st, lastTie)}
               </div>
+            )}
+            {tieDecided && userTieVerdict(st, lastTie) && (
+              <div className="text-center text-[11px] text-slate-300">{userTieVerdict(st, lastTie)}</div>
             )}
             <p className="text-[10px] text-slate-500 text-center">تقدر تلعب كل مباراة بنفسك أو تحاكيها.</p>
           </div>
