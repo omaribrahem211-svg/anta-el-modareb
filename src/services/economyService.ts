@@ -349,7 +349,7 @@ export function validateTransferFinancials(
     };
   }
 
-  const isPlayerFreeAgent = isFreeAgent || (player?.contractYears !== undefined && player.contractYears <= 0);
+  const isPlayerFreeAgent = player?.isLegend ? false : isFreeAgent || (player?.contractYears !== undefined && player.contractYears <= 0);
   const currentBudget = userClub.budget || 0;
   const requiredFee = isPlayerFreeAgent ? 0 : (offeredFee ?? player?.marketValue ?? 0);
   const canAffordFee = currentBudget >= requiredFee;

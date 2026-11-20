@@ -120,7 +120,9 @@ export const NegotiationModal: React.FC<NegotiationModalProps> = ({
   const explicitContractType = (targetPlayer as any)?.contractType as 'club' | 'free' | undefined;
 
   const isFreeAgent =
-    explicitContractType === 'free'
+    targetPlayer?.isLegend
+      ? false
+      : explicitContractType === 'free'
       ? true
       : explicitContractType === 'club' || hasValidClubAssociation
       ? false

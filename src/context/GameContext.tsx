@@ -10106,6 +10106,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           (!resolvedClub.clubName.includes('وكيل حر') && !resolvedClub.clubName.includes('لاعب حر'))
       );
       const isFreeAgent =
+        !targetPlayer.isLegend &&
         !hasClubAssociation &&
         (targetPlayer.isFreeAgent === true ||
           targetPlayer.currentLeagueId === 'free_agents' ||

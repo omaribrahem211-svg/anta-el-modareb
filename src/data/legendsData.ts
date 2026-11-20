@@ -63,13 +63,39 @@ export const LEGENDS: LegendDef[] = [
   L('vanbasten', 'ماركو فان باستن', 'هولندا', 'NED', 'ST', 27, 93, 85_000_000, [84, 95, 82, 90, 40, 82], 9, 'البجعة'),
 ];
 
-/** Fixed-length (10-wide) skills for a legend card: use for display where needed. */
+/**
+ * Legends must feel clearly better than anyone in the game (the best normal players are ~90-92), so the base rating in
+ * the table is lifted: 94..99, and the price follows the rating (200M..400M).
+ */
+export function legendRating(def: LegendDef): number {
+  if (def.ovr >= 94) return 99;
+  if (def.ovr >= 92) return 98;
+  if (def.ovr >= 90) return 97;
+  if (def.ovr >= 88) return 96;
+  if (def.ovr >= 85) return 95;
+  return 94;
+}
+
+export function legendValue(def: LegendDef): number {
+  const r = legendRating(def);
+  const table: Record<number, number> = { 94: 200_000_000, 95: 230_000_000, 96: 270_000_000, 97: 320_000_000, 98: 360_000_000, 99: 400_000_000 };
+  return table[r] || 200_000_000;
+}
+
+function legendAttrs(def: LegendDef): LegendDef['attrs'] {
+  const delta = legendRating(def) - def.ovr;
+  // Strong attributes rise by the full lift; weak ones (e.g. an attacker's defending) only by half so roles stay believable.
+  return def.attrs.map(v => Math.min(99, v + (v >= 60 ? delta : Math.round(delta / 2)))) as LegendDef['attrs'];
+}
+
 export function createLegendPlayer(def: LegendDef): Player {
   const cat: PositionCategory = def.pos === 'GK' ? 'GK'
     : (def.pos === 'CB' || def.pos === 'RB' || def.pos === 'LB') ? 'DEF'
     : (def.pos === 'CDM' || def.pos === 'CM' || def.pos === 'CAM') ? 'MID' : 'FWD';
   const parts = def.name.split(' ');
-  const [pace, shooting, passing, dribbling, defending, physical] = def.attrs;
+  const ovr = legendRating(def);
+  const value = legendValue(def);
+  const [pace, shooting, passing, dribbling, defending, physical] = legendAttrs(def);
   return {
     id: def.id,
     name: def.name,
@@ -85,18 +111,18 @@ export function createLegendPlayer(def: LegendDef): Player {
     age: def.age,
     position: def.pos,
     positionCategory: cat,
-    overallRating: def.ovr,
-    rating: def.ovr,
-    potentialRating: def.ovr,
-    salary: Math.round(def.value / 90 / 1000) * 1000,
-    marketValue: def.value,
-    askingPrice: def.value,
+    overallRating: ovr,
+    rating: ovr,
+    potentialRating: ovr,
+    salary: Math.round(value / 200 / 1000) * 1000,
+    marketValue: value,
+    askingPrice: value,
     morale: 95,
     fitness: 100,
     fatigue: 0,
     form: 8.5,
     number: def.number,
-    attributes: { pace, shooting, passing, dribbling, defending, physical, goalkeeping: def.pos === 'GK' ? def.ovr : 20 },
+    attributes: { pace, shooting, passing, dribbling, defending, physical, goalkeeping: def.pos === 'GK' ? ovr : 20 },
     stats: { appearances: 0, goals: 0, assists: 0, yellowCards: 0, redCards: 0, cleanSheets: 0, averageRating: 7.5 },
     contractYears: 0,
     isFreeAgent: true,
@@ -114,7 +140,13 @@ export function createLegendPlayer(def: LegendDef): Player {
  * Returns the same array when nothing changed (cheap to call).
  */
 export function ensureLegendsInMarket(market: Player[], teams: Club[], retiredIds: Set<string> = new Set()): Player[] {
-  const base = Array.isArray(market) ? market : [];
+  let base = Array.isArray(market) ? market : [];
+  // Legends saved by an earlier version (lower rating / price) are refreshed to the current definition.
+  const byId = new Map(LEGENDS.map(l => [l.id, l] as const));
+  if (base.some(p => p && p.isLegend && byId.has(p.id) && p.overallRating !== legendRating(byId.get(p.id)!))) {
+    base = base.map(p => (p && p.isLegend && byId.has(p.id) && p.overallRating !== legendRating(byId.get(p.id)!))
+      ? createLegendPlayer(byId.get(p.id)!) : p);
+  }
   const present = new Set<string>();
   for (const p of base) if (p && p.id && p.id.startsWith('legend_')) present.add(p.id);
   const owned = new Set<string>();
