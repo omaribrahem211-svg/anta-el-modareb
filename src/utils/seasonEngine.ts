@@ -2416,7 +2416,9 @@ export async function processNewSeasonAdvancement(
       // - Between 35 and 39: progressive probability based on age, rating, and physical stamina.
       let shouldRetire = false;
 
-      if (newAge >= 40) {
+      if ((p as any).isLegend) {
+        shouldRetire = newAge >= 42; // legends play on a few extra seasons
+      } else if (newAge >= 40) {
         shouldRetire = true;
       } else if (newAge >= 35) {
         let retireProbability = 0.18; // Age 35: ~18%

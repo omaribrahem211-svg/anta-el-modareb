@@ -164,7 +164,7 @@ interface TransfersTabProps {
 }
 
 type PositionCategory = 'GK' | 'DEF' | 'MID' | 'FWD';
-type ScoutingPreset = 'all' | 'affordable' | 'arab_players' | 'u22_wonderkids' | 'bargains';
+type ScoutingPreset = 'all' | 'legends' | 'affordable' | 'arab_players' | 'u22_wonderkids' | 'bargains';
 
 const POSITION_CATEGORY_MAP: Record<string, PositionCategory> = {
   GK: 'GK',
@@ -830,15 +830,15 @@ export const TransfersTab: React.FC<TransfersTabProps> = ({
       list.push({
         player: rawP,
         club: null,
-        clubName: (rawP as any).clubName || 'لاعب حر',
+        clubName: rawP.isLegend ? 'قاعة الأساطير' : ((rawP as any).clubName || 'لاعب حر'),
         leagueId: 'free_agents',
-        leagueName: 'سوق اللاعبين الأحرار',
+        leagueName: rawP.isLegend ? 'قاعة الأساطير' : 'سوق اللاعبين الأحرار',
         isUserClubPlayer: false,
         isArabPlayer: isArab,
         posCategory: posCat,
-        askingPrice: 0,
-        statusLabel: 'وكيل حر',
-        statusType: 'free',
+        askingPrice: rawP.isLegend ? (rawP.askingPrice || rawP.marketValue || 0) : 0,
+        statusLabel: rawP.isLegend ? 'أسطورة 👑' : 'وكيل حر',
+        statusType: rawP.isLegend ? 'star' : 'free',
       });
     });
 
@@ -1309,7 +1309,9 @@ export const TransfersTab: React.FC<TransfersTabProps> = ({
         }
 
         // 1-Tap Smart Scouting Lens Filter
-        if (scoutingPreset === 'affordable') {
+        if (scoutingPreset === 'legends') {
+          if (!p.isLegend) return false;
+        } else if (scoutingPreset === 'affordable') {
           if (item.askingPrice > clubTransferBudget) return false;
           if ((p.salary || 2500) > remainingWageBudget) return false;
         } else if (scoutingPreset === 'arab_players') {
@@ -1751,6 +1753,7 @@ export const TransfersTab: React.FC<TransfersTabProps> = ({
             <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar pb-0.5">
               {[
                 { id: 'all', label: 'كل اللاعبين', icon: Globe2 },
+                { id: 'legends', label: 'أساطير زمان 👑', icon: Sparkles },
                 { id: 'affordable', label: 'ضمن ميزانيتك 💰', icon: Wallet },
                 { id: 'arab_players', label: 'محترفون عرب 🌍', icon: Compass },
                 { id: 'u22_wonderkids', label: 'مواهب شابة ≤ 22 💎', icon: Sparkles },

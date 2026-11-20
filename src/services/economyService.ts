@@ -416,6 +416,9 @@ export function canPlayerJoinClub(
     };
   }
 
+  // Legends sign for any club (their very high price is the barrier)
+  if (player.isLegend) return { canJoin: true };
+
   // 2. Tier 4 restrictions
   if (clubTier >= 4) {
     const maxAllowed = age >= 33 ? 67 : 65;

@@ -136,6 +136,7 @@ export interface Player {
   injuryMatches?: number;
   lastContractDecrementedSeason?: number;
   transferRequestSubmitted?: boolean;
+  isLegend?: boolean; // لاعب أسطورة (قاعة الأساطير)
   isGuestStar?: boolean; // هل اللاعب معار لمباراة واحدة فقط مقابل إعلان
   guestMatchesRemaining?: number; // عدد المباريات المتبقية (عادة 1)
   guestStarTier?: 'legend' | 'world_class' | 'star' | 'wildcard';

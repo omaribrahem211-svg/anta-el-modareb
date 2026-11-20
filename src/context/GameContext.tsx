@@ -169,6 +169,8 @@ import { DIAGNOSTIC_CONFIG } from '../config/diagnosticConfig';
 import { AdRewardType, AdRewardClaimResult } from '../services/adRewardService';
 import { getRandomWorldStarTemplate, createGuestStarPlayer, WorldStarTemplate } from '../services/worldStarService';
 import { challengesManager, ChallengeReward } from '../services/challengesService';
+import { ensureLegendsInMarket } from '../data/legendsData';
+import { refreshFreeAgentPool } from '../utils/marketRefresh';
 import { MIGRATION_STORAGE_KEY, runOneTimeWorldMigration, inferClubCountry } from '../utils/worldMigration';
 import { validateWorldDatabase, sanitizeWorldPlayerOwnership } from '../utils/worldValidation';
 import { isRealClub, loadRealClubSquad } from '../data/realPlayersData';
@@ -2533,6 +2535,18 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       isCancelled = true;
     };
   }, [user?.uid, applyLoadedSave]);
+
+  // Legends ("أساطير زمان") live in the transfer market: add the missing ones after load and at each new season.
+  useEffect(() => {
+    const t = setTimeout(() => {
+      try {
+        const retired = new Set<string>((retiredPlayers || []).map((r: any) => r && r.id).filter(Boolean));
+        setTransferMarket(prev => ensureLegendsInMarket(prev, teams, retired));
+      } catch (_) {}
+    }, 2500);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [season?.seasonNumber, user?.uid, manager?.name]);
 
   // Persist game state (Local-First: IndexedDB + localStorage mirror, debounced + immediate flush on tab change / page hide)
   const saveTimeoutRef = useRef<any>(null);
@@ -9756,6 +9770,11 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       }
 
       setTeams(calculatedNextTeams);
+
+      // Fresh free agents arrive every ~10 days so the market never goes stale
+      if ((newDate.dayIndexInSeason || 1) % 10 === 0) {
+        try { setTransferMarket(prev => refreshFreeAgentPool(prev || [], activeNegotiations || [], 8)); } catch (_) {}
+      }
 
       // Random season event (camps, friendlies, star demands...). One at a time, spaced >= 10 days apart, with
       // per-kind cooldowns and per-season caps on the events that hand out free value.

@@ -2342,7 +2342,7 @@ export function processFreeAgentsAndAiTransfers(
     if (!buyer) continue;
 
     const marketCandidates = safeMarket.filter(
-      p => p && (p.contractYears || 0) > 0 && (p.marketValue || 50000) <= (buyer.budget || 0) * 0.75
+      p => p && !p.isLegend && (p.contractYears || 0) > 0 && (p.marketValue || 50000) <= (buyer.budget || 0) * 0.75
     );
 
     if (marketCandidates.length > 0) {
@@ -2587,6 +2587,7 @@ export function executeCompetitiveAiTransfersAndGrowth(params: {
     let targetPlayer: Player | undefined = safeMarket.find(
       p =>
         p &&
+        !p.isLegend &&
         !usedPlayerIds.has(p.id) &&
         (p.positionCategory === neededPosCat || p.position === neededPos) &&
         (p.overallRating || 60) >= desiredMinOvr &&
@@ -2600,6 +2601,7 @@ export function executeCompetitiveAiTransfersAndGrowth(params: {
       targetPlayer = safeMarket.find(
         p =>
           p &&
+          !p.isLegend &&
           !usedPlayerIds.has(p.id) &&
           (p.overallRating || 60) >= desiredMinOvr &&
           (p.overallRating || 60) <= desiredMaxOvr + 2
