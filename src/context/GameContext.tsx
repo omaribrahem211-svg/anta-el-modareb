@@ -9665,6 +9665,11 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             const safeFee = deal.bidFee || 0;
             const safeSalary = deal.offeredSalary || targetPlayer.salary || 10000;
             const safeYears = deal.contractYears || 2;
+            // Money conservation: the selling club can only receive what the buyer actually paid.
+            // Affordability was checked when the negotiation started, but the budget may have
+            // dropped since; without this cap the seller would be credited money that never existed.
+            const buyerTeamNow = calculatedNextTeams.find(t => t && (t.isUserClub || t.id === userClub.id));
+            const paidFee = Math.max(0, Math.min(safeFee, buyerTeamNow?.budget ?? 0));
             const newPlayer: Player = {
               ...targetPlayer,
               currentClubId: userClub.id,
@@ -9683,14 +9688,14 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                 const filtered = (t.players || []).filter(p => p && p.id !== targetPlayer.id && (normTargetName ? normalizePlayerKey(p.name) !== normTargetName : true));
                 return {
                   ...t,
-                  budget: Math.max(0, (t.budget || 0) - safeFee),
+                  budget: Math.max(0, (t.budget || 0) - paidFee),
                   players: [...filtered, newPlayer],
                 };
               }
               if (deal.playerClubId && t.id === deal.playerClubId) {
                 return {
                   ...t,
-                  budget: (t.budget || 0) + safeFee,
+                  budget: (t.budget || 0) + paidFee,
                   players: (t.players || []).filter(p => p && p.id !== targetPlayer.id && (normTargetName ? normalizePlayerKey(p.name) !== normTargetName : true)),
                 };
               }
