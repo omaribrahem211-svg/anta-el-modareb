@@ -65,27 +65,27 @@ export const LEGENDS: LegendDef[] = [
 
 /**
  * Legends must feel clearly better than anyone in the game (the best normal players are ~90-92), so the base rating in
- * the table is lifted: 94..99, and the price follows the rating (200M..400M).
+ * the table is lifted above 100 (100..110), and the price follows the rating (200M..400M).
  */
 export function legendRating(def: LegendDef): number {
-  if (def.ovr >= 94) return 99;
-  if (def.ovr >= 92) return 98;
-  if (def.ovr >= 90) return 97;
-  if (def.ovr >= 88) return 96;
-  if (def.ovr >= 85) return 95;
-  return 94;
+  if (def.ovr >= 94) return 110;
+  if (def.ovr >= 92) return 108;
+  if (def.ovr >= 90) return 106;
+  if (def.ovr >= 88) return 104;
+  if (def.ovr >= 85) return 102;
+  return 100;
 }
 
 export function legendValue(def: LegendDef): number {
   const r = legendRating(def);
-  const table: Record<number, number> = { 94: 200_000_000, 95: 230_000_000, 96: 270_000_000, 97: 320_000_000, 98: 360_000_000, 99: 400_000_000 };
+  const table: Record<number, number> = { 100: 200_000_000, 102: 230_000_000, 104: 270_000_000, 106: 320_000_000, 108: 360_000_000, 110: 400_000_000 };
   return table[r] || 200_000_000;
 }
 
 function legendAttrs(def: LegendDef): LegendDef['attrs'] {
   const delta = legendRating(def) - def.ovr;
   // Strong attributes rise by the full lift; weak ones (e.g. an attacker's defending) only by half so roles stay believable.
-  return def.attrs.map(v => Math.min(99, v + (v >= 60 ? delta : Math.round(delta / 2)))) as LegendDef['attrs'];
+  return def.attrs.map(v => Math.min(110, v + (v >= 60 ? delta : Math.round(delta / 2)))) as LegendDef['attrs'];
 }
 
 export function createLegendPlayer(def: LegendDef): Player {

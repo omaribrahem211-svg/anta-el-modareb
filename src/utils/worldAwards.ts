@@ -162,8 +162,8 @@ export function applyPlayerAwardBoosts(teams: any[], userClubId: string | undefi
           ...p,
           morale: Math.min(100, num(p.morale, 70) + (world ? 25 : 15)),
           marketValue: Math.round(num(p.marketValue, 50000) * mult),
-          overallRating: Math.min(99, num(p.overallRating, 60) + (world ? 2 : 1)),
-          potentialRating: Math.min(99, Math.max(num(p.potentialRating, 60), num(p.overallRating, 60) + 1) + (world ? 2 : 1)),
+          overallRating: p.isLegend ? num(p.overallRating, 60) : Math.min(99, num(p.overallRating, 60) + (world ? 2 : 1)),
+          potentialRating: p.isLegend ? num(p.potentialRating, 60) : Math.min(99, Math.max(num(p.potentialRating, 60), num(p.overallRating, 60) + 1) + (world ? 2 : 1)),
           seasonAwards: [...(p.seasonAwards || []), ...w.map(x => `${x.title} (موسم ${x.seasonNumber})`)],
         };
       }),

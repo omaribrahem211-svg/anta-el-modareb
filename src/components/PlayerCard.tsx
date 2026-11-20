@@ -63,7 +63,7 @@ export const PlayerCard: React.FC<PlayerCardProps> = React.memo(({
   draggable = false,
   className = '',
 }) => {
-  const ovr = Math.max(40, Math.min(99, Math.round(player.overallRating || player.rating || 60)));
+  const ovr = Math.max(40, Math.min(player.isLegend ? 120 : 99, Math.round(player.overallRating || player.rating || 60)));
   const pos = player.position || 'CM';
   const flag = getCountryFlag(player.nationalityCode, player.nationality);
   const isGk = pos === 'GK' || player.positionCategory === 'GK';

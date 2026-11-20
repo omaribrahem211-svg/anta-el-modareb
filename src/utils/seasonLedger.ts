@@ -128,8 +128,8 @@ export function applySeasonAwards(teams: any[], userClubId: string | undefined, 
           ...p,
           morale: Math.min(100, (p.morale || 70) + 15),
           marketValue: Math.round((p.marketValue || 50000) * mult),
-          overallRating: Math.min(99, (p.overallRating || 60) + 1),
-          potentialRating: Math.min(99, Math.max((p.potentialRating || 60), (p.overallRating || 60) + 1) + 1),
+          overallRating: p.isLegend ? (p.overallRating || 60) : Math.min(99, (p.overallRating || 60) + 1),
+          potentialRating: p.isLegend ? (p.potentialRating || 60) : Math.min(99, Math.max((p.potentialRating || 60), (p.overallRating || 60) + 1) + 1),
           seasonAwards: [...(p.seasonAwards || []), ...titles.map(x => `${x} (موسم ${seasonNumber})`)],
         };
       });

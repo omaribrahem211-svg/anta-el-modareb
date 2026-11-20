@@ -2486,6 +2486,12 @@ export async function processNewSeasonAdvancement(
         );
         const isGK = p.position === 'GK' || p.positionCategory === 'GK';
 
+        // Legends keep their legendary level (no yearly decline) and just age on
+        if ((p as any).isLegend) {
+          survivingPlayers.push({ ...p, age: newAge, contractYears: newContractYears, fitness: 100, isInjured: false, injury: null, stats: resetStats } as any);
+          return;
+        }
+
         let overallDelta = 0;
         if (newAge <= 23 && currentOvr < currentPot) {
           const rawGrowth = Math.floor(Math.random() * 3) + 1; // +1 to +3
