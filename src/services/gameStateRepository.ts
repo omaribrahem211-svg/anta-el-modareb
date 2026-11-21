@@ -54,6 +54,8 @@ export interface LocalGameSavePayload {
   worldRankings: any;
   scoutedOpponents: any;
   africanChampionsLeague?: any;
+  /** National teams slice (additive, optional — old saves simply lack it). */
+  nationalTeams?: any;
   seasonArchives?: any[];
   deletedMessageIds?: string[];
   pendingCloudSync?: boolean;

@@ -142,6 +142,23 @@ import {
   repairContinentalTournamentIntegrity,
   getContinentClubPool,
 } from '../utils/continentalEngine';
+// National teams (fully isolated additive wiring — no club logic changes)
+import { NationalTeam, NationalTeamsState } from '../types/nationalTeams';
+import {
+  acceptNationalTeamJob as ntAcceptJob,
+  advanceNationalTeamsToRound,
+  completePostSeasonTournament,
+  createEmptyNationalTeamsState,
+  declineNationalTeamJob as ntDeclineJob,
+  generateNationalTeamJobOffer,
+  initNationalTeamsForSeason,
+  refreshUserCallUp,
+  rehydrateNationalTeams,
+  resignFromNationalTeam as ntResign,
+  stripNationalTeamsForSave,
+  NT_MIN_REPUTATION_FOR_JOB,
+} from '../services/nationalTeamsService';
+import { GLOBAL_COUNTRIES } from '../data/countriesData';
 import { getDomesticCupDefinitionForCountry } from '../data/competitionsData';
 import { EGYPT_PREMIER_CLUBS } from '../data/arabClubsData';
 import {
@@ -297,6 +314,13 @@ interface GameContextType {
   cupTournament: CupTournament | null;
   africanChampionsLeague: ContinentalTournament | null;
   uefaChampionsLeague?: ContinentalTournament | null;
+  // National teams (isolated additive slice)
+  nationalTeamsState: NationalTeamsState | null;
+  userNationalTeam: NationalTeam | null;
+  acceptNationalTeamJob: (offerId: string) => void;
+  declineNationalTeamJob: () => void;
+  resignFromNationalTeam: () => void;
+  refreshNationalTeamCallUp: () => void;
   deletedMessageIds?: string[];
   switchUserClubToAlAhly: () => { success: boolean; message: string };
   switchContinentalCompetition?: (compCode: 'ccl' | 'ccc' | 'ucl' | 'uel' | 'acl' | 'acl2') => void;
@@ -1168,6 +1192,8 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   // 5. Domestic Cup & Continental Tournaments (Disabled for smooth League-only calendar & performance)
   const [cupTournament, setCupTournament] = useState<CupTournament | null>(null);
   const [africanChampionsLeague, setAfricanChampionsLeague] = useState<ContinentalTournament | null>(null);
+  // National teams slice (isolated). Missing in old saves -> lazy init builds it.
+  const [nationalTeamsState, setNationalTeamsState] = useState<NationalTeamsState | null>(null);
 
   const fixturesRef = useRef(fixtures);
   fixturesRef.current = fixtures;
@@ -2416,6 +2442,13 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     if (Array.isArray(migrated.inbox)) setInbox(migrated.inbox);
     setCupTournament(null);
     setAfricanChampionsLeague(null);
+    if (migrated.nationalTeams) {
+      const rehydrated = rehydrateNationalTeams(
+        migrated.nationalTeams,
+        Array.isArray(migrated.teams) ? migrated.teams : []
+      );
+      if (rehydrated) setNationalTeamsState(rehydrated);
+    }
     if (Array.isArray(migrated.jobOffers)) setJobOffers(migrated.jobOffers);
     if (migrated.seasonEndSummary !== undefined) setSeasonEndSummary(migrated.seasonEndSummary);
     if (Array.isArray(migrated.transferHistory)) setTransferHistory(migrated.transferHistory);
@@ -2586,12 +2619,13 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         worldRankings,
         scoutedOpponents,
         deletedMessageIds,
+        nationalTeams: stripNationalTeamsForSave(nationalTeamsState),
         ...(overrides || {}),
       }, urgent ? { urgent: true } : undefined);
     } catch (err) {
       console.warn('Failed immediate flush to local state repository:', err);
     }
-  }, [season, activeLeague, teams, standings, fixtures, currentRound, manager, transferMarket, incomingBids, inbox, jobOffers, seasonEndSummary, transferHistory, clubEconomy, calendarDate, activeNegotiations, boardSystem, dailyNews, retiredPlayers, worldRankings, scoutedOpponents, deletedMessageIds]);
+  }, [season, activeLeague, teams, standings, fixtures, currentRound, manager, transferMarket, incomingBids, inbox, jobOffers, seasonEndSummary, transferHistory, clubEconomy, calendarDate, activeNegotiations, boardSystem, dailyNews, retiredPlayers, worldRankings, scoutedOpponents, deletedMessageIds, nationalTeamsState]);
 
   useEffect(() => {
     if (!isInitialLoadDoneRef.current) return;
@@ -2612,12 +2646,165 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         clearTimeout(saveTimeoutRef.current);
       }
     };
-  }, [season, activeLeague, teams, standings, fixtures, currentRound, manager, transferMarket, incomingBids, inbox, cupTournament, africanChampionsLeague, jobOffers, seasonEndSummary, transferHistory, clubEconomy, calendarDate, activeNegotiations, boardSystem, dailyNews, retiredPlayers, worldRankings, scoutedOpponents, deletedMessageIds, user?.uid, getSyncInput, flushLocalSaveImmediate]);
+  }, [season, activeLeague, teams, standings, fixtures, currentRound, manager, transferMarket, incomingBids, inbox, cupTournament, africanChampionsLeague, jobOffers, seasonEndSummary, transferHistory, clubEconomy, calendarDate, activeNegotiations, boardSystem, dailyNews, retiredPlayers, worldRankings, scoutedOpponents, deletedMessageIds, nationalTeamsState, user?.uid, getSyncInput, flushLocalSaveImmediate]);
 
   // Android: swiping the app away fires Capacitor's pause/appStateChange, not always pagehide. Registered once; always
   // calls the latest flush through a ref so it never saves stale state.
   const flushLocalSaveRef = useRef(flushLocalSaveImmediate);
   flushLocalSaveRef.current = flushLocalSaveImmediate;
+
+  // ==================== NATIONAL TEAMS (isolated additive wiring) ====================
+  // All NT logic lives in services/nationalTeamsService + utils/nationalTeamsEngine
+  // + utils/internationalTournamentEngine. The effects below only call those pure
+  // functions; refs make every step idempotent (StrictMode / re-render safe).
+  const nationalTeamsRef = useRef<NationalTeamsState | null>(nationalTeamsState);
+  nationalTeamsRef.current = nationalTeamsState;
+  const ntSeasonInitRef = useRef<number>(0);
+  const ntRoundRef = useRef<number>(0);
+  const ntPostSeasonRef = useRef<number>(0);
+
+  const userNationalTeam = useMemo<NationalTeam | null>(() => {
+    const st = nationalTeamsState;
+    if (!st || !st.userNationalTeamId) return null;
+    return st.teams.find(t => t.id === st.userNationalTeamId) || null;
+  }, [nationalTeamsState]);
+
+  // Rewards the manager when their national team wins a trophy (reputation + world rank points).
+  const applyNtChampionReward = useCallback((prevState: NationalTeamsState | null, nextState: NationalTeamsState | null) => {
+    const t = nextState?.activeTournament;
+    if (!t || !t.isCompleted || !t.winnerTeamId || t.winnerTeamId !== nextState?.userNationalTeamId) return;
+    const wasAlready = prevState?.activeTournament?.id === t.id && prevState?.activeTournament?.isCompleted;
+    if (wasAlready) return;
+    setManager(m => {
+      if (!m) return m;
+      if ((m.trophies || []).includes(t.trophyName)) return m;
+      return {
+        ...m,
+        reputation: Math.min(100, (m.reputation || 50) + 6),
+        rankingPoints: (m.rankingPoints || 0) + 400,
+        trophies: [...(m.trophies || []), t.trophyName],
+      };
+    });
+  }, []);
+
+  // Season rollover / first-time init (build universe, schedule AFCON / World Cup, job offers)
+  useEffect(() => {
+    if (!isInitialLoadDoneRef.current) return;
+    if (!Array.isArray(teams) || teams.length === 0) return;
+    const seasonNumber = season?.seasonNumber || 1;
+    if (ntSeasonInitRef.current === seasonNumber) return;
+    if (nationalTeamsRef.current?.initializedForSeason === seasonNumber) {
+      ntSeasonInitRef.current = seasonNumber;
+      return;
+    }
+    ntSeasonInitRef.current = seasonNumber;
+    const res = initNationalTeamsForSeason(
+      nationalTeamsRef.current,
+      seasonNumber,
+      totalRounds,
+      teams,
+      nationalTeamsRef.current?.userNationalTeamId
+    );
+    let nextState = res.state;
+    const messages = [...res.messages];
+    // NT job offer for high-reputation managers (dual club+NT job allowed)
+    const rep = manager?.reputation ?? 0;
+    if (rep >= NT_MIN_REPUTATION_FOR_JOB && !nextState.userNationalTeamId) {
+      const mgrNat = manager?.nationality || '';
+      const homeCountry = Object.values(GLOBAL_COUNTRIES).find(
+        c => mgrNat.startsWith(c.name) || c.name.startsWith(mgrNat)
+      );
+      const before = nextState.pendingJobOffers.length;
+      nextState = generateNationalTeamJobOffer(nextState, rep, homeCountry?.code, seasonNumber);
+      const newOffer = nextState.pendingJobOffers.length > before ? nextState.pendingJobOffers[0] : null;
+      if (newOffer) {
+        messages.push({
+          id: `msg_${newOffer.id}`,
+          title: `${newOffer.flag} عرض تدريب منتخب ${newOffer.nationalTeamName}!`,
+          sender: 'الاتحاد الدولي لكرة القدم',
+          date: `الموسم ${seasonNumber}`,
+          type: 'news',
+          read: false,
+          content: `بناءً على سمعتك الكبيرة (${rep}/100)، يسعدنا أن نعرض عليك تدريب منتخب ${newOffer.nationalTeamName} ${newOffer.flag}.\n\nيمكنك الجمع بين تدريب المنتخب وناديك الحالي في نفس الوقت. المنتخبات لا تشترك في سوق الانتقالات — قوائم استدعاء فقط.\n\nقبول العرض متاح من شاشة المنتخبات.`,
+        } as InboxMessage);
+      }
+    }
+    applyNtChampionReward(nationalTeamsRef.current, nextState);
+    setNationalTeamsState(nextState);
+    if (messages.length > 0) setInbox(prev => [...messages, ...prev]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [season?.seasonNumber, teams, totalRounds]);
+
+  // Round-by-round advancement (international breaks: tournament matches + friendlies)
+  useEffect(() => {
+    if (!isInitialLoadDoneRef.current) return;
+    const st = nationalTeamsRef.current;
+    if (!st || st.teams.length === 0) return;
+    const seasonNumber = season?.seasonNumber || 1;
+    if (st.initializedForSeason !== seasonNumber) return;
+    if (currentRound <= ntRoundRef.current) return;
+    if (currentRound <= (st.lastProcessedRound ?? 0)) {
+      ntRoundRef.current = currentRound;
+      return;
+    }
+    ntRoundRef.current = currentRound;
+    const res = advanceNationalTeamsToRound(st, currentRound, totalRounds, seasonNumber, teams);
+    applyNtChampionReward(st, res.state);
+    setNationalTeamsState(res.state);
+    if (res.messages.length > 0) setInbox(prev => [...res.messages, ...prev]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentRound, season?.seasonNumber, teams, totalRounds]);
+
+  // Post-season window: complete the World Cup before season transition
+  useEffect(() => {
+    if (!seasonFinished) return;
+    const st = nationalTeamsRef.current;
+    if (!st || st.teams.length === 0) return;
+    const seasonNumber = season?.seasonNumber || 1;
+    if (ntPostSeasonRef.current === seasonNumber) return;
+    ntPostSeasonRef.current = seasonNumber;
+    const res = completePostSeasonTournament(st, totalRounds, seasonNumber, teams);
+    applyNtChampionReward(st, res.state);
+    if (res.state !== st) setNationalTeamsState(res.state);
+    if (res.messages.length > 0) setInbox(prev => [...res.messages, ...prev]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [seasonFinished, season?.seasonNumber, teams, totalRounds]);
+
+  // NT job actions (user decisions)
+  const acceptNationalTeamJob = useCallback((offerId: string) => {
+    const st = nationalTeamsRef.current;
+    if (!st) return;
+    const offer = (st.pendingJobOffers || []).find(o => o.id === offerId);
+    const next = ntAcceptJob(st, offerId);
+    setNationalTeamsState(next);
+    if (offer && next.userNationalTeamId) {
+      setInbox(prev => [{
+        id: `msg_nt_accepted_${offer.id}_${Date.now()}`,
+        title: `✅ أنت الآن مدرب منتخب ${offer.nationalTeamName} ${offer.flag}`,
+        sender: 'الاتحاد الدولي لكرة القدم',
+        date: `الموسم ${season?.seasonNumber || 1}`,
+        type: 'news',
+        read: false,
+        content: `تهانينا! تم تعيينك مدرباً لمنتخب ${offer.nationalTeamName}.\nستدير المنتخب بالتوازي مع مهامك مع ناديك. قم بتحديث قائمة الاستدعاء من شاشة المنتخبات قبل المباريات الدولية.`,
+      } as InboxMessage, ...prev]);
+    }
+  }, [season?.seasonNumber]);
+
+  const declineNationalTeamJob = useCallback(() => {
+    const st = nationalTeamsRef.current;
+    if (st) setNationalTeamsState(ntDeclineJob(st));
+  }, []);
+
+  const resignFromNationalTeam = useCallback(() => {
+    const st = nationalTeamsRef.current;
+    if (st) setNationalTeamsState(ntResign(st));
+  }, []);
+
+  const refreshNationalTeamCallUp = useCallback(() => {
+    const st = nationalTeamsRef.current;
+    if (st) setNationalTeamsState(refreshUserCallUp(st, teams));
+  }, [teams]);
+  // ================== END NATIONAL TEAMS WIRING ==================
   useEffect(() => {
     const handles: any[] = [];
     let disposed = false;
@@ -12378,6 +12565,12 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         userSquadStrength,
         userDynamicManagerRating,
         recalculateWorldRankings,
+        nationalTeamsState,
+        userNationalTeam,
+        acceptNationalTeamJob,
+        declineNationalTeamJob,
+        resignFromNationalTeam,
+        refreshNationalTeamCallUp,
         dayAdvanceSummary,
         showDaySummaryModal,
         trainingIntensity,
