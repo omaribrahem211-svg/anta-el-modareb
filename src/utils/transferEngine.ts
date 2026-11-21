@@ -4,6 +4,21 @@ import { isRealClub, loadRealClubSquad, REAL_SQUADS_BY_CLUB_ID } from '../data/r
 import { VERIFIED_REAL_PLAYERS, convertVerifiedRealPlayerToPlayer } from '../data/playersData';
 import { generateClubSquad } from '../utils/playerGenerator';
 import { calculateClubMonthlyIncome, calculateClubTotalMonthlyWages, calculateRealisticSalary } from '../services/economyService';
+import { getTransferWindow } from './worldTransferEngine';
+
+/**
+ * Transfer window check for the in-game date (season runs Aug 15 -> May 30, so in practice
+ * the open periods are Aug 15-31 at season start and the whole of January).
+ * Free agents stay signable all year; callers exempt them.
+ */
+export function isTransferWindowOpen(rawDateStr?: string): boolean {
+  const d = rawDateStr ? new Date(`${rawDateStr.slice(0, 10)}T00:00:00`) : new Date();
+  if (isNaN(d.getTime())) return true;
+  return getTransferWindow(d.getMonth() + 1, d.getDate()) !== null;
+}
+
+export const TRANSFER_WINDOW_CLOSED_MESSAGE =
+  'سوق الانتقالات مغلق حالياً! فترتا القيد: الصيفية من 15 يونيو حتى 31 أغسطس، والشتوية طوال شهر يناير. (اللاعبون الأحرار متاحون للتوقيع طوال العام).';
 
 export type PlayerTransferStatus = 
   | 'available' 
@@ -664,6 +679,10 @@ export function executeAtomicTransfer(params: {
     };
   }
 
+  // External leagues are needed both for the affordability check below and the club sync later.
+  const customLeagues = getCustomLeagues();
+  let customLeaguesModified = false;
+
   // Financial safety check: strictly applied for both user and AI buying clubs when transferFee > 0
   if (buyingClub) {
     const clubBudget = buyingClub.budget || 0;
@@ -686,9 +705,21 @@ export function executeAtomicTransfer(params: {
   const fromClubName = sellingClub ? sellingClub.name : (player.currentClubId ? 'نادي آخر' : 'لاعب حر (سوق الانتقالات)');
   let toClubName = buyingClub ? buyingClub.name : 'نادي مشتري';
 
-  // Synchronize across all external GLOBAL_LEAGUES and custom leagues first to resolve external club name if needed
-  const customLeagues = getCustomLeagues();
-  let customLeaguesModified = false;
+  // External buying club (exists only in a custom league, not in allTeams): enforce the same
+  // affordability rule as internal clubs. Without this, an external AI club could "pay" a fee far
+  // above its budget while the selling club is credited the full amount (minting money).
+  if (!buyingClub && buyingClubId && transferFee > 0) {
+    const externalBuyer = Object.values(customLeagues)
+      .flatMap(league => (league && league.teams) || [])
+      .find(c => c && c.id === buyingClubId);
+    if (externalBuyer && (externalBuyer.budget || 0) < transferFee) {
+      return {
+        success: false,
+        message: `ميزانية النادي المشتري (${externalBuyer.name}) (${(externalBuyer.budget || 0).toLocaleString()} ج.م) لا تكفي لدفع قيمة الصفقة المطلوبة (${transferFee.toLocaleString()} ج.م)!`,
+        updatedTeams: allTeams,
+      };
+    }
+  }
 
   Object.values(customLeagues).forEach(league => {
     if (!league.teams) return;
@@ -1255,13 +1286,19 @@ export function generateIncomingAiBids(
   allTeams: Club[],
   userClub: Club | null,
   round: number,
-  seasonNumber: number
+  seasonNumber: number,
+  rawDateStr?: string
 ): {
   bids: TransferOffer[];
   inboxMessages: InboxMessage[];
 } {
   const bids: TransferOffer[] = [];
   const inboxMessages: InboxMessage[] = [];
+
+  // Clubs only approach with official bids while the transfer window is open
+  if (!isTransferWindowOpen(rawDateStr)) {
+    return { bids, inboxMessages };
+  }
 
   if (!userClub || !userClub.id || !Array.isArray(userClub.players) || userClub.players.length <= 14) {
     return { bids, inboxMessages };
@@ -1335,7 +1372,7 @@ export function generateIncomingAiBids(
     if (biddingClub.budget < baseMarketVal || maxAffordableFee < baseMarketVal) continue;
     const bidAmount = baseMarketVal;
 
-    const profitRatio = 1.0;
+    const profitRatio = baseMarketVal > 0 ? bidAmount / baseMarketVal : 1;
     const isLucrative = (biddingClub.reputation || 50) >= 75 || targetPlayer.overallRating >= 72;
 
     const offerId = `bid_${Date.now()}_${targetPlayer.id}_${Math.random().toString(36).substring(2, 6)}`;
@@ -1361,8 +1398,13 @@ export function generateIncomingAiBids(
       ? `🔥 عرض شراء مغرٍ: ${biddingClub.name}${originTag} يطلب ضم ${targetPlayer.name} (${bidAmount.toLocaleString()} ج.م)!`
       : `💰 عرض رسمي: نادي ${biddingClub.name}${originTag} يرغب في شراء ${targetPlayer.name}`;
 
+    const profitPct = Math.round((profitRatio - 1) * 100);
+    const valuePhrase = profitPct > 0
+      ? `(بفارق ربح +${profitPct}% عن قيمته السوقية البالغة ${baseMarketVal.toLocaleString()} ج.م)`
+      : `(بما يعادل كامل قيمته السوقية البالغة ${baseMarketVal.toLocaleString()} ج.م)`;
+
     const content = isLucrative
-      ? `وصل إدارة نادي ${userClub.name} عرض رسمي مغرٍ من نادي ${biddingClub.name}${originTag} للتعاقد النهائي مع اللاعب ${targetPlayer.name} (${targetPlayer.position} - تقييم ${targetPlayer.overallRating}) مقابل رسوم انتقال تبلغ ${bidAmount.toLocaleString()} ج.م (بفارق ربح +${Math.round((profitRatio - 1) * 100)}% عن قيمته السوقية البالغة ${baseMarketVal.toLocaleString()} ج.م).\n\nيمثل هذا العرض فرصة مالية ممتازة لإنعاش خزينة النادي. في حال الموافقة، سينتقل اللاعب فوراً للنادي المشتري وتودع الأموال في خزينة النادي.`
+      ? `وصل إدارة نادي ${userClub.name} عرض رسمي مغرٍ من نادي ${biddingClub.name}${originTag} للتعاقد النهائي مع اللاعب ${targetPlayer.name} (${targetPlayer.position} - تقييم ${targetPlayer.overallRating}) مقابل رسوم انتقال تبلغ ${bidAmount.toLocaleString()} ج.م ${valuePhrase}.\n\nيمثل هذا العرض فرصة مالية جيدة لإنعاش خزينة النادي. في حال الموافقة، سينتقل اللاعب فوراً للنادي المشتري وتودع الأموال في خزينة النادي.`
       : `تلقى النادي خطاباً رسمياً من نادي ${biddingClub.name}${originTag} يطلب فيه شراء اللاعب ${targetPlayer.name} (${targetPlayer.position} - تقييم ${targetPlayer.overallRating}) بمبلغ ${bidAmount.toLocaleString()} ج.م.\n\nالقيمة السوقية الحالية للاعب: ${baseMarketVal.toLocaleString()} ج.م. يمكنك قبول العرض مباشرة لنقل اللاعب، أو رفضه، أو تجديد عقده لحمايته.`;
 
     const msg: InboxMessage = {
@@ -2341,8 +2383,10 @@ export function processFreeAgentsAndAiTransfers(
     const buyer = richAiClubs[d];
     if (!buyer) continue;
 
+    // The market holds free agents (their contracts already expired), so do not require a running
+    // contract here: the old contractYears > 0 condition could never match and AI clubs never bought.
     const marketCandidates = safeMarket.filter(
-      p => p && !p.isLegend && (p.contractYears || 0) > 0 && (p.marketValue || 50000) <= (buyer.budget || 0) * 0.75
+      p => p && !p.isLegend && (p.marketValue || 50000) <= (buyer.budget || 0) * 0.75
     );
 
     if (marketCandidates.length > 0) {
@@ -2359,6 +2403,7 @@ export function processFreeAgentsAndAiTransfers(
           ...target,
           currentClubId: buyer.id,
           currentLeagueId: buyer.leagueId || '',
+          isFreeAgent: false,
           contractYears: years,
           salary: wage,
           isListedForTransfer: false,

@@ -231,6 +231,8 @@ import {
   normalizePlayerKey,
   processFreeAgentsAndAiTransfers,
   executeCompetitiveAiTransfersAndGrowth,
+  isTransferWindowOpen,
+  TRANSFER_WINDOW_CLOSED_MESSAGE,
   TransferNegotiationProposal,
   NegotiationResult,
 } from '../utils/transferEngine';
@@ -4707,7 +4709,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       console.log('[DIAG] BIDS_STARTED');
       const latestUserClub = updatedAllTeams.find(t => t.isUserClub || (userClub && t.id === userClub.id)) || userClub;
       if (latestUserClub) {
-        const aiBidsResult = generateIncomingAiBids(updatedAllTeams, latestUserClub, currentRound, season.seasonNumber);
+        const aiBidsResult = generateIncomingAiBids(updatedAllTeams, latestUserClub, currentRound, season.seasonNumber, calendarDate?.rawDateStr);
         if (aiBidsResult.bids.length > 0) {
           setIncomingBids(prev => [...aiBidsResult.bids, ...prev].slice(0, 40));
           newInboxMsgs.unshift(...aiBidsResult.inboxMessages);
@@ -5672,7 +5674,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     // 5. Generate Incoming AI Bids & Check Expiring Contracts if user is managing a club
     const latestUserClubSim = updatedAllTeams.find(t => t.isUserClub || (userClub && t.id === userClub.id)) || userClub;
     if (latestUserClubSim) {
-      const aiBidsResult = generateIncomingAiBids(updatedAllTeams, latestUserClubSim, currentRound, season.seasonNumber);
+      const aiBidsResult = generateIncomingAiBids(updatedAllTeams, latestUserClubSim, currentRound, season.seasonNumber, calendarDate?.rawDateStr);
       if (aiBidsResult.bids.length > 0) {
         setIncomingBids(prev => [...aiBidsResult.bids, ...prev].slice(0, 40));
         newInboxMsgs.unshift(...aiBidsResult.inboxMessages);
@@ -6274,6 +6276,11 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       // Only treat as free agent if in transferMarket or not found in any club
       const isFreeAgent = isInTransferMarket || !sellingClubId;
 
+      // Transfer window: only free agents can be signed while the window is closed
+      if (!isFreeAgent && !isTransferWindowOpen(calendarDate?.rawDateStr)) {
+        return { success: false, message: TRANSFER_WINDOW_CLOSED_MESSAGE };
+      }
+
       const transferFee = isFreeAgent
         ? 0
         : customFee !== undefined && customFee > 0
@@ -6430,6 +6437,11 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       return { success: false, message: 'أنت غير مرتبط بأي نادٍ حالياً!' };
     }
 
+    // Selling (registration of the player elsewhere) is only possible while the window is open
+    if (!isTransferWindowOpen(calendarDate?.rawDateStr)) {
+      return { success: false, message: TRANSFER_WINDOW_CLOSED_MESSAGE };
+    }
+
     const squadPlayers = Array.isArray(userClub.players) ? userClub.players : [];
     const targetPlayer = squadPlayers.find(p => p.id === playerId);
     if (!targetPlayer) {
@@ -6446,9 +6458,12 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     // Pick a real AI club so the sold player joins another club and actively plays there
     const eligibleBuyers = findEligibleBuyerClubs(targetPlayer, teams, userClub.id);
     const fallbackAiClubs = teams.filter(t => !t.isUserClub && t.id !== userClub.id);
-    let chosenBuyer = eligibleBuyers.length > 0
-      ? eligibleBuyers[Math.floor(Math.random() * eligibleBuyers.length)].club
-      : (fallbackAiClubs.length > 0 ? fallbackAiClubs[Math.floor(Math.random() * fallbackAiClubs.length)] : null);
+    // Only clubs that can really pay the fee may buy (no more silent budget top-ups)
+    const affordableBuyers = eligibleBuyers.filter(b => (b.club.budget || 0) >= saleAmount);
+    const affordableFallback = fallbackAiClubs.filter(t => (t.budget || 0) >= saleAmount);
+    let chosenBuyer = affordableBuyers.length > 0
+      ? affordableBuyers[Math.floor(Math.random() * affordableBuyers.length)].club
+      : (affordableFallback.length > 0 ? affordableFallback[Math.floor(Math.random() * affordableFallback.length)] : null);
 
     // Negotiated sale: the asking price is re-validated here (never trust the UI) against what buyers would really pay
     if (opts && Number.isFinite(opts.fee)) {
@@ -6462,14 +6477,11 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
 
     if (chosenBuyer) {
-      const ensuredBuyerTeams = teams.map(t =>
-        t.id === chosenBuyer.id ? { ...t, budget: Math.max(t.budget || 0, saleAmount + 100000) } : t
-      );
       const atomicRes = executeAtomicTransfer({
         player: targetPlayer,
         sellingClubId: userClub.id,
         buyingClubId: chosenBuyer.id,
-        allTeams: ensuredBuyerTeams,
+        allTeams: teams,
         transferFee: saleAmount,
         salary: targetPlayer.salary || 5000,
         contractYears: 3,
@@ -6507,87 +6519,13 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           message: `تم بيع ${targetPlayer.name} إلى نادي ${chosenBuyer.name} بمبلغ ${saleAmount.toLocaleString()} ج.م!`,
         };
       }
+      // Buyer found but the atomic transfer failed (e.g. it can no longer afford the fee): report why.
+      return { success: false, message: atomicRes.message };
     }
 
-    const newStarting = userClub.tactics?.startingPlayerIds.filter(id => id !== playerId) || [];
-    const newBench = userClub.tactics?.benchPlayerIds.filter(id => id !== playerId) || [];
-    const soldMarketPlayer: Player = {
-      ...targetPlayer,
-      currentClubId: chosenBuyer?.id || '',
-      currentLeagueId: chosenBuyer?.leagueId || 'free_agents',
-      isFreeAgent: !chosenBuyer,
-      contractYears: chosenBuyer ? 3 : 0,
-      isListedForTransfer: Boolean(chosenBuyer),
-    };
-
-    setTeams(prev => prev.map(t => {
-      if (t.isUserClub || t.id === userClub.id) {
-        return {
-          ...t,
-          budget: (t.budget || 0) + saleAmount,
-          transferBudget: (t.transferBudget || t.budget || 0) + saleAmount,
-          players: (t.players || []).filter(p => p.id !== playerId),
-          tactics: t.tactics ? {
-            ...t.tactics,
-            startingPlayerIds: newStarting,
-            benchPlayerIds: newBench,
-          } : undefined,
-        };
-      }
-      if (chosenBuyer && t.id === chosenBuyer.id) {
-        return {
-          ...t,
-          players: [...(t.players || []).filter(p => p.id !== playerId), soldMarketPlayer],
-        };
-      }
-      return t;
-    }));
-
-    if (!chosenBuyer) {
-      setTransferMarket(prev => [
-        soldMarketPlayer,
-        ...(Array.isArray(prev) ? prev.filter(p => p && p.id !== playerId) : []),
-      ]);
-    }
-    setActiveNegotiations(prev => prev.filter(n => n.playerId !== playerId));
-    setIncomingBids(prev => prev.filter(b => b.playerId !== playerId));
-
-    const transferEntry: TransferHistoryEntry = {
-      id: `tx_${Date.now()}_${targetPlayer.id}`,
-      playerId: targetPlayer.id,
-      playerName: targetPlayer.name,
-      playerRating: targetPlayer.overallRating,
-      position: targetPlayer.position,
-      type: 'sell',
-      fee: saleAmount,
-      salary: targetPlayer.salary,
-      date: `الجولة ${currentRound}`,
-      seasonNumber: season.seasonNumber,
-      round: currentRound,
-      fromClubName: userClub.name,
-      toClubName: chosenBuyer?.name || 'نادي آخر (سوق الانتقالات)',
-      timestamp: Date.now(),
-    };
-    setTransferHistory(prev => [transferEntry, ...prev]);
-
-    setClubEconomy(prev => ({
-      ...prev,
-      transferIncomeTotal: prev.transferIncomeTotal + saleAmount,
-      currentSeasonNetProfit: prev.currentSeasonNetProfit + saleAmount,
-    }));
-
-    const sellMsg: InboxMessage = {
-      id: `msg_trans_sell_${Date.now()}`,
-      title: `بيع اللاعب ${targetPlayer.name} بنجاح 💰`,
-      sender: 'إدارة الحسابات',
-      date: `الجولة ${currentRound}`,
-      type: 'transfer',
-      read: false,
-      content: `تمت الموافقة على بيع اللاعب ${targetPlayer.name} بالسعر الثابت (${saleAmount.toLocaleString()} جنيه) وتم إيداع المبلغ في خزينة النادي.`,
-    };
-    setInbox(prev => [sellMsg, ...prev]);
-
-    return { success: true, message: `تم بيع ${targetPlayer.name} بالسعر الثابت (${saleAmount.toLocaleString()} جنيه)!` };
+    // No club is willing and able to pay the fee: the sale simply does not happen
+    // (no more budget top-ups or mystery money appearing from the market).
+    return { success: false, message: 'لا يوجد نادٍ قادر على دفع قيمة اللاعب حالياً. جرّب تخفيض السعر المطلوب أو أعد المحاولة خلال فترة الانتقالات.' };
   };
 
   const listPlayerForTransfer = (playerId: string, isListed: boolean): { success: boolean; message: string } => {
@@ -9858,6 +9796,11 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             const safeFee = deal.bidFee || 0;
             const safeSalary = deal.offeredSalary || targetPlayer.salary || 10000;
             const safeYears = deal.contractYears || 2;
+            // Money conservation: the selling club can only receive what the buyer actually paid.
+            // Affordability was checked when the negotiation started, but the budget may have
+            // dropped since; without this cap the seller would be credited money that never existed.
+            const buyerTeamNow = calculatedNextTeams.find(t => t && (t.isUserClub || t.id === userClub.id));
+            const paidFee = Math.max(0, Math.min(safeFee, buyerTeamNow?.budget ?? 0));
             const newPlayer: Player = {
               ...targetPlayer,
               currentClubId: userClub.id,
@@ -9876,14 +9819,14 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                 const filtered = (t.players || []).filter(p => p && p.id !== targetPlayer.id && (normTargetName ? normalizePlayerKey(p.name) !== normTargetName : true));
                 return {
                   ...t,
-                  budget: Math.max(0, (t.budget || 0) - safeFee),
+                  budget: Math.max(0, (t.budget || 0) - paidFee),
                   players: [...filtered, newPlayer],
                 };
               }
               if (deal.playerClubId && t.id === deal.playerClubId) {
                 return {
                   ...t,
-                  budget: (t.budget || 0) + safeFee,
+                  budget: (t.budget || 0) + paidFee,
                   players: (t.players || []).filter(p => p && p.id !== targetPlayer.id && (normTargetName ? normalizePlayerKey(p.name) !== normTargetName : true)),
                 };
               }
@@ -10330,6 +10273,11 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           proposal.transferFee <= 0);
       const displaySellingClubName = isFreeAgent ? 'لاعب حر (بدون نادٍ)' : resolvedClub.clubName;
       const effectiveTransferFee = isFreeAgent ? 0 : proposal.transferFee;
+
+      // Transfer window: only free agents can be negotiated with while the window is closed
+      if (!isFreeAgent && !isTransferWindowOpen(calendarDate?.rawDateStr)) {
+        return { success: false, message: TRANSFER_WINDOW_CLOSED_MESSAGE };
+      }
 
       if (!isFreeAgent && effectiveTransferFee > userClub.budget) {
         return { success: false, message: `قيمة عرض الشراء المطلوب (${effectiveTransferFee.toLocaleString()} ج.م) تتجاوز ميزانية النادي المتاحة (${userClub.budget.toLocaleString()} ج.م). يجب توفير سعر اللاعب أولاً!` };
