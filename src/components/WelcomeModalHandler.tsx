@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useGame } from '../context/GameContext';
 import { CreateTrainerModal } from './CreateTrainerModal';
+import { TEST_QUICK_START } from '../config/testQuickStart';
 import { 
   hasLocalTrainerProfile, 
   getLocalTrainerProfile, 
@@ -9,7 +10,7 @@ import {
 } from '../services/trainerProfileService';
 
 export const WelcomeModalHandler: React.FC = () => {
-  const { manager, updateTrainerProfile, selectStartingClub } = useGame();
+  const { manager, updateTrainerProfile, selectStartingClub, resetGame } = useGame();
   const [needsProfileCreation, setNeedsProfileCreation] = useState<boolean>(false);
   const [isReady, setIsReady] = useState<boolean>(false);
 
@@ -59,7 +60,11 @@ export const WelcomeModalHandler: React.FC = () => {
     if (updateTrainerProfile) {
       updateTrainerProfile(profile.name, profile.age, profile.nationality);
     }
-    if (startingClubId && selectStartingClub) {
+    // TEST BUILDS ONLY: a quick-start club means the first career must be rebuilt at that
+    // club's real league (resetGame handles it); the normal path just marks the picked club.
+    if (TEST_QUICK_START && TEST_QUICK_START.clubId && resetGame) {
+      resetGame();
+    } else if (startingClubId && selectStartingClub) {
       selectStartingClub(startingClubId);
     }
     setNeedsProfileCreation(false);
