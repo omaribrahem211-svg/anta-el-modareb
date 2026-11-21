@@ -116,9 +116,9 @@ export class BillingService {
       if (productId === PREMIUM_PRODUCT_ID) {
         await this.acknowledgePremium(transaction);
         this.setPremiumLocal(true);
-      } else if (productId in COIN_PACKS) {
-        await this.consumePack(transaction);
       }
+      // Coin packs are NOT consumed here: the caller credits the coins first and then calls finishCoinPack(),
+      // so a crash in between can never lose a paid pack (it is recovered by getUnconsumedCoinPacks()).
       return transaction;
     } catch (err) {
       // إلغاء المستخدم أو فشل الدفع
@@ -131,21 +131,35 @@ export class BillingService {
   private async acknowledgePremium(transaction: Transaction): Promise<void> {
     try {
       await NativePurchases.acknowledgePurchase({
-        purchaseToken: transaction.transactionId,
+        purchaseToken: transaction.purchaseToken || transaction.transactionId,
       });
     } catch (err) {
       console.warn('[Billing] acknowledge failed', err);
     }
   }
 
-  /** استهلاك باقة كوينز (مستهلك - يتيح إعادة الشراء) */
-  private async consumePack(transaction: Transaction): Promise<void> {
+  /** استهلاك باقة كوينز بعد إضافة الكوينز (مستهلك - يتيح إعادة الشراء) */
+  async finishCoinPack(transaction: Transaction): Promise<void> {
     try {
       await NativePurchases.consumePurchase({
-        purchaseToken: transaction.transactionId,
+        purchaseToken: transaction.purchaseToken || transaction.transactionId,
       });
     } catch (err) {
       console.warn('[Billing] consume failed', err);
+    }
+  }
+
+  /** باقات كوينز مدفوعة لم تُستهلك بعد (انقطاع/إغلاق أثناء الشراء) - لازم تُضاف وتُستهلك */
+  async getUnconsumedCoinPacks(): Promise<Transaction[]> {
+    if (!this.isAvailable()) return [];
+    try {
+      const result = await NativePurchases.getPurchases({ productType: PURCHASE_TYPE.INAPP });
+      return (result.purchases ?? []).filter(
+        (p) => p.productIdentifier in COIN_PACKS && p.purchaseState === '1'
+      );
+    } catch (err) {
+      console.warn('[Billing] getUnconsumedCoinPacks failed', err);
+      return [];
     }
   }
 
@@ -160,8 +174,10 @@ export class BillingService {
       const owned = purchases.some(
         (p) => p.productIdentifier === PREMIUM_PRODUCT_ID && p.purchaseState === '1'
       );
-      this.setPremiumLocal(owned);
-      return owned;
+      // Never revoke automatically: an empty/failed store answer (offline, Play Store busy) must not take
+      // away something the player paid for. Only a confirmed purchase turns premium on.
+      if (owned) this.setPremiumLocal(true);
+      return owned || this.isPremium();
     } catch (err) {
       console.warn('[Billing] syncEntitlement failed', err);
       return this.isPremium();

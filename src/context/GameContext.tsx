@@ -6276,10 +6276,10 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       }
 
       // Only treat as free agent if in transferMarket or not found in any club
-      const isFreeAgent = isInTransferMarket || !sellingClubId;
+      const isFreeAgent = !player.isLegend && (isInTransferMarket || !sellingClubId);
 
       // Transfer window: only free agents can be signed while the window is closed
-      if (!isFreeAgent && !isTransferWindowOpen(calendarDate?.rawDateStr)) {
+      if (!isFreeAgent && !player.isLegend && !isTransferWindowOpen(calendarDate?.rawDateStr)) {
         return { success: false, message: TRANSFER_WINDOW_CLOSED_MESSAGE };
       }
 
@@ -10287,8 +10287,8 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       const displaySellingClubName = isFreeAgent ? 'لاعب حر (بدون نادٍ)' : resolvedClub.clubName;
       const effectiveTransferFee = isFreeAgent ? 0 : proposal.transferFee;
 
-      // Transfer window: only free agents can be negotiated with while the window is closed
-      if (!isFreeAgent && !isTransferWindowOpen(calendarDate?.rawDateStr)) {
+      // Transfer window: only free agents (and the Legends Hall, which has no selling club) can be negotiated with while it is closed
+      if (!isFreeAgent && !targetPlayer.isLegend && !isTransferWindowOpen(calendarDate?.rawDateStr)) {
         return { success: false, message: TRANSFER_WINDOW_CLOSED_MESSAGE };
       }
 

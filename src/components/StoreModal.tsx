@@ -20,6 +20,9 @@ interface StoreModalProps {
   onClose: () => void;
 }
 
+// Purchases already credited in this app run (stops a double credit between the buy flow and the recovery below)
+const creditedPurchaseTokens = new Set<string>();
+
 type StoreMessage = { kind: 'success' | 'error' | 'info'; text: string } | null;
 
 export const StoreModal: React.FC<StoreModalProps> = ({ isOpen, onClose }) => {
@@ -53,6 +56,28 @@ export const StoreModal: React.FC<StoreModalProps> = ({ isOpen, onClose }) => {
     };
   }, [isOpen]);
 
+  // A paid coin pack that was never credited/consumed (app closed or crashed mid-purchase) is credited now.
+  useEffect(() => {
+    if (!isNative) return;
+    let cancelled = false;
+    (async () => {
+      await billingService.initialize();
+      const owned = await billingService.getUnconsumedCoinPacks();
+      for (const tx of owned) {
+        if (cancelled) return;
+        const key = tx.transactionId;
+        if (creditedPurchaseTokens.has(key)) continue;
+        creditedPurchaseTokens.add(key);
+        const pack = COIN_PACKS[tx.productIdentifier as keyof typeof COIN_PACKS];
+        if (!pack) continue;
+        grantPurchasedCoins(pack.coins, 'باقة دعم اللعبة (تمت استعادتها) ❤️');
+        await billingService.finishCoinPack(tx);
+      }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const handleReloadProducts = async () => {
     if (reloading) return;
     setReloading(true);
@@ -82,8 +107,12 @@ export const StoreModal: React.FC<StoreModalProps> = ({ isOpen, onClose }) => {
         setMessage({ kind: 'success', text: res.message });
       } else if (productId in COIN_PACKS) {
         const amount = COIN_PACKS[productId as keyof typeof COIN_PACKS].coins;
-        const res = grantPurchasedCoins(amount, 'باقة دعم اللعبة ❤️');
-        setMessage({ kind: 'success', text: res.message });
+        if (!creditedPurchaseTokens.has(tx.transactionId)) {
+          creditedPurchaseTokens.add(tx.transactionId);
+          const res = grantPurchasedCoins(amount, 'باقة دعم اللعبة ❤️');
+          setMessage({ kind: 'success', text: res.message });
+          await billingService.finishCoinPack(tx);
+        }
       }
     } catch (err: any) {
       setMessage({ kind: 'error', text: err?.message || 'حدث خطأ أثناء الشراء. حاول مرة أخرى.' });

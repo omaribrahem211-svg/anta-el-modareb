@@ -1492,7 +1492,7 @@ export function simulateMatchStep(
       aiTactics = {
         ...aiTactics,
         mentality: bigDeficit || aiMgrStyle === 'attacking' ? 'ultra_attacking' : 'attacking',
-        pressingIntensity: aiMgrStyle === 'defensive' ? 'medium' : 'high',
+        pressingIntensity: aiMgrStyle === 'defensive' ? 'balanced' : 'high',
         tempo: 'fast',
       };
 
@@ -1510,7 +1510,7 @@ export function simulateMatchStep(
         ...aiTactics,
         mentality: aiMgrStyle === 'defensive' ? 'ultra_defensive' : 'defensive',
         pressingIntensity: 'low',
-        timeWasting: 'sometimes',
+        ...({ timeWasting: 'sometimes' } as any),
       };
 
       newEvents.push({
@@ -1837,14 +1837,14 @@ export function simulateMatchStep(
     if (scoreDiff > 0 && nextMinute >= 72) {
       currentHomeTactics = { ...currentHomeTactics, mentality: 'defensive', defensiveLine: 'low', timeWasting: 'sometimes', defensiveBlock: 'low' };
     } else if (scoreDiff < 0 && compositeDiff > -3) {
-      currentHomeTactics = { ...currentHomeTactics, mentality: 'attacking', pressingIntensity: 'medium', tempo: 'fast' };
+      currentHomeTactics = { ...currentHomeTactics, mentality: 'attacking', pressingIntensity: 'balanced', tempo: 'fast' };
     }
   }
   if (isAwayAi && nextMinute >= 55) {
     if (scoreDiff < 0 && nextMinute >= 72) {
       currentAwayTactics = { ...currentAwayTactics, mentality: 'defensive', defensiveLine: 'low', timeWasting: 'sometimes', defensiveBlock: 'low' };
     } else if (scoreDiff > 0 && compositeDiff < 3) {
-      currentAwayTactics = { ...currentAwayTactics, mentality: 'attacking', pressingIntensity: 'medium', tempo: 'fast' };
+      currentAwayTactics = { ...currentAwayTactics, mentality: 'attacking', pressingIntensity: 'balanced', tempo: 'fast' };
     }
   }
 
