@@ -161,6 +161,7 @@ import { generateMatchReactions } from '../services/matchReactionEngine';
 import { generateImmersiveNewsBatch, getInitialFootballNews } from '../services/footballNewsEngine';
 import { evaluateMatchImpactOnConfidence, updateDailyBoardConfidence, getClubLeagueTarget } from '../utils/boardEngine';
 import { EGYPT_TIER_4_LEAGUE, getLeagueById, GLOBAL_LEAGUES, findClubInWorld, getClubDisplayName, updateLeagueRosterInWorld, getCustomLeagues } from '../data/leaguesData';
+import { TEST_QUICK_START } from '../config/testQuickStart';
 import { calculateMatchRevenue, MatchRevenueBreakdown, getBenchmarkTicketPrice } from '../utils/matchRevenue';
 import { AdManager } from '../services/adManager';
 import { getWeekKey } from '../services/managerRankingService';
@@ -10972,8 +10973,13 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     localStorage.removeItem(`${STORAGE_KEY}_scoutedOpponents`);
     localStorage.removeItem(`${STORAGE_KEY}_deletedMessageIds`);
 
-    const rawTeams = applyWorldOverridesToClubs(INITIAL_TEAMS);
-    const chosenClubId = startingClubId || 'team_user';
+    // TEST BUILDS ONLY: when TEST_QUICK_START.clubId is set (never on production branches),
+    // a new career starts directly at that club in its real league instead of tier 4.
+    const quickStartClubId = TEST_QUICK_START && TEST_QUICK_START.clubId ? TEST_QUICK_START.clubId : null;
+    const startLeague = quickStartClubId ? (getLeagueById(TEST_QUICK_START.leagueId) || EGYPT_TIER_4_LEAGUE) : EGYPT_TIER_4_LEAGUE;
+    const startBaseTeams = quickStartClubId ? (startLeague.teams || INITIAL_TEAMS) : INITIAL_TEAMS;
+    const rawTeams = applyWorldOverridesToClubs(startBaseTeams);
+    const chosenClubId = quickStartClubId || startingClubId || 'team_user';
     const freshTeams = rawTeams.map(t => ({
       ...t,
       isUserClub: t.id === chosenClubId,
@@ -10981,11 +10987,11 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const chosenUserClub = freshTeams.find(t => t.id === chosenClubId) || freshTeams[0];
     const freshMarket = applyWorldOverridesToMarket(INITIAL_TRANSFER_MARKET);
 
-    const freshAgenda = generateMasterSeasonAgenda(1, EGYPT_TIER_4_LEAGUE, freshTeams, undefined, undefined, chosenUserClub);
+    const freshAgenda = generateMasterSeasonAgenda(1, startLeague, freshTeams, undefined, undefined, chosenUserClub);
     const maxR = freshAgenda.length > 0 ? Math.max(...freshAgenda.map(f => f.round)) : 34;
 
-    setSeason({ ...INITIAL_SEASON, totalRounds: maxR });
-    setActiveLeague(EGYPT_TIER_4_LEAGUE);
+    setSeason({ ...INITIAL_SEASON, totalRounds: maxR, leagueId: startLeague.id, leagueName: startLeague.name, divisionTier: startLeague.tier });
+    setActiveLeague(startLeague);
     setTeams(freshTeams);
     setStandings(generateInitialStandings(freshTeams));
     setCupTournament(null);
@@ -11002,7 +11008,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     setInbox(INITIAL_INBOX.map((msg, idx) => idx === 0 ? {
       ...msg,
       title: `مرحباً بك في ${chosenUserClub.name}!`,
-      content: `يا كابتن، بنرحب بيك على رأس القيادة الفنية لنادي ${chosenUserClub.name} العريق في دوري الدرجة الرابعة. الجماهير هنا بتعشق الكورة ومستنية منك تصعد بالفريق للدرجة الثالثة وتعمل موسم تاريخي. الخزينة فيها ${chosenUserClub.budget.toLocaleString()} جنيه، والقائمة تحت أمرك. ورينا شطارتك وتكتيكك!`,
+      content: `يا كابتن، بنرحب بيك على رأس القيادة الفنية لنادي ${chosenUserClub.name} العريق في ${startLeague.name}. الجماهير هنا بتعشق الكورة ومستنية منك موسم تاريخي. الخزينة فيها ${(chosenUserClub.budget || 0).toLocaleString()} جنيه، والقائمة تحت أمرك. ورينا شطارتك وتكتيكك!`,
     } : msg));
     setJobOffers([]);
     setSeasonEndSummary(null);
@@ -11021,7 +11027,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     });
     setCalendarDate(getInitialSeasonDate(1));
     setActiveNegotiations([]);
-    setBoardSystem(generateInitialBoardSystem(chosenUserClub, 4, freshTeams.length, freshTeams, false));
+    setBoardSystem(generateInitialBoardSystem(chosenUserClub, startLeague.tier || 4, freshTeams.length, freshTeams, false));
     setDailyNews([]);
     setRetiredPlayers([]);
     setScoutedOpponents({});
@@ -11036,7 +11042,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       },
       transferMarket: freshMarket,
       calendarDate: getInitialSeasonDate(1),
-      activeLeagueId: EGYPT_TIER_4_LEAGUE.id,
+      activeLeagueId: startLeague.id,
       seasonNumber: 1,
     });
   };
