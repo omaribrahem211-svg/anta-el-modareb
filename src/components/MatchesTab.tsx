@@ -115,6 +115,11 @@ export const MatchesTab: React.FC = () => {
 
   const { t, language } = useLanguage();
   const commentaryScrollRef = useRef<HTMLDivElement>(null);
+  // Opaque dark cover while the live-match screen mounts: the first paint of the match tree is
+  // heavy, and weak WebViews flash their WHITE background while the main layer rasters. Show the
+  // stadium-dark cover instead until the first frames are on screen.
+  const [matchMountCover, setMatchMountCover] = useState(false);
+  const mountCoverFixtureRef = useRef<string | null>(null);
   const [showSubModal, setShowSubModal] = useState(false);
   const [selectedOutPlayerId, setSelectedOutPlayerId] = useState<string>('');
   const [selectedInPlayerId, setSelectedInPlayerId] = useState<string>('');
@@ -302,6 +307,17 @@ export const MatchesTab: React.FC = () => {
       [alertId]: (liveMatch?.currentMinute || 0) + 12,
     }));
   };
+
+  useEffect(() => {
+    const id = liveMatch?.fixture?.id || null;
+    if (id && id !== mountCoverFixtureRef.current) {
+      mountCoverFixtureRef.current = id;
+      setMatchMountCover(true);
+      const t = setTimeout(() => setMatchMountCover(false), 600);
+      return () => clearTimeout(t);
+    }
+    if (!id) mountCoverFixtureRef.current = null;
+  }, [liveMatch?.fixture?.id]);
 
   // Auto scroll commentary container ONLY internally (never scroll whole page)
   useEffect(() => {
@@ -1388,16 +1404,16 @@ export const MatchesTab: React.FC = () => {
           </div>
 
           {showCommentary && (
-            <div ref={commentaryScrollRef} className="space-y-2 max-h-52 overflow-y-auto pr-1 scroll-smooth">
+            <div ref={commentaryScrollRef} className="space-y-2 max-h-52 overflow-y-auto pr-1">
               {visibleEvents.length === 0 ? (
                 <div className="text-center py-5 text-xs text-slate-500">
                   صافرة البداية تنطلق.. الفريقان يتحسسان أرضية الملعب في الدقائق الأولى!
                 </div>
               ) : (
-                visibleEvents.map((evt, idx) => (
+                visibleEvents.slice(-12).map((evt, idx) => (
                   <div 
                     key={idx}
-                    className={`p-2 rounded-xl border text-xs flex items-start gap-2.5 transition-all ${
+                    className={`p-2 rounded-xl border text-xs flex items-start gap-2.5 ${
                       evt.type === 'goal'
                         ? 'bg-emerald-950/80 border-emerald-500 text-emerald-200 font-bold animate-pulse'
                         : evt.type === 'yellow_card'
@@ -1467,6 +1483,12 @@ export const MatchesTab: React.FC = () => {
   // Not in live match: Show Fixtures & Round Schedule
   return (
     <div className="space-y-4 pb-20 animate-fade-in font-['Cairo',sans-serif]">
+      {matchMountCover && (
+        <div className="fixed inset-0 z-[25000] bg-[#020617] flex flex-col items-center justify-center gap-3" dir="rtl">
+          <div className="w-10 h-10 rounded-full border-4 border-emerald-500 border-t-transparent animate-spin" />
+          <div className="text-emerald-300 text-sm font-black">جاري تجهيز الملعب...</div>
+        </div>
+      )}
       {/* Non-blocking Simulation & Tournament Processing Indicator */}
       {isSimulationRunning && (
         <div className="p-3.5 rounded-2xl bg-slate-900/95 border border-emerald-500/50 text-emerald-300 text-xs font-bold shadow-xl flex items-center justify-between gap-3 animate-pulse">

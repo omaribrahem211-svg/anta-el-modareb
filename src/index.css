@@ -59,21 +59,13 @@ html, body {
   animation: pitchBallFloat 0.45s ease-in-out infinite;
 }
 
-/* Compositor-only micro-drift for live pitch discs & ball (transform-only, no layout work).
-   The centering translate(-50%, -50%) is baked into every frame because the elements no
-   longer carry it as an inline transform. */
-@keyframes pitchDiscDrift {
-  0%, 100% { transform: translate(-50%, -50%); }
-  50% { transform: translate(calc(-50% + 1.5px), calc(-50% - 2px)); }
-}
-
+/* Compositor-only micro-bob for the live pitch ball (transform-only, no layout work).
+   The centering translate(-50%, -50%) is baked into every frame because the ball does not
+   carry it as an inline transform. Discs stay animation-free: 22 extra compositor layers
+   overloaded weak GPUs (white flash). */
 @keyframes pitchBallBob {
   0%, 100% { transform: translate(-50%, -50%) scale(1); }
   50% { transform: translate(-50%, calc(-50% - 3px)) scale(1.08); }
-}
-
-.animate-disc-drift {
-  animation: pitchDiscDrift 2.4s ease-in-out infinite;
 }
 
 .animate-ball-bob {

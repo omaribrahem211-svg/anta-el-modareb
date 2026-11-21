@@ -1137,11 +1137,13 @@ export const OnlineMatchPitch3D: React.FC<OnlineMatchPitch3DProps> = ({
     const bg = isGK ? '#facc15' : isHome ? kit.home : kit.away;
     const fg = readableOn(bg);
     const size = player.isCarrier ? 30 : 26;
+    // Solid rings only: blurred box-shadows repaint on the main thread whenever a disc moves,
+    // and on weak GPUs that raster cost is what drops frames to white.
     const ring = player.isScorer
-      ? '0 0 0 3px #fbbf24, 0 0 16px 4px rgba(251,191,36,0.7)'
+      ? '0 0 0 3px #fbbf24'
       : player.isCarrier
-      ? '0 0 0 3px rgba(253,230,138,0.9), 0 0 14px 3px rgba(253,230,138,0.5)'
-      : '0 2px 6px rgba(0,0,0,0.5)';
+      ? '0 0 0 3px rgba(253,230,138,0.9)'
+      : '0 0 0 1px rgba(0,0,0,0.4)';
     return (
       <div
         key={player.id}
@@ -1149,13 +1151,14 @@ export const OnlineMatchPitch3D: React.FC<OnlineMatchPitch3DProps> = ({
           left: `${player.x}%`,
           top: `${player.y}%`,
           transition: 'left 0.7s cubic-bezier(0.25, 1, 0.5, 1), top 0.7s cubic-bezier(0.25, 1, 0.5, 1)',
+          transform: 'translate(-50%, -50%)',
           width: size,
           height: size,
           background: bg,
           color: fg,
           boxShadow: ring,
         }}
-        className="absolute z-10 pointer-events-none select-none rounded-full border-2 border-white/90 flex items-center justify-center font-black text-[11px] font-mono box-border animate-disc-drift"
+        className="absolute z-10 pointer-events-none select-none rounded-full border-2 border-white/90 flex items-center justify-center font-black text-[11px] font-mono box-border"
         aria-label={`${player.name} رقم ${player.jerseyNumber}`}
       >
         {player.jerseyNumber}
@@ -1489,7 +1492,8 @@ export const OnlineMatchPitch3D: React.FC<OnlineMatchPitch3DProps> = ({
               left: `${ballPos.x}%`,
               top: `${ballPos.y}%`,
               transition: 'left 0.45s cubic-bezier(0.25, 1, 0.5, 1), top 0.45s cubic-bezier(0.25, 1, 0.5, 1)',
-              boxShadow: '0 0 0 4px rgba(253,230,138,0.35), 0 0 14px 4px rgba(253,230,138,0.55)',
+              // Glow only while a shot is flying: a permanent blurred box-shadow repaints on the main thread every frame the ball moves.
+              boxShadow: attackSimulation.isShot ? '0 0 0 4px rgba(253,230,138,0.35), 0 0 14px 4px rgba(253,230,138,0.55)' : '0 1px 3px rgba(0,0,0,0.5)',
             }}
             className="absolute z-20 pointer-events-none w-3 h-3 rounded-full bg-white animate-ball-bob"
           >
