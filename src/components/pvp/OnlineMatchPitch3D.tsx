@@ -852,11 +852,11 @@ export const OnlineMatchPitch3D: React.FC<OnlineMatchPitch3DProps> = ({
         }
       } else if (p.role === 'ST' || p.role === 'CF') {
         if (isHomeAttack) {
-          targetY = 16 + Math.sin(time * 0.8) * 4;
-          targetX = 50 + Math.cos(time * 0.7) * 14;
+          targetY = 16;
+          targetX = 58;
           isRunning = true;
         } else if (isAwayAttack) {
-          targetY = 48 + Math.sin(time * 0.5) * 3;
+          targetY = 48;
           targetX = 50;
         }
       }
@@ -958,11 +958,11 @@ export const OnlineMatchPitch3D: React.FC<OnlineMatchPitch3DProps> = ({
         }
       } else if (p.role === 'ST' || p.role === 'CF') {
         if (isAwayAttack) {
-          targetY = 84 - Math.sin(time * 0.8) * 4;
-          targetX = 50 + Math.cos(time * 0.7) * 14;
+          targetY = 84;
+          targetX = 58;
           isRunning = true;
         } else if (isHomeAttack) {
-          targetY = 52 - Math.sin(time * 0.5) * 3;
+          targetY = 52;
           targetX = 50;
         }
       }
