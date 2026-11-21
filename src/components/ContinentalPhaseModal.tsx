@@ -9,6 +9,8 @@ import {
   qualifiesForWorldCup,
   tieScoreText,
   userTieVerdict,
+  getUserPendingLeg,
+  groupStandingsRows,
   type ContinentalPhaseState,
   type ContTie,
   type ContRoundKey,
@@ -67,6 +69,8 @@ export default function ContinentalPhaseModal() {
 
   const roundTies: ContTie[] = st.ties.filter(t => t.round === st.round);
   const userTie = roundTies.find(t => t.a === st.userId || t.b === st.userId);
+  const hasGroups = !!st.groups?.length;
+  const pending = (() => { try { return getUserPendingLeg(st); } catch { return null; } })();
   const finished = st.status === 'finished';
   const outcome = (() => { if (!finished) return null; try { return getContinentalOutcome(st); } catch { return { resultText: 'انتهت مشاركتك في البطولة', isChampion: false, xp: 0, reputation: 0, stageReached: st.round } as any; } })();
   const goesToWorldCup = (() => { try { return finished && qualifiesForWorldCup(st); } catch { return false; } })();
@@ -80,9 +84,24 @@ export default function ContinentalPhaseModal() {
   const money = (months: number) => fmt(Math.max(0, wageBill) * months * 1000 / 1000);
   const allRounds: ContRoundKey[] = ['R32', 'R16', 'QF', 'SF', 'F'];
   const entryRound: ContRoundKey = st.ties.length ? st.ties[0].round : st.round;
-  const roundKeys = allRounds.slice(allRounds.indexOf(entryRound));
+  const roundKeys: ContRoundKey[] = hasGroups ? ['GS', 'R16', 'QF', 'SF', 'F'] : allRounds.slice(Math.max(0, allRounds.indexOf(entryRound)));
+  // Current matchday of the group stage (all groups advance in lockstep)
+  const gsCurrentMd = (() => {
+    if (!hasGroups) return 0;
+    const unplayed = st.groups!.flatMap(g => g.matches).filter(m => !m.isPlayed);
+    return unplayed.length ? Math.min(...unplayed.map(m => m.matchday)) : 3;
+  })();
+  const gsMatches = hasGroups
+    ? st.groups!.flatMap(g => g.matches.map(m => ({ m, gid: g.id }))).filter(x => x.m.matchday === gsCurrentMd)
+    : [];
+  const lastGroupMatch = (() => {
+    if (!hasGroups) return null;
+    const mine = st.groups!.flatMap(g => g.matches).filter(m => m.isPlayed && (m.homeId === st.userId || m.awayId === st.userId));
+    return mine.length ? mine[mine.length - 1] : null;
+  })();
 
   const nextLegLabel = (() => {
+    if (st.round === 'GS') return `العب مباراة المجموعات (الجولة ${gsCurrentMd || 1})`;
     if (!userTie) return 'المباراة التالية';
     if (st.round === 'F') return 'العب النهائي';
     if (st.singleLeg) return 'العب المباراة';
@@ -106,7 +125,7 @@ export default function ContinentalPhaseModal() {
           <div className={`text-[11px] font-bold ${th.accentText}`}>{th.tagline}</div>
           <div className="text-sm tracking-widest text-amber-300">{'★'.repeat(th.stars)}<span className="text-slate-600">{'★'.repeat(5 - th.stars)}</span></div>
           <p className="text-xs text-slate-300">
-            {finished ? 'انتهت مشاركتك في البطولة' : isCwc ? `${ROUND_LABEL[st.round]} • مباراة واحدة • الموسم ${st.seasonNumber}` : `${ROUND_LABEL[st.round]} • الموسم ${st.seasonNumber}`}
+            {finished ? 'انتهت مشاركتك في البطولة' : st.round === 'GS' ? `${ROUND_LABEL[st.round]} • 3 مباريات لكل فريق • أول مركزين يتأهلان • الموسم ${st.seasonNumber}` : isCwc ? `${ROUND_LABEL[st.round]} • مباراة واحدة • الموسم ${st.seasonNumber}` : `${ROUND_LABEL[st.round]} • الموسم ${st.seasonNumber}`}
           </p>
           <div className="flex justify-center gap-1 pt-1">
             {roundKeys.map(rk => (
@@ -137,7 +156,7 @@ export default function ContinentalPhaseModal() {
             <div className="text-xl font-black text-white">{outcome.resultText}</div>
             <p className="text-xs text-slate-400 mt-2">
               {goesToWorldCup
-                ? '🌍 تأهلت إلى كأس العالم للأندية! 32 نادياً من أنحاء العالم بنظام خروج المغلوب.'
+                ? '🌍 تأهلت إلى كأس العالم للأندية! 32 نادياً من أنحاء العالم: 8 مجموعات ثم خروج المغلوب من دور الـ16.'
                 : 'بعد المتابعة ستظهر نتيجة الموسم وعروض الأندية. المكافآت ستُضاف إلى ميزانية الموسم القادم.'}
             </p>
           </div>
@@ -174,6 +193,18 @@ export default function ContinentalPhaseModal() {
           );
         })()}
 
+        {!lastTie && lastGroupMatch && (
+          <div className="bg-slate-900 border border-amber-500/40 rounded-3xl p-4 space-y-1.5">
+            <div className="text-[11px] text-amber-300 font-bold">آخر نتيجة لك • دور المجموعات (الجولة {lastGroupMatch.matchday})</div>
+            <div className="flex items-center justify-between gap-2 text-sm font-black text-white">
+              <span className="flex-1 text-center">{nameOf(st, lastGroupMatch.homeId)}</span>
+              <span className="text-lg font-mono text-amber-300">{lastGroupMatch.homeGoals} - {lastGroupMatch.awayGoals}</span>
+              <span className="flex-1 text-center">{nameOf(st, lastGroupMatch.awayId)}</span>
+            </div>
+            <p className="text-[10px] text-slate-500 text-center">تقدر تلعب كل مباراة بنفسك أو تحاكيها.</p>
+          </div>
+        )}
+
         {lastTie && lastLeg && (
           <div className="bg-slate-900 border border-amber-500/40 rounded-3xl p-4 space-y-1.5">
             <div className="text-[11px] text-amber-300 font-bold">
@@ -208,11 +239,57 @@ export default function ContinentalPhaseModal() {
           </div>
         )}
 
+        {!finished && st.round === 'GS' && pending && (
+          <div className="bg-slate-900 border border-emerald-500/30 rounded-3xl p-4 space-y-2">
+            <div className="text-[11px] text-emerald-300 font-bold">مباراتك في دور المجموعات • الجولة {gsCurrentMd}</div>
+            <div className="flex items-center justify-between gap-2 text-sm font-black text-white">
+              <span className="flex-1 text-center">{nameOf(st, pending.homeId)}</span>
+              <span className="text-slate-500 text-xs">ضد</span>
+              <span className="flex-1 text-center">{nameOf(st, pending.awayId)}</span>
+            </div>
+          </div>
+        )}
+
+        {hasGroups && (
+          <div className="space-y-2">
+            <div className="text-xs font-black text-slate-300">المجموعات • النقاط 3/1/0 • الترتيب عند التساوي: فارق الأهداف ثم الأهداف المسجلة</div>
+            {st.groups!.map(g => {
+              let rows: ReturnType<typeof groupStandingsRows> = [];
+              try { rows = groupStandingsRows(st, g); } catch { rows = []; }
+              return (
+                <div key={g.id} className="rounded-2xl border border-slate-800 bg-slate-900/60 p-3">
+                  <div className="text-[11px] font-black text-slate-400 mb-1">المجموعة {g.id}</div>
+                  {rows.map((r, i) => (
+                    <div key={r.teamId} className={`flex items-center justify-between gap-2 text-[11px] py-0.5 ${r.teamId === st.userId ? 'text-emerald-300 font-black' : i < 2 ? 'text-slate-100' : 'text-slate-500'}`}>
+                      <span className="flex-1 truncate">{i + 1}. {nameOf(st, r.teamId)}{r.teamId === st.userId ? ' ⭐' : ''}</span>
+                      <span className="font-mono text-[10px] text-slate-400">لعب {r.played} • {r.gf}:{r.ga}</span>
+                      <span className="font-mono font-black w-7 text-end">{r.pts}</span>
+                    </div>
+                  ))}
+                </div>
+              );
+            })}
+          </div>
+        )}
+
         <div className="space-y-2">
           <div className="text-xs font-black text-slate-300">
-            {finished ? 'النتائج النهائية' : `مباريات ${ROUND_LABEL[st.round]}`}
+            {finished ? 'النتائج النهائية' : st.round === 'GS' ? `مباريات الجولة ${gsCurrentMd} من دور المجموعات` : `مباريات ${ROUND_LABEL[st.round]}`}
           </div>
-          {(finished ? st.ties.filter(t => t.round === 'F' || t.a === st.userId || t.b === st.userId) : roundTies).map(t => {
+          {!finished && st.round === 'GS' && gsMatches.map(({ m, gid }) => {
+            const mine = m.homeId === st.userId || m.awayId === st.userId;
+            return (
+              <div key={m.id} className={`rounded-2xl p-3 border text-xs ${mine ? 'border-emerald-500/40 bg-emerald-500/5' : 'border-slate-800 bg-slate-900/60'}`}>
+                <div className="text-[10px] text-slate-500 mb-1">المجموعة {gid}</div>
+                <div className="flex items-center justify-between gap-2 font-bold text-slate-100">
+                  <span className={m.isPlayed && (m.homeGoals ?? 0) > (m.awayGoals ?? 0) ? 'text-emerald-300' : ''}>{nameOf(st, m.homeId)}</span>
+                  <span className="text-slate-300 font-mono">{m.isPlayed ? `${m.homeGoals} - ${m.awayGoals}` : 'لم تُلعب'}</span>
+                  <span className={m.isPlayed && (m.awayGoals ?? 0) > (m.homeGoals ?? 0) ? 'text-emerald-300' : ''}>{nameOf(st, m.awayId)}</span>
+                </div>
+              </div>
+            );
+          })}
+          {(finished ? st.ties.filter(t => t.round === 'F' || t.a === st.userId || t.b === st.userId) : st.round === 'GS' ? [] : roundTies).map(t => {
             const mine = t.a === st.userId || t.b === st.userId;
             return (
               <div key={t.id} className={`rounded-2xl p-3 border text-xs ${mine ? 'border-emerald-500/40 bg-emerald-500/5' : 'border-slate-800 bg-slate-900/60'}`}>
@@ -231,7 +308,7 @@ export default function ContinentalPhaseModal() {
         <div className="space-y-2 pt-2">
           {!finished ? (
             <>
-              <button onClick={() => (userTie ? playContinentalLiveMatch() : playContinentalStep())} className={`w-full ${th.button} font-black py-3.5 rounded-2xl active:scale-[0.99]`}>
+              <button onClick={() => (pending ? playContinentalLiveMatch() : playContinentalStep())} className={`w-full ${th.button} font-black py-3.5 rounded-2xl active:scale-[0.99]`}>
                 {nextLegLabel}
               </button>
               <div className="grid grid-cols-2 gap-2">
@@ -243,7 +320,7 @@ export default function ContinentalPhaseModal() {
                 </button>
               </div>
               <p className="text-[10px] text-slate-500 text-center">بين كل مباراة وأخرى 6 أيام راحة: اللياقة بتتجدد والإصابات بتتحسن.</p>
-              {userTie && (
+              {pending && (
                 <button onClick={() => playContinentalStep()} className="w-full bg-slate-800 text-slate-200 font-bold py-3 rounded-2xl border border-slate-700">
                   محاكاة هذه المباراة فقط
                 </button>
