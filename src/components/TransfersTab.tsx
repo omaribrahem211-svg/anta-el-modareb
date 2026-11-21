@@ -678,7 +678,7 @@ export const TransfersTab: React.FC<TransfersTabProps> = ({
   // Filter States: Default to user's league if available, otherwise 'ALL'
   const [searchQuery, setSearchQuery] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
-  const [selectedLeague, setSelectedLeague] = useState<string>(() => userClub?.leagueId || 'ALL');
+  const [selectedLeague, setSelectedLeague] = useState<string>('ALL');
   const [selectedClub, setSelectedClub] = useState<string>('ALL');
   const [selectedCategory, setSelectedCategory] = useState<PositionCategory | 'ALL'>('ALL');
   const [selectedExactPos, setSelectedExactPos] = useState<string>('ALL');
@@ -1332,13 +1332,13 @@ export const TransfersTab: React.FC<TransfersTabProps> = ({
           if (!matchName && !matchClub && !matchNat && !matchNick) return false;
         }
 
-        if (selectedLeague !== 'ALL' && item.leagueId !== selectedLeague) return false;
+        if (!p.isLegend && selectedLeague !== 'ALL' && item.leagueId !== selectedLeague) return false;
         if (selectedClub !== 'ALL' && item.clubName !== selectedClub) return false;
         if (selectedCategory !== 'ALL' && item.posCategory !== selectedCategory) return false;
         if (selectedExactPos !== 'ALL' && p.position !== selectedExactPos) return false;
         if (selectedNationality !== 'ALL' && p.nationality !== selectedNationality) return false;
         if (p.age < effMinAge || p.age > effMaxAge) return false;
-        if (p.overallRating < effMinOvr || p.overallRating > effMaxOvr) return false;
+        if (!p.isLegend && (p.overallRating < effMinOvr || p.overallRating > effMaxOvr)) return false;
 
         return true;
       })
