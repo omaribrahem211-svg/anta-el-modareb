@@ -152,7 +152,7 @@ export const StoreModal: React.FC<StoreModalProps> = ({ isOpen, onClose }) => {
     <div className="fixed inset-0 z-[26000] flex items-end sm:items-center justify-center bg-slate-950/90 backdrop-blur-sm p-0 sm:p-4" dir="rtl">
       <div className="w-full sm:max-w-md max-h-[92vh] overflow-y-auto bg-gradient-to-b from-slate-900 to-slate-950 border border-slate-700/60 sm:rounded-3xl rounded-t-3xl shadow-2xl">
         {/* Header */}
-        <div className="sticky top-0 z-10 flex items-center justify-between px-5 py-4 bg-slate-900/95 border-b border-slate-800">
+        <div className="sticky top-0 z-10 flex items-center justify-between px-5 py-4 bg-slate-900 border-b border-slate-800">
           <h2 className="text-lg font-black text-white">متجر اللعبة 🛒</h2>
           <button
             onClick={onClose}
