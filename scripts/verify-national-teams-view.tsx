@@ -26,7 +26,8 @@ const {
   generateNationalTeamJobOffer,
   initNationalTeamsForSeason,
 } = await import('../src/services/nationalTeamsService');
-const { __setMockGame } = await import('../src/context/GameContext');
+// __setMockGame exists only on the test double swapped in by run-nt-view-test.sh
+const { __setMockGame } = await import('../src/context/GameContext') as any;
 const { NationalTeamView } = await import('../src/components/national/NationalTeamView');
 
 let failures = 0;
