@@ -634,28 +634,32 @@ export function simulateDailyNegotiations(
 
     // --- STAGE 2: Player Terms Review (Contract Length 1-5 Years & Fixed Monthly Salary) ---
     if (current.stage === 'player_terms') {
+      // Terms agreed: WAIT for the manager to confirm the signing from the negotiations screen
+      // instead of auto-signing (and auto-charging the fee) on the next day advance.
+      if (current.actionRequired) {
+        return current;
+      }
       const validYears = Math.max(1, Math.min(5, current.contractYears || 3));
       current.contractYears = validYears;
       const fullPlayer = resolveFullPlayerObject(current, allTeams, transferMarket);
       const fixedWage = Math.max(1000, current.offeredSalary || fullPlayer.salary || 2500);
 
       current.offeredSalary = fixedWage;
-      current.stage = 'completed';
-      current.statusMessage = `تم الاتفاق بنجاح! وقع اللاعب ${current.playerName} عقداً رسمياً يمتد لـ ${validYears} سنوات بالراتب الشهري الثابت (${fixedWage.toLocaleString()} ج.م).`;
+      current.actionRequired = true;
+      current.daysRemainingInStage = 0;
+      current.statusMessage = `تم الاتفاق على جميع البنود مع ${current.playerName} (عقد ${validYears} سنوات براتب شهري ${fixedWage.toLocaleString()} ج.م). الصفقة بانتظار تأكيدك: اضغط "إتمام التعاقد" من شاشة المفاوضات لحسم التوقيع رسمياً.`;
       current.history.push({
         dateStr: new Date().toISOString().slice(0, 10),
-        message: `وقع اللاعب ${current.playerName} على عقده الجديد لمدة ${validYears} سنوات بالراتب الشهري الثابت (${fixedWage.toLocaleString()} ج.م).`,
+        message: `تم الاتفاق على عقد ${validYears} سنوات براتب شهري ${fixedWage.toLocaleString()} ج.م — بانتظار تأكيد المدير لإتمام التوقيع.`,
         from: 'player',
       });
       negotiationReports.push({
         negotiationId: current.id,
         playerName: current.playerName,
-        text: `🎉 تمت الصفقة رسمياً! انضم ${current.playerName} إلى صفوف فريقك بعقد يمتد لـ ${validYears} سنوات وبالراتب الثابت ${fixedWage.toLocaleString()} ج.م.`,
-        stage: 'completed',
-        actionRequired: false,
+        text: `✅ تم الاتفاق على كل بنود صفقة ${current.playerName}! اضغط "إتمام التعاقد" من شاشة المفاوضات لحسم التوقيع رسمياً.`,
+        stage: 'player_terms',
+        actionRequired: true,
       });
-
-      completedTransfers.push({ negotiation: current, player: { ...fullPlayer, salary: fixedWage } });
       return current;
     }
 
