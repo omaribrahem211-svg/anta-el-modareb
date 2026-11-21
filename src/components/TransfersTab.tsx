@@ -1338,7 +1338,7 @@ export const TransfersTab: React.FC<TransfersTabProps> = ({
         if (selectedExactPos !== 'ALL' && p.position !== selectedExactPos) return false;
         if (selectedNationality !== 'ALL' && p.nationality !== selectedNationality) return false;
         if (p.age < effMinAge || p.age > effMaxAge) return false;
-        if (p.overallRating < effMinOvr || p.overallRating > effMaxOvr) return false;
+        if (!p.isLegend && (p.overallRating < effMinOvr || p.overallRating > effMaxOvr)) return false;
 
         return true;
       })
