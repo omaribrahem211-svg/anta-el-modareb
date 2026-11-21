@@ -13,12 +13,14 @@ import {
   RotateCcw,
   ShieldCheck,
   ExternalLink,
-  Gift
+  Gift,
+  Crown
 } from 'lucide-react';
 import { getLocalTrainerProfile } from '../services/trainerProfileService';
 import { SettingsBackupModal } from './SettingsBackupModal';
 import { PromoCodeRedeemModal } from './PromoCodeRedeemModal';
 import { RestartSeasonModal } from './RestartSeasonModal';
+import { PremiumBadge, useIsPremium } from './premium/PremiumBadge';
 
 interface UserProfileMenuProps {
   onOpenAdmin?: () => void;
@@ -29,6 +31,7 @@ export const UserProfileMenu: React.FC<UserProfileMenuProps> = ({ onOpenAdmin, o
   const { user, isAdmin } = useAuth();
   const { manager, canClaimDailyReward, setShowDailyRewardModal, dailyRewardState } = useGame();
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+  const isPremiumCoach = useIsPremium();
   const [showSettingsModal, setShowSettingsModal] = useState(false);
   const [showPromoModal, setShowPromoModal] = useState(false);
   const [showRestartSeasonModal, setShowRestartSeasonModal] = useState(false);
@@ -90,7 +93,7 @@ export const UserProfileMenu: React.FC<UserProfileMenuProps> = ({ onOpenAdmin, o
                   {trainerName.charAt(0) || <User className="w-4 h-4" />}
                 </div>
                 <div className="min-w-0 flex-1">
-                  <h4 className="text-sm font-bold text-white truncate">{trainerName}</h4>
+                  <h4 className="text-sm font-bold text-white truncate flex items-center gap-1.5">{trainerName}{isPremiumCoach && <PremiumBadge />}</h4>
                   <span className="text-[10px] text-slate-400 block">
                     {manager.nationality || 'مصري'} • {manager.age || 35} سنة
                   </span>
@@ -144,6 +147,25 @@ export const UserProfileMenu: React.FC<UserProfileMenuProps> = ({ onOpenAdmin, o
                     : 'bg-slate-700 text-slate-300'
                 }`}>
                   {canClaimDailyReward ? 'متاح الآن 🎁' : `سلسلة ${dailyRewardState.streak || 0} أيام 🔥`}
+                </span>
+              </button>
+            </div>
+
+            {/* Game Store (المدرب المميز وادعم اللعبة) */}
+            <div className="mb-2">
+              <button
+                onClick={() => {
+                  setIsDropdownOpen(false);
+                  window.dispatchEvent(new CustomEvent('open-game-store'));
+                }}
+                className="w-full flex items-center justify-between p-2.5 rounded-xl border font-bold transition-all cursor-pointer group shadow-sm text-xs bg-gradient-to-r from-amber-500/20 via-amber-500/25 to-yellow-500/20 hover:from-amber-500/30 hover:to-yellow-500/30 border-amber-500/50 text-amber-200"
+              >
+                <div className="flex items-center gap-2">
+                  <Crown className="w-4 h-4 text-amber-400 group-hover:scale-110 transition-transform" />
+                  <span>متجر اللعبة</span>
+                </div>
+                <span className="text-[10px] px-2 py-0.5 rounded-full font-bold bg-amber-500/30 text-amber-200 border border-amber-400/40">
+                  المدرب المميز ⭐
                 </span>
               </button>
             </div>

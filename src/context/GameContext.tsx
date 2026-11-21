@@ -167,6 +167,7 @@ import { getWeekKey } from '../services/managerRankingService';
 import { ADMOB_CONFIG } from '../config/admobConfig';
 import { DIAGNOSTIC_CONFIG } from '../config/diagnosticConfig';
 import { AdRewardType, AdRewardClaimResult } from '../services/adRewardService';
+import { PREMIUM_COIN_BONUS } from '../config/billingConfig';
 import { getRandomWorldStarTemplate, createGuestStarPlayer, WorldStarTemplate } from '../services/worldStarService';
 import { challengesManager, ChallengeReward } from '../services/challengesService';
 import { ensureLegendsInMarket } from '../data/legendsData';
@@ -474,6 +475,10 @@ interface GameContextType {
   // AdMob Rewarded Economy System (نظام مكافآت الإعلانات الآمن)
   claimAdReward: (rewardType: AdRewardType, boostSubtype?: TrainingBoostType) => { success: boolean; message: string };
   grantChallengeReward: (reward: ChallengeReward) => { success: boolean; message: string };
+
+  // المدرب المميز ومشتريات المتجر
+  grantPurchasedCoins: (amount: number, reason: string) => { success: boolean; message: string };
+  activatePremiumBenefits: () => { success: boolean; message: string };
 
   // Promo / Gift Codes System (نظام استرداد أكواد الهدايا والمكافآت)
   redeemGiftCode: (
@@ -11620,6 +11625,117 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   // ----------------------------------------------------
+  // PREMIUM COACH & STORE PURCHASES (المدرب المميز ومشتريات المتجر)
+  // ----------------------------------------------------
+  const PREMIUM_PENDING_COINS_KEY = 'premium_pending_coin_grants';
+  const PREMIUM_BONUS_GRANTED_KEY = 'premium_coach_bonus_granted';
+
+  // يضيف المبلغ إلى خزينة النادي وميزانية التعاقدات (نفس مسار مكافأة club_funds)،
+  // وإن لم يوجد نادٍ بعد تُحفظ المنحة وتُطبَّق عند تولي أول نادٍ
+  const grantPurchasedCoins = (amount: number, reason: string): { success: boolean; message: string } => {
+    if (!amount || amount <= 0) {
+      return { success: false, message: 'مبلغ غير صالح.' };
+    }
+    if (!userClub) {
+      try {
+        const pending = Number(localStorage.getItem(PREMIUM_PENDING_COINS_KEY) || '0');
+        localStorage.setItem(PREMIUM_PENDING_COINS_KEY, String(pending + amount));
+      } catch (_) {}
+      return {
+        success: true,
+        message: `تم حفظ ${amount.toLocaleString()} ج.م وستُضاف لخزينة أول نادٍ تتولى تدريبه! 💰`,
+      };
+    }
+
+    setTeams(prev => prev.map(t => {
+      if (!t.isUserClub && t.id !== userClub.id) return t;
+      return {
+        ...t,
+        budget: (t.budget || 0) + amount,
+        transferBudget: (t.transferBudget || 0) + amount,
+      };
+    }));
+
+    setClubEconomy(prev => ({
+      ...prev,
+      clubBudget: (prev.clubBudget || 0) + amount,
+    }));
+
+    const purchaseMsg: InboxMessage = {
+      id: `msg_purchase_${Date.now()}_${Math.random()}`,
+      title: `💰 إيداع مشتريات: (+${amount.toLocaleString()} ج.م) في خزينة النادي`,
+      sender: 'إدارة اللعبة',
+      date: `الجولة ${currentRound}`,
+      type: 'finance',
+      read: false,
+      content: `${reason}
+
+تم إيداع مبلغ قدره (${amount.toLocaleString()} ج.م) مباشرة في خزينة نادي ${userClub.name} وميزانية التعاقدات، ويمكنك صرفه على اللاعبين وكل احتياجات النادي.`,
+    };
+    setInbox(prev => [purchaseMsg, ...prev]);
+
+    setTimeout(() => {
+      saveToCloud(false).catch(() => {});
+    }, 500);
+
+    return {
+      success: true,
+      message: `تم إيداع ${amount.toLocaleString()} ج.م في خزينة النادي! 💰`,
+    };
+  };
+
+  // تفعيل مزايا المدرب المميز بعد الشراء: بونص 50 مليون (مرة واحدة) + رسالة ترحيب
+  // المزايا نفسها (بدون إعلانات، الخطط، الأندية، الشارة) تُقرأ مباشرة من billingService.isPremium()
+  const activatePremiumBenefits = (): { success: boolean; message: string } => {
+    let alreadyGranted = false;
+    try {
+      alreadyGranted = localStorage.getItem(PREMIUM_BONUS_GRANTED_KEY) === 'true';
+    } catch (_) {}
+    if (alreadyGranted) {
+      return { success: true, message: 'مزايا المدرب المميز مفعلة بالفعل ⭐' };
+    }
+    try {
+      localStorage.setItem(PREMIUM_BONUS_GRANTED_KEY, 'true');
+    } catch (_) {}
+
+    const bonusResult = grantPurchasedCoins(PREMIUM_COIN_BONUS, 'بونص ترقية المدرب المميز ⭐');
+
+    const congratsMsg: InboxMessage = {
+      id: `msg_premium_welcome_${Date.now()}`,
+      title: '⭐ مبروك! أنت الآن مدرب مميز',
+      sender: 'إدارة اللعبة',
+      date: `الجولة ${currentRound}`,
+      type: 'board',
+      read: false,
+      content: `تهانينا يا كابتن ${manager.name}!\n\nتم تفعيل باقة المدرب المميز:\n- كل المميزات بدون إعلانات للأبد\n- كل التشكيلات والأساليب التكتيكية مفتوحة\n- يمكنك تدريب أي نادٍ من اليوم الأول\n- الشارة الذهبية بجانب اسمك\n- بونص ${PREMIUM_COIN_BONUS.toLocaleString()} ج.م في خزينة النادي\n\nشكراً لدعمك تطوير اللعبة! ❤️`,
+    };
+    setInbox(prev => [congratsMsg, ...prev]);
+
+    return {
+      success: true,
+      message: `تم تفعيل المدرب المميز! ${bonusResult.message}`,
+    };
+  };
+
+  // تطبيق المنح المحفوظة عند تولي أول نادٍ (شراء قبل بدء الكارير)
+  const premiumPendingAppliedRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!userClub) return;
+    if (premiumPendingAppliedRef.current === userClub.id) return;
+    let pending = 0;
+    try {
+      pending = Number(localStorage.getItem(PREMIUM_PENDING_COINS_KEY) || '0');
+    } catch (_) {}
+    if (pending > 0) {
+      premiumPendingAppliedRef.current = userClub.id;
+      try {
+        localStorage.setItem(PREMIUM_PENDING_COINS_KEY, '0');
+      } catch (_) {}
+      grantPurchasedCoins(pending, 'منحة مشتريات محفوظة من متجر اللعبة 🎁');
+    }
+  }, [userClub?.id]);
+
+  // ----------------------------------------------------
   // DAILY LOGIN REWARDS SYSTEM (نظام مكافآت تسجيل الدخول اليومي)
   // ----------------------------------------------------
   const claimDailyLoginReward = useCallback((): ClaimDailyRewardResult => {
@@ -12380,6 +12496,8 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         grantDevelopmentPoints,
         claimAdReward,
         grantChallengeReward,
+        grantPurchasedCoins,
+        activatePremiumBenefits,
         redeemGiftCode,
         availableSponsorOffers,
         signSponsorshipContract,

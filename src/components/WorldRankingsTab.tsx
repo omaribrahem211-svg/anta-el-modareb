@@ -18,6 +18,7 @@ import {
   AlertCircle
 } from 'lucide-react';
 import { ClubManager, WorldClubRankingItem } from '../types/game';
+import { PremiumBadge, useIsPremium } from './premium/PremiumBadge';
 
 type RankingType = 'managers' | 'clubs';
 type RegionFilter = 'all' | 'egypt' | 'africa' | 'europe' | 'asia';
@@ -32,6 +33,7 @@ export const WorldRankingsTab: React.FC = () => {
     userDynamicManagerRating 
   } = useGame();
 
+  const isPremiumCoach = useIsPremium();
   const [rankingType, setRankingType] = useState<RankingType>('managers');
   const [regionFilter, setRegionFilter] = useState<RegionFilter>('all');
   const [searchQuery, setSearchQuery] = useState('');
@@ -152,6 +154,7 @@ export const WorldRankingsTab: React.FC = () => {
             <div className="space-y-0.5">
               <div className="text-xs font-bold text-white flex items-center gap-1.5">
                 <span>{manager.name}</span>
+                {isPremiumCoach && <PremiumBadge withLabel={false} />}
                 <span className="text-[10px] bg-amber-950 text-amber-300 px-1.5 py-0.5 rounded font-bold border border-amber-800/60">
                   تقييم {userDynamicManagerRating || 60}
                 </span>

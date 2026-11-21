@@ -21,6 +21,7 @@ import {
   Maximize2,
   Sparkles,
 } from 'lucide-react';
+import { PremiumBadge, useIsPremium } from './premium/PremiumBadge';
 
 interface CoachHomeCardProps {
   manager: ManagerProfile;
@@ -42,6 +43,7 @@ export const CoachHomeCard: React.FC<CoachHomeCardProps> = ({
   const [photoUrl, setPhotoUrl] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState<'download' | 'share' | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const isPremiumCoach = useIsPremium();
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cardRef = useRef<HTMLDivElement>(null);
@@ -342,14 +344,15 @@ export const CoachHomeCard: React.FC<CoachHomeCardProps> = ({
       <div
         ref={cardRef}
         id="home_official_coach_card"
-        className="w-full relative rounded-2xl p-4 sm:p-5 shadow-xl select-none border-2 border-amber-500/40 overflow-hidden"
-        style={{
+        className={`w-full relative rounded-2xl p-4 sm:p-5 shadow-xl select-none border-2 overflow-hidden ${isPremiumCoach ? 'premium-card-frame' : 'border-amber-500/40'}`}
+        style={isPremiumCoach ? undefined : {
           background: 'linear-gradient(180deg, #09131f 0%, #061019 60%, #03080e 100%)',
           boxShadow: '0 15px 35px -10px rgba(16, 185, 129, 0.15), 0 0 25px rgba(245, 158, 11, 0.08)',
         }}
       >
+        {isPremiumCoach && <div className="premium-card-shimmer" />}
         {/* Top Emerald & Gold Holographic Accent Line */}
-        <div className="absolute top-0 right-0 left-0 h-1.5 bg-gradient-to-r from-amber-400 via-emerald-400 to-amber-500 rounded-t-2xl" />
+        <div className={`absolute top-0 right-0 left-0 h-1.5 rounded-t-2xl ${isPremiumCoach ? 'bg-gradient-to-r from-amber-300 via-yellow-400 to-amber-300' : 'bg-gradient-to-r from-amber-400 via-emerald-400 to-amber-500'}`} />
 
         {/* 1. Card Top Bar: Logo & OVR Rating */}
         <div className="flex items-center justify-between border-b border-slate-800/80 pb-3 mb-3.5 pt-1">
@@ -447,6 +450,7 @@ export const CoachHomeCard: React.FC<CoachHomeCardProps> = ({
               <span className="text-[11px] px-2 py-0.5 rounded-md bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 font-medium">
                 {manager.nationality || 'مصر'}
               </span>
+              {isPremiumCoach && <PremiumBadge />}
               <span className="text-[11px] px-2 py-0.5 rounded-md bg-purple-500/10 border border-purple-500/30 text-purple-300 font-mono">
                 CAF-{manager.license || 'A'}
               </span>
