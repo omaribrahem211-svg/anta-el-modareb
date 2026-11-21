@@ -951,7 +951,7 @@ export const MatchesTab: React.FC = () => {
                   }`}
                   title="الذكاء الاصطناعي يستبدل اللاعبين المجهدين والمصابين تلقائياً"
                 >
-                  <RefreshCw className={`w-3.5 h-3.5 ${liveMatch.autoSubsEnabled ? 'animate-spin text-emerald-400' : ''}`} />
+                  <RefreshCw className={`w-3.5 h-3.5 ${liveMatch.autoSubsEnabled ? 'text-emerald-400' : ''}`} />
                   <span>تبديل تلقائي: {liveMatch.autoSubsEnabled ? 'مفعل 🟢' : 'معطل ⚪'}</span>
                 </button>
 
@@ -1389,17 +1389,20 @@ export const MatchesTab: React.FC = () => {
 
           {showCommentary && (
             <div ref={commentaryScrollRef} className="space-y-2 max-h-52 overflow-y-auto pr-1 scroll-smooth">
+              {visibleEvents.length > 40 && (
+                <div className="text-center text-[10px] text-slate-400">آخر 40 حدث لتخفيف العرض أثناء المباراة</div>
+              )}
               {visibleEvents.length === 0 ? (
                 <div className="text-center py-5 text-xs text-slate-500">
                   صافرة البداية تنطلق.. الفريقان يتحسسان أرضية الملعب في الدقائق الأولى!
                 </div>
               ) : (
-                visibleEvents.map((evt, idx) => (
+                visibleEvents.slice(-40).map((evt, idx) => (
                   <div 
                     key={idx}
                     className={`p-2 rounded-xl border text-xs flex items-start gap-2.5 transition-all ${
                       evt.type === 'goal'
-                        ? 'bg-emerald-950/80 border-emerald-500 text-emerald-200 font-bold animate-pulse'
+                        ? 'bg-emerald-950/80 border-emerald-500 text-emerald-200 font-bold'
                         : evt.type === 'yellow_card'
                         ? 'bg-amber-950/70 border-amber-500/80 text-amber-200'
                         : evt.type === 'save'
