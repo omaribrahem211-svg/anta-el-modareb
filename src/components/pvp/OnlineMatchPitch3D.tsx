@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import {
   Activity,
   Volume2,
@@ -63,6 +63,7 @@ export interface OnlineMatchPitch3DProps {
   lastEvent?: PitchLiveEvent | null;
   isFinished?: boolean;
   status?: 'playing' | 'halftime' | 'finished';
+  isPaused?: boolean;
   addedTime?: number;
   title?: string;
   homeColor?: string;
@@ -406,6 +407,7 @@ export const OnlineMatchPitch3D: React.FC<OnlineMatchPitch3DProps> = ({
   lastEvent,
   isFinished,
   status,
+  isPaused = false,
   addedTime,
   title,
   homeColor,
@@ -458,19 +460,27 @@ export const OnlineMatchPitch3D: React.FC<OnlineMatchPitch3DProps> = ({
     }
   };
 
-  // Animation frame tick for lifelike miniature movement - 700ms smooth tactical tick matching CSS transitions
-  // Immediately halted when match ends or enters halftime break to free CPU/GPU resources
+  // Cosmetic motion runs independently of the match simulation. Stop it while paused,
+  // processing a result, or at a break, and honor the device's reduced-motion setting.
+  const reduceMotion = useMemo(
+    () =>
+      typeof window !== 'undefined' &&
+      typeof window.matchMedia === 'function' &&
+      window.matchMedia('(prefers-reduced-motion: reduce)').matches,
+    []
+  );
   const [animTick, setAnimTick] = useState<number>(0);
   useEffect(() => {
-    if (isFullTimeFinished || isHalfTimeBreak || status !== 'playing') {
+    if (reduceMotion) return; // reduced motion: positions still update on each match-minute tick via props
+    if (isPaused || isSimulationRunning || isFullTimeFinished || isHalfTimeBreak || status !== 'playing') {
       return;
     }
     const interval = setInterval(() => {
       if (typeof document !== 'undefined' && document.hidden) return;
       setAnimTick((t) => (t + 1) % 10000);
-    }, 850);
+    }, 1200);
     return () => clearInterval(interval);
-  }, [isFullTimeFinished, isHalfTimeBreak, status]);
+  }, [reduceMotion, isPaused, isSimulationRunning, isFullTimeFinished, isHalfTimeBreak, status]);
 
   // Audio triggers for important match events (Goal Roar & Referee Whistle)
   useEffect(() => {
@@ -1153,24 +1163,62 @@ export const OnlineMatchPitch3D: React.FC<OnlineMatchPitch3DProps> = ({
   const hasShotStats = typeof homeShots === 'number' && typeof awayShots === 'number';
   const hasXg = typeof homeXg === 'number' && typeof awayXg === 'number';
 
+  // Animate transforms rather than left/top to avoid per-frame layout work.
+  // Measure the untransformed pitch once and again only when its size changes.
+  const pitchRef = useRef<HTMLDivElement | null>(null);
+  const [pitchSize, setPitchSize] = useState<{ w: number; h: number }>({ w: 0, h: 0 });
+  useEffect(() => {
+    const el = pitchRef.current;
+    if (!el) return;
+    const update = () => {
+      const w = el.clientWidth;
+      const h = el.clientHeight;
+      setPitchSize((prev) => (prev.w === w && prev.h === h ? prev : { w, h }));
+    };
+    update();
+    let ro: ResizeObserver | null = null;
+    if (typeof ResizeObserver !== 'undefined') {
+      ro = new ResizeObserver(update);
+      ro.observe(el);
+    }
+    window.addEventListener('resize', update);
+    return () => {
+      ro?.disconnect();
+      window.removeEventListener('resize', update);
+    };
+  }, []);
+  const pitchMeasured = pitchSize.w > 0 && pitchSize.h > 0;
+  const toPx = (xPct: number, yPct: number) => ({ x: (xPct / 100) * pitchSize.w, y: (yPct / 100) * pitchSize.h });
+  // Positional style helper: px transforms once measured, plain % fallback on the very first frame.
+  const movingPosStyle = (xPct: number, yPct: number, dur: string): React.CSSProperties => {
+    if (!pitchMeasured) {
+      return { left: `${xPct}%`, top: `${yPct}%`, transform: 'translate(-50%, -50%)' };
+    }
+    const pos = toPx(xPct, yPct);
+    return {
+      left: 0,
+      top: 0,
+      transform: `translate(${pos.x}px, ${pos.y}px) translate(-50%, -50%)`,
+      transition: reduceMotion ? 'none' : `transform ${dur} cubic-bezier(0.25, 1, 0.5, 1)`,
+    };
+  };
+
   const renderDisc = (player: PlayerDot, isHome: boolean) => {
     const isGK = player.role === 'GK';
     const bg = isGK ? '#facc15' : isHome ? kit.home : kit.away;
     const fg = readableOn(bg);
     const size = player.isCarrier ? 30 : 26;
+    // Cheap non-blurred rings instead of blurred glow shadows on constantly-moving elements.
     const ring = player.isScorer
-      ? '0 0 0 3px #fbbf24, 0 0 16px 4px rgba(251,191,36,0.7)'
+      ? '0 0 0 3px #fbbf24'
       : player.isCarrier
-      ? '0 0 0 3px rgba(253,230,138,0.9), 0 0 14px 3px rgba(253,230,138,0.5)'
-      : '0 2px 6px rgba(0,0,0,0.5)';
+      ? '0 0 0 3px rgba(253,230,138,0.9)'
+      : 'none';
     return (
       <div
         key={player.id}
         style={{
-          left: `${player.x}%`,
-          top: `${player.y}%`,
-          transform: 'translate(-50%, -50%)',
-          transition: 'left 0.7s cubic-bezier(0.25, 1, 0.5, 1), top 0.7s cubic-bezier(0.25, 1, 0.5, 1)',
+          ...movingPosStyle(player.x, player.y, '0.7s'),
           width: size,
           height: size,
           background: bg,
@@ -1297,9 +1345,10 @@ export const OnlineMatchPitch3D: React.FC<OnlineMatchPitch3DProps> = ({
       {/* 3. PITCH (+ half-time / full-time panels) */}
       <div className="relative w-full flex flex-col items-center justify-center">
         <div
+          ref={pitchRef}
           style={{
             ...transformStyle,
-            transition: 'transform 0.4s cubic-bezier(0.2, 0.8, 0.2, 1)',
+            transition: reduceMotion ? 'none' : 'transform 0.4s cubic-bezier(0.2, 0.8, 0.2, 1)',
           }}
           className="relative w-full max-w-[360px] aspect-[10/12.2] rounded-[20px] overflow-hidden shadow-[0_18px_40px_rgba(0,0,0,0.7)] border border-[#1d3a2b] bg-emerald-900"
         >
@@ -1508,15 +1557,12 @@ export const OnlineMatchPitch3D: React.FC<OnlineMatchPitch3DProps> = ({
           {/* BALL */}
           <div
             style={{
-              left: `${ballPos.x}%`,
-              top: `${ballPos.y}%`,
-              transform: 'translate(-50%, -50%)',
-              transition: 'left 0.45s cubic-bezier(0.25, 1, 0.5, 1), top 0.45s cubic-bezier(0.25, 1, 0.5, 1)',
-              boxShadow: '0 0 0 4px rgba(253,230,138,0.35), 0 0 14px 4px rgba(253,230,138,0.55)',
+              ...movingPosStyle(ballPos.x, ballPos.y, '0.45s'),
+              boxShadow: '0 0 0 3px rgba(253,230,138,0.45)',
             }}
             className="absolute z-20 pointer-events-none w-3 h-3 rounded-full bg-white"
           >
-            {attackSimulation.isShot && (
+            {attackSimulation.isShot && !reduceMotion && !isPaused && !isSimulationRunning && (
               <span className="absolute -inset-2 rounded-full bg-amber-400/30 animate-ping pointer-events-none" />
             )}
           </div>
@@ -1525,10 +1571,7 @@ export const OnlineMatchPitch3D: React.FC<OnlineMatchPitch3DProps> = ({
           {carrier && !isGoal && !isFullTimeFinished && !isHalfTimeBreak && (
             <div
               style={{
-                left: `${Math.max(24, Math.min(76, carrier.p.x))}%`,
-                top: `${carrier.p.y + (carrier.p.y > 82 ? -7.5 : 6.5)}%`,
-                transform: 'translate(-50%, -50%)',
-                transition: 'left 0.7s cubic-bezier(0.25, 1, 0.5, 1), top 0.7s cubic-bezier(0.25, 1, 0.5, 1)',
+                ...movingPosStyle(Math.max(24, Math.min(76, carrier.p.x)), carrier.p.y + (carrier.p.y > 82 ? -7.5 : 6.5), '0.7s'),
                 borderColor: carrier.isHome ? kit.home : kit.away,
               }}
               className="absolute z-30 pointer-events-none flex items-center gap-1.5 bg-[#060b14]/90 border rounded-[10px] pl-2 pr-1 py-[3px] text-[11px] font-black text-white whitespace-nowrap max-w-[70%]"
@@ -1586,7 +1629,7 @@ export const OnlineMatchPitch3D: React.FC<OnlineMatchPitch3DProps> = ({
 
         {/* HALF-TIME CENTER SCREEN (شاشة استراحة الشوطين في منتصف الشاشة - خيارات المدرب وزر بدء الشوط الثاني) */}
         {isHalfTimeBreak && (
-          <div className="absolute inset-0 z-35 flex items-center justify-center p-2 sm:p-3 bg-slate-950/80 backdrop-blur-md animate-in fade-in zoom-in-95 duration-200">
+          <div className="absolute inset-0 z-35 flex items-center justify-center p-2 sm:p-3 bg-slate-950 animate-in fade-in duration-200">
             <div className="relative w-full max-w-[325px] sm:max-w-[350px] bg-gradient-to-b from-slate-900 via-slate-900/98 to-slate-950 rounded-3xl border-2 border-amber-400/90 shadow-[0_0_35px_rgba(251,191,36,0.3)] p-3.5 sm:p-4 text-center flex flex-col items-center gap-2.5">
               {/* Top Badge: انتهاء الشوط الأول */}
               <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-400 text-slate-950 text-[11px] font-black shadow">
@@ -1698,7 +1741,7 @@ export const OnlineMatchPitch3D: React.FC<OnlineMatchPitch3DProps> = ({
 
         {/* FULL-TIME CENTER SCREEN (شاشة نهاية المباراة في منتصف الملعب - تأكيد النتيجة والانتقال) */}
         {isFullTimeFinished && (
-          <div className="absolute inset-0 z-35 flex items-center justify-center p-2 sm:p-3 bg-slate-950/85 backdrop-blur-md animate-in fade-in zoom-in-95 duration-200">
+          <div className="absolute inset-0 z-35 flex items-center justify-center p-2 sm:p-3 bg-slate-950 animate-in fade-in duration-200">
             <div className="relative w-full max-w-[325px] sm:max-w-[360px] bg-gradient-to-b from-slate-900 via-slate-900/98 to-slate-950 rounded-3xl border-2 border-emerald-400/90 shadow-[0_0_40px_rgba(16,185,129,0.35)] p-3.5 sm:p-4 text-center flex flex-col items-center gap-2.5">
               {/* Top Badge: انتهاء المباراة بالكامل */}
               <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-400 text-slate-950 text-[11px] font-black shadow">

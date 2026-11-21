@@ -74,16 +74,23 @@ export const StadiumSponsorBanner: React.FC<StadiumSponsorBannerProps> = ({
 
   // Rotate pitch-side sponsors smoothly every 12 seconds during the match
   useEffect(() => {
+    if (!isMatchPlaying) return;
+    let transitionTimer: ReturnType<typeof setTimeout> | undefined;
     const interval = setInterval(() => {
+      if (document.hidden) return;
       setIsTransitioning(true);
-      setTimeout(() => {
+      transitionTimer = setTimeout(() => {
         setSponsorIndex((prev) => (prev + 1) % IN_GAME_STADIUM_SPONSORS.length);
         setIsTransitioning(false);
       }, 300);
     }, 12000);
 
-    return () => clearInterval(interval);
-  }, []);
+    return () => {
+      clearInterval(interval);
+      clearTimeout(transitionTimer);
+      setIsTransitioning(false);
+    };
+  }, [isMatchPlaying]);
 
   const currentSponsor = IN_GAME_STADIUM_SPONSORS[sponsorIndex];
 
@@ -106,7 +113,7 @@ export const StadiumSponsorBanner: React.FC<StadiumSponsorBannerProps> = ({
 
         {/* Dynamic Sponsor Ambient Glow */}
         <div 
-          className="absolute top-0 right-0 w-32 h-full opacity-20 pointer-events-none transition-colors duration-700 blur-md"
+          className="absolute top-0 right-0 w-32 h-full opacity-10 pointer-events-none"
           style={{ backgroundColor: currentSponsor.accentColor }}
         />
 
