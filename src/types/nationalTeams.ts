@@ -142,9 +142,15 @@ export interface NationalTeamJobOffer {
 export interface NationalTeamsState {
   teams: NationalTeam[];
   activeTournament: InternationalTournament | null;
+  /** A tournament scheduled later this season (e.g. post-season World Cup). */
+  queuedTournament: InternationalTournament | null;
   lastTournamentSeasonByCompetition: Partial<Record<InternationalCompetitionId, number>>;
   friendlyMatches: InternationalMatch[];
   userNationalTeamId: string | null;
   pendingJobOffers: NationalTeamJobOffer[];
   initializedForSeason?: number;
+  /** Idempotency marker: highest league round already processed. */
+  lastProcessedRound?: number;
+  /** Set once the post-season tournament was force-completed at season end. */
+  postSeasonCompletedForSeason?: number;
 }
