@@ -29,6 +29,7 @@ import { simulateMatch } from './engine';
 import { simulateKnockoutMatch } from './continentalEngine';
 import { syncPlayerMarketValueWithRating } from './transferEngine';
 import { generateYouthAcademyBatch } from './youthAcademyEngine';
+import { buildRebornPlayer, shouldRebornPlayer } from './regenRebirthEngine';
 import { checkCupStageAdvancementRewards, StageRewardInfo } from './rewardsEngine';
 import { isRealClub, loadRealClubSquad } from '../data/realPlayersData';
 import {
@@ -2398,6 +2399,7 @@ export async function processNewSeasonAdvancement(
   await yieldToUI();
   // 3. Flexible Retirement System (strictly between age 35 and 40) + Player Age & Contract Updates
   const newRetiredPlayers: RetiredPlayer[] = [];
+  const rebornDone = new Set<string>();
 
   const agedLeagueTeams = leagueTeams.map(team => {
     const squad = Array.isArray(team.players) ? team.players : [];
@@ -2411,21 +2413,21 @@ export async function processNewSeasonAdvancement(
         : Math.max(0, (typeof p.contractYears === 'number' ? p.contractYears : 2) - 1);
 
       // Flexible Retirement Age Rules:
-      // - Under 35: NEVER retires (strictly 0% chance).
-      // - 40 and above: 100% MANDATORY retirement (no player plays beyond 40).
-      // - Between 35 and 39: progressive probability based on age, rating, and physical stamina.
+      // - Under 36: NEVER retires (strictly 0% chance).
+      // - 41 and above: 100% MANDATORY retirement (no player plays beyond 41).
+      // - Between 36 and 40: progressive probability based on age, rating, and physical stamina.
       let shouldRetire = false;
 
       if ((p as any).isLegend) {
         shouldRetire = newAge >= 42; // legends play on a few extra seasons
-      } else if (newAge >= 40) {
+      } else if (newAge >= 41) {
         shouldRetire = true;
-      } else if (newAge >= 35) {
-        let retireProbability = 0.18; // Age 35: ~18%
-        if (newAge === 36) retireProbability = 0.30;
-        else if (newAge === 37) retireProbability = 0.48;
-        else if (newAge === 38) retireProbability = 0.70;
-        else if (newAge === 39) retireProbability = 0.88;
+      } else if (newAge >= 36) {
+        let retireProbability = 0.18; // Age 36: ~18%
+        if (newAge === 37) retireProbability = 0.30;
+        else if (newAge === 38) retireProbability = 0.48;
+        else if (newAge === 39) retireProbability = 0.70;
+        else if (newAge === 40) retireProbability = 0.88;
 
         if (p.overallRating < 72) retireProbability += 0.12;
         if ((p.fitness || 100) < 70) retireProbability += 0.10;
@@ -2453,6 +2455,18 @@ export async function processNewSeasonAdvancement(
           legacyNote: newAge >= 38 ? 'أسطورة معتزلة أثرت الملاعب بعطائها' : 'نجم مخضرم قرر إنهاء مسيرته في القمة',
         };
         newRetiredPlayers.push(retiredRecord);
+        // Rebirth: a notable retiree (78+) returns in the same rollover as a 17-19 y/o
+        // version of himself - same name, nationality and position, fresh career, potential
+        // near his peak. The hall-of-fame record above keeps his career stats; the reborn
+        // starts from zero. One reborn per retiree per rollover (rebornDone guard).
+        if (!rebornDone.has(p.id) && shouldRebornPlayer(p)) {
+          rebornDone.add(p.id);
+          survivingPlayers.push(buildRebornPlayer(p, {
+            idSuffix: `s${currentSeason.seasonNumber + 1}`,
+            clubId: team.id,
+            leagueId: team.leagueId,
+          }));
+        }
         // Player is removed from team!
       } else {
         // Reset player seasonal stats while preserving overall attributes & experience
