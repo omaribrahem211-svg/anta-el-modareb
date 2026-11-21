@@ -6,6 +6,7 @@ import { UserProfileMenu } from './UserProfileMenu';
 import { useLanguage } from '../utils/i18n';
 import { useAuth } from '../context/AuthContext';
 import { challengesManager } from '../services/challengesService';
+import { PremiumBadge, useIsPremium } from './premium/PremiumBadge';
 
 interface HeaderProps {
   activeTab: ActiveTab;
@@ -38,6 +39,7 @@ export const Header: React.FC<HeaderProps> = ({
   const { t } = useLanguage();
   const { user } = useAuth();
   const [isSavingCloud, setIsSavingCloud] = useState(false);
+  const isPremiumCoach = useIsPremium();
   const [saveCloudSuccess, setSaveCloudSuccess] = useState(false);
   const [unclaimedChallengesCount, setUnclaimedChallengesCount] = useState<number>(() => {
     return challengesManager.getUnclaimedCompletedCount();
@@ -89,6 +91,7 @@ export const Header: React.FC<HeaderProps> = ({
             </div>
             <div className="flex items-center gap-1.5 text-[10px] sm:text-[11px] text-slate-400 truncate">
               <span>{manager.name}</span>
+              {isPremiumCoach && <PremiumBadge withLabel={false} />}
               <span aria-hidden="true" className="text-slate-600">·</span>
               <span className="truncate">{userClub ? activeLeague.name : 'باحث عن نادٍ'}</span>
               <span aria-hidden="true" className="text-slate-600 hidden xs:inline">·</span>

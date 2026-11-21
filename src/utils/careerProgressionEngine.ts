@@ -10,6 +10,7 @@ import {
   JobOfferCategory,
   TeamTactics,
 } from '../types/game';
+import { billingService } from '../services/billingService';
 
 // ============================================================================
 // 1. CENTRALIZED CONFIGURATION (مكان مركزي واحد لكافة قيم وضوابط المسيرة)
@@ -662,7 +663,8 @@ export function isClubEligibleForManager(
 } {
   const activeLic = normalizeCoachingLicense(managerLicense);
   const reqLic = getRequiredLicenseForClub(club, league);
-  const allowed = getLicenseRank(activeLic) >= getLicenseRank(reqLic);
+  // المدرب المميز: يدرب أي نادٍ من اليوم الأول بدون بوابات الرخص
+  const allowed = billingService.isPremium() ? true : getLicenseRank(activeLic) >= getLicenseRank(reqLic);
   return {
     allowed,
     requiredLicense: reqLic,
@@ -700,7 +702,9 @@ export function evaluateLeagueEligibilityForManager(
   const requiredLicense = getRequiredLicenseForLeague(league);
   const requiredRank = getLicenseRank(requiredLicense);
   const reqConfig = CAREER_CONFIG.LICENSES[requiredLicense];
-  const isUnlocked = activeRank >= requiredRank;
+  // المدرب المميز: كل الدوريات والأندية مفتوحة بدون بوابات الرخص
+  const isPremiumCoach = billingService.isPremium();
+  const isUnlocked = isPremiumCoach ? true : activeRank >= requiredRank;
   const isArab = isArabLeagueOrCountry(league.country, league.id);
   const tier = league.tier ?? league.divisionTier ?? 1;
 
@@ -710,7 +714,7 @@ export function evaluateLeagueEligibilityForManager(
 
   for (const club of teams) {
     const clubReqLic = getRequiredLicenseForClub(club, league);
-    if (activeRank >= getLicenseRank(clubReqLic)) {
+    if (isPremiumCoach || activeRank >= getLicenseRank(clubReqLic)) {
       eligibleClubs.push(club);
     } else {
       restrictedEliteClubs.push(club);

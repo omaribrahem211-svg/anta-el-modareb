@@ -49,6 +49,7 @@ export class BillingService {
   private setPremiumLocal(owned: boolean): void {
     try {
       localStorage.setItem(PREMIUM_STORAGE_KEY, owned ? 'true' : 'false');
+      window.dispatchEvent(new CustomEvent('premium-status-changed', { detail: { owned } }));
     } catch {
       // تجاهل أخطاء التخزين
     }
