@@ -23,6 +23,7 @@ import { getLedger } from '../utils/seasonLedger';
 import { fetchDailyManagersLeaderboard, fetchWeeklyManagersLeaderboard, getWeekKey, getLeaderboardUpdatedAt, LEADERBOARD_REFRESH_HOURS, DailyManagerLeaderboardEntry } from '../services/managerRankingService';
 import { getClubDisplayName } from '../data/leaguesData';
 import { AfricanChampionsLeagueView } from './continental/AfricanChampionsLeagueView';
+import NationalTeamView from './national/NationalTeamView';
 import { getDomesticCupDefinitionForCountry } from '../data/competitionsData';
 import { isEuropeanCountry } from '../utils/continentalEngine';
 import { ClubBadge } from './ClubBadge';
@@ -45,7 +46,7 @@ export const LeagueTab: React.FC = () => {
   const { user } = useAuth();
 
   const [activeSubTab, setActiveSubTab] = useState<
-    'standings' | 'domestic_cup' | 'continental' | 'daily_managers' | 'scorers' | 'assists'
+    'standings' | 'domestic_cup' | 'continental' | 'daily_managers' | 'scorers' | 'assists' | 'national_teams'
   >('standings');
   const [dailyLeaders, setDailyLeaders] = useState<DailyManagerLeaderboardEntry[]>([]);
   const [loadingDaily, setLoadingDaily] = useState(false);
@@ -196,7 +197,7 @@ export const LeagueTab: React.FC = () => {
         </div>
 
         {/* Sub-Tab Navigation */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 bg-slate-950/80 p-1.5 rounded-2xl border border-slate-800">
+        <div className="grid grid-cols-2 sm:grid-cols-5 gap-1.5 bg-slate-950/80 p-1.5 rounded-2xl border border-slate-800">
           <button
             onClick={() => setActiveSubTab('standings')}
             className={`py-2 text-xs font-bold rounded-xl transition-all cursor-pointer ${
@@ -229,6 +230,14 @@ export const LeagueTab: React.FC = () => {
             }`}
           >
             صناع اللعب 🎯
+          </button>
+          <button
+            onClick={() => setActiveSubTab('national_teams')}
+            className={`py-2 text-xs font-bold rounded-xl transition-all cursor-pointer ${
+              activeSubTab === 'national_teams' ? 'bg-amber-500 text-slate-950 shadow-md' : 'text-slate-400 hover:text-white'
+            }`}
+          >
+            المنتخبات 🌍
           </button>
         </div>
       </div>
@@ -617,6 +626,9 @@ export const LeagueTab: React.FC = () => {
           )}
         </div>
       )}
+
+      {/* VIEW 6: National Teams (isolated component) */}
+      {activeSubTab === 'national_teams' && <NationalTeamView />}
     </div>
   );
 };
