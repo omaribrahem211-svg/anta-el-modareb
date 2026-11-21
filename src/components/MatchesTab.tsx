@@ -1524,7 +1524,7 @@ export const MatchesTab: React.FC = () => {
               <span>إعادة بداية الموسم</span>
             </button>
             <span className="text-xs bg-slate-800 px-3 py-1.5 rounded-xl border border-slate-700 font-bold text-amber-400">
-              {seasonFinished ? 'الموسم انتهى' : `الجولة الحالية: ${currentRound} / ${totalRounds}`}
+              {seasonFinished ? 'الموسم انتهى' : `الجولة ${currentRound} من ${totalRounds}`}
             </span>
           </div>
         </div>

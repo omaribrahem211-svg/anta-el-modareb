@@ -1524,8 +1524,13 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
 
     const min = liveMatch.currentMinute;
-    const shouldSaveMinute = min === 45 || min === 90 || (min > 0 && min % 10 === 0);
-    const isMinuteTrigger = shouldSaveMinute && lastSavedMinuteRef.current !== min;
+    const lastMin = lastSavedMinuteRef.current;
+    // Crossing-based triggers: multi-minute ticks (high playback speed) must not skip save points.
+    const isMinuteTrigger = min > 0 && (
+      Math.floor(min / 10) !== Math.floor(Math.max(0, lastMin) / 10) ||
+      (lastMin < 45 && min >= 45) ||
+      (lastMin < 90 && min >= 90)
+    );
     const isPausedTrigger = !liveMatch.isPlaying;
 
     if (isPausedTrigger || isMinuteTrigger) {
@@ -2066,6 +2071,13 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const gapDays = Math.round((end - start) / 86400000);
     if (gapDays < 1 || gapDays > 100) return;
 
+    // PERF: defer the world-transfer sim until after the UI paints, replay at most the
+    // 7 most recent days of a long gap, and yield between days. A season rollover jumps
+    // the calendar by ~2 months and without this the sim blocked the main thread for
+    // several seconds on low-end phones.
+    let cancelled = false;
+    const deferTimer = setTimeout(() => {
+    (async () => {
     try {
       const protectedIds = new Set<string>((activeNegotiations || []).map(n => n?.playerId).filter(Boolean) as string[]);
       let workTeams: Club[] = teams;
@@ -2074,7 +2086,9 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       const dealsAll: { playerId: string; toClubName: string; fromClubName: string; playerName: string; fee: number; rating: number }[] = [];
       const newsItems: DailyNewsItem[] = [];
 
-      for (let i = 1; i <= gapDays; i++) {
+      const firstReplayDay = Math.max(1, gapDays - 6);
+      for (let i = firstReplayDay; i <= gapDays; i++) {
+        if (cancelled) return;
         const d = new Date(start + i * 86400000);
         const win = getTransferWindow(d.getUTCMonth() + 1, d.getUTCDate());
         if (!win) continue;
@@ -2103,8 +2117,10 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           icon: '🔁',
           source: 'سوق الانتقالات',
         } as DailyNewsItem));
+        if ((i - firstReplayDay + 1) % 3 === 0) await new Promise<void>(r => setTimeout(r, 0));
       }
 
+      if (cancelled) return;
       if (dealsAll.length === 0 && Object.keys(newMoves).length === 0) return;
 
       const changed = new Map<string, Club>();
@@ -2117,6 +2133,9 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     } catch (e) {
       console.warn('[WorldTransfers] simulation notice:', e);
     }
+    })();
+    }, 0);
+    return () => { cancelled = true; clearTimeout(deferTimer); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [calendarDate?.rawDateStr]);
 
@@ -2827,7 +2846,12 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
 
     const currentSpeed = liveMatchRef.current?.speed || 1;
-    const intervalTime = Math.max(80, 600 / currentSpeed);
+    // PERF: cap UI updates at ~2-3 per second. At high playback speeds each tick advances
+    // several match minutes, so React re-renders the match screen a couple of times per
+    // second instead of 8-12 times (the main source of stutter on low-end phones).
+    const baseMsPerMinute = 600 / currentSpeed;
+    const stepsPerTick = Math.max(1, Math.min(10, Math.round(450 / baseMsPerMinute)));
+    const intervalTime = Math.max(80, Math.round(stepsPerTick * baseMsPerMinute));
 
     liveMatchTimerRef.current = setInterval(() => {
       if (isMatchFinishedRef.current) {
@@ -2848,16 +2872,19 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         }
 
         let next = prev;
-        try {
-          next = simulateMatchStep(prev, userTacticsRef.current);
-        } catch (simErr) {
-          console.error('[simulateMatchStep Graceful Recovery]', simErr);
-          next = {
-            ...prev,
-            currentMinute: prev.currentMinute + 1,
-            isFinished: prev.currentMinute + 1 >= 90,
-            isPlaying: prev.currentMinute + 1 < 90,
-          };
+        for (let step = 0; step < stepsPerTick; step++) {
+          if (!next.isPlaying || next.isFinished || next.isHalfTime || next.currentMinute >= 90) break;
+          try {
+            next = simulateMatchStep(next, userTacticsRef.current);
+          } catch (simErr) {
+            console.error('[simulateMatchStep Graceful Recovery]', simErr);
+            next = {
+              ...next,
+              currentMinute: next.currentMinute + 1,
+              isFinished: next.currentMinute + 1 >= 90,
+              isPlaying: next.currentMinute + 1 < 90,
+            };
+          }
         }
 
         // 2) Track minute changes for watchdog
@@ -4710,6 +4737,9 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     setCurrentRound(nextRoundNumber);
     setCalendarDate(updatedCalendarDate);
     setLiveMatch(null);
+    // Let the committed post-match UI paint before reactions/save run (removes the
+    // brief black flash weak phones showed while the main thread stayed blocked).
+    await yieldToPaint();
 
     // Boost Consumption
     try {
@@ -5653,6 +5683,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     setCalendarDate(updatedCalendarDate);
     setLiveMatch(null);
     setMatchBlocker(null);
+    await yieldToPaint();
 
     // Generate fresh matchday headlines for the football world
     let matchdayNews: any[] = [];
