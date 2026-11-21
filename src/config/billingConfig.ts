@@ -1,18 +1,16 @@
 /**
- * إعدادات الشراء داخل التطبيق - المدرب المميز وباقات الكوينز
+ * إعدادات الشراء داخل التطبيق - المدرب المميز وباقة دعم اللعبة
  *
  * معرّفات المنتجات يجب أن تطابق ما يتم إنشاؤه في Google Play Console.
  * النوع (دائم/مستهلك) يتحدد في الكود فقط:
  * - premium_coach: غير مستهلك (acknowledge)
- * - باقات الكوينز: مستهلكة (consume) حتى يمكن شراؤها مرة أخرى
+ * - coins_support_75m: مستهلك (consume) حتى يمكن شراؤها مرة أخرى
  */
 
 export const PREMIUM_PRODUCT_ID = 'premium_coach';
 
 export const COIN_PACKS = {
-  coins_30m: { id: 'coins_30m', coins: 30_000_000 },
-  coins_100m: { id: 'coins_100m', coins: 100_000_000 },
-  coins_300m: { id: 'coins_300m', coins: 300_000_000 },
+  coins_support_75m: { id: 'coins_support_75m', coins: 75_000_000 },
 } as const;
 
 export type CoinPackId = keyof typeof COIN_PACKS;
