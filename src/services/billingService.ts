@@ -23,6 +23,7 @@ export class BillingService {
   private static instance: BillingService;
   private initialized = false;
   private products: Product[] = [];
+  private lastProductsError: string | null = null;
 
   private constructor() {}
 
@@ -75,11 +76,22 @@ export class BillingService {
         productType: PURCHASE_TYPE.INAPP,
       });
       this.products = result.products ?? [];
+      this.lastProductsError =
+        this.products.length === 0
+          ? 'المنتجات غير متاحة بعد من المتجر (قد تكون قيد النشر). حاول مرة أخرى بعد قليل.'
+          : null;
       return this.products;
-    } catch (err) {
+    } catch (err: any) {
       console.warn('[Billing] loadProducts failed', err);
+      this.products = [];
+      this.lastProductsError =
+        err?.message || 'تعذر الاتصال بالمتجر. تحقق من الإنترنت وحاول مرة أخرى.';
       return [];
     }
+  }
+
+  getProductsError(): string | null {
+    return this.lastProductsError;
   }
 
   getLoadedProducts(): Product[] {

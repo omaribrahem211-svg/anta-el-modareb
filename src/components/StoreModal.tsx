@@ -25,6 +25,8 @@ type StoreMessage = { kind: 'success' | 'error' | 'info'; text: string } | null;
 export const StoreModal: React.FC<StoreModalProps> = ({ isOpen, onClose }) => {
   const { grantPurchasedCoins, activatePremiumBenefits } = useGame();
   const [productsReady, setProductsReady] = useState(false);
+  const [productsError, setProductsError] = useState<string | null>(null);
+  const [reloading, setReloading] = useState(false);
   const [isPremium, setIsPremium] = useState(false);
   const [purchasingId, setPurchasingId] = useState<string | null>(null);
   const [restoring, setRestoring] = useState(false);
@@ -42,6 +44,7 @@ export const StoreModal: React.FC<StoreModalProps> = ({ isOpen, onClose }) => {
       await billingService.loadProducts();
       if (!cancelled) {
         setProductsReady(true);
+        setProductsError(billingService.getProductsError());
         setIsPremium(billingService.isPremium());
       }
     })();
@@ -49,6 +52,14 @@ export const StoreModal: React.FC<StoreModalProps> = ({ isOpen, onClose }) => {
       cancelled = true;
     };
   }, [isOpen]);
+
+  const handleReloadProducts = async () => {
+    if (reloading) return;
+    setReloading(true);
+    await billingService.loadProducts();
+    setProductsError(billingService.getProductsError());
+    setReloading(false);
+  };
 
   const priceOf = (productId: string): string => {
     const p = billingService.getLoadedProducts().find((prod) => prod.identifier === productId);
@@ -226,6 +237,23 @@ export const StoreModal: React.FC<StoreModalProps> = ({ isOpen, onClose }) => {
             <p className="text-[10px] text-slate-500 text-center flex items-center justify-center gap-1">
               <Loader2 className="w-3 h-3 animate-spin" /> جاري تحميل الأسعار من المتجر...
             </p>
+          )}
+
+          {productsReady && productsError && isNative && (
+            <div className="space-y-2">
+              <div className="flex items-start gap-2 p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-200 text-xs leading-relaxed">
+                <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" />
+                <span>{productsError}</span>
+              </div>
+              <button
+                onClick={handleReloadProducts}
+                disabled={reloading}
+                className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-slate-200 text-xs font-bold transition-colors cursor-pointer"
+              >
+                {reloading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
+                إعادة تحميل الأسعار
+              </button>
+            </div>
           )}
         </div>
       </div>
