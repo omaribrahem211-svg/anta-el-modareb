@@ -4,7 +4,11 @@ on:
   workflow_dispatch:
   push:
     branches:
-      - main
+      - '**'
+      - '!builds'
+
+permissions:
+  contents: write
 
 jobs:
   build:
@@ -72,4 +76,16 @@ jobs:
         with:
           name: anta-el-modareb-test-apk
           path: android/app/build/outputs/apk/release/*.apk
-          
+
+      # Every branch keeps ONE stable file on the "builds" branch, overwritten on each push,
+      # so the download link for a branch never changes: .../raw/builds/anta-modareb-<branch>.apk
+      - name: Publish the APK on the "builds" branch
+        run: |
+          mkdir -p out
+          BR="${GITHUB_REF_NAME//\//-}"
+          cp android/app/build/outputs/apk/release/*.apk "out/anta-modareb-${BR}.apk"
+          cd out
+          git init -q -b builds
+          git add .
+          git -c user.name="build bot" -c user.email="actions@users.noreply.github.com" commit -q -m "Test APK: ${GITHUB_REF_NAME} @ ${GITHUB_SHA:0:7}"
+          git push -q -f "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" builds

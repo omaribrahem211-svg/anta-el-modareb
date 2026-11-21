@@ -6,7 +6,7 @@
 //
 // Format: 16 teams, knockout. Round of 16 / quarter-finals / semi-finals are two-legged, the final is a single match.
 
-export type ContRoundKey = 'R32' | 'R16' | 'QF' | 'SF' | 'F';
+export type ContRoundKey = 'GS' | 'R32' | 'R16' | 'QF' | 'SF' | 'F';
 
 export interface ContTeam {
   id: string;
@@ -36,6 +36,22 @@ export interface ContTie {
 
 export type ContStatus = 'active' | 'finished' | 'done';
 
+export interface ContGroupMatch {
+  id: string;
+  matchday: 1 | 2 | 3;
+  homeId: string;
+  awayId: string;
+  homeGoals?: number;
+  awayGoals?: number;
+  isPlayed: boolean;
+}
+
+export interface ContGroup {
+  id: string;        // 'A' .. 'H'
+  teamIds: string[]; // exactly 4
+  matches: ContGroupMatch[]; // exactly 6: full round robin over 3 matchdays, every club exactly 3 games
+}
+
 export interface ContinentalPhaseState {
   version: 1;
   seasonNumber: number;
@@ -53,10 +69,12 @@ export interface ContinentalPhaseState {
   userRoundsWon: number;
   log: string[];
   singleLeg?: boolean; // Club World Cup: every tie is a single match
+  groups?: ContGroup[];  // Club World Cup group stage. Present only when the tournament starts with groups (round 'GS').
   continent?: string;  // continent of the competition (AFRICA / EUROPE / ASIA)
 }
 
 export const ROUND_LABEL: Record<ContRoundKey, string> = {
+  GS: 'دور المجموعات',
   R32: 'دور الـ32',
   R16: 'دور الـ16',
   QF: 'ربع النهائي',
@@ -187,6 +205,82 @@ function pairTies(teamIds: string[], round: ContRoundKey, rnd: () => number): Co
     ties.push({ id: `${round}_${i / 2}`, round, a: ids[i], b: ids[i + 1], legs: [] });
   }
   return ties;
+}
+
+const CWC_GROUP_IDS = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'];
+
+/**
+ * Draws 32 teams into 8 seeded groups of 4 (one club from each rating pot per group, so no group
+ * stacks the strongest clubs) and builds the full round-robin schedule: 3 matchdays, 2 matches per
+ * group per matchday, every club EXACTLY 3 matches. Home/away alternates (1-2 home games per club).
+ */
+export function buildCwcGroups(teams: ContTeam[], rnd: () => number): ContGroup[] {
+  const sorted = [...teams].sort((x, y) => y.rating - x.rating || x.id.localeCompare(y.id));
+  const pots: ContTeam[][] = [0, 1, 2, 3].map(k => shuffle(sorted.slice(k * 8, k * 8 + 8), rnd));
+  const ROUNDS: { matchday: 1 | 2 | 3; pairs: [number, number][] }[] = [
+    { matchday: 1, pairs: [[0, 1], [2, 3]] },
+    { matchday: 2, pairs: [[2, 0], [1, 3]] },
+    { matchday: 3, pairs: [[3, 0], [1, 2]] },
+  ];
+  return CWC_GROUP_IDS.map((id, gi) => {
+    const teamIds = pots.map(pot => pot[gi].id);
+    const matches: ContGroupMatch[] = [];
+    for (const r of ROUNDS) {
+      for (const [h, a] of r.pairs) {
+        matches.push({
+          id: `gs_${id}_md${r.matchday}_${h}${a}`,
+          matchday: r.matchday,
+          homeId: teamIds[h],
+          awayId: teamIds[a],
+          isPlayed: false,
+        });
+      }
+    }
+    return { id, teamIds, matches };
+  });
+}
+
+export interface ContGroupRow {
+  teamId: string;
+  played: number;
+  won: number;
+  drawn: number;
+  lost: number;
+  gf: number;
+  ga: number;
+  gd: number;
+  pts: number;
+}
+
+/**
+ * Group table computed from PLAYED matches only. Points 3/1/0.
+ * Tiebreakers in order: points, goal difference, goals for, squad rating (deterministic, no coin flips).
+ */
+export function groupStandingsRows(state: ContinentalPhaseState, group: ContGroup): ContGroupRow[] {
+  const rows = new Map<string, ContGroupRow>();
+  group.teamIds.forEach(id =>
+    rows.set(id, { teamId: id, played: 0, won: 0, drawn: 0, lost: 0, gf: 0, ga: 0, gd: 0, pts: 0 })
+  );
+  for (const m of group.matches) {
+    if (!m.isPlayed || m.homeGoals === undefined || m.awayGoals === undefined) continue;
+    const h = rows.get(m.homeId);
+    const a = rows.get(m.awayId);
+    if (!h || !a) continue;
+    h.played++; a.played++;
+    h.gf += m.homeGoals; h.ga += m.awayGoals;
+    a.gf += m.awayGoals; a.ga += m.homeGoals;
+    if (m.homeGoals > m.awayGoals) { h.won++; h.pts += 3; a.lost++; }
+    else if (m.homeGoals < m.awayGoals) { a.won++; a.pts += 3; h.lost++; }
+    else { h.drawn++; a.drawn++; h.pts++; a.pts++; }
+  }
+  rows.forEach(r => { r.gd = r.gf - r.ga; });
+  return [...rows.values()].sort((x, y) =>
+    y.pts - x.pts ||
+    y.gd - x.gd ||
+    y.gf - x.gf ||
+    teamOf(state, y.teamId).rating - teamOf(state, x.teamId).rating ||
+    x.teamId.localeCompare(y.teamId)
+  );
 }
 
 /**
@@ -324,12 +418,13 @@ export function createWorldCupPhase(params: {
     isTopTier: true,
     userId: userClub.id,
     teams,
-    ties: pairTies(teams.map(t => t.id), 'R32', rnd),
-    round: 'R32',
+    ties: [],
+    groups: buildCwcGroups(teams, rnd),
+    round: 'GS',
     status: 'active',
     userEliminated: false,
     userRoundsWon: 0,
-    userStage: 'R32',
+    userStage: 'GS',
     singleLeg: true,
     log: [`تأهل ${userClub.name} إلى كأس العالم للأندية 🌍🏆`],
   };
@@ -375,6 +470,64 @@ function stepOnce(input: ContinentalPhaseState, rnd: () => number, userLegResult
   if (input.status !== 'active') return input;
   const state: ContinentalPhaseState = JSON.parse(JSON.stringify(input));
   const need = legsFor(state);
+
+  // GROUP STAGE (Club World Cup): one matchday per step, all 8 groups in lockstep.
+  // The user's own group match uses his real played score when provided.
+  if (state.round === 'GS' && state.groups && state.groups.length > 0) {
+    const unplayed = state.groups.flatMap(g => g.matches).filter(m => !m.isPlayed);
+    if (unplayed.length > 0) {
+      const md = Math.min(...unplayed.map(m => m.matchday));
+      for (const g of state.groups) {
+        for (const m of g.matches) {
+          if (m.matchday !== md || m.isPlayed) continue;
+          const isUserMatch = m.homeId === state.userId || m.awayId === state.userId;
+          const goals = isUserMatch && userLegResult
+            ? { home: userLegResult.homeGoals, away: userLegResult.awayGoals }
+            : simulateMatchGoals(teamOf(state, m.homeId).rating, teamOf(state, m.awayId).rating, rnd, false);
+          m.homeGoals = goals.home;
+          m.awayGoals = goals.away;
+          m.isPlayed = true;
+        }
+      }
+      state.log.push(`انتهت الجولة ${md} من دور المجموعات`);
+    }
+    const stillUnplayed = state.groups.some(g => g.matches.some(m => !m.isPlayed));
+    if (!stillUnplayed) {
+      // Group stage complete: top 2 of every group advance (16 clubs).
+      // Group winners are seeded against runners-up of OTHER groups (no same-group rematch in R16).
+      const winners: string[] = [];
+      const runners: string[] = [];
+      for (const g of state.groups) {
+        const rows = groupStandingsRows(state, g);
+        winners.push(rows[0].teamId);
+        runners.push(rows[1].teamId);
+      }
+      const order = shuffle([0, 1, 2, 3, 4, 5, 6, 7], rnd);
+      for (let i = 0; i < 8; i++) {
+        if (order[i] === i) {
+          const j = (i + 1) % 8;
+          const tmp = order[i]; order[i] = order[j]; order[j] = tmp;
+        }
+      }
+      const newTies: ContTie[] = [];
+      for (let i = 0; i < 8; i++) {
+        newTies.push({ id: `R16_${i}`, round: 'R16', a: winners[i], b: runners[order[i]], legs: [] });
+      }
+      state.ties = state.ties.concat(newTies);
+      state.round = 'R16';
+      const userGroup = state.groups.find(g => g.teamIds.includes(state.userId));
+      const userQualified = newTies.some(t => t.a === state.userId || t.b === state.userId);
+      if (userQualified) {
+        state.userRoundsWon += 1;
+        state.userStage = 'R16';
+        state.log.push(`✅ تأهل ${teamOf(state, state.userId).name} من المجموعة ${userGroup ? userGroup.id : ''} إلى دور الـ16`);
+      } else {
+        state.userEliminated = true;
+        state.log.push(`❌ خرج ${teamOf(state, state.userId).name} من دور المجموعات`);
+      }
+    }
+    return state;
+  }
 
   state.ties = state.ties.map(tie => {
     if (tie.round !== state.round || tie.winnerId) return tie;
@@ -435,6 +588,16 @@ function stepOnce(input: ContinentalPhaseState, rnd: () => number, userLegResult
 /** The user's next unplayed leg (who hosts it), or null when the user is out / the round is not waiting on him. */
 export function getUserPendingLeg(state: ContinentalPhaseState): { tieId: string; homeId: string; awayId: string; legNo: number; isFinal: boolean; single: boolean } | null {
   if (state.status !== 'active' || state.userEliminated) return null;
+  if (state.round === 'GS' && state.groups && state.groups.length > 0) {
+    const ug = state.groups.find(g => g.teamIds.includes(state.userId));
+    if (!ug) return null;
+    const unplayedAll = state.groups.flatMap(g => g.matches).filter(m => !m.isPlayed);
+    if (unplayedAll.length === 0) return null;
+    const md = Math.min(...unplayedAll.map(m => m.matchday));
+    const m = ug.matches.find(x => x.matchday === md && !x.isPlayed);
+    if (!m) return null;
+    return { tieId: m.id, homeId: m.homeId, awayId: m.awayId, legNo: 0, isFinal: false, single: true };
+  }
   const tie = state.ties.find(t => t.round === state.round && !t.winnerId && (t.a === state.userId || t.b === state.userId));
   if (!tie) return null;
   const legNo = tie.legs.length;
@@ -501,11 +664,12 @@ export const prestigeOf = (compId: string): number => COMP_PRESTIGE[compId] ?? 0
  */
 export const REWARD_SCHEDULE = {
   participation: 0.25,
-  stage: { R32: 0.25, R16: 0.45, QF: 0.8, SF: 1.3, F: 2.0 } as Record<ContRoundKey, number>,
+  stage: { GS: 0, R32: 0.25, R16: 0.45, QF: 0.8, SF: 1.3, F: 2.0 } as Record<ContRoundKey, number>,
   champion: 2.0,
 };
 
 const STAGE_NAME: Record<ContRoundKey, string> = {
+  GS: 'دور المجموعات',
   R32: 'دور الـ32', R16: 'دور الـ16', QF: 'ربع النهائي', SF: 'نصف النهائي', F: 'النهائي',
 };
 
@@ -521,7 +685,8 @@ export function getPayoutLines(state: ContinentalPhaseState): PayoutLine[] {
   const champion = state.championId === state.userId;
   const reached = roundsReached(state);
   const lines: PayoutLine[] = [{ label: 'مكافأة المشاركة', months: REWARD_SCHEDULE.participation * pr }];
-  reached.slice(1).forEach(r => lines.push({ label: `بلوغ ${STAGE_NAME[r]}`, months: REWARD_SCHEDULE.stage[r] * pr }));
+  // With a group stage, participation already covers the groups: reaching R16 is itself a rewarded step up.
+  reached.slice(state.groups && state.groups.length ? 0 : 1).forEach(r => lines.push({ label: `بلوغ ${STAGE_NAME[r]}`, months: REWARD_SCHEDULE.stage[r] * pr }));
   if (champion) lines.push({ label: '🏆 مكافأة التتويج بالبطولة', months: REWARD_SCHEDULE.champion * pr });
   return lines;
 }
@@ -557,7 +722,7 @@ export function getContinentalOutcome(state: ContinentalPhaseState): Continental
   const isRunnerUp = reachedFinal && !isChampion;
   const lastRound: ContRoundKey = reachedFinal
     ? 'F'
-    : (ROUND_ORDER.slice().reverse().find(r => state.ties.some(t => t.round === r && (t.a === state.userId || t.b === state.userId))) || 'R16');
+    : (ROUND_ORDER.slice().reverse().find(r => state.ties.some(t => t.round === r && (t.a === state.userId || t.b === state.userId))) || (state.groups && state.groups.length ? 'GS' : 'R16'));
 
   const pr = prestigeOf(state.compId);
   const months = getPayoutLines(state).reduce((s, l) => s + l.months, 0);
