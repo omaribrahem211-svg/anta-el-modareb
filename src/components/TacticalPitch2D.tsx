@@ -97,6 +97,8 @@ export const TacticalPitch2D: React.FC<TacticalPitch2DProps> = ({
 }) => {
   const homeLabel = homeTeam?.shortName || homeTeam?.name || 'المضيف';
   const awayLabel = awayTeam?.shortName || awayTeam?.name || 'الضيف';
+  const homePitchSquad = useMemo(() => toPitchSquad(homeTeam, homeLineupIds), [homeTeam, homeLineupIds]);
+  const awayPitchSquad = useMemo(() => toPitchSquad(awayTeam, awayLineupIds), [awayTeam, awayLineupIds]);
 
   // Find the most recent event up to current minute
   const latestMatchEvent = useMemo(() => {
@@ -213,9 +215,10 @@ export const TacticalPitch2D: React.FC<TacticalPitch2DProps> = ({
       awayPossession={awayPossession}
       homeFormation={homeFormation}
       awayFormation={awayFormation}
-      homeSquad={toPitchSquad(homeTeam, homeLineupIds)}
-      awaySquad={toPitchSquad(awayTeam, awayLineupIds)}
+      homeSquad={homePitchSquad}
+      awaySquad={awayPitchSquad}
       lastEvent={convertedLastEvent}
+      isPaused={!isPlaying}
       isFinished={isFinished}
       status={isFinished ? 'finished' : isHalfTime ? 'halftime' : 'playing'}
       addedTime={currentMinute === 45 || currentMinute === 90 ? 3 : undefined}
