@@ -1,3 +1,4 @@
+import { recordJsException, crashLog } from '../services/crashReporting';
 /**
  * Tiny persistent debug log (last 30 entries) so testers can copy what went wrong
  * after a white screen / freeze. Stored as a small JSON string only.
@@ -18,6 +19,7 @@ function readLog(): DebugEntry[] {
 }
 
 export function pushDebugLog(kind: string, msg: string): void {
+  try { crashLog(`[${kind}] ${msg}`); } catch {}
   try {
     const entries = readLog();
     entries.push({ t: new Date().toISOString(), kind, msg: String(msg).slice(0, 400) });
@@ -59,6 +61,7 @@ let errSeq = 0;
 
 /** Emits a lightweight event so the on-screen reporter can show the real error (message + stack). */
 export function reportAppError(kind: string, msg: string, stack: string): void {
+  try { recordJsException(kind, msg, stack); } catch {}
   try {
     const m = String(msg || '');
     if (!m || IGNORED.some(r => r.test(m))) return;

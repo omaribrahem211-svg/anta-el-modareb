@@ -165,7 +165,7 @@ export const BottomNav: React.FC<BottomNavProps> = ({ activeTab, setActiveTab })
       )}
 
       {/* Docked Persistent Bottom Navigation Bar */}
-      <nav className="fixed left-0 right-0 bottom-0 z-40 bg-slate-900/90 backdrop-blur-xl border-t border-slate-800/80 pb-safe gpu-layer">
+      <nav className="fixed left-0 right-0 bottom-0 z-40 bg-slate-900 border-t border-slate-800/80 pb-safe gpu-layer">
         <div className="max-w-lg mx-auto flex items-center justify-around px-2 py-1">
           {mainTabs.map((tab) => {
             const Icon = tab.icon;

@@ -62,7 +62,7 @@ export const Header: React.FC<HeaderProps> = ({
   };
 
   return (
-    <header className="sticky top-0 z-30 bg-slate-900/90 backdrop-blur-md border-b border-slate-800/80 px-3 sm:px-4 py-2 sm:py-2.5 transition-all">
+    <header className="sticky top-0 z-30 bg-slate-900 border-b border-slate-800/80 px-3 sm:px-4 py-2 sm:py-2.5 transition-all">
       <div className="max-w-5xl mx-auto flex items-center justify-between gap-2.5">
         
         {/* Game & Club Brand Identity */}

@@ -478,7 +478,7 @@ export const InteractiveMatchController: React.FC<InteractiveMatchControllerProp
 
       {/* 1v1 SHOOTOUT MODAL OVERLAY */}
       {show1v1Modal && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-50 bg-black/85 flex items-center justify-center p-4">
           <div className="bg-slate-950 border-2 border-amber-500/60 rounded-3xl p-5 max-w-md w-full shadow-2xl space-y-4 animate-in zoom-in-95 duration-200">
             {/* Modal Header */}
             <div className="flex items-center justify-between border-b border-slate-800 pb-3">
