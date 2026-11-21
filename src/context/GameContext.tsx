@@ -248,6 +248,7 @@ import {
 } from '../utils/rankingsEngine';
 import { enrichClubsWithManagers } from '../data/worldManagersData';
 import { simulateWorldTransferDay, getTransferWindow, applyWorldMoves, resetWorldTransfers, advanceWorldEra, applyWorldEras, pruneWorldMoves } from '../utils/worldTransferEngine';
+import { runMonthlyAiClubDecisions } from '../utils/aiClubDirector';
 import { generateYouthAcademyBatch, promoteYouthProspectToSquad } from '../utils/youthAcademyEngine';
 import {
   calculateInitialPlayerSavings,
@@ -10096,6 +10097,29 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           }
         } catch (rankErr) {
           console.warn('[DailyProgression] Monthly rankings error:', rankErr);
+        }
+        // Monthly AI club decisions: sackings, appointments, youth growth, facility investment, morale drift.
+        // Makes the league feel alive: rival clubs develop themselves and managers pay for failure.
+        try {
+          const aiDirectorRes = runMonthlyAiClubDecisions(
+            calculatedNextTeams || teams,
+            standings || [],
+            {
+              seasonNumber: season?.seasonNumber || 1,
+              monthLabel: newDate.formattedArabic,
+              dateStr: newDate.rawDateStr,
+              userClubId: userClub?.id || null,
+            }
+          );
+          if (aiDirectorRes && Array.isArray(aiDirectorRes.teams)) {
+            calculatedNextTeams = aiDirectorRes.teams;
+            setTeams(aiDirectorRes.teams);
+          }
+          if (aiDirectorRes && aiDirectorRes.news.length > 0) {
+            addDailyNews(aiDirectorRes.news);
+          }
+        } catch (aiDirErr) {
+          console.warn('[DailyProgression] Monthly AI club director error:', aiDirErr);
         }
       }
 
