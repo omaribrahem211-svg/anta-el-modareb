@@ -152,6 +152,7 @@ import {
   generateDailyWorldNews,
   generateInitialBoardSystem,
   getInitialSeasonDate,
+  getScheduledRoundDate,
   normalizeCalendarDate,
   simulateDailyNegotiations,
   simulateDailySquadTraining,
@@ -10990,13 +10991,42 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const freshAgenda = generateMasterSeasonAgenda(1, startLeague, freshTeams, undefined, undefined, chosenUserClub);
     const maxR = freshAgenda.length > 0 ? Math.max(...freshAgenda.map(f => f.round)) : 34;
 
-    setSeason({ ...INITIAL_SEASON, totalRounds: maxR, leagueId: startLeague.id, leagueName: startLeague.name, divisionTier: startLeague.tier });
+    // TEST BUILDS ONLY: with a quick-start club, pre-play every league round except the
+    // final one so the reviewer lands on the last matchday with his club top of the table.
+    let startRound = 1;
+    let startFixtures = freshAgenda;
+    let startStandings = generateInitialStandings(freshTeams);
+    let startDate = getInitialSeasonDate(1);
+    if (quickStartClubId) {
+      startFixtures = freshAgenda.map(f => {
+        if (!f || (f.round || 0) >= maxR) return f;
+        const userHome = f.homeTeamId === chosenClubId;
+        const userAway = f.awayTeamId === chosenClubId;
+        let homeScore: number;
+        let awayScore: number;
+        if (userHome || userAway) {
+          const gf = 2 + ((f.round || 1) % 3);
+          const ga = (f.round || 1) % 2;
+          homeScore = userHome ? gf : ga;
+          awayScore = userHome ? ga : gf;
+        } else {
+          homeScore = ((f.homeTeamId || '').length + (f.round || 1)) % 3;
+          awayScore = ((f.awayTeamId || '').length + (f.round || 1)) % 3;
+        }
+        return { ...f, isPlayed: true, homeScore, awayScore };
+      });
+      startStandings = recalculateStandingsFromFixtures(generateInitialStandings(freshTeams), freshTeams, startFixtures);
+      startRound = maxR;
+      startDate = getScheduledRoundDate(startDate.rawDateStr, maxR, maxR);
+    }
+
+    setSeason({ ...INITIAL_SEASON, currentRound: startRound, totalRounds: maxR, leagueId: startLeague.id, leagueName: startLeague.name, divisionTier: startLeague.tier });
     setActiveLeague(startLeague);
     setTeams(freshTeams);
-    setStandings(generateInitialStandings(freshTeams));
+    setStandings(startStandings);
     setCupTournament(null);
-    setFixtures(freshAgenda);
-    setCurrentRound(1);
+    setFixtures(startFixtures);
+    setCurrentRound(startRound);
     setManager({
       ...INITIAL_MANAGER,
       currentClubId: chosenUserClub.id,
@@ -11025,7 +11055,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       facilitySpendingTotal: 0,
       currentSeasonNetProfit: 0,
     });
-    setCalendarDate(getInitialSeasonDate(1));
+    setCalendarDate(startDate);
     setActiveNegotiations([]);
     setBoardSystem(generateInitialBoardSystem(chosenUserClub, startLeague.tier || 4, freshTeams.length, freshTeams, false));
     setDailyNews([]);
@@ -11041,7 +11071,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         clubsManaged: [chosenUserClub.name],
       },
       transferMarket: freshMarket,
-      calendarDate: getInitialSeasonDate(1),
+      calendarDate: startDate,
       activeLeagueId: startLeague.id,
       seasonNumber: 1,
     });
