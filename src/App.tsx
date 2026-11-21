@@ -499,12 +499,15 @@ function ContinentalSafe() {
 }
 
 function SeasonStartingOverlay() {
-  const { isStartingSeasonUi, isSimulationRunning } = useGame() as any;
+  const { isStartingSeasonUi, isSimulationRunning, seasonStartStep } = useGame() as any;
   if (!isStartingSeasonUi && !isSimulationRunning) return null;
   return (
     <div className="fixed inset-0 z-[10000] flex flex-col items-center justify-center gap-4" dir="rtl" style={{ background: '#020617' }}>
       <div className="w-14 h-14 rounded-full border-4 animate-spin" style={{ borderColor: 'rgba(16,185,129,0.3)', borderTopColor: '#34d399' }} />
       <div className="font-black text-lg" style={{ color: '#fff' }}>{isStartingSeasonUi ? 'جاري تجهيز الموسم الجديد...' : 'جاري حساب النتائج...'}</div>
+      {isStartingSeasonUi && seasonStartStep ? (
+        <div className="text-sm font-bold" style={{ color: '#34d399' }}>{seasonStartStep}</div>
+      ) : null}
       <div className="text-xs" style={{ color: '#94a3b8' }}>لحظات من فضلك، لا تغلق اللعبة</div>
     </div>
   );
