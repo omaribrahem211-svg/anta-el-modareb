@@ -26,7 +26,6 @@ export const AfricanChampionsLeagueView: React.FC<AfricanChampionsLeagueViewProp
     africanChampionsLeague,
     userClub,
     activeLeague,
-    switchUserClubToAlAhly,
     switchContinentalCompetition,
     teams,
     calendarDate,
@@ -81,15 +80,7 @@ export const AfricanChampionsLeagueView: React.FC<AfricanChampionsLeagueViewProp
                 {comp.shortLabel}
               </button>
             ))}
-          {managedRegion === 'africa' && (
-            <button
-              onClick={() => switchUserClubToAlAhly()}
-              className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-red-600 via-amber-600 to-amber-500 text-white font-black text-xs flex items-center gap-1.5 shadow-lg cursor-pointer"
-            >
-              <Sparkles className="w-4 h-4 text-amber-200" />
-              <span>تولي تدريب النادي الأهلي 🦅</span>
-            </button>
-          )}
+
         </div>
       </div>
     );
