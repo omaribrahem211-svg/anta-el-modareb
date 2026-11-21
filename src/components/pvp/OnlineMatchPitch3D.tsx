@@ -460,17 +460,9 @@ export const OnlineMatchPitch3D: React.FC<OnlineMatchPitch3DProps> = ({
 
   // Animation frame tick for lifelike miniature movement - 700ms smooth tactical tick matching CSS transitions
   // Immediately halted when match ends or enters halftime break to free CPU/GPU resources
-  const [animTick, setAnimTick] = useState<number>(0);
-  useEffect(() => {
-    if (isFullTimeFinished || isHalfTimeBreak || status !== 'playing') {
-      return;
-    }
-    const interval = setInterval(() => {
-      if (typeof document !== 'undefined' && document.hidden) return;
-      setAnimTick((t) => (t + 1) % 10000);
-    }, 850);
-    return () => clearInterval(interval);
-  }, [isFullTimeFinished, isHalfTimeBreak, status]);
+  // PERF: no periodic re-render tick. Pitch positions now change only when match props
+  // change (zone/formation/score), so weak WebViews are not re-rasterising 22 animated
+  // player discs every 850ms (this caused white flash glitches on low-end phones).
 
   // Audio triggers for important match events (Goal Roar & Referee Whistle)
   useEffect(() => {
@@ -758,49 +750,44 @@ export const OnlineMatchPitch3D: React.FC<OnlineMatchPitch3DProps> = ({
     if (isGoal) {
       if (lastEvent?.team === homeClubName) {
         // Goal scored by Home in the top goal net
-        return { x: 50 + Math.sin(animTick * 0.3) * 6, y: 3 };
+        return { x: 50, y: 3 };
       } else {
         // Goal scored by Away in the bottom goal net
-        return { x: 50 + Math.sin(animTick * 0.3) * 6, y: 97 };
+        return { x: 50, y: 97 };
       }
     }
 
     if (currentBallZone === 'guest_box') {
       // Home team in Away's box at the TOP
-      const wobbleX = Math.sin(animTick * 0.14) * 16;
-      return { x: 50 + wobbleX, y: 12 + Math.cos(animTick * 0.18) * 4 };
+      return { x: 50, y: 12 };
     }
     if (currentBallZone === 'guest_half') {
       // Attacking build-up in upper half
-      const wobbleX = Math.sin(animTick * 0.12) * 22;
-      return { x: 50 + wobbleX, y: 28 + Math.cos(animTick * 0.15) * 5 };
+      return { x: 50, y: 28 };
     }
     if (currentBallZone === 'host_box') {
       // Away team in Home's box at the BOTTOM
-      const wobbleX = Math.sin(animTick * 0.14) * 16;
-      return { x: 50 + wobbleX, y: 88 - Math.cos(animTick * 0.18) * 4 };
+      return { x: 50, y: 88 };
     }
     if (currentBallZone === 'host_half') {
       // Defending build-up in lower half
-      const wobbleX = Math.sin(animTick * 0.12) * 22;
-      return { x: 50 + wobbleX, y: 72 - Math.cos(animTick * 0.15) * 5 };
+      return { x: 50, y: 72 };
     }
 
     // Midfield zone with dynamic momentum shift
-    const shiftedY = 50 - (momentum / 100) * 12 + Math.sin(animTick * 0.12) * 5;
-    const shiftedX = 50 + Math.cos(animTick * 0.1) * 24;
+    const shiftedY = 50 - (momentum / 100) * 12;
+    const shiftedX = 50;
     return {
       x: Math.max(18, Math.min(82, shiftedX)),
       y: Math.max(38, Math.min(62, shiftedY)),
     };
-  }, [currentBallZone, momentum, animTick, isGoal, lastEvent?.team, homeClubName]);
+  }, [currentBallZone, momentum, isGoal, lastEvent?.team, homeClubName]);
 
   // Compute HOME Players (Defending Bottom y=94%, Attacking Top y=6%)
   const homePlayers: PlayerDot[] = useMemo(() => {
     const list = getFormationSlots(homeFormation);
     const isHomeAttack = currentBallZone === 'guest_box' || currentBallZone === 'guest_half';
     const isAwayAttack = currentBallZone === 'host_box' || currentBallZone === 'host_half';
-    const time = animTick * 0.14;
     const usedNames = new Set<string>();
 
     return list.map((p, idx) => {
@@ -811,10 +798,6 @@ export const OnlineMatchPitch3D: React.FC<OnlineMatchPitch3DProps> = ({
       // Assign realistic player name and jersey number
       const playerInfo = assignPlayerNameAndNumber(p.role, idx, homeClubName, homeSquad, usedNames);
 
-      // Micro movement breathing
-      const phase = time + idx * 1.35;
-      const microX = Math.sin(phase) * 1.2;
-      const microY = Math.cos(phase * 1.1) * 1.0;
 
       if (p.role === 'GK') {
         targetX = 50 + (ballPos.x - 50) * 0.32;
@@ -878,8 +861,8 @@ export const OnlineMatchPitch3D: React.FC<OnlineMatchPitch3DProps> = ({
         }
       }
 
-      const finalX = Math.max(8, Math.min(92, targetX + microX));
-      const finalY = Math.max(6, Math.min(94, targetY + microY));
+      const finalX = Math.max(8, Math.min(92, targetX));
+      const finalY = Math.max(6, Math.min(94, targetY));
       const dist = Math.hypot(finalX - ballPos.x, finalY - ballPos.y);
       const isCarrier = dist < 7.5 && (isHomeAttack || currentBallZone === 'midfield');
       const isScorer = Boolean(
@@ -902,14 +885,13 @@ export const OnlineMatchPitch3D: React.FC<OnlineMatchPitch3DProps> = ({
         isScorer,
       };
     });
-  }, [homeFormation, currentBallZone, animTick, ballPos, homeClubName, homeSquad, isGoal, goalDetails]);
+  }, [homeFormation, currentBallZone, ballPos, homeClubName, homeSquad, isGoal, goalDetails]);
 
   // Compute AWAY Players (Defending Top y=6%, Attacking Bottom y=94%)
   const awayPlayers: PlayerDot[] = useMemo(() => {
     const list = getFormationSlots(awayFormation);
     const isHomeAttack = currentBallZone === 'guest_box' || currentBallZone === 'guest_half';
     const isAwayAttack = currentBallZone === 'host_box' || currentBallZone === 'host_half';
-    const time = animTick * 0.14;
     const usedNames = new Set<string>();
 
     return list.map((p, idx) => {
@@ -922,9 +904,6 @@ export const OnlineMatchPitch3D: React.FC<OnlineMatchPitch3DProps> = ({
       // Assign realistic player name and jersey number
       const playerInfo = assignPlayerNameAndNumber(p.role, idx, awayClubName, awaySquad, usedNames);
 
-      const phase = time + (idx + 11) * 1.35;
-      const microX = Math.sin(phase) * 1.2;
-      const microY = Math.cos(phase * 1.1) * 1.0;
 
       if (p.role === 'GK') {
         targetX = 50 + (ballPos.x - 50) * 0.32;
@@ -988,8 +967,8 @@ export const OnlineMatchPitch3D: React.FC<OnlineMatchPitch3DProps> = ({
         }
       }
 
-      const finalX = Math.max(8, Math.min(92, targetX + microX));
-      const finalY = Math.max(6, Math.min(94, targetY + microY));
+      const finalX = Math.max(8, Math.min(92, targetX));
+      const finalY = Math.max(6, Math.min(94, targetY));
       const dist = Math.hypot(finalX - ballPos.x, finalY - ballPos.y);
       const isCarrier = dist < 7.5 && isAwayAttack;
       const isScorer = Boolean(
@@ -1012,7 +991,7 @@ export const OnlineMatchPitch3D: React.FC<OnlineMatchPitch3DProps> = ({
         isScorer,
       };
     });
-  }, [awayFormation, currentBallZone, animTick, ballPos, awayClubName, awaySquad, isGoal, goalDetails]);
+  }, [awayFormation, currentBallZone, ballPos, awayClubName, awaySquad, isGoal, goalDetails]);
 
   // Compute Attack & Passing Vectors (Moving Vertically UP or DOWN)
   const attackSimulation = useMemo(() => {
@@ -1043,7 +1022,7 @@ export const OnlineMatchPitch3D: React.FC<OnlineMatchPitch3DProps> = ({
           hasVector: true,
           startX: carrier?.x || ballPos.x,
           startY: carrier?.y || ballPos.y,
-          endX: 50 + Math.sin(animTick * 0.2) * 8,
+          endX: 50,
           endY: 3,
           isShot: true,
           direction: 'up',
@@ -1073,7 +1052,7 @@ export const OnlineMatchPitch3D: React.FC<OnlineMatchPitch3DProps> = ({
           hasVector: true,
           startX: carrier?.x || ballPos.x,
           startY: carrier?.y || ballPos.y,
-          endX: 50 + Math.sin(animTick * 0.2) * 8,
+          endX: 50,
           endY: 97,
           isShot: true,
           direction: 'down',
@@ -1096,7 +1075,7 @@ export const OnlineMatchPitch3D: React.FC<OnlineMatchPitch3DProps> = ({
         };
       }
     }
-  }, [currentBallZone, ballPos, homePlayers, awayPlayers, animTick]);
+  }, [currentBallZone, ballPos, homePlayers, awayPlayers]);
 
   // Perspective 3D Transforms for the Vertical Stadium View
   const transformStyle = useMemo(() => {
@@ -1169,7 +1148,6 @@ export const OnlineMatchPitch3D: React.FC<OnlineMatchPitch3DProps> = ({
         style={{
           left: `${player.x}%`,
           top: `${player.y}%`,
-          transform: 'translate(-50%, -50%)',
           transition: 'left 0.7s cubic-bezier(0.25, 1, 0.5, 1), top 0.7s cubic-bezier(0.25, 1, 0.5, 1)',
           width: size,
           height: size,
@@ -1177,7 +1155,7 @@ export const OnlineMatchPitch3D: React.FC<OnlineMatchPitch3DProps> = ({
           color: fg,
           boxShadow: ring,
         }}
-        className="absolute z-10 pointer-events-none select-none rounded-full border-2 border-white/90 flex items-center justify-center font-black text-[11px] font-mono box-border"
+        className="absolute z-10 pointer-events-none select-none rounded-full border-2 border-white/90 flex items-center justify-center font-black text-[11px] font-mono box-border animate-disc-drift"
         aria-label={`${player.name} رقم ${player.jerseyNumber}`}
       >
         {player.jerseyNumber}
@@ -1510,11 +1488,10 @@ export const OnlineMatchPitch3D: React.FC<OnlineMatchPitch3DProps> = ({
             style={{
               left: `${ballPos.x}%`,
               top: `${ballPos.y}%`,
-              transform: 'translate(-50%, -50%)',
               transition: 'left 0.45s cubic-bezier(0.25, 1, 0.5, 1), top 0.45s cubic-bezier(0.25, 1, 0.5, 1)',
               boxShadow: '0 0 0 4px rgba(253,230,138,0.35), 0 0 14px 4px rgba(253,230,138,0.55)',
             }}
-            className="absolute z-20 pointer-events-none w-3 h-3 rounded-full bg-white"
+            className="absolute z-20 pointer-events-none w-3 h-3 rounded-full bg-white animate-ball-bob"
           >
             {attackSimulation.isShot && (
               <span className="absolute -inset-2 rounded-full bg-amber-400/30 animate-ping pointer-events-none" />
@@ -1586,7 +1563,7 @@ export const OnlineMatchPitch3D: React.FC<OnlineMatchPitch3DProps> = ({
 
         {/* HALF-TIME CENTER SCREEN (شاشة استراحة الشوطين في منتصف الشاشة - خيارات المدرب وزر بدء الشوط الثاني) */}
         {isHalfTimeBreak && (
-          <div className="absolute inset-0 z-35 flex items-center justify-center p-2 sm:p-3 bg-slate-950/80 backdrop-blur-md animate-in fade-in zoom-in-95 duration-200">
+          <div className="absolute inset-0 z-35 flex items-center justify-center p-2 sm:p-3 bg-slate-950/90 animate-in fade-in zoom-in-95 duration-200">
             <div className="relative w-full max-w-[325px] sm:max-w-[350px] bg-gradient-to-b from-slate-900 via-slate-900/98 to-slate-950 rounded-3xl border-2 border-amber-400/90 shadow-[0_0_35px_rgba(251,191,36,0.3)] p-3.5 sm:p-4 text-center flex flex-col items-center gap-2.5">
               {/* Top Badge: انتهاء الشوط الأول */}
               <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-400 text-slate-950 text-[11px] font-black shadow">
@@ -1698,7 +1675,7 @@ export const OnlineMatchPitch3D: React.FC<OnlineMatchPitch3DProps> = ({
 
         {/* FULL-TIME CENTER SCREEN (شاشة نهاية المباراة في منتصف الملعب - تأكيد النتيجة والانتقال) */}
         {isFullTimeFinished && (
-          <div className="absolute inset-0 z-35 flex items-center justify-center p-2 sm:p-3 bg-slate-950/85 backdrop-blur-md animate-in fade-in zoom-in-95 duration-200">
+          <div className="absolute inset-0 z-35 flex items-center justify-center p-2 sm:p-3 bg-slate-950/90 animate-in fade-in zoom-in-95 duration-200">
             <div className="relative w-full max-w-[325px] sm:max-w-[360px] bg-gradient-to-b from-slate-900 via-slate-900/98 to-slate-950 rounded-3xl border-2 border-emerald-400/90 shadow-[0_0_40px_rgba(16,185,129,0.35)] p-3.5 sm:p-4 text-center flex flex-col items-center gap-2.5">
               {/* Top Badge: انتهاء المباراة بالكامل */}
               <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-400 text-slate-950 text-[11px] font-black shadow">
