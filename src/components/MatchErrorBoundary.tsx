@@ -12,7 +12,13 @@ interface State {
   hasError: boolean;
   error: Error | null;
   errorInfo: ErrorInfo | null;
+  repeated: boolean;
 }
+
+// Session-level memory of the last caught crash: if the SAME error comes back after a
+// recovery tap, the crash is deterministic and a soft reset would just loop the screen.
+let lastCrash: { msg: string; at: number } | null = null;
+const REPEAT_WINDOW_MS = 5 * 60 * 1000;
 
 /**
  * Robust Diagnostic Error Boundary around Match Flow & MatchesTab
@@ -25,6 +31,7 @@ export class MatchErrorBoundary extends Component<Props, State> {
       hasError: false,
       error: null,
       errorInfo: null,
+      repeated: false,
     };
   }
 
@@ -36,10 +43,19 @@ export class MatchErrorBoundary extends Component<Props, State> {
     reportAppError('match', error?.message || String(error), (error?.stack || '') + '\n' + (errorInfo?.componentStack || ''));
     console.error(`[CRITICAL_MATCH_ERROR] Runtime exception in ${this.props.componentName || 'MatchFlow'}:`, error);
     console.error('[CRITICAL_MATCH_ERROR] Component stack trace:', errorInfo.componentStack);
-    this.setState({ errorInfo });
+    const msg = error?.message || String(error);
+    const repeated = Boolean(lastCrash && lastCrash.msg === msg && Date.now() - lastCrash.at < REPEAT_WINDOW_MS);
+    lastCrash = { msg, at: Date.now() };
+    this.setState({ errorInfo, repeated });
   }
 
   private handleRecover = () => {
+    if (this.state.repeated) {
+      // Same crash returned after a soft reset - only a full reload can clear it.
+      console.log('[MatchErrorBoundary] Repeated identical crash, forcing full reload.');
+      window.location.reload();
+      return;
+    }
     console.log('[MatchErrorBoundary] User triggered safe recovery action.');
     this.setState({ hasError: false, error: null, errorInfo: null });
     if (this.props.onReset) {
@@ -104,7 +120,7 @@ export class MatchErrorBoundary extends Component<Props, State> {
               className="px-6 py-3 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-black rounded-2xl flex items-center gap-2 shadow-lg shadow-emerald-950/60 transition-all active:scale-95 cursor-pointer"
             >
               <RotateCcw className="w-4 h-4" />
-              <span>استئناف اللعب ومتابعة الجولة ➔</span>
+              <span>{this.state.repeated ? 'تحديث اللعبة ومتابعة الجولة ➔' : 'استئناف اللعب ومتابعة الجولة ➔'}</span>
             </button>
 
             <button
