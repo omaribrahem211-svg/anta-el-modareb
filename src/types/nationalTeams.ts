@@ -148,6 +148,8 @@ export interface NationalTeamsState {
   friendlyMatches: InternationalMatch[];
   userNationalTeamId: string | null;
   pendingJobOffers: NationalTeamJobOffer[];
+  /** NTs whose offers the user declined (or resigned from) this season; not re-offered until next season. */
+  declinedOfferTeamIds?: string[];
   initializedForSeason?: number;
   /** Idempotency marker: highest league round already processed. */
   lastProcessedRound?: number;

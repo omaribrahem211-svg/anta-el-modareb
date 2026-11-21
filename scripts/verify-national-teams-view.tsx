@@ -92,8 +92,14 @@ ok('job-offer view: offer card with accept/decline');
 
 // 4. Low-reputation locked state
 const html3 = renderWith({ ...baseCtx, nationalTeamsState: initNationalTeamsForSeason(createEmptyNationalTeamsState(), 1, 34, clubs, null).state, userNationalTeam: null });
-if (!html3.includes('السمعة 70+')) fail('locked card missing');
-ok('locked view: reputation gate message');
+if (!html3.includes('سمعة 50+')) fail('locked card missing');
+if (!html3.includes('منتخبات ناشئة')) fail('locked card missing tier progression hint');
+ok('locked view: reputation gate message (50+) with tier hint');
+
+// 4b. Contract + cumulative-record notes on the managed card (uses baseCtx, 22 rounds in)
+if (!html1.includes('عقدك ينتهي بعد نهاية البطولة')) fail('contract-end note missing on managed card');
+if (!html1.includes('تراكمي لكل المواسم')) fail('cumulative-record note missing on managed card');
+ok('managed view: contract-end note + cumulative record note');
 
 // 5. Null state: placeholder, no crash
 const html4 = renderWith({ ...baseCtx, nationalTeamsState: null, userNationalTeam: null });

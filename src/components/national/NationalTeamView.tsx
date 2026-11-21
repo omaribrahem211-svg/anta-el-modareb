@@ -131,6 +131,7 @@ export const NationalTeamView: React.FC = () => {
             </button>
           </div>
           <div className="mt-2 text-[10px] text-slate-500 text-center">المنتخبات لا تجري انتقالات — قوائم استدعاء فقط من اللاعبين الحاليين</div>
+          <div className="mt-1 text-[10px] text-slate-500 text-center">📄 عقدك ينتهي بعد نهاية البطولة الدولية القادمة، وبعدها تصلك عروض جديدة • السجل أعلاه تراكمي لكل المواسم</div>
         </div>
       ) : pendingOffer ? (
         <div className="bg-gradient-to-l from-amber-900/40 to-slate-900 border border-amber-600/50 rounded-3xl p-4">
@@ -138,7 +139,7 @@ export const NationalTeamView: React.FC = () => {
             <span className="text-4xl">{pendingOffer.flag}</span>
             <div className="flex-1">
               <div className="text-white font-black text-base">عرض تدريب منتخب {pendingOffer.nationalTeamName}</div>
-              <div className="text-amber-300 text-xs">بناءً على سمعتك العالية. يمكنك الجمع بين المنتخب والنادي.</div>
+              <div className="text-amber-300 text-xs">يمكنك الجمع بين المنتخب والنادي. العقد يمتد حتى نهاية البطولة الدولية القادمة.</div>
             </div>
           </div>
           <div className="mt-3 flex gap-2">
@@ -159,8 +160,8 @@ export const NationalTeamView: React.FC = () => {
       ) : (
         <div className="bg-slate-900 border border-slate-800 rounded-3xl p-4 text-center">
           <Flag className="w-6 h-6 text-slate-500 mx-auto mb-1" />
-          <div className="text-slate-300 text-xs font-bold">تدريب المنتخبات متاح للمدربين أصحاب السمعة 70+</div>
-          <div className="text-slate-500 text-[10px] mt-1">ارفع سمعتك بالألقاب مع ناديك لتصلك عروض المنتخبات</div>
+          <div className="text-slate-300 text-xs font-bold">تدريب المنتخبات متاح من سمعة 50+</div>
+          <div className="text-slate-500 text-[10px] mt-1">تبدأ بعروض من منتخبات ناشئة، وكلما ربحت البطولات وصلتك عروض من منتخبات أقوى</div>
         </div>
       )}
 
@@ -193,6 +194,11 @@ export const NationalTeamView: React.FC = () => {
             <div className="bg-slate-900 border border-slate-800 rounded-3xl p-5 text-center text-slate-400 text-xs">
               <CalendarDays className="w-5 h-5 mx-auto mb-2 text-slate-500" />
               لا توجد بطولة دولية هذا الموسم. كأس الأمم الإفريقية كل موسمين وكأس العالم كل 4 مواسم.
+              {userNationalTeam && userNationalTeam.stats.played > 0 && (
+                <div className="mt-2 text-[10px] text-slate-500">
+                  سجل منتخبك ({userNationalTeam.stats.played} مباراة) تراكمي من الوديات والبطولات السابقة — الوديات الدولية تقام كل 6 جولات.
+                </div>
+              )}
             </div>
           ) : (
             <>

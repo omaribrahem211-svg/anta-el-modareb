@@ -13,6 +13,7 @@ import {
   InternationalMatch,
   InternationalTournament,
   NationalTeam,
+  NationalTeamJobOffer,
   NationalTeamsState,
 } from '../types/nationalTeams';
 import {
@@ -33,7 +34,49 @@ import {
   shouldHoldWorldCup,
 } from '../utils/internationalTournamentEngine';
 
-export const NT_MIN_REPUTATION_FOR_JOB = 70;
+export const NT_MIN_REPUTATION_FOR_JOB = 50;
+
+// ---------------------------------------------------------------------------
+// Tiered NT job offers: weak national teams offer first; stronger teams offer
+// as the manager's score (reputation + trophy bonus) grows. Contract ends
+// after the next completed tournament so the manager can switch teams.
+// ---------------------------------------------------------------------------
+
+/** Reputation points added per trophy won (club or country) for NT offer tiers. */
+export const NT_TROPHY_SCORE_BONUS = 3;
+
+export interface NtOfferTier {
+  /** Minimum manager score to receive offers from this tier. */
+  minScore: number;
+  /** Minimum NT rankingPoints to belong to this tier (band runs up to the tier above). */
+  minRankingPoints: number;
+  label: string;
+}
+
+/** Ordered strongest-first; the first tier whose minScore is met is the offer band. */
+export const NT_OFFER_TIERS: NtOfferTier[] = [
+  { minScore: 82, minRankingPoints: 900, label: 'منتخب من الصفوة' },
+  { minScore: 72, minRankingPoints: 850, label: 'منتخب قوي' },
+  { minScore: 62, minRankingPoints: 780, label: 'منتخب متوسط' },
+  { minScore: NT_MIN_REPUTATION_FOR_JOB, minRankingPoints: 0, label: 'منتخب ناشئ' },
+];
+
+/** Manager score driving tiered offers: reputation plus a bonus per trophy won. */
+export function managerNtScore(reputation: number, trophiesCount: number): number {
+  return (reputation || 0) + NT_TROPHY_SCORE_BONUS * Math.max(0, trophiesCount || 0);
+}
+
+/** The strongest offer tier this manager qualifies for, or null below the gate. */
+export function eligibleNtOfferTier(score: number): NtOfferTier | null {
+  return NT_OFFER_TIERS.find(t => score >= t.minScore) || null;
+}
+
+/** Manager context needed to generate offers outside the init effect. */
+export interface NtJobContext {
+  reputation: number;
+  trophiesCount: number;
+  nationalityCode?: string;
+}
 
 /** Rounds on which friendly internationals are scheduled (international breaks). */
 const FRIENDLY_ROUND_MODULO = 6;
@@ -99,7 +142,9 @@ export function initNationalTeamsForSeason(
       `تم تشكيل ${teams.length} منتخباً وطنياً من أفضل اللاعبين الموجودين في اللعبة حسب الجنسية.\n` +
       `• ${teams.filter(t => !t.isStatistical).length} منتخبات بتشكيلات حقيقية من لاعبي الأندية.\n` +
       `• كأس الأمم الإفريقية كل موسمين وكأس العالم كل 4 مواسم.\n` +
-      `• تدريب المنتخبات متاح للمدربين أصحاب السمعة العالية (${NT_MIN_REPUTATION_FOR_JOB}+) ويمكن الجمع بينه وبين تدريب النادي.\n` +
+      `• تدريب المنتخبات متاح من سمعة ${NT_MIN_REPUTATION_FOR_JOB}+ ويمكن الجمع بينه وبين تدريب النادي.\n` +
+      `• تبدأ بعروض من منتخبات ناشئة، وكلما ربحت البطولات وصلتك عروض من منتخبات أقوى.\n` +
+      `• عقدك مع أي منتخب ينتهي بعد نهاية البطولة الدولية، فتنتقل لمنتخب آخر.\n` +
       `تابع المنتخبات من شاشة "المنتخبات".`,
       `الموسم ${seasonNumber}`
     ));
@@ -151,7 +196,10 @@ export function initNationalTeamsForSeason(
       userNationalTeamId: userNtId,
       initializedForSeason: seasonNumber,
       lastProcessedRound: 0,
-      friendlyMatches: [],
+      // Keep friendly history across seasons so a team's all-time record
+      // (stats) always has visible matches behind it.
+      friendlyMatches: (state.friendlyMatches || []).slice(0, MAX_STORED_FRIENDLIES),
+      declinedOfferTeamIds: [],
       postSeasonCompletedForSeason: undefined,
     },
     messages,
@@ -194,7 +242,8 @@ export function advanceNationalTeamsToRound(
   currentRound: number,
   totalRounds: number,
   seasonNumber: number,
-  clubTeams: Club[]
+  clubTeams: Club[],
+  jobCtx?: NtJobContext
 ): NtAdvanceResult {
   if (!prev || !Array.isArray(prev.teams) || prev.teams.length === 0) return { state: prev, messages: [] };
   const lastDone = prev.lastProcessedRound ?? 0;
@@ -227,6 +276,13 @@ export function advanceNationalTeamsToRound(
       }
       if (res.tournament.isCompleted && !t.isCompleted) {
         messages.push(championMessage(res.tournament, state.teams, round));
+        // The user's NT contract runs until the end of a tournament: end it
+        // and line up the next (possibly stronger) offer.
+        if (jobCtx) {
+          const contract = applyTournamentContractOutcome(state, res.tournament, jobCtx, seasonNumber);
+          state = contract.state;
+          messages.push(...contract.messages);
+        }
       }
     }
 
@@ -310,7 +366,8 @@ export function completePostSeasonTournament(
   prev: NationalTeamsState,
   totalRounds: number,
   seasonNumber: number,
-  clubTeams: Club[]
+  clubTeams: Club[],
+  jobCtx?: NtJobContext
 ): NtAdvanceResult {
   if (!prev || prev.postSeasonCompletedForSeason === seasonNumber) return { state: prev, messages: [] };
   let state: NationalTeamsState = { ...prev, teams: prev.teams.map(t => ({ ...t, stats: { ...t.stats } })) };
@@ -337,6 +394,11 @@ export function completePostSeasonTournament(
       messages.push(championMessage(current, state.teams, totalRounds));
     }
     state = { ...state, activeTournament: current };
+    if (current.isCompleted && jobCtx) {
+      const contract = applyTournamentContractOutcome(state, current, jobCtx, seasonNumber);
+      state = contract.state;
+      messages.push(...contract.messages);
+    }
   }
 
   recomputeNationalTeamWorldRanks(state.teams);
@@ -369,19 +431,34 @@ export function rehydrateNationalTeams(state: NationalTeamsState | null | undefi
 // NT job offers (stage 4 hooks live here so GameContext stays thin)
 // ---------------------------------------------------------------------------
 
-/** Picks an NT that would offer the user a job: strong NTs first, user's own country preferred. */
+/**
+ * Picks an NT that would offer the user a job, from the strongest tier the
+ * manager qualifies for (weak NTs first, stronger ones as trophies pile up).
+ * User's own country is preferred inside the eligible band.
+ */
 export function generateNationalTeamJobOffer(
   state: NationalTeamsState,
   managerReputation: number,
   managerNationalityCode: string | undefined,
-  seasonNumber: number
+  seasonNumber: number,
+  trophiesCount = 0
 ): NationalTeamsState {
-  if (managerReputation < NT_MIN_REPUTATION_FOR_JOB) return state;
+  const score = managerNtScore(managerReputation, trophiesCount);
+  const tier = eligibleNtOfferTier(score);
+  if (!tier) return state;
   if (state.userNationalTeamId) return state; // already manages an NT
   if ((state.pendingJobOffers || []).length > 0) return state; // one at a time
 
+  // Eligible pool: every NT below the ceiling of the manager's tier (the next
+  // tier up's floor). The strongest team in reach is picked, so offers grow
+  // with the manager; home country wins ties of access.
+  const tierIdx = NT_OFFER_TIERS.indexOf(tier);
+  const bandCeiling = tierIdx > 0 ? NT_OFFER_TIERS[tierIdx - 1].minRankingPoints : Infinity;
+  const declined = new Set(state.declinedOfferTeamIds || []);
   const candidates = [...(state.teams || [])]
-    .filter(t => !t.isUserManaged)
+    .filter(t => !t.isUserManaged
+      && !declined.has(t.id)
+      && t.rankingPoints < bandCeiling)
     .sort((a, b) => {
       const aHome = managerNationalityCode && a.countryCode === managerNationalityCode ? 1 : 0;
       const bHome = managerNationalityCode && b.countryCode === managerNationalityCode ? 1 : 0;
@@ -394,7 +471,7 @@ export function generateNationalTeamJobOffer(
   return {
     ...state,
     pendingJobOffers: [{
-      id: `nt_offer_${seasonNumber}_${pick.id}`,
+      id: `nt_offer_${seasonNumber}_${pick.id}_r${pick.worldRank}`,
       nationalTeamId: pick.id,
       nationalTeamName: pick.name,
       flag: pick.flag,
@@ -403,6 +480,66 @@ export function generateNationalTeamJobOffer(
       expiresAfterSeasons: 1,
     }],
   };
+}
+
+/** Inbox message announcing a new NT job offer (shared by all offer paths). */
+export function describeNtJobOffer(
+  offer: NationalTeamJobOffer,
+  managerReputation: number,
+  seasonNumber: number
+): InboxMessage {
+  return msg(
+    `msg_${offer.id}`,
+    `${offer.flag} عرض تدريب منتخب ${offer.nationalTeamName}!`,
+    `بناءً على سمعتك (${managerReputation}/100)، يسعدنا أن نعرض عليك تدريب منتخب ${offer.nationalTeamName} ${offer.flag}.\n\n` +
+    `• يمكنك الجمع بين تدريب المنتخب وناديك الحالي في نفس الوقت.\n` +
+    `• المنتخبات لا تشترك في سوق الانتقالات — قوائم استدعاء فقط.\n` +
+    `• العقد يمتد حتى نهاية البطولة الدولية القادمة، وبعدها تصلك عروض جديدة كلما ربحت البطولات.\n\n` +
+    `قبول العرض متاح من شاشة المنتخبات.`,
+    `الموسم ${seasonNumber}`
+  );
+}
+
+/**
+ * Ends the user's NT contract after a tournament completes, then immediately
+ * offers the next job their (possibly boosted) score qualifies for. A manager
+ * who just won the tournament is credited with the champion reward (+6 rep,
+ * +1 trophy) before the next offer is picked. Idempotent: after the contract
+ * ends there is no userNationalTeamId, so re-runs are no-ops.
+ */
+export function applyTournamentContractOutcome(
+  prev: NationalTeamsState,
+  completedTournament: InternationalTournament,
+  jobCtx: NtJobContext,
+  seasonNumber: number
+): NtAdvanceResult {
+  if (!prev.userNationalTeamId) return { state: prev, messages: [] };
+  const team = getNationalTeamById(prev.teams, prev.userNationalTeamId);
+  const teamName = team ? `${team.flag} ${team.name}` : 'منتخبك';
+  const wonIt = completedTournament.winnerTeamId === prev.userNationalTeamId;
+  let state: NationalTeamsState = {
+    ...prev,
+    userNationalTeamId: null,
+    teams: prev.teams.map(t => t.id === prev.userNationalTeamId ? { ...t, isUserManaged: false } : t),
+  };
+  const messages: InboxMessage[] = [msg(
+    `nt_contract_end_${completedTournament.id}_${prev.userNationalTeamId}`,
+    `📄 انتهى عقدك مع ${teamName}`,
+    `انتهى عقدك مع ${teamName} بعد نهاية ${completedTournament.name}.\n` +
+    (wonIt
+      ? 'رحلت وأنت بطل! إنجازك سيرفع أسهمك وستصلك عروض من منتخبات أقوى.\n'
+      : 'شكراً على فترة قيادتك للمنتخب.\n') +
+    'يمكنك الآن قبول عرض جديد من شاشة المنتخبات متى وصلك.',
+    `الموسم ${seasonNumber}`
+  )];
+  const rep = jobCtx.reputation + (wonIt ? 6 : 0);
+  const trophies = jobCtx.trophiesCount + (wonIt ? 1 : 0);
+  const before = state.pendingJobOffers.length;
+  state = generateNationalTeamJobOffer(state, rep, jobCtx.nationalityCode, seasonNumber, trophies);
+  if (state.pendingJobOffers.length > before) {
+    messages.push(describeNtJobOffer(state.pendingJobOffers[0], rep, seasonNumber));
+  }
+  return { state, messages };
 }
 
 export function acceptNationalTeamJob(state: NationalTeamsState, offerId: string): NationalTeamsState {
@@ -417,15 +554,22 @@ export function acceptNationalTeamJob(state: NationalTeamsState, offerId: string
 }
 
 export function declineNationalTeamJob(state: NationalTeamsState): NationalTeamsState {
-  return { ...state, pendingJobOffers: [] };
+  const declinedIds = (state.pendingJobOffers || []).map(o => o.nationalTeamId);
+  return {
+    ...state,
+    pendingJobOffers: [],
+    declinedOfferTeamIds: [...new Set([...(state.declinedOfferTeamIds || []), ...declinedIds])],
+  };
 }
 
 export function resignFromNationalTeam(state: NationalTeamsState): NationalTeamsState {
   if (!state.userNationalTeamId) return state;
+  const resignedId = state.userNationalTeamId;
   return {
     ...state,
     userNationalTeamId: null,
-    teams: state.teams.map(t => t.id === state.userNationalTeamId ? { ...t, isUserManaged: false } : t),
+    teams: state.teams.map(t => t.id === resignedId ? { ...t, isUserManaged: false } : t),
+    declinedOfferTeamIds: [...new Set([...(state.declinedOfferTeamIds || []), resignedId])],
   };
 }
 

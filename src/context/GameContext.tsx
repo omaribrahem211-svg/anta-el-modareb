@@ -156,8 +156,11 @@ import {
   rehydrateNationalTeams,
   resignFromNationalTeam as ntResign,
   stripNationalTeamsForSave,
+  describeNtJobOffer,
+  managerNtScore,
   NT_MIN_REPUTATION_FOR_JOB,
 } from '../services/nationalTeamsService';
+import type { NtJobContext } from '../services/nationalTeamsService';
 import { GLOBAL_COUNTRIES } from '../data/countriesData';
 import { getDomesticCupDefinitionForCountry } from '../data/competitionsData';
 import { EGYPT_PREMIER_CLUBS } from '../data/arabClubsData';
@@ -2687,6 +2690,19 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     });
   }, []);
 
+  // Manager context for NT job offers (reputation + trophy count + home country).
+  const buildNtJobCtx = (): NtJobContext => {
+    const mgrNat = manager?.nationality || '';
+    const homeCountry = Object.values(GLOBAL_COUNTRIES).find(
+      c => mgrNat.startsWith(c.name) || c.name.startsWith(mgrNat)
+    );
+    return {
+      reputation: manager?.reputation ?? 0,
+      trophiesCount: manager?.trophies?.length ?? 0,
+      nationalityCode: homeCountry?.code,
+    };
+  };
+
   // Season rollover / first-time init (build universe, schedule AFCON / World Cup, job offers)
   useEffect(() => {
     if (!isInitialLoadDoneRef.current) return;
@@ -2707,27 +2723,13 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     );
     let nextState = res.state;
     const messages = [...res.messages];
-    // NT job offer for high-reputation managers (dual club+NT job allowed)
-    const rep = manager?.reputation ?? 0;
-    if (rep >= NT_MIN_REPUTATION_FOR_JOB && !nextState.userNationalTeamId) {
-      const mgrNat = manager?.nationality || '';
-      const homeCountry = Object.values(GLOBAL_COUNTRIES).find(
-        c => mgrNat.startsWith(c.name) || c.name.startsWith(mgrNat)
-      );
+    // NT job offer (tiered: weak NTs first, stronger ones as trophies pile up)
+    const jobCtx = buildNtJobCtx();
+    if (managerNtScore(jobCtx.reputation, jobCtx.trophiesCount) >= NT_MIN_REPUTATION_FOR_JOB && !nextState.userNationalTeamId) {
       const before = nextState.pendingJobOffers.length;
-      nextState = generateNationalTeamJobOffer(nextState, rep, homeCountry?.code, seasonNumber);
+      nextState = generateNationalTeamJobOffer(nextState, jobCtx.reputation, jobCtx.nationalityCode, seasonNumber, jobCtx.trophiesCount);
       const newOffer = nextState.pendingJobOffers.length > before ? nextState.pendingJobOffers[0] : null;
-      if (newOffer) {
-        messages.push({
-          id: `msg_${newOffer.id}`,
-          title: `${newOffer.flag} عرض تدريب منتخب ${newOffer.nationalTeamName}!`,
-          sender: 'الاتحاد الدولي لكرة القدم',
-          date: `الموسم ${seasonNumber}`,
-          type: 'news',
-          read: false,
-          content: `بناءً على سمعتك الكبيرة (${rep}/100)، يسعدنا أن نعرض عليك تدريب منتخب ${newOffer.nationalTeamName} ${newOffer.flag}.\n\nيمكنك الجمع بين تدريب المنتخب وناديك الحالي في نفس الوقت. المنتخبات لا تشترك في سوق الانتقالات — قوائم استدعاء فقط.\n\nقبول العرض متاح من شاشة المنتخبات.`,
-        } as InboxMessage);
-      }
+      if (newOffer) messages.push(describeNtJobOffer(newOffer, jobCtx.reputation, seasonNumber));
     }
     applyNtChampionReward(nationalTeamsRef.current, nextState);
     setNationalTeamsState(nextState);
@@ -2748,7 +2750,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       return;
     }
     ntRoundRef.current = currentRound;
-    const res = advanceNationalTeamsToRound(st, currentRound, totalRounds, seasonNumber, teams);
+    const res = advanceNationalTeamsToRound(st, currentRound, totalRounds, seasonNumber, teams, buildNtJobCtx());
     applyNtChampionReward(st, res.state);
     setNationalTeamsState(res.state);
     if (res.messages.length > 0) setInbox(prev => [...res.messages, ...prev]);
@@ -2763,12 +2765,33 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const seasonNumber = season?.seasonNumber || 1;
     if (ntPostSeasonRef.current === seasonNumber) return;
     ntPostSeasonRef.current = seasonNumber;
-    const res = completePostSeasonTournament(st, totalRounds, seasonNumber, teams);
+    const res = completePostSeasonTournament(st, totalRounds, seasonNumber, teams, buildNtJobCtx());
     applyNtChampionReward(st, res.state);
     if (res.state !== st) setNationalTeamsState(res.state);
     if (res.messages.length > 0) setInbox(prev => [...res.messages, ...prev]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [seasonFinished, season?.seasonNumber, teams, totalRounds]);
+
+  // Mid-season NT offers: when the manager's score crosses a new tier (reputation
+  // or trophies changed) while unemployed, generate an offer immediately instead
+  // of waiting for the next season rollover.
+  useEffect(() => {
+    if (!isInitialLoadDoneRef.current) return;
+    const st = nationalTeamsRef.current;
+    if (!st || st.teams.length === 0) return;
+    const seasonNumber = season?.seasonNumber || 1;
+    if (st.initializedForSeason !== seasonNumber) return;
+    if (st.userNationalTeamId || (st.pendingJobOffers || []).length > 0) return;
+    const jobCtx = buildNtJobCtx();
+    if (managerNtScore(jobCtx.reputation, jobCtx.trophiesCount) < NT_MIN_REPUTATION_FOR_JOB) return;
+    const before = st.pendingJobOffers.length;
+    const next = generateNationalTeamJobOffer(st, jobCtx.reputation, jobCtx.nationalityCode, seasonNumber, jobCtx.trophiesCount);
+    if (next.pendingJobOffers.length > before) {
+      setNationalTeamsState(next);
+      setInbox(prev => [describeNtJobOffer(next.pendingJobOffers[0], jobCtx.reputation, seasonNumber), ...prev]);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [manager?.reputation, manager?.trophies?.length, season?.seasonNumber]);
 
   // NT job actions (user decisions)
   const acceptNationalTeamJob = useCallback((offerId: string) => {
