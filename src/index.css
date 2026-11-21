@@ -71,3 +71,26 @@ html.perf-lite *:not(.animate-spin):not(.animate-spin *) {
 html.perf-lite [class*="blur"] { filter: none !important; }
 /* big blurred drop shadows are expensive on weak GPUs (rings are kept) */
 html.perf-lite [class*="shadow-"] { box-shadow: none !important; }
+
+/* المدرب المميز: إطار ذهبي متحرك خفيف (transform فقط، يراعي prefers-reduced-motion) */
+@keyframes premium-shimmer {
+  0% { transform: translateX(320%) skewX(-15deg); }
+  100% { transform: translateX(-320%) skewX(-15deg); }
+}
+.premium-card-frame {
+  border-color: rgba(251, 191, 36, 0.9) !important;
+  background: linear-gradient(160deg, #1a1408 0%, #0d0f1a 55%, #03080e 100%) !important;
+  box-shadow: 0 15px 35px -10px rgba(245, 158, 11, 0.25), 0 0 30px rgba(245, 158, 11, 0.18) !important;
+}
+.premium-card-shimmer {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 30%;
+  background: linear-gradient(90deg, transparent, rgba(251, 191, 36, 0.12), transparent);
+  animation: premium-shimmer 3.5s linear infinite;
+  pointer-events: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .premium-card-shimmer { animation: none; }
+}

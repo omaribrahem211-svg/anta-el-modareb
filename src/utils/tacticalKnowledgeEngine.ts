@@ -12,6 +12,7 @@ import {
   Club,
 } from '../types/game';
 import { getActiveCourseUnlocks, findCoursesUnlocking } from './managerFinancesEngine';
+import { billingService } from '../services/billingService';
 
 // ============================================================================
 // 1. FORMATION DEFINITIONS & LICENSING SPECIFICATION (26 Formations)
@@ -694,6 +695,8 @@ export function isTacticalItemUnlocked(
   itemRequiredLicense: CoachingLicenseTier,
   managerLicense: CoachingLicenseTier | string
 ): boolean {
+  // المدرب المميز: كل التشكيلات والأساليب التكتيكية مفتوحة دائماً
+  if (billingService.isPremium()) return true;
   const currentRank = getLicenseRankValue(managerLicense);
   const reqRank = getLicenseRankValue(itemRequiredLicense);
   return currentRank >= reqRank;

@@ -25,6 +25,7 @@ import {
   Award,
 } from 'lucide-react';
 import { ModalPortal } from './common/ModalPortal';
+import { PremiumBadge, useIsPremium } from './premium/PremiumBadge';
 
 interface CoachCardModalProps {
   isOpen: boolean;
@@ -44,6 +45,7 @@ export const CoachCardModal: React.FC<CoachCardModalProps> = ({
   worldRankings,
 }) => {
   const [photoUrl, setPhotoUrl] = useState<string | null>(null);
+  const isPremiumCoach = useIsPremium();
   const [actionLoading, setActionLoading] = useState<'download' | 'share' | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
@@ -309,12 +311,13 @@ export const CoachCardModal: React.FC<CoachCardModalProps> = ({
         <div
           ref={cardRef}
           id="official_coach_card"
-          className="w-full relative rounded-2xl p-4 sm:p-5 shadow-xl select-none text-right border-2 border-amber-500/40"
-          style={{
+          className={`w-full relative rounded-2xl p-4 sm:p-5 shadow-xl select-none text-right border-2 overflow-hidden ${isPremiumCoach ? 'premium-card-frame' : 'border-amber-500/40'}`}
+          style={isPremiumCoach ? undefined : {
             background: 'linear-gradient(180deg, #09131f 0%, #061019 60%, #03080e 100%)',
             boxShadow: '0 15px 35px -10px rgba(16, 185, 129, 0.15), 0 0 25px rgba(245, 158, 11, 0.08)',
           }}
         >
+          {isPremiumCoach && <div className="premium-card-shimmer" />}
           {/* Top Emerald & Gold Holographic Accent Line */}
           <div className="absolute top-0 right-0 left-0 h-1.5 bg-gradient-to-r from-amber-400 via-emerald-400 to-amber-500 rounded-t-2xl" />
 
@@ -393,8 +396,9 @@ export const CoachCardModal: React.FC<CoachCardModalProps> = ({
 
             {/* Coach Name & Club Information */}
             <div className="flex-1 min-w-0">
-              <h3 className="text-lg sm:text-xl font-black text-white truncate tracking-wide">
+              <h3 className="text-lg sm:text-xl font-black text-white truncate tracking-wide flex items-center gap-2">
                 {effectiveCoachName}
+                {isPremiumCoach && <PremiumBadge size="md" />}
               </h3>
               <div className="text-xs text-amber-400 font-bold mt-0.5 truncate">
                 المدير الفني لنادي {userClub?.name || 'دوري الدرجة الرابعة'}
