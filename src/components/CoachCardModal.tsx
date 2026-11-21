@@ -396,12 +396,14 @@ export const CoachCardModal: React.FC<CoachCardModalProps> = ({
 
             {/* Coach Name & Club Information */}
             <div className="flex-1 min-w-0">
-              <h3 className="text-lg sm:text-xl font-black text-white truncate tracking-wide flex items-center gap-2">
-                {effectiveCoachName}
-                {isPremiumCoach && <PremiumBadge size="md" />}
-              </h3>
-              <div className="text-xs text-amber-400 font-bold mt-0.5 truncate">
-                المدير الفني لنادي {userClub?.name || 'دوري الدرجة الرابعة'}
+              <div className="flex flex-col items-start gap-1.5 min-w-0" dir="rtl">
+                <h3 className="w-full text-lg sm:text-xl leading-snug font-black text-white break-words [overflow-wrap:anywhere]" data-coach-name>
+                  {effectiveCoachName}
+                </h3>
+                <PremiumBadge size="md" premium={isPremiumCoach} />
+              </div>
+              <div className="text-xs leading-relaxed text-amber-400 font-bold mt-1.5 break-words [overflow-wrap:anywhere]" data-coach-club>
+                {userClub ? `المدير الفني: ${userClub.name}` : 'مدرب حر (متاح للتعاقد)'}
               </div>
               <div className="flex items-center gap-2 mt-1.5 flex-wrap">
                 <span className="text-[11px] px-2 py-0.5 rounded-md bg-slate-800 border border-slate-700/80 text-slate-300 font-medium">

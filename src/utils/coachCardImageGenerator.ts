@@ -309,17 +309,15 @@ async function generateCanvasCoachCard(options: GenerateCardOptions, fileName: s
   ctx.fillStyle = '#fbbf24';
   ctx.font = 'bold 24px system-ui, "Cairo", sans-serif';
   const clubName = userClub?.name || 'دوري الدرجة الرابعة';
-  ctx.fillText(`المدير الفني لنادي ${clubName}`, margin + cardW - 50, photoY + 58);
+  ctx.fillText(userClub ? `المدير الفني: ${clubName}` : 'مدرب حر (متاح للتعاقد)', margin + cardW - 50, photoY + 58);
 
   ctx.fillStyle = '#94a3b8';
   ctx.font = 'bold 20px system-ui, "Cairo", sans-serif';
   ctx.fillText(`المستوى التدريبي: ${managerLevel}  •  الجنسية: ${manager.nationality || 'مصر'}`, margin + cardW - 50, photoY + 102);
 
-  if (isPremiumCoach) {
-    ctx.fillStyle = '#fbbf24';
-    ctx.font = '900 24px system-ui, "Cairo", sans-serif';
-    ctx.fillText('⭐ مدرب مميز', margin + cardW - 50, photoY + 140);
-  }
+  ctx.fillStyle = isPremiumCoach ? '#fbbf24' : '#94a3b8';
+  ctx.font = '900 24px system-ui, "Cairo", sans-serif';
+  ctx.fillText(isPremiumCoach ? '⭐ مدرب مميز' : 'مدرب عادي', margin + cardW - 50, photoY + 140);
   ctx.restore();
 
   // 4. Core Stats Grid: World Rank, Matches, Win Rate (3 Columns)

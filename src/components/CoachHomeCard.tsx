@@ -437,11 +437,11 @@ export const CoachHomeCard: React.FC<CoachHomeCardProps> = ({
 
           {/* Coach Name & Information */}
           <div className="flex-1 min-w-0">
-            <h3 className="text-lg sm:text-xl font-black text-white truncate tracking-wide">
+            <h3 className="text-lg sm:text-xl leading-snug font-black text-white break-words [overflow-wrap:anywhere]">
               {effectiveCoachName}
             </h3>
-            <div className="text-xs text-amber-400 font-bold mt-0.5 truncate">
-              {userClub ? `المدير الفني لنادي ${userClub.name}` : 'مدرب حر (متاح للتعاقد)'}
+            <div className="text-xs leading-relaxed text-amber-400 font-bold mt-0.5 break-words [overflow-wrap:anywhere]">
+              {userClub ? `المدير الفني: ${userClub.name}` : 'مدرب حر (متاح للتعاقد)'}
             </div>
             <div className="flex items-center gap-2 mt-1.5 flex-wrap">
               <span className="text-[11px] px-2 py-0.5 rounded-md bg-slate-800 border border-slate-700/80 text-slate-300 font-medium">
@@ -450,7 +450,7 @@ export const CoachHomeCard: React.FC<CoachHomeCardProps> = ({
               <span className="text-[11px] px-2 py-0.5 rounded-md bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 font-medium">
                 {manager.nationality || 'مصر'}
               </span>
-              {isPremiumCoach && <PremiumBadge />}
+              <PremiumBadge premium={isPremiumCoach} />
               <span className="text-[11px] px-2 py-0.5 rounded-md bg-purple-500/10 border border-purple-500/30 text-purple-300 font-mono">
                 CAF-{manager.license || 'A'}
               </span>
