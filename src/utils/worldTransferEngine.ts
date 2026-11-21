@@ -2,6 +2,7 @@ import type { Club, Player, PositionCategory } from '../types/game';
 import { GLOBAL_LEAGUES, EGYPT_TIER_4_LEAGUE } from '../data/leaguesData';
 import { pickLineup } from '../data/realClubsData';
 import { generatePlayer, calculatePlayerValuation, withSeededRandom } from './playerGenerator';
+import { buildRebornPlayer, shouldRebornPlayer } from './regenRebirthEngine';
 
 /**
  * World transfer engine.
@@ -449,16 +450,18 @@ export interface WorldEraReport {
 }
 
 /** Age one player by a year. Returns null when he retires. */
-function agePlayer(p: Player, era: number, club: Club): Player | null {
+export function agePlayer(p: Player, era: number, club: Club): Player | null {
   const r = rngFor(`${p.id}:era${era}`);
   const age = (p.age || 25) + 1;
   const ovr0 = p.overallRating || 65;
   const pot = Math.max(ovr0, p.potentialRating || ovr0);
   const isGK = p.position === 'GK';
 
-  if (age >= 40) return null;
-  if (age >= 35) {
-    let prob = age === 35 ? 0.18 : age === 36 ? 0.3 : age === 37 ? 0.48 : age === 38 ? 0.7 : 0.88;
+  // Same flexible retirement curve as the live-league rollover (seasonEngine):
+  // 0% under 36, progressive 36-40, mandatory at 41.
+  if (age >= 41) return null;
+  if (age >= 36) {
+    let prob = age === 36 ? 0.18 : age === 37 ? 0.3 : age === 38 ? 0.48 : age === 39 ? 0.7 : 0.88;
     if (ovr0 < 72) prob += 0.12;
     if (r() < prob) return null;
   }
@@ -543,6 +546,7 @@ function makeYouth(club: Club, era: number, k: number): Player {
 export function advanceWorldEra(era: number): WorldEraReport {
   ensureIndex();
   const report: WorldEraReport = { era, retired: 0, youth: 0, retiredStars: [], risingStars: [] };
+  const rebornDone = new Set<string>(); // one reborn per retiree per era
   staticClubs!.forEach(club => {
     const squad = club.players || [];
     if (squad.length === 0) return;
@@ -555,6 +559,20 @@ export function advanceWorldEra(era: number): WorldEraReport {
         staticHolder!.delete(p.id);
         if (p.overallRating >= 80 && report.retiredStars.length < 12) {
           report.retiredStars.push({ name: p.name, age: (p.age || 35) + 1, rating: p.overallRating, clubName: club.name });
+        }
+        // Rebirth: a notable retiree (78+) is immediately replaced by a 17-19 y/o version
+        // of himself - same name, nationality and position, fresh stats, potential near his peak.
+        if (!rebornDone.has(p.id) && shouldRebornPlayer(p)) {
+          rebornDone.add(p.id);
+          const reborn = buildRebornPlayer(p, {
+            idSuffix: `e${era}`,
+            clubId: club.id,
+            leagueId: club.leagueId,
+            rand: rngFor(`reborn:${p.id}:era${era}`),
+          });
+          reborn.number = freeNumber(kept, reborn.number);
+          kept.push(reborn);
+          staticHolder!.set(reborn.id, club.id);
         }
         continue;
       }
