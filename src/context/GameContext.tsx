@@ -2541,7 +2541,46 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const t = setTimeout(() => {
       try {
         const retired = new Set<string>((retiredPlayers || []).map((r: any) => r && r.id).filter(Boolean));
-        setTransferMarket(prev => ensureLegendsInMarket(prev, teams, retired));
+
+        // Revocation pass (legends free-purchase exploit fix): a legitimately bought legend carries
+        // legendPaid=true (set at purchase) or a paid buy entry in the transfer history. Any legend
+        // in any squad without that proof was acquired through the zero-fee hole and is removed.
+        const paidBuyIds = new Set(
+          (Array.isArray(transferHistory) ? transferHistory : [])
+            .filter(h => h && h.type === 'buy' && (Number(h.fee) || 0) > 0)
+            .map(h => h.playerId)
+        );
+        const revokedNames: string[] = [];
+        const currentTeams = Array.isArray(teams) ? teams : [];
+        const nextTeams = currentTeams.map(team => {
+          const squad = Array.isArray(team.players) ? team.players : [];
+          const unpaid = squad.filter(
+            p => p && p.isLegend === true && (p as any).legendPaid !== true && !paidBuyIds.has(p.id)
+          );
+          if (unpaid.length === 0) return team;
+          const unpaidIds = new Set(unpaid.map(u => u.id));
+          for (const u of unpaid) revokedNames.push(u.name);
+          return { ...team, players: squad.filter(p => !(p && unpaidIds.has(p.id))) };
+        });
+        if (revokedNames.length > 0) {
+          setTeams(nextTeams);
+          setTransferMarket(prev => ensureLegendsInMarket(prev, nextTeams, retired));
+          setInbox(prev => [
+            {
+              id: `legend-revoke-${Date.now()}`,
+              title: 'مراجعة صفقات الأساطير',
+              sender: 'إدارة اللعبة',
+              date: new Date().toISOString(),
+              content: `تم سحب ${revokedNames.join('، ')} من تشكيلتك لأنه تم ضمهم بدون دفع قيمتهم بسبب خطأ في اللعبة تم إصلاحه. يمكنك الآن التعاقد معهم بشكل صحيح من سوق اللاعبين الأحرار (قاعة الأساطير) مقابل قيمتهم الكاملة.`,
+              type: 'transfer',
+              read: false,
+              priority: 'high',
+            } as InboxMessage,
+            ...(Array.isArray(prev) ? prev : []),
+          ]);
+        } else {
+          setTransferMarket(prev => ensureLegendsInMarket(prev, currentTeams, retired));
+        }
       } catch (_) {}
     }, 2500);
     return () => clearTimeout(t);
@@ -6081,11 +6120,24 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       // Only treat as free agent if in transferMarket or not found in any club
       const isFreeAgent = isInTransferMarket || !sellingClubId;
 
-      const transferFee = isFreeAgent
-        ? 0
-        : customFee !== undefined && customFee > 0
-          ? customFee
-          : calculateContractDurationTransferFee(baseThreeYearPrice, defaultContractYears, false);
+      // Legends are premium players: they are listed as free agents (قاعة الأساطير) but must ALWAYS
+      // be charged their full asking price, on every buy path. Never let the free-agent zero-fee
+      // rule apply to them.
+      const legendRequiredFee = player.isLegend
+        ? Math.max(
+            Number((player as any).askingPrice) || 0,
+            Number(player.marketValue) || 0,
+            baseThreeYearPrice
+          )
+        : 0;
+
+      const transferFee = player.isLegend
+        ? legendRequiredFee
+        : isFreeAgent
+          ? 0
+          : customFee !== undefined && customFee > 0
+            ? customFee
+            : calculateContractDurationTransferFee(baseThreeYearPrice, defaultContractYears, false);
       const salary = Math.max(2500, Number(player.salary) || recommendedMonthlyWage || 2500);
 
       const transferResult = executeAtomicTransfer({
@@ -6105,6 +6157,17 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       }
 
       setTeams(transferResult.updatedTeams);
+      // Mark a legitimately paid legend on the player object itself so the unpaid-legend
+      // revocation pass (and future saves) can prove this copy was bought, not exploited.
+      if (player.isLegend && transferFee > 0) {
+        setTeams(prev =>
+          prev.map(t =>
+            t.id === userClub.id
+              ? { ...t, players: (t.players || []).map(p => (p && p.id === player.id ? { ...p, legendPaid: true } : p)) }
+              : t
+          )
+        );
+      }
       const normBoughtName = normalizePlayerKey(player.name);
       setTransferMarket(prev =>
         (Array.isArray(prev) ? prev : []).filter(
@@ -6185,6 +6248,26 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       };
     }
 
+    // Legends are premium players: negotiation can never bring them below their full asking price.
+    // They are listed as free agents, so the normal free-agent zero-fee logic must not apply.
+    if (targetPlayer.isLegend) {
+      const requiredLegendFee = Math.max(
+        Number((targetPlayer as any).askingPrice) || 0,
+        Number(targetPlayer.marketValue) || 0
+      );
+      if ((Number(proposal.transferFee) || 0) < requiredLegendFee) {
+        return {
+          success: false,
+          result: {
+            decision: 'reject',
+            clubApproved: false,
+            playerApproved: false,
+            message: `الأسطورة ${targetPlayer.name} لا يمكن ضمه بأقل من قيمته الكاملة (${requiredLegendFee.toLocaleString()} ج.م)!`,
+          }
+        };
+      }
+    }
+
     const negotiation = evaluateTransferOffer(
       targetPlayer,
       sellingClub,
@@ -6208,6 +6291,17 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
       if (transferResult.success) {
         setTeams(transferResult.updatedTeams);
+        // Mark a legitimately paid legend so the unpaid-legend revocation pass keeps it.
+        if (targetPlayer.isLegend && (Number(proposal.transferFee) || 0) > 0) {
+          const boughtLegendId = targetPlayer.id;
+          setTeams(prev =>
+            prev.map(t =>
+              t.id === userClub.id
+                ? { ...t, players: (t.players || []).map(p => (p && p.id === boughtLegendId ? { ...p, legendPaid: true } : p)) }
+                : t
+            )
+          );
+        }
         setTransferMarket(prev => prev.filter(p => p.id !== targetPlayer!.id));
         if (transferResult.transferEntry) setTransferHistory(prev => [transferResult.transferEntry!, ...prev]);
         if (transferResult.inboxMessage) setInbox(prev => [transferResult.inboxMessage!, ...prev]);

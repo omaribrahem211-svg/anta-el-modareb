@@ -1433,11 +1433,14 @@ export const TransfersTab: React.FC<TransfersTabProps> = ({
       try {
         if (!player) return;
         const item = dbItemByIdMap.get(player.id);
+        // Legends are premium: they are listed in the free-agents market (قاعة الأساطير) but are
+        // NEVER free — they must be charged their asking price. Do not treat them as free items.
         const isFreeItem =
-          item?.statusType === 'free' ||
-          player.isFreeAgent === true ||
-          player.currentLeagueId === 'free_agents' ||
-          (!item?.club?.id && !player.currentClubId && !(player as any).clubId);
+          !player.isLegend &&
+          (item?.statusType === 'free' ||
+            player.isFreeAgent === true ||
+            player.currentLeagueId === 'free_agents' ||
+            (!item?.club?.id && !player.currentClubId && !(player as any).clubId));
         const fee = isFreeItem
           ? 0
           : customAskingPrice !== undefined && customAskingPrice > 0
