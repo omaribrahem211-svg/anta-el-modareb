@@ -90,12 +90,12 @@ export const BottomNav: React.FC<BottomNavProps> = ({ activeTab, setActiveTab })
       {/* Sleek Floating Bottom Sheet for Secondary Navigation */}
       {showMoreMenu && (
         <div 
-          className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-end justify-center animate-fade-in pb-16"
+          className="fixed inset-0 z-50 bg-black/75 flex items-end justify-center animate-fade-in pb-16"
           onClick={() => setShowMoreMenu(false)}
           dir="rtl"
         >
           <div 
-            className="w-full max-w-lg bg-slate-900/95 border-t border-slate-700/60 rounded-t-3xl p-4 sm:p-5 pb-6 shadow-2xl space-y-3.5 backdrop-blur-xl animate-in fade-in slide-in-from-bottom-5 duration-150"
+            className="w-full max-w-lg bg-slate-900/95 border-t border-slate-700/60 rounded-t-3xl p-4 sm:p-5 pb-6 shadow-2xl space-y-3.5 animate-in fade-in slide-in-from-bottom-5 duration-150"
             onClick={(e) => e.stopPropagation()}
           >
             {/* Sheet Handle & Header */}
@@ -165,7 +165,7 @@ export const BottomNav: React.FC<BottomNavProps> = ({ activeTab, setActiveTab })
       )}
 
       {/* Docked Persistent Bottom Navigation Bar */}
-      <nav className="fixed left-0 right-0 bottom-0 z-40 bg-slate-900/90 backdrop-blur-xl border-t border-slate-800/80 pb-safe gpu-layer">
+      <nav className="fixed left-0 right-0 bottom-0 z-40 bg-slate-900 border-t border-slate-800/80 pb-safe gpu-layer">
         <div className="max-w-lg mx-auto flex items-center justify-around px-2 py-1">
           {mainTabs.map((tab) => {
             const Icon = tab.icon;

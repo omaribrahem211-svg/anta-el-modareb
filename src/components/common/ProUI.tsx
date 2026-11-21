@@ -58,7 +58,7 @@ export const Toast: React.FC<{ toast: ToastState | null }> = ({ toast }) => {
   return (
     <div className="fixed top-3 inset-x-0 z-[60] flex justify-center px-4 pointer-events-none" dir="rtl">
       <div
-        className={`pointer-events-auto max-w-md w-full flex items-center gap-2.5 px-4 py-3 rounded-2xl text-xs font-bold shadow-2xl border backdrop-blur ${
+        className={`pointer-events-auto max-w-md w-full flex items-center gap-2.5 px-4 py-3 rounded-2xl text-xs font-bold shadow-2xl border ${
           toast.ok ? 'bg-emerald-950/95 text-emerald-200 border-emerald-500/60' : 'bg-rose-950/95 text-rose-200 border-rose-500/60'
         }`}
         role="status"

@@ -597,7 +597,7 @@ export const CareerTab: React.FC = () => {
       {/* 🤝 DONATE TO CLUB MODAL (دعم ومساعدة النادي من أموالك الخاصة) */}
       {showDonateModal && (
         <ModalPortal>
-          <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4 animate-fade-in" dir="rtl">
+          <div className="fixed inset-0 bg-black/85 z-50 flex items-center justify-center p-4 animate-fade-in" dir="rtl">
           <div className="bg-slate-900 border-2 border-emerald-500/50 rounded-3xl p-6 max-w-md w-full shadow-2xl space-y-4 text-right relative">
             <button
               onClick={() => setShowDonateModal(false)}
@@ -714,7 +714,7 @@ export const CareerTab: React.FC = () => {
       {/* Reset Confirmation Modal */}
       {showResetModal && (
         <ModalPortal>
-          <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4 animate-fade-in" dir="rtl">
+          <div className="fixed inset-0 bg-black/85 z-50 flex items-center justify-center p-4 animate-fade-in" dir="rtl">
           <div className="bg-slate-900 border-2 border-red-500/50 rounded-3xl p-6 max-w-md w-full shadow-2xl shadow-red-500/20 space-y-5 text-right relative">
             
             <button

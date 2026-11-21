@@ -8493,7 +8493,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       const summaryClub = userClub || teams.find(t => t.isUserClub) || teams[0];
       // Always rebuild the summary from the FINAL standings: a summary cached earlier (e.g. on the last matchday,
       // computed from the previous day's table) can say "stayed" even though the club won the league / got promoted.
-      const freshSummary = calculateSeasonEndSummary(
+      const freshSummary = timed('startNextSeason.calculateSeasonEndSummary', () => calculateSeasonEndSummary(
         { ...season, status: 'completed', totalRounds },
         standings,
         summaryClub,
@@ -8501,7 +8501,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         cupTournament,
         manager,
         africanChampionsLeague
-      );
+      ));
       const cachedOk = !!seasonEndSummary && seasonEndSummary.resultStatus === freshSummary.resultStatus && seasonEndSummary.nextDivisionTier === freshSummary.nextDivisionTier;
       let summary = cachedOk
         ? seasonEndSummary!
@@ -8688,12 +8688,15 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
       setSeasonStartStep('جاري حفظ الموسم الجديد...');
       await new Promise<void>(r => setTimeout(r, 12));
+      // Commit the new season's data first, then yield so it can PAINT behind the progress
+      // overlay before the lighter UI flags flip - one giant commit here read as a hard freeze.
       setSeason(result.nextSeason);
       setActiveLeague(result.nextActiveLeague);
       setTeams(finalNextTeams);
       setStandings(result.nextStandings);
       setFixtures(nextFixturesWithContinental);
       setManager(result.updatedManager);
+      await new Promise<void>(r => setTimeout(r, 24));
       setCupTournament(null);
       setCurrentRound(1);
       setSeasonEndSummary(null);
@@ -8722,7 +8725,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
       let initialBoard = boardSystem;
       if (nextUserClubObj) {
-        initialBoard = generateInitialBoardSystem(nextUserClubObj, result.nextActiveLeague.tier, finalNextTeams.length, finalNextTeams, nextUserClubObj.isNewlyPromoted);
+        initialBoard = timed('startNextSeason.generateInitialBoardSystem', () => generateInitialBoardSystem(nextUserClubObj, result.nextActiveLeague.tier, finalNextTeams.length, finalNextTeams, nextUserClubObj.isNewlyPromoted));
         setBoardSystem(initialBoard);
       }
 
@@ -8754,25 +8757,30 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       setInbox(newInbox);
 
       // العالم الثابت (باقي الدوريات): كبر سن + اعتزال + جيل جديد، ويُحفظ كعدّاد مواسم يُعاد تشغيله عند التحميل
-      try {
-        const nextEra = (worldRankings?.worldEra || 0) + 1;
-        const eraReport = advanceWorldEra(nextEra);
-        setWorldRankings(prev => ({ ...prev, worldEra: nextEra, worldMoves: pruneWorldMoves(prev?.worldMoves, teams, season?.seasonNumber || nextEra) }));
-        const eraDate = calendarDate?.rawDateStr || new Date().toISOString().slice(0, 10);
-        const eraNews: DailyNewsItem[] = eraReport.retiredStars.slice(0, 4).map((r, i) => ({
-          id: `era_ret_${nextEra}_${i}`,
-          dateStr: eraDate,
-          title: `اعتزال ${r.name} (${r.age} عاماً) رسمياً`,
-          content: `أعلن ${r.name} نجم ${r.clubName} اعتزال كرة القدم بعد مسيرة حافلة، وكان تصنيفه ${r.rating}.`,
-          category: 'milestone',
-          importance: 'medium',
-          icon: '🏅',
-          source: 'عالم الكرة',
-        } as DailyNewsItem));
-        if (eraNews.length > 0) setDailyNews(prev => [...eraNews, ...(prev || [])].slice(0, 40));
-      } catch (e) {
-        console.warn('[worldEra] failed', e);
-      }
+      // PERF: runs when the browser is idle, AFTER the new season is already on screen - it is
+      // bookkeeping, not something the player waits for.
+      const eraSeasonNumber = season?.seasonNumber;
+      runWhenIdle(() => {
+        try {
+          const nextEra = (worldRankings?.worldEra || 0) + 1;
+          const eraReport = timed('startNextSeason.advanceWorldEra', () => advanceWorldEra(nextEra));
+          setWorldRankings(prev => ({ ...prev, worldEra: nextEra, worldMoves: pruneWorldMoves(prev?.worldMoves, teams, eraSeasonNumber || nextEra) }));
+          const eraDate = calendarDate?.rawDateStr || new Date().toISOString().slice(0, 10);
+          const eraNews: DailyNewsItem[] = eraReport.retiredStars.slice(0, 4).map((r, i) => ({
+            id: `era_ret_${nextEra}_${i}`,
+            dateStr: eraDate,
+            title: `اعتزال ${r.name} (${r.age} عاماً) رسمياً`,
+            content: `أعلن ${r.name} نجم ${r.clubName} اعتزال كرة القدم بعد مسيرة حافلة، وكان تصنيفه ${r.rating}.`,
+            category: 'milestone',
+            importance: 'medium',
+            icon: '🏅',
+            source: 'عالم الكرة',
+          } as DailyNewsItem));
+          if (eraNews.length > 0) setDailyNews(prev => [...eraNews, ...(prev || [])].slice(0, 40));
+        } catch (e) {
+          console.warn('[worldEra] failed', e);
+        }
+      });
 
       let nextRetired = retiredPlayers;
       if (Array.isArray(result.newRetiredPlayers) && result.newRetiredPlayers.length > 0) {
@@ -8795,7 +8803,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
       // Immediately synchronize and save state to disk/storage
       try {
-        gameStateRepository.saveLocalGameState({
+        timed('startNextSeason.saveLocalGameState', () => gameStateRepository.saveLocalGameState({
           schemaVersion: 2,
           saveVersion: 1,
           lastLocalSaveAt: Date.now(),
@@ -8823,17 +8831,17 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           retiredPlayers: nextRetired,
           worldRankings,
           deletedMessageIds,
-        } as any);
+        } as any));
 
         // Save initial snapshot for this new season to allow clean restart (IndexedDB + memory cache, never localStorage)
-        gameStateRepository.saveSeasonSnapshot(result.nextSeason.seasonNumber, {
+        runWhenIdle(() => timed('startNextSeason.saveSeasonSnapshot', () => gameStateRepository.saveSeasonSnapshot(result.nextSeason.seasonNumber, {
           teams: finalNextTeams,
           clubBudget: nextUserClubObj?.budget || 250000,
           manager: result.updatedManager,
           calendarDate: newSeasonInitialDate,
           activeLeagueId: result.nextActiveLeague.id,
           seasonNumber: result.nextSeason.seasonNumber,
-        });
+        })));
       } catch (saveErr) {
         console.warn('Immediate save on season transition:', saveErr);
       }
@@ -9261,7 +9269,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
       // Persist state to local repository & IndexedDB simultaneously
       try {
-        gameStateRepository.saveLocalGameState({
+        timed('startNextSeason.saveLocalGameState', () => gameStateRepository.saveLocalGameState({
           schemaVersion: 2,
           saveVersion: 1,
           lastLocalSaveAt: Date.now(),
@@ -9289,7 +9297,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           worldRankings,
           scoutedOpponents,
           deletedMessageIds,
-        } as any);
+        } as any));
 
         safeLocalStorageSet(`${STORAGE_KEY}_currentRound`, '1');
         safeLocalStorageSet(`${STORAGE_KEY}_season`, JSON.stringify(updatedSeasonObj));

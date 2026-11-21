@@ -427,7 +427,7 @@ export const FootballNewsFeed: React.FC<FootballNewsFeedProps> = ({
       {/* 5. Full Story Article Modal */}
       {selectedArticle && (
         <div 
-          className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-950/80 backdrop-blur-md animate-fadeIn"
+          className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-950/90 animate-fadeIn"
           onClick={() => setSelectedArticle(null)}
         >
           <div 

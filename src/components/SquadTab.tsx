@@ -545,7 +545,7 @@ export const SquadTab: React.FC<SquadTabProps> = ({ onSelectPlayer }) => {
       </div>
 
       {/* شريط الفلترة والبحث الثابت (Sticky Toolbar) */}
-      <div className="sticky top-0 z-20 bg-slate-950/95 backdrop-blur-md py-2 space-y-2 border-b border-slate-800/80">
+      <div className="sticky top-0 z-20 bg-slate-950 py-2 space-y-2 border-b border-slate-800/80">
         {/* البحث + الترتيب + التبديل بين القائمة والكروت */}
         <div className="flex items-center gap-2">
           <div className="relative flex-1">
@@ -734,7 +734,7 @@ export const SquadTab: React.FC<SquadTabProps> = ({ onSelectPlayer }) => {
       {/* نافذة صرف المكافآت */}
       {bonusModalOpen && (
         <ModalPortal>
-          <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4" dir="rtl">
+          <div className="fixed inset-0 z-50 bg-black/85 flex items-center justify-center p-4" dir="rtl">
             <div className="bg-slate-900 border border-slate-800 w-full max-w-md rounded-3xl p-5 space-y-4 shadow-2xl animate-scale-in max-h-[90vh] overflow-y-auto">
               <div className="flex items-center justify-between border-b border-slate-800 pb-3">
                 <div className="flex items-center gap-2">

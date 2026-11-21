@@ -437,7 +437,7 @@ export const TacticsTab: React.FC<TacticsTabProps> = ({ onSelectPlayer }) => {
       )}
 
       {/* شريط التبويبات الفرعية الثلاثة (التشكيل | الخطة | الأدوار) */}
-      <div className="sticky top-0 z-20 bg-slate-950/95 backdrop-blur-md py-1.5 border-b border-slate-800/80">
+      <div className="sticky top-0 z-20 bg-slate-950 py-1.5 border-b border-slate-800/80">
         <div className="grid grid-cols-3 gap-1.5 bg-slate-900 p-1 rounded-2xl border border-slate-800">
           {[
             { id: 'lineup', label: 'التشكيل والملعب', icon: Users },
@@ -1400,7 +1400,7 @@ export const TacticsTab: React.FC<TacticsTabProps> = ({ onSelectPlayer }) => {
       {formationSheetOpen && (
         <ModalPortal>
           <div
-            className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4"
+            className="fixed inset-0 z-50 bg-black/85 flex items-end sm:items-center justify-center p-0 sm:p-4"
             dir="rtl"
           >
             <div className="bg-slate-900 border-t sm:border border-slate-800 w-full max-w-lg rounded-t-3xl sm:rounded-3xl p-4 space-y-3 shadow-2xl max-h-[85vh] flex flex-col">
@@ -1518,7 +1518,7 @@ export const TacticsTab: React.FC<TacticsTabProps> = ({ onSelectPlayer }) => {
       {emptySlotPickerIdx !== null && (
         <ModalPortal>
           <div
-            className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4"
+            className="fixed inset-0 z-50 bg-black/85 flex items-end sm:items-center justify-center p-0 sm:p-4"
             dir="rtl"
           >
             <div className="bg-slate-900 border-t sm:border border-slate-800 w-full max-w-md rounded-t-3xl sm:rounded-3xl p-4 space-y-3 shadow-2xl max-h-[80vh] flex flex-col">
@@ -1611,7 +1611,7 @@ export const TacticsTab: React.FC<TacticsTabProps> = ({ onSelectPlayer }) => {
       {confirmAutoPickOpen && (
         <ModalPortal>
           <div
-            className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4"
+            className="fixed inset-0 z-50 bg-black/85 flex items-center justify-center p-4"
             dir="rtl"
           >
             <div className="bg-slate-900 border border-slate-800 w-full max-w-sm rounded-3xl p-5 space-y-4 shadow-2xl text-center">
