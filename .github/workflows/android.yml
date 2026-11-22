@@ -61,7 +61,6 @@ jobs:
         run: |
           chmod +x gradlew
           ./gradlew assembleRelease \
-            -PautoVersionCode=${{ github.run_number }} \
             -Pandroid.injected.signing.store.file="${{ github.workspace }}/release.p12" \
             -Pandroid.injected.signing.store.password="$KS_PASS" \
             -Pandroid.injected.signing.key.alias="$ALIAS" \

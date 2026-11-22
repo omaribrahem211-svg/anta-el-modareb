@@ -199,6 +199,7 @@ import { ensureClubSquadIntegrity, calibrateRealisticPlayerRating } from '../uti
 import { useAuth } from './AuthContext';
 import { getLocalTrainerProfile, saveLocalTrainerProfile, generateTrainerId } from '../services/trainerProfileService';
 import { crashStage } from '../services/crashReporting';
+import { applyUpdate207Gift } from '../services/updateGiftService';
 import { gameStateRepository, setLatestNationalTeamsSnapshot } from '../services/gameStateRepository';
 import { timed, runWhenIdle } from '../utils/perfLog';
 import { migrateSavePayload, CURRENT_SAVE_FORMAT_VERSION } from '../services/saveBackupService';
@@ -2728,6 +2729,22 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       }
     };
   }, [season, activeLeague, teams, standings, fixtures, currentRound, manager, transferMarket, incomingBids, inbox, cupTournament, africanChampionsLeague, jobOffers, seasonEndSummary, transferHistory, clubEconomy, calendarDate, activeNegotiations, boardSystem, dailyNews, retiredPlayers, worldRankings, scoutedOpponents, deletedMessageIds, nationalTeamsState, user?.uid, getSyncInput, flushLocalSaveImmediate]);
+
+  // New installs do not pass through save migration until a career exists. Grant after profile/club selection.
+  const updateGift207PendingRef = useRef(false);
+  useEffect(() => {
+    if (!isInitialLoadDoneRef.current || manager.updateGift207Received || updateGift207PendingRef.current) return;
+    if (!getLocalTrainerProfile()?.isCreated || !userClub?.id) return;
+    const result = applyUpdate207Gift({ manager, teams, clubEconomy, inbox, season, currentRound });
+    if (result.state === undefined || !result.state.manager.updateGift207Received) return;
+    updateGift207PendingRef.current = true;
+    setManager(result.state.manager);
+    setTeams(result.state.teams);
+    setClubEconomy(result.state.clubEconomy);
+    setInbox(result.state.inbox);
+    flushLocalSaveImmediate({ manager: result.state.manager, teams: result.state.teams,
+      clubEconomy: result.state.clubEconomy, inbox: result.state.inbox }, true);
+  }, [manager, teams, clubEconomy, inbox, season, currentRound, userClub?.id, flushLocalSaveImmediate]);
 
   // Android: swiping the app away fires Capacitor's pause/appStateChange, not always pagehide. Registered once; always
   // calls the latest flush through a ref so it never saves stale state.
@@ -11380,6 +11397,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     setCurrentRound(1);
     setManager({
       ...INITIAL_MANAGER,
+      updateGift207Received: manager.updateGift207Received === true,
       currentClubId: chosenUserClub.id,
       clubsManaged: [chosenUserClub.name],
     });
@@ -11418,6 +11436,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       clubBudget: chosenUserClub.budget || 85000,
       manager: {
         ...INITIAL_MANAGER,
+      updateGift207Received: manager.updateGift207Received === true,
         currentClubId: chosenUserClub.id,
         clubsManaged: [chosenUserClub.name],
       },

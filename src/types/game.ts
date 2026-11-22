@@ -802,6 +802,8 @@ export interface ContinentalTournament {
 }
 
 export interface ManagerProfile {
+  /** One-time update 1.0.207 club-funds receipt, retained in all save formats. */
+  updateGift207Received?: boolean;
   trainerId?: string;
   name: string;
   age: number;

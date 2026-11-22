@@ -8,6 +8,7 @@
  *    so game updates never wipe or corrupt player progress.
  */
 
+import { applyUpdate207Gift } from './updateGiftService';
 import { refreshLegendNicknames } from '../data/legendsData';
 import { LocalGameSavePayload } from './gameStateRepository';
 import { INITIAL_TEAMS, INITIAL_MANAGER, INITIAL_TRANSFER_MARKET } from '../data/initialData';
@@ -146,7 +147,7 @@ export function migrateSavePayload(rawPayload: any): LocalGameSavePayload {
     ...(src?.dailyRewardState && typeof src.dailyRewardState === 'object' ? { dailyRewardState: src.dailyRewardState } : {}),
   } as LocalGameSavePayload;
 
-  return migrated;
+  return applyUpdate207Gift(migrated).state;
 }
 
 /**

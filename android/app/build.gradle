@@ -8,10 +8,11 @@ android {
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
 
-        // تعديل الإصدار التلقائي
-        def autoCode = project.hasProperty('autoVersionCode') ? project.property('autoVersionCode').toInteger() : 1
-        versionCode autoCode
-        versionName "1.0." + autoCode
+        // APK and AAB share one release identity, independent of workflow run counters.
+        def releaseVersion = new Properties()
+        rootProject.file('version.properties').withInputStream { releaseVersion.load(it) }
+        versionCode releaseVersion.getProperty('VERSION_CODE').toInteger()
+        versionName releaseVersion.getProperty('VERSION_NAME')
 
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {

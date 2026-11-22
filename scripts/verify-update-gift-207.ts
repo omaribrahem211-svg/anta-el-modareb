@@ -1,0 +1,38 @@
+import assert from 'node:assert/strict';
+import { JSDOM } from 'jsdom';
+const dom=new JSDOM('',{url:'http://localhost/'});
+Object.assign(globalThis,{window:dom.window,document:dom.window.document,localStorage:dom.window.localStorage});
+const {applyUpdate207Gift,UPDATE_207_GIFT_AMOUNT,UPDATE_207_GIFT_MESSAGE_ID}=await import('../src/services/updateGiftService');
+const {migrateSavePayload,createExportContainer}=await import('../src/services/saveBackupService');
+const {normalizeManagerProfile}=await import('../src/utils/dataNormalizer');
+const initial:any={manager:{trainerId:'TRN-GIFT-TEST',name:'Test',currentClubId:'mine'},teams:[{id:'mine',isUserClub:true,budget:1000,transferBudget:2000,players:[]},{id:'other',budget:500,players:[]}],inbox:[],clubEconomy:{clubBudget:1000},season:{seasonNumber:3}};
+const {state:first,granted}=applyUpdate207Gift(initial);
+assert.equal(granted,true);
+assert.equal(first.teams[0].budget,1000+UPDATE_207_GIFT_AMOUNT);
+assert.equal(first.teams[0].transferBudget,2000+UPDATE_207_GIFT_AMOUNT);
+assert.equal(first.clubEconomy.clubBudget,1000+UPDATE_207_GIFT_AMOUNT);
+assert.equal(first.manager.updateGift207Received,true);
+assert.equal(first.inbox[0].title,'هدية التحديث الجديد');
+assert.equal(initial.teams[0].budget,1000,'must not mutate source');
+assert.equal(first.teams[1],initial.teams[1],'must not change AI club');
+assert.equal(applyUpdate207Gift(first).state,first);
+let saved:any=JSON.parse(JSON.stringify(first));
+for(let i=0;i<8;i++){
+  saved=migrateSavePayload({payload:saved});
+  assert.equal(saved.manager.updateGift207Received,true);
+  assert.equal(saved.teams.find((t:any)=>t.id==='mine').budget,50_001_000);
+}
+const exported=createExportContainer(saved,'TRN-GIFT-TEST');
+const restored=migrateSavePayload(JSON.parse(JSON.stringify(exported)));
+assert.equal(applyUpdate207Gift(restored).granted,false);
+assert.equal(restored.inbox.filter((m:any)=>m.id===UPDATE_207_GIFT_MESSAGE_ID).length,1);
+assert.equal(normalizeManagerProfile(first.manager).updateGift207Received,true);
+const legacy=migrateSavePayload(initial);
+assert.equal(legacy.teams.find((t:any)=>t.id==='mine').budget,50_001_000);
+const noClub=applyUpdate207Gift({...initial,teams:[]});
+assert.equal(noClub.granted,false); assert.notEqual(noClub.state.manager.updateGift207Received,true);
+const msgOnly=applyUpdate207Gift({...initial,inbox:first.inbox});
+assert.equal(msgOnly.granted,false); assert.equal(msgOnly.state.teams[0].budget,1000);
+assert.equal(msgOnly.state.manager.updateGift207Received,true);
+console.log('PASS: old/new saves, exact 50M club funds, atomic receipt/message, no source mutation, repeated migration, JSON export/import, no-club deferral, message dedupe');
+process.exit(0);
