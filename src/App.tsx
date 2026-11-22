@@ -45,7 +45,7 @@ import { AdminLayout } from './components/admin/AdminLayout';
 import { AdminAccessDenied } from './components/admin/AdminAccessDenied';
 import { MatchErrorBoundary } from './components/MatchErrorBoundary';
 import { SocialTab } from './components/SocialTab';
-import { applyPerfMode, forceRepaint } from './utils/perfMode';
+import { applyPerfMode, isLiteMode } from './utils/perfMode';
 import { PressConferenceModal } from './components/PressConferenceModal';
 import { PrivacyPolicyPage } from './components/PrivacyPolicyPage';
 
@@ -92,11 +92,12 @@ function GameApp() {
   // screen do not flash white on weak GPUs. The user's own performance setting is restored afterwards.
   useEffect(() => {
     try {
+      const cl = document.documentElement.classList;
       if (seasonFocus) {
-        document.documentElement.classList.add('perf-lite');
+        if (!cl.contains('perf-lite')) cl.add('perf-lite');
       } else {
-        applyPerfMode();
-        forceRepaint();
+        // Only touch <html> when the class really has to change (a whole-DOM restyle stalls weak GPUs); no forced repaint here.
+        if (cl.contains('perf-lite') !== isLiteMode()) applyPerfMode();
       }
     } catch { /* */ }
   }, [seasonFocus]);

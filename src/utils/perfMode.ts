@@ -37,8 +37,23 @@ export function setPerfSetting(v: PerfSetting): void {
   forceRepaint();
 }
 
-/** Nudges the compositor so panels that failed to paint are drawn again. */
+/**
+ * Throttled, lite-aware repaint for non-essential callers. Promoting the whole #root to a GPU layer can stall the
+ * WebView/Vulkan render thread on weak phones (ANR in drawVk), so: skipped in lite mode, at most once per 5 s.
+ */
+let lastSoftRepaintAt = 0;
 export function forceRepaint(): void {
+  try {
+    if (isLiteMode()) return;
+    const now = Date.now();
+    if (now - lastSoftRepaintAt < 5000) return;
+    lastSoftRepaintAt = now;
+  } catch { /* fall through */ }
+  forceRepaintNow();
+}
+
+/** Unconditional repaint nudge: safety net against unpainted (white) panels. Used on foreground and live-match open. */
+export function forceRepaintNow(): void {
   try {
     const el = document.getElementById('root') || document.body;
     el.style.transform = 'translateZ(0)';
@@ -54,7 +69,7 @@ export function installPerfMode(): void {
   installed = true;
   applyPerfMode();
   document.addEventListener('visibilitychange', () => {
-    if (!document.hidden) { forceRepaint(); setTimeout(forceRepaint, 600); }
+    if (!document.hidden) { forceRepaintNow(); setTimeout(forceRepaintNow, 600); }
   });
-  window.addEventListener('focus', () => forceRepaint());
+  window.addEventListener('focus', () => forceRepaintNow());
 }
