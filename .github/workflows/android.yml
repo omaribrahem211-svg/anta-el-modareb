@@ -25,6 +25,9 @@ jobs:
       - name: Install dependencies
         run: npm install
 
+      - name: Verify rewarded consent and lifecycle regressions
+        run: node scripts/verify-rewarded-flow-208.mjs
+
       - name: Build Web Assets
         run: npm run build
 
@@ -40,6 +43,14 @@ jobs:
 
       - name: Accept Android licenses
         run: yes | sdkmanager --licenses || true
+
+      - name: Record resolved mediation dependencies
+        working-directory: android
+        run: |
+          chmod +x gradlew
+          ./gradlew :app:dependencies --configuration releaseRuntimeClasspath > mediation-dependencies.txt
+          grep -E 'com.unity3d.ads:unity-ads:4.21.0|com.google.ads.mediation:unity:4.21.0.0|com.facebook.android:audience-network-sdk' mediation-dependencies.txt
+          ./gradlew :app:dependencyInsight --dependency com.unity3d.ads:unity-ads --configuration releaseRuntimeClasspath
 
       - name: Decode Keystore
         env:
@@ -65,6 +76,15 @@ jobs:
             -Pandroid.injected.signing.store.password="$KS_PASS" \
             -Pandroid.injected.signing.key.alias="$ALIAS" \
             -Pandroid.injected.signing.key.password="$KEY_PASS"
+
+      - name: Verify packaged Unity and Meta SDK classes
+        run: python3 scripts/verify-mediation-apk.py android/app/build/outputs/apk/release/app-release.apk
+
+      - name: Upload mediation dependency report
+        uses: actions/upload-artifact@v4
+        with:
+          name: mediation-dependencies
+          path: android/mediation-dependencies.txt
 
       - name: Upload Signed APK
         uses: actions/upload-artifact@v4

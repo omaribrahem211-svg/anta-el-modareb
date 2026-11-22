@@ -42,8 +42,8 @@ dependencies {
     implementation "androidx.core:core-splashscreen:$coreSplashScreenVersion"
     implementation project(':capacitor-android')
     implementation "com.google.android.play:app-update:2.1.0"
-    // AdMob mediation adapter for Unity Ads (pulls com.unity3d.ads:unity-ads 4.21.0 transitively).
-    // Keep this in sync with the play-services-ads version used by @capacitor-community/admob.
+    // Unity's adapter does not bundle the SDK. Keep both versions paired per Google's guide.
+    implementation 'com.unity3d.ads:unity-ads:4.21.0'
     implementation 'com.google.ads.mediation:unity:4.21.0.0'
     // AdMob mediation adapter for Meta Audience Network (bidding only).
     implementation 'com.google.ads.mediation:facebook:6.22.0.1'
