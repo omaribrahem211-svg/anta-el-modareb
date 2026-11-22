@@ -139,6 +139,8 @@ export function migrateSavePayload(rawPayload: any): LocalGameSavePayload {
     worldRankings: (src?.worldRankings && typeof src.worldRankings === 'object' && !Array.isArray(src.worldRankings)) ? src.worldRankings : null,
     scoutedOpponents: (src?.scoutedOpponents && typeof src.scoutedOpponents === 'object' && !Array.isArray(src.scoutedOpponents)) ? src.scoutedOpponents : {},
     deletedMessageIds: Array.isArray(src?.deletedMessageIds) ? src.deletedMessageIds : [],
+    // National teams state (job offers, accepted NT job, tournaments) must survive every load
+    ...(src?.nationalTeams && typeof src.nationalTeams === 'object' ? { nationalTeams: src.nationalTeams } : {}),
     ...(src?.dailyRewardState && typeof src.dailyRewardState === 'object' ? { dailyRewardState: src.dailyRewardState } : {}),
   } as LocalGameSavePayload;
 

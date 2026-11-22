@@ -3,6 +3,7 @@ import { Filesystem, Directory } from '@capacitor/filesystem';
 import { Share } from '@capacitor/share';
 import { Capacitor } from '@capacitor/core';
 import { ManagerProfile, Club } from '../types/game';
+import { billingService } from '../services/billingService';
 
 export interface TacticalProfileData {
   styleTitle: string;
@@ -177,11 +178,13 @@ async function generateCanvasCoachCard(options: GenerateCardOptions, fileName: s
   const cardH = height - margin * 2;
   const cardRadius = 36;
 
+  const isPremiumCoach = billingService.isPremium();
+
   ctx.save();
-  ctx.shadowColor = 'rgba(245, 158, 11, 0.25)';
-  ctx.shadowBlur = 30;
-  ctx.strokeStyle = '#f59e0b';
-  ctx.lineWidth = 4;
+  ctx.shadowColor = isPremiumCoach ? 'rgba(251, 191, 36, 0.55)' : 'rgba(245, 158, 11, 0.25)';
+  ctx.shadowBlur = isPremiumCoach ? 48 : 30;
+  ctx.strokeStyle = isPremiumCoach ? '#fcd34d' : '#f59e0b';
+  ctx.lineWidth = isPremiumCoach ? 8 : 4;
   roundRect(margin, margin, cardW, cardH, cardRadius);
   ctx.stroke();
   ctx.restore();
@@ -306,11 +309,15 @@ async function generateCanvasCoachCard(options: GenerateCardOptions, fileName: s
   ctx.fillStyle = '#fbbf24';
   ctx.font = 'bold 24px system-ui, "Cairo", sans-serif';
   const clubName = userClub?.name || 'دوري الدرجة الرابعة';
-  ctx.fillText(`المدير الفني لنادي ${clubName}`, margin + cardW - 50, photoY + 58);
+  ctx.fillText(userClub ? `المدير الفني: ${clubName}` : 'مدرب حر (متاح للتعاقد)', margin + cardW - 50, photoY + 58);
 
   ctx.fillStyle = '#94a3b8';
   ctx.font = 'bold 20px system-ui, "Cairo", sans-serif';
   ctx.fillText(`المستوى التدريبي: ${managerLevel}  •  الجنسية: ${manager.nationality || 'مصر'}`, margin + cardW - 50, photoY + 102);
+
+  ctx.fillStyle = isPremiumCoach ? '#fbbf24' : '#94a3b8';
+  ctx.font = '900 24px system-ui, "Cairo", sans-serif';
+  ctx.fillText(isPremiumCoach ? '⭐ مدرب مميز' : 'مدرب عادي', margin + cardW - 50, photoY + 140);
   ctx.restore();
 
   // 4. Core Stats Grid: World Rank, Matches, Win Rate (3 Columns)

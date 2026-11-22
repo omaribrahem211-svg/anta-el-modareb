@@ -18,7 +18,8 @@ import {
   Globe2,
   Zap,
   MessageCircle,
-  X
+  X,
+  Crown
 } from 'lucide-react';
 
 interface BottomNavProps {
@@ -160,6 +161,27 @@ export const BottomNav: React.FC<BottomNavProps> = ({ activeTab, setActiveTab })
                 );
               })}
             </div>
+
+            {/* Game Store Entry (المدرب المميز وادعم اللعبة) */}
+            <button
+              onClick={() => {
+                setShowMoreMenu(false);
+                window.dispatchEvent(new CustomEvent('open-game-store'));
+              }}
+              className="w-full flex items-center gap-2.5 p-2.5 sm:p-3 rounded-xl border transition-all text-right group cursor-pointer active:scale-95 bg-gradient-to-l from-amber-500/20 to-yellow-500/10 border-amber-500/50 hover:border-amber-400/70 text-amber-200"
+            >
+              <div className="p-2 rounded-xl border shrink-0 bg-amber-500/20 border-amber-400/50 text-amber-300 transition-transform group-hover:scale-105">
+                <Crown className="w-4 h-4" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="font-bold text-xs sm:text-sm text-white leading-snug">
+                  متجر اللعبة
+                </div>
+                <div className="text-[10px] text-amber-300/80 mt-0.5 leading-tight">
+                  المدرب المميز ⭐ وادعم اللعبة ❤️
+                </div>
+              </div>
+            </button>
           </div>
         </div>
       )}

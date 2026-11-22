@@ -15,6 +15,7 @@ import { gatherConsent } from './consentService';
 import { ADMOB_CONFIG, TEST_AD_IDS } from '../config/admobConfig';
 import { AdManagerState, ActiveTrainingBoost, TrainingBoostType } from '../types/game';
 import { AdRewardManager, AdRewardType, AdRewardClaimResult } from './adRewardService';
+import { billingService } from './billingService';
 
 const ADMOB_STORAGE_KEY = 'modareb_admob_state_v1';
 const BOTTOM_NAV_MARGIN_DP = 58; // Default; replaced at runtime by the measured bottom-nav height
@@ -537,6 +538,23 @@ class AdManagerService {
     onDismiss?: (rewardEarned: boolean) => void;
     onFailure?: (error: any) => void;
   }): Promise<boolean> {
+    // المدرب المميز: كل المزايا المدعومة بالإعلانات تُمنح فوراً بدون عرض إعلان
+    if (billingService.isPremium()) {
+      this.log(`Premium Coach: granting reward instantly without ad (${params.rewardTypeLabel})`);
+      this.recordRewardedAdSuccess();
+      try {
+        params.onRewardEarned();
+      } catch (cbErr) {
+        console.error('Error in premium onRewardEarned:', cbErr);
+      }
+      if (params.onDismiss) {
+        try {
+          params.onDismiss(true);
+        } catch (_) {}
+      }
+      return true;
+    }
+
     // Auto-clear stale state if trapped for more than 12 seconds
     if (this.isRewardedShowing && this.lastRewardedShowStart && (Date.now() - this.lastRewardedShowStart > 12000)) {
       console.warn('[REWARDED] Stale rewarded show detected (>12s), force resetting show state');

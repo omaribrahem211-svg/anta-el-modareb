@@ -33,6 +33,8 @@ import { WelcomeModalHandler } from './components/WelcomeModalHandler';
 import { FacebookBanner } from './components/FacebookBanner';
 import { ChallengesTab } from './components/ChallengesTab';
 import { RewardedAdCenterModal } from './components/ads/RewardedAdCenterModal';
+import { StoreModal } from './components/StoreModal';
+import { billingService } from './services/billingService';
 import { DailyLoginRewardModal } from './components/DailyLoginRewardModal';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { AdManager } from './services/adManager';
@@ -123,6 +125,7 @@ function GameApp() {
   }, []);
   const [selectedPlayer, setSelectedPlayer] = useState<Player | null>(null);
   const [isRewardedModalOpen, setIsRewardedModalOpen] = useState<boolean>(false);
+  const [isStoreModalOpen, setIsStoreModalOpen] = useState<boolean>(false);
   const [rewardedModalDefaultType, setRewardedModalDefaultType] = useState<AdRewardType>('club_funds');
   const [isPremium, setIsPremium] = useState<boolean>(AdManager.isPremium());
   const [isAdminMode, setIsAdminMode] = useState<boolean>(() => {
@@ -159,6 +162,20 @@ function GameApp() {
       });
     }, 400);
     return () => clearTimeout(timer);
+  }, []);
+
+  // تهيئة خدمة المشتريات ومزامنة حالة المدرب المميز من المتجر
+  useEffect(() => {
+    billingService.initialize().catch(() => {});
+  }, []);
+
+  // Listen for global open-game-store event
+  useEffect(() => {
+    const handleOpenStore = () => setIsStoreModalOpen(true);
+    window.addEventListener('open-game-store', handleOpenStore);
+    return () => {
+      window.removeEventListener('open-game-store', handleOpenStore);
+    };
   }, []);
 
   // Listen for global open-admob-rewards event (disabled when rewards are turned off)
@@ -472,6 +489,12 @@ function GameApp() {
           defaultRewardType={rewardedModalDefaultType}
         />
       )}
+
+      {/* Game Store Modal (المدرب المميز وادعم اللعبة) */}
+      <StoreModal
+        isOpen={isStoreModalOpen}
+        onClose={() => setIsStoreModalOpen(false)}
+      />
     </div>
   );
 }
