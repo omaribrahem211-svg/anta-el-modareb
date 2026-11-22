@@ -198,6 +198,7 @@ import { isRealClub, loadRealClubSquad } from '../data/realPlayersData';
 import { ensureClubSquadIntegrity, calibrateRealisticPlayerRating } from '../utils/playerGenerator';
 import { useAuth } from './AuthContext';
 import { getLocalTrainerProfile, saveLocalTrainerProfile, generateTrainerId } from '../services/trainerProfileService';
+import { crashStage } from '../services/crashReporting';
 import { gameStateRepository, setLatestNationalTeamsSnapshot } from '../services/gameStateRepository';
 import { timed, runWhenIdle } from '../utils/perfLog';
 import { migrateSavePayload, CURRENT_SAVE_FORMAT_VERSION } from '../services/saveBackupService';
@@ -1253,6 +1254,11 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const [continentalPhase, setContinentalPhaseState] = useState<ContinentalPhaseState | null>(() => {
     try { return loadContinentalPhase(localStorage.getItem(`${STORAGE_KEY}_continentalPhase`)); } catch { return null; }
   });
+  useEffect(() => {
+    crashStage('tournament_stage', continentalPhase
+      ? `${continentalPhase.compId}:${continentalPhase.round}:${continentalPhase.status}`
+      : 'none');
+  }, [continentalPhase?.compId, continentalPhase?.round, continentalPhase?.status]);
   const continentalPhaseRef = useRef<ContinentalPhaseState | null>(continentalPhase);
   const setContinentalPhase = (next: ContinentalPhaseState | null) => {
     continentalPhaseRef.current = next;
@@ -8840,6 +8846,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const seasonStartPendingRef = useRef(false);
   const startNextSeason = (chosenOfferId?: string) => {
     if (isStartingSeasonRef.current || seasonStartPendingRef.current) return;
+    crashStage('season_stage', 'queued');
     seasonStartPendingRef.current = true;
     setIsStartingSeasonUi(true);
     const run = () => {
@@ -8865,6 +8872,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const startNextSeasonNow = async (chosenOfferId?: string): Promise<void> => {
     if (isStartingSeasonRef.current) return; // double tap while the new season is being built
     isStartingSeasonRef.current = true;
+    crashStage('season_stage', 'summary');
     setTimeout(() => { isStartingSeasonRef.current = false; }, 4000);
     try {
       const summaryClub = userClub || teams.find(t => t.isUserClub) || teams[0];
@@ -8946,6 +8954,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       pendingAwardsRef.current = [];
       try { teamsForAdvance = applyPlayerAwardBoosts(teamsForAdvance, summaryClub?.id, worldAwardItems); } catch (_) { /* optional */ }
       const advStart = typeof performance !== 'undefined' ? performance.now() : Date.now();
+      crashStage('season_stage', 'world_advancement');
       const result = await processNewSeasonAdvancement(
         season,
         summary,
@@ -8984,6 +8993,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
       // 1. Process Free Agents (contractYears === 0) & AI Club Transfers for the new season
       await new Promise<void>(r => setTimeout(r, 12));
+      crashStage('season_stage', 'transfers');
       const freeAgencyAndAiResult = timed('startNextSeason.processFreeAgentsAndAiTransfers', () => processFreeAgentsAndAiTransfers(
         baseNextTeams,
         transferMarket,
@@ -9026,6 +9036,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
       // Build unified Master Schedule (League Only) cleanly from scratch
       await new Promise<void>(r => setTimeout(r, 12));
+      crashStage('season_stage', 'fixtures');
       const nextFixturesWithContinental = timed('startNextSeason.generateMasterSeasonAgenda', () => generateMasterSeasonAgenda(
         result.nextSeason.seasonNumber,
         result.nextActiveLeague,
@@ -9059,6 +9070,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         localStorage.setItem(`${STORAGE_KEY}_season_archives`, JSON.stringify(updatedSeasonArchives));
       } catch (_) {}
 
+      crashStage('season_stage', 'commit_state');
       setSeason(result.nextSeason);
       setActiveLeague(result.nextActiveLeague);
       setTeams(finalNextTeams);
@@ -9208,7 +9220,9 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       } catch (saveErr) {
         console.warn('Immediate save on season transition:', saveErr);
       }
+      crashStage('season_stage', 'complete');
     } catch (err) {
+      crashStage('season_stage', 'recovery');
       console.error('Error starting next season:', err);
       try {
       // Failsafe recovery: bump season number, reset round and regenerate fresh fixtures and standings so game never locks
@@ -9274,6 +9288,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       setActiveLeague(safeNextLeague);
       setTeams(safeTeams);
       setStandings(safeStandings);
+      crashStage('season_stage', 'recovered');
       setFixtures(safeFixtures);
       setManager(safeManager);
       setCupTournament(null);
@@ -9282,6 +9297,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       setSeasonEndSummary(null);
       setJobOffers([]);
       } catch (fatal) {
+        crashStage('season_stage', 'failed');
         // Last resort: never leave the user on a frozen season-end screen
         console.error('[startNextSeason] failsafe failed too:', fatal);
         setLiveMatch(null);

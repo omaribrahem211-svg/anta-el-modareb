@@ -15,6 +15,7 @@ import { gatherConsent } from './consentService';
 import { ADMOB_CONFIG, TEST_AD_IDS } from '../config/admobConfig';
 import { AdManagerState, ActiveTrainingBoost, TrainingBoostType } from '../types/game';
 import { AdRewardManager, AdRewardType, AdRewardClaimResult } from './adRewardService';
+import { crashStage } from './crashReporting';
 import { billingService } from './billingService';
 
 const ADMOB_STORAGE_KEY = 'modareb_admob_state_v1';
@@ -129,6 +130,7 @@ class AdManagerService {
 
     this.initPromise = (async () => {
       this.isInitializing = true;
+      crashStage('ad_stage', 'init_consent');
       this.log('Initializing AdMob SDK... (Native:', this.isNative, ')');
 
       try {
@@ -137,9 +139,11 @@ class AdManagerService {
           const consent = await gatherConsent();
           if (!consent.canRequestAds) {
             this.isInitializing = false;
+            crashStage('ad_stage', 'init_consent_blocked');
             console.warn('[ADMOB] Consent not granted/available yet; ads postponed');
             return false;
           }
+          crashStage('ad_stage', 'init_sdk');
           await AdMob.initialize({
             testingDevices: ADMOB_CONFIG.IS_TEST_MODE ? ['EMULATOR'] : undefined,
             initializeForTesting: ADMOB_CONFIG.IS_TEST_MODE,
@@ -149,6 +153,7 @@ class AdManagerService {
           console.log('[ADMOB] SDK initialized (web simulation mode)');
         }
 
+        crashStage('ad_stage', 'init_ready');
         this.isInitialized = true;
         this.isInitializing = false;
         console.log('[STARTUP] AdManager initialized', Math.round(performance.now()) + 'ms');
@@ -168,6 +173,7 @@ class AdManagerService {
         return true;
       } catch (error) {
         console.warn('[ADMOB] SDK initialization error (app continues normally):', error);
+        crashStage('ad_stage', 'init_failed');
         this.isInitialized = false;
         this.isInitializing = false;
         return false;
@@ -194,6 +200,7 @@ class AdManagerService {
     try {
       const loadedHandle = await AdMob.addListener(BannerAdPluginEvents.Loaded, () => {
         console.log('[ADMOB_BANNER_LOADED] Banner loaded successfully and is now active');
+        crashStage('ad_stage', 'banner_loaded');
         this.isBannerActive = true;
         this.isBannerLoading = false;
         this.isBannerCreated = true;
@@ -201,6 +208,7 @@ class AdManagerService {
       });
 
       const failedHandle = await AdMob.addListener(BannerAdPluginEvents.FailedToLoad, async (error: any) => {
+        crashStage('ad_stage', 'banner_load_failed');
         const errCode = (error && (error.code ?? error.errorCode)) ?? 'UNKNOWN';
         const errMsg = (error && (error.message ?? error.errorMessage)) ?? (typeof error === 'object' ? JSON.stringify(error) : String(error));
         console.warn(`[ADMOB_BANNER_FAILED] Code: ${errCode} | Message: ${errMsg}`);
@@ -291,6 +299,7 @@ class AdManagerService {
         };
 
         console.log(`[ADMOB_BANNER] Requesting ${isTest ? 'TEST' : 'PRODUCTION'} banner ad:`, bannerAdId, 'position: BOTTOM_CENTER');
+        crashStage('ad_stage', 'banner_request');
         await this.queueBannerOp(() => AdMob.showBanner(options));
         this.isBannerCreated = true;
         this.isBannerVisible = true;
@@ -476,6 +485,7 @@ class AdManagerService {
 
       // Safe timeout for loading so game never hangs
       timer = setTimeout(() => {
+        crashStage('ad_stage', 'reward_load_timeout');
         console.warn(`[ADMOB_REWARDED_TIMEOUT] Load timed out after ${timeoutMs}ms`);
         finish(false);
       }, timeoutMs);
@@ -492,12 +502,14 @@ class AdManagerService {
         // 1. Listen for Loaded event
         const loadedHandle = await AdMob.addListener(RewardAdPluginEvents.Loaded, () => {
           console.log('[ADMOB_REWARDED_LOADED] Ad loaded successfully with unit ID:', rewardedAdId);
+          crashStage('ad_stage', 'reward_loaded');
           finish(true);
         });
         this.rewardedListenerHandles.push(loadedHandle);
 
         // 2. Listen for FailedToLoad event
         const failedHandle = await AdMob.addListener(RewardAdPluginEvents.FailedToLoad, async (err: any) => {
+          crashStage('ad_stage', 'reward_load_failed');
           const errCode = (err && (err.code ?? err.errorCode)) ?? 'UNKNOWN';
           const errMsg = (err && (err.message ?? err.errorMessage)) ?? (typeof err === 'object' ? JSON.stringify(err) : String(err));
           console.warn(`[ADMOB_REWARDED_LOAD_FAILED] Code: ${errCode} | Message: ${errMsg}`);
@@ -511,7 +523,9 @@ class AdManagerService {
         };
 
         console.log('[ADMOB_REWARDED] Preparing rewarded ad:', rewardedAdId);
+        crashStage('ad_stage', 'reward_load');
         AdMob.prepareRewardVideoAd(options).catch(async (err: any) => {
+          crashStage('ad_stage', 'reward_load_failed');
           console.warn('[ADMOB_REWARDED_PREPARE_ERROR]', err);
           finish(false);
         });
@@ -686,6 +700,7 @@ class AdManagerService {
 
         // A. Listen for presentation start
         const showedHandle = await AdMob.addListener(RewardAdPluginEvents.Showed, () => {
+          crashStage('ad_stage', 'reward_visible');
           adHasShown = true;
           if (presentationTimer) {
             clearTimeout(presentationTimer);
@@ -710,6 +725,7 @@ class AdManagerService {
 
         // C. Event 2: onAdDismissedFullScreenContent (Strict separation - handles teardown and audio/game resumption)
         const dismissHandle = await AdMob.addListener(RewardAdPluginEvents.Dismissed, async () => {
+          crashStage('ad_stage', 'reward_dismissed');
           console.log(`[ADMOB_REWARDED] Dismissed event received (pre-reward: ${rewardEarned})`);
           if (!rewardEarned) {
             // Allow 350ms grace period for Android native bridge to deliver Rewarded event before teardown
@@ -733,6 +749,7 @@ class AdManagerService {
 
         // D. Listen for FailedToShow
         const failHandle = await AdMob.addListener(RewardAdPluginEvents.FailedToShow, async (err: any) => {
+          crashStage('ad_stage', 'reward_show_failed');
           const errCode = (err && (err.code ?? err.errorCode)) ?? 'UNKNOWN';
           const errMsg = (err && (err.message ?? err.errorMessage)) ?? (typeof err === 'object' ? JSON.stringify(err) : String(err));
           console.error(`[ADMOB_REWARDED_SHOW_FAILED] Code: ${errCode} | Message: ${errMsg}`, err);
@@ -749,7 +766,9 @@ class AdManagerService {
         this.rewardedListenerHandles.push(failHandle);
 
         // Trigger show in native SDK
+        crashStage('ad_stage', 'reward_show');
         AdMob.showRewardVideoAd().catch(async (showError: any) => {
+          crashStage('ad_stage', 'reward_show_failed');
           const errCode = (showError && (showError.code ?? showError.errorCode)) ?? 'UNKNOWN';
           const errMsg = (showError && (showError.message ?? showError.errorMessage)) ?? (typeof showError === 'object' ? JSON.stringify(showError) : String(showError));
           console.error(`[ADMOB_REWARDED_INVOKE_ERROR] Code: ${errCode} | Message: ${errMsg}`, showError);

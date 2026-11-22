@@ -123,6 +123,18 @@ export function recordJsException(kind: string, message: string, stack?: string)
   });
 }
 
+/** Low-cardinality state only, never names, save contents, ad IDs or error payloads. */
+const diagnosticState = new Map<string, string>();
+export function crashStage(key: 'screen' | 'season_stage' | 'tournament_stage' | 'ad_stage', stage: string): void {
+  const value = String(stage).slice(0, 120);
+  if (diagnosticState.get(key) === value) return;
+  diagnosticState.set(key, value);
+  void safelyCallCrashlytics('diagnostic state', async (crashlytics) => {
+    await crashlytics.setCustomKey({ key, value, type: 'string' });
+    await crashlytics.log({ message: `${key}:${value}` });
+  });
+}
+
 /** Attaches a user id (never an email) once known. */
 export function setCrashUserId(id: string): void {
   void safelyCallCrashlytics('user ID', (crashlytics) =>

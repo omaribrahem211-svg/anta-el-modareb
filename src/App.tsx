@@ -47,6 +47,7 @@ import { MatchErrorBoundary } from './components/MatchErrorBoundary';
 import { SocialTab } from './components/SocialTab';
 import { applyPerfMode, isLiteMode } from './utils/perfMode';
 import { PressConferenceModal } from './components/PressConferenceModal';
+import { crashStage } from './services/crashReporting';
 import { PrivacyPolicyPage } from './components/PrivacyPolicyPage';
 
 function GameApp() {
@@ -103,6 +104,14 @@ function GameApp() {
   }, [seasonFocus]);
   const [activeTab, setActiveTab] = useState<ActiveTab>('dashboard');
   const [pressFixture, setPressFixture] = useState<any>(null);
+  useEffect(() => {
+    const screen = isStartingSeasonUi ? 'season_rollover'
+      : showSeasonTransitionModal ? 'season_summary'
+      : liveMatch ? 'live_match'
+      : contFocus ? 'continental'
+      : activeTab;
+    crashStage('screen', screen);
+  }, [activeTab, isStartingSeasonUi, showSeasonTransitionModal, liveMatch?.fixture?.id, contFocus]);
 
   useEffect(() => {
     if (!userClub || liveMatch || showDaySummaryModal || pressFixture) return;
@@ -161,7 +170,7 @@ function GameApp() {
       AdManager.init().catch((err) => {
         console.warn('[AdMob] Init notice:', err);
       });
-    }, 400);
+    }, 3000);
     return () => clearTimeout(timer);
   }, []);
 

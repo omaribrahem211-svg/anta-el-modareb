@@ -19,6 +19,7 @@ import {
   Position,
   PositionCategory,
 } from '../types/game';
+import { crashStage } from '../services/crashReporting';
 import { applyPyramidMovements, hasLowerDivision, normalizeLeagueSizes } from './pyramidEngine';
 import { evolveWorldLeaguesAsync } from './worldEvolution';
 import { evolveAIClubs, evolveWorldLeagues } from './worldEvolution';
@@ -2139,6 +2140,7 @@ export async function processNewSeasonAdvancement(
       const fromTier = summary.divisionTier || getLeagueById(summary.leagueId || currentSeason.leagueId).tier;
       const toTier = summary.nextDivisionTier ?? fromTier;
       try {
+        crashStage('season_stage', 'pyramid');
         applyPyramidMovements({ clubId: userClub.id, outcome: toTier < fromTier ? 'up' : toTier > fromTier ? 'down' : 'stay' });
       } catch (e) {
         console.warn('[Pyramid] movement failed, falling back to user-only move', e);
@@ -2176,6 +2178,7 @@ export async function processNewSeasonAdvancement(
     await yieldToUI();
     // 2b. Living world: every other league ages, develops, retires + clubs/managers improve.
     try {
+      crashStage('season_stage', 'world_evolution');
       await evolveWorldLeaguesAsync([nextActiveLeague.id], c => !!c && (c.id === userClub?.id || c.id === acceptedJobOffer?.clubId), Math.random, yieldToUI);
     } catch (e) {
       console.warn('[WorldEvolution] failed', e);
@@ -2404,6 +2407,7 @@ export async function processNewSeasonAdvancement(
   const newRetiredPlayers: RetiredPlayer[] = [];
   const rebornDone = new Set<string>();
 
+  crashStage('season_stage', 'squad_ageing');
   const agedLeagueTeams = leagueTeams.map(team => {
     const squad = Array.isArray(team.players) ? team.players : [];
     const survivingPlayers: Player[] = [];
@@ -2711,6 +2715,7 @@ export async function processNewSeasonAdvancement(
 
   await yieldToUI();
   // 4. Generate New Season Schedule & Standings (League Only)
+  crashStage('season_stage', 'world_fixtures');
   const nextFixtures = generateMasterSeasonAgenda(
     nextSeasonNumber,
     nextActiveLeague,
