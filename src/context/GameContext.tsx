@@ -143,7 +143,7 @@ import {
   getContinentClubPool,
 } from '../utils/continentalEngine';
 // National teams (fully isolated additive wiring — no club logic changes)
-import { NationalTeam, NationalTeamsState } from '../types/nationalTeams';
+import { InternationalMatch, NationalTeam, NationalTeamsState } from '../types/nationalTeams';
 import {
   acceptNationalTeamJob as ntAcceptJob,
   advanceNationalTeamsToRound,
@@ -153,6 +153,7 @@ import {
   generateNationalTeamJobOffer,
   initNationalTeamsForSeason,
   refreshUserCallUp,
+  recordUserInternationalResult,
   rehydrateNationalTeams,
   resignFromNationalTeam as ntResign,
   stripNationalTeamsForSave,
@@ -161,6 +162,7 @@ import {
   NT_MIN_REPUTATION_FOR_JOB,
 } from '../services/nationalTeamsService';
 import type { NtJobContext } from '../services/nationalTeamsService';
+import { controlledLiveClub, findUserInternationalMatch, getDueUserInternationalMatch, hasPendingUserInternationalTournament, internationalMatchFixture, nationalTeamForLivePlay, nationalTeamMatchClub, substituteInternationalPlayer } from '../utils/internationalLiveMatch';
 import { GLOBAL_COUNTRIES } from '../data/countriesData';
 import { getDomesticCupDefinitionForCountry } from '../data/competitionsData';
 import { EGYPT_PREMIER_CLUBS } from '../data/arabClubsData';
@@ -328,6 +330,9 @@ interface GameContextType {
   resignFromNationalTeam: () => void;
   refreshNationalTeamCallUp: () => void;
   setNationalTeamLineup: (startingIds: string[] | null) => void;
+  setNationalTeamTactics: (tactics: TeamTactics) => void;
+  startNationalTeamLiveMatch: (matchId?: string) => boolean;
+  pendingInternationalMatch: InternationalMatch | null;
   deletedMessageIds?: string[];
   switchUserClubToAlAhly: () => { success: boolean; message: string };
   switchContinentalCompetition?: (compCode: 'ccl' | 'ccc' | 'ucl' | 'uel' | 'acl' | 'acl2') => void;
@@ -1349,8 +1354,8 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const restoreMatchFromCandidate = (candidate: any): any | null => {
       try {
         if (!candidate || !candidate.fixture) return null;
-        if (typeof candidate.currentMinute !== 'number' || candidate.currentMinute < 0 || candidate.currentMinute >= 90) return null;
-        if (candidate.fixture.isPlayed === true || candidate.isFinished === true) return null;
+        if (typeof candidate.currentMinute !== 'number' || candidate.currentMinute < 0 || candidate.currentMinute > (candidate.internationalContext ? 120 : 89)) return null;
+        if (candidate.fixture.isPlayed === true || (candidate.isFinished === true && !candidate.internationalContext)) return null;
 
         // Backward compatibility: legacy saves with complete team squad objects
         if (
@@ -1541,7 +1546,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   }, []);
 
   const saveLiveMatchToStorage = useCallback((matchToSave: LiveMatchState | null) => {
-    if (matchToSave && !matchToSave.isFinished) {
+    if (matchToSave && (!matchToSave.isFinished || matchToSave.internationalContext)) {
       saveActiveLiveMatchToDb(matchToSave);
     } else {
       clearActiveLiveMatchFromDb();
@@ -2757,7 +2762,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   nationalTeamsRef.current = nationalTeamsState;
   const ntSeasonInitRef = useRef<number>(0);
   const ntRoundRef = useRef<number>(0);
-  const ntPostSeasonRef = useRef<number>(0);
+  const ntPostSeasonRef = useRef<string>('');
 
   useEffect(() => {
     try { setLatestNationalTeamsSnapshot(stripNationalTeamsForSave(nationalTeamsState)); } catch (_) { /* optional */ }
@@ -2766,13 +2771,24 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const userNationalTeam = useMemo<NationalTeam | null>(() => {
     const st = nationalTeamsState;
     if (!st || !st.userNationalTeamId) return null;
-    return st.teams.find(t => t.id === st.userNationalTeamId) || null;
+    const nt = st.teams.find(t => t.id === st.userNationalTeamId);
+    return nt ? nationalTeamForLivePlay(nt) : null;
   }, [nationalTeamsState]);
+
+  const pendingInternationalMatch = useMemo(() => getDueUserInternationalMatch(nationalTeamsState, currentRound, seasonFinished) || null,
+    [nationalTeamsState, currentRound, seasonFinished]);
+  const pendingInternationalTournament = seasonFinished && (hasPendingUserInternationalTournament(nationalTeamsState) || Boolean(pendingInternationalMatch));
+  const openNationalTeamView = () => {
+    try { sessionStorage.setItem('anta_open_national_teams', 'true'); } catch (_) {}
+    setShowSeasonTransitionModal(false);
+    try { window.dispatchEvent(new CustomEvent('set-active-tab', { detail: { tab: 'league' } }));
+      window.dispatchEvent(new CustomEvent('open-national-teams')); } catch (_) {}
+  };
 
   // Rewards the manager when their national team wins a trophy (reputation + world rank points).
   const applyNtChampionReward = useCallback((prevState: NationalTeamsState | null, nextState: NationalTeamsState | null) => {
     const t = nextState?.activeTournament;
-    if (!t || !t.isCompleted || !t.winnerTeamId || t.winnerTeamId !== nextState?.userNationalTeamId) return;
+    if (!t || !t.isCompleted || !t.winnerTeamId || t.winnerTeamId !== (prevState?.userNationalTeamId || nextState?.userNationalTeamId)) return;
     const wasAlready = prevState?.activeTournament?.id === t.id && prevState?.activeTournament?.isCompleted;
     if (wasAlready) return;
     setManager(m => {
@@ -2847,7 +2863,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       return;
     }
     ntRoundRef.current = currentRound;
-    const res = advanceNationalTeamsToRound(st, currentRound, totalRounds, seasonNumber, teams, buildNtJobCtx());
+    const res = advanceNationalTeamsToRound(st, currentRound, totalRounds, seasonNumber, teams, buildNtJobCtx(), true);
     applyNtChampionReward(st, res.state);
     setNationalTeamsState(res.state);
     if (res.messages.length > 0) setInbox(prev => [...res.messages, ...prev]);
@@ -2860,14 +2876,15 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const st = nationalTeamsRef.current;
     if (!st || st.teams.length === 0) return;
     const seasonNumber = season?.seasonNumber || 1;
-    if (ntPostSeasonRef.current === seasonNumber) return;
-    ntPostSeasonRef.current = seasonNumber;
-    const res = completePostSeasonTournament(st, totalRounds, seasonNumber, teams, buildNtJobCtx());
+    const key = `${seasonNumber}_${st.activeTournament?.id}_${st.activeTournament?.matches.filter(m => m.isPlayed).length}_${st.queuedTournament?.id}_${st.userNationalTeamId}`;
+    if (ntPostSeasonRef.current === key) return;
+    ntPostSeasonRef.current = key;
+    const res = completePostSeasonTournament(st, totalRounds, seasonNumber, teams, buildNtJobCtx(), true);
     applyNtChampionReward(st, res.state);
     if (res.state !== st) setNationalTeamsState(res.state);
     if (res.messages.length > 0) setInbox(prev => [...res.messages, ...prev]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [seasonFinished, season?.seasonNumber, teams, totalRounds]);
+  }, [seasonFinished, season?.seasonNumber, teams, totalRounds, nationalTeamsState]);
 
   // Mid-season NT offers: when the manager's score crosses a new tier (reputation
   // or trophies changed) while unemployed, generate an offer immediately instead
@@ -2917,12 +2934,12 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   const resignFromNationalTeam = useCallback(() => {
     const st = nationalTeamsRef.current;
-    if (st) setNationalTeamsState(ntResign(st));
+    if (st && !liveMatchRef.current?.internationalContext) setNationalTeamsState(ntResign(st));
   }, []);
 
   const setNationalTeamLineup = useCallback((startingIds: string[] | null) => {
     const st = nationalTeamsRef.current;
-    if (!st || !st.userNationalTeamId) return;
+    if (!st || !st.userNationalTeamId || liveMatchRef.current?.internationalContext) return;
     const ids = startingIds && startingIds.length === 11 ? [...startingIds] : undefined;
     setNationalTeamsState({
       ...st,
@@ -2932,8 +2949,48 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   const refreshNationalTeamCallUp = useCallback(() => {
     const st = nationalTeamsRef.current;
-    if (st) setNationalTeamsState(refreshUserCallUp(st, teams));
+    if (st && !liveMatchRef.current?.internationalContext) setNationalTeamsState(refreshUserCallUp(st, teams));
   }, [teams]);
+  const setNationalTeamTactics = (tactics: TeamTactics) => {
+    const st = nationalTeamsRef.current;
+    if (!st?.userNationalTeamId || liveMatchRef.current?.internationalContext) return;
+    const next = { ...st, teams: st.teams.map(nt => nt.id === st.userNationalTeamId ? { ...nt, tactics: { ...nt.tactics, ...tactics } } : nt) };
+    nationalTeamsRef.current = next;
+    setNationalTeamsState(next);
+  };
+
+  const startNationalTeamLiveMatch = (matchId?: string): boolean => {
+    const st = nationalTeamsRef.current;
+    if (!st?.userNationalTeamId) return false;
+    const pending = matchId ? findUserInternationalMatch(st, matchId) : getDueUserInternationalMatch(st, currentRound, seasonFinished);
+    if (!pending || (!seasonFinished && pending.roundTrigger > currentRound)) return false;
+    const active = liveMatchRef.current;
+    if (active) {
+      if (active.internationalContext?.matchId !== pending.id) return false;
+      try { window.dispatchEvent(new CustomEvent('set-active-tab', { detail: { tab: 'matches' } })); } catch (_) {}
+      return true;
+    }
+    const homeNt = st.teams.find(t => t.id === pending.homeTeamId);
+    const awayNt = st.teams.find(t => t.id === pending.awayTeamId);
+    if (!homeNt || !awayNt) return false;
+    const home = { ...nationalTeamMatchClub(homeNt), isUserClub: homeNt.id === st.userNationalTeamId };
+    const away = { ...nationalTeamMatchClub(awayNt), isUserClub: awayNt.id === st.userNationalTeamId };
+    const userIsHome = home.id === st.userNationalTeamId;
+    if (userIsHome) home.manager = manager as any; else away.manager = manager as any;
+    const initial = createInitialLiveMatchState(internationalMatchFixture(pending), home, away, (userIsHome ? home : away).tactics, st.userNationalTeamId);
+    initial.internationalContext = { matchId: pending.id, competitionId: pending.competitionId, stage: pending.stage, userTeamId: st.userNationalTeamId, seasonNumber: season.seasonNumber };
+    initial.autoSubsEnabled = false;
+    completedMatchFixtureIdRef.current = null;
+    isMatchFinishedRef.current = false;
+    isFinishingMatchRef.current = false;
+    liveMatchSkippedRef.current = false;
+    clearMatchSimulationTimers();
+    liveMatchRef.current = initial;
+    setLiveMatch(initial);
+    saveActiveLiveMatchToDb(initial).catch(() => {});
+    try { window.dispatchEvent(new CustomEvent('set-active-tab', { detail: { tab: 'matches' } })); } catch (_) {}
+    return true;
+  };
   // ================== END NATIONAL TEAMS WIRING ==================
   useEffect(() => {
     const handles: any[] = [];
@@ -3164,10 +3221,10 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
         let next = prev;
         try {
-          next = simulateMatchStep(prev, userTacticsRef.current);
+          next = simulateMatchStep(prev, prev.internationalContext ? controlledLiveClub(prev, userClubRef.current).tactics : userTacticsRef.current);
         } catch (simErr) {
           console.error('[simulateMatchStep Graceful Recovery]', simErr);
-          next = {
+          next = prev.internationalContext ? { ...prev, isPlaying: false } : {
             ...prev,
             currentMinute: prev.currentMinute + 1,
             isFinished: prev.currentMinute + 1 >= 90,
@@ -3181,7 +3238,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           liveMatchWatchdogRef.current.lastMinuteChangeTs = Date.now();
         }
 
-        if (next.currentMinute >= 90 || next.isFinished) {
+        if (next.isFinished || (!next.internationalContext && next.currentMinute >= 90)) {
           const currentClub = userClubRef.current;
           const currentLeague = activeLeagueRef.current;
           const userIsInFixture = currentClub && (next.fixture?.homeTeamId === currentClub.id || next.fixture?.awayTeamId === currentClub.id);
@@ -3203,7 +3260,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
           const finishedNext = {
             ...next,
-            currentMinute: 90,
+            currentMinute: next.internationalContext ? next.currentMinute : 90,
             isFinished: true,
             isPlaying: false,
             isHalfTime: false,
@@ -3296,6 +3353,19 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   // Actions
   const updateTactics = (tactics: TeamTactics) => {
+    const active = liveMatchRef.current;
+    if (active?.internationalContext) {
+      const home = active.homeTeam.id === active.internationalContext.userTeamId;
+      const current = home ? active.homeTactics : active.awayTactics;
+      const nextTactics = { ...current, ...tactics };
+      const changed = { ...active, homeTactics: home ? nextTactics : active.homeTactics, awayTactics: home ? active.awayTactics : nextTactics,
+        userTacticsSnapshot: nextTactics };
+      liveMatchRef.current = changed;
+      setLiveMatch(changed);
+      setNationalTeamsState(st => st ? { ...st, teams: st.teams.map(nt => nt.id === active.internationalContext!.userTeamId
+        ? { ...nt, tactics: { ...nt.tactics, ...tactics, startingPlayerIds: nt.tactics?.startingPlayerIds || [], benchPlayerIds: nt.tactics?.benchPlayerIds || [] } } : nt) } : st);
+      return;
+    }
     const targetId = userClub?.id || manager?.currentClubId;
     setTeams(prev => {
       const next = prev.map(t =>
@@ -3320,6 +3390,15 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   const setFormation = (formation: FormationType) => {
+    const active = liveMatchRef.current;
+    if (active?.internationalContext) {
+      const team = controlledLiveClub(active, userClub);
+      const ids = reorderStartingIdsForFormation(team, formation);
+      updateTactics({ ...team.tactics!, formation, startingPlayerIds: ids });
+      setLiveMatch(prev => !prev ? prev : ({ ...prev, homeLineup: prev.homeTeam.id === team.id ? ids : prev.homeLineup,
+        awayLineup: prev.awayTeam.id === team.id ? ids : prev.awayLineup }));
+      return;
+    }
     const targetId = userClub?.id || manager?.currentClubId;
     setTeams(prev => {
       const next = prev.map(t => {
@@ -3528,6 +3607,13 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   // Match management
   const startLiveMatch = (fixtureId?: string) => {
+    if (liveMatchRef.current?.internationalContext) {
+      try { window.dispatchEvent(new CustomEvent("set-active-tab", { detail: { tab: "matches" } })); } catch (_) {}
+      return;
+    }
+    if (getDueUserInternationalMatch(nationalTeamsRef.current, currentRound, seasonFinished) && !liveMatchRef.current) {
+      startNationalTeamLiveMatch(); return;
+    }
     if (seasonFinished) return;
     liveMatchSkippedRef.current = false;
 
@@ -3723,7 +3809,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const resumeSecondHalf = (teamTalkMoraleBoost: boolean = false) => {
     if (!liveMatch || !liveMatch.isHalfTime) return;
 
-    if (teamTalkMoraleBoost) {
+    if (teamTalkMoraleBoost && !liveMatch.internationalContext) {
       setTeams(prev => prev.map(t => {
         if (!t.isUserClub) return t;
         return {
@@ -3742,12 +3828,22 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         ...prev,
         isHalfTime: false,
         isPlaying: true,
-        currentMinute: 45,
+        currentMinute: prev.internationalContext ? prev.currentMinute : 45,
+        ...(teamTalkMoraleBoost && prev.internationalContext ? {
+          homeTeam: { ...prev.homeTeam, players: prev.homeTeam.players.map(p => prev.homeTeam.id === prev.internationalContext!.userTeamId ? { ...p, morale: Math.min(100, (p.morale || 50) + 5) } : p) },
+          awayTeam: { ...prev.awayTeam, players: prev.awayTeam.players.map(p => prev.awayTeam.id === prev.internationalContext!.userTeamId ? { ...p, morale: Math.min(100, (p.morale || 50) + 5) } : p) },
+        } : {}),
       };
     });
   };
 
   const makeLiveSubstitution = (outPlayerId: string, inPlayerId: string) => {
+    const active = liveMatchRef.current;
+    if (active?.internationalContext) {
+      const result = substituteInternationalPlayer(active, outPlayerId, inPlayerId);
+      if (result.success) { liveMatchRef.current = result.match; setLiveMatch(result.match); }
+      return { success: result.success, message: result.message };
+    }
     if (!liveMatch) return { success: false, message: 'لا توجد مباراة جارية حالياً' };
     if (!userClub) return { success: false, message: 'أنت غير مرتبط بنادٍ حالياً' };
     if (liveMatch.substitutionsCount >= 5) {
@@ -3805,11 +3901,12 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   ) => {
     setLiveMatch(prev => {
       if (!prev || prev.isFinished) return prev;
-      const isHome = userClub ? prev.homeTeam.id === userClub.id : true;
+      const controlled = controlledLiveClub(prev, userClub);
+      const isHome = controlled ? prev.homeTeam.id === controlled.id : true;
       const userTeam = isHome ? prev.homeTeam : prev.awayTeam;
       const currentMin = Math.max(1, prev.currentMinute);
 
-      const resolvedPlayerName = playerName || userClub?.players?.[0]?.name || (isHome ? prev.homeTeam.name : prev.awayTeam.name);
+      const resolvedPlayerName = playerName || controlled?.players?.[0]?.name || (isHome ? prev.homeTeam.name : prev.awayTeam.name);
 
       let eventType: MatchEvent['type'] = 'chance';
       let defaultDesc = `⚡ فرصة خطيرة بعد جملة تكتيكية وبناء هجومي رائع!`;
@@ -3877,13 +3974,15 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   const changeLiveMentality = (mentality: TeamTactics['mentality']) => {
-    if (!userClub?.tactics) return;
-    updateTactics({ ...userClub.tactics, mentality });
+    const controlled = controlledLiveClub(liveMatchRef.current, userClub);
+    if (!controlled?.tactics) return;
+    updateTactics({ ...controlled.tactics, mentality });
   };
 
   const changeLivePressing = (pressingIntensity: TeamTactics['pressingIntensity']) => {
-    if (!userClub?.tactics) return;
-    updateTactics({ ...userClub.tactics, pressingIntensity });
+    const controlled = controlledLiveClub(liveMatchRef.current, userClub);
+    if (!controlled?.tactics) return;
+    updateTactics({ ...controlled.tactics, pressingIntensity });
   };
 
   const skipLiveMatchToEnd = () => {
@@ -3896,6 +3995,16 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     setLiveMatch(prev => {
       if (!prev || prev.isFinished) return prev;
+      if (prev.internationalContext) {
+        try {
+          let international = { ...prev, isHalfTime: false, isPlaying: true };
+          for (let step = 0; step < 160 && !international.isFinished; step++) {
+            international = simulateMatchStep({ ...international, isHalfTime: false, isPlaying: true }, controlledLiveClub(international, userClub).tactics);
+          }
+          isMatchFinishedRef.current = international.isFinished;
+          return international;
+        } catch (err) { console.error('[NationalLiveMatch] Skip paused safely', err); return { ...prev, isPlaying: false }; }
+      }
       try {
         let state = { ...prev, isHalfTime: false, isPlaying: true };
         const maxSteps = 100;
@@ -4002,6 +4111,32 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     if (!currentFixtureId) {
       console.warn('[MatchEndingFlow] Blocked: liveMatch has no fixture ID. Clearing state.');
       setLiveMatch(null);
+      return;
+    }
+
+    if (liveMatch.internationalContext) {
+      const st = nationalTeamsRef.current;
+      if (!st) return;
+      const snapshot = liveMatch;
+      isFinishingMatchRef.current = true;
+      try {
+        const result = recordUserInternationalResult(st, snapshot.internationalContext!.matchId, snapshot,
+          currentRound, totalRounds, snapshot.internationalContext!.seasonNumber, seasonFinished, buildNtJobCtx());
+        applyNtChampionReward(st, result.state);
+        nationalTeamsRef.current = result.state;
+        setNationalTeamsState(result.state);
+        setLatestNationalTeamsSnapshot(stripNationalTeamsForSave(result.state));
+        if (result.messages.length) setInbox(prev => [...result.messages.filter(m => !prev.some(old => old.id === m.id)), ...prev]);
+        flushLocalSaveImmediate({ nationalTeams: stripNationalTeamsForSave(result.state) }, true);
+        completedMatchFixtureIdRef.current = currentFixtureId;
+        clearMatchSimulationTimers();
+        liveMatchRef.current = null;
+        setLiveMatch(null);
+        clearActiveLiveMatchFromDb().catch(() => {});
+        openNationalTeamView();
+      } catch (err) {
+        console.error('[NationalLiveMatch] Result not committed; keeping the match for retry', err);
+      } finally { isFinishingMatchRef.current = false; }
       return;
     }
 
@@ -5181,6 +5316,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   const instantSimulateCurrentRound = async (options?: { advanceDate?: boolean; forcePlayUserMatch?: boolean }) => {
+    if (liveMatchRef.current?.internationalContext || getDueUserInternationalMatch(nationalTeamsRef.current, currentRound, seasonFinished)) { openNationalTeamView(); return; }
     if (isSimulationRunningRef.current || seasonFinished) return;
 
     // Clear any active live match timer and reset live match state
@@ -6236,6 +6372,13 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   const simulateMultipleRounds = (roundsCount: number = 10): { success: boolean; simulatedCount: number; message: string } => {
+    const national = nationalTeamsRef.current;
+    if (liveMatchRef.current?.internationalContext || getDueUserInternationalMatch(national, currentRound, seasonFinished)) { openNationalTeamView(); return { success: false, simulatedCount: 0, message: "العب مباراة المنتخب المستحقة أولاً." }; }
+    if (national?.userNationalTeamId) {
+      const nextBreak = (Math.floor(currentRound / 6) + 1) * 6;
+      const nextTournament = (national.activeTournament?.matches || []).filter(m => !m.isPlayed && m.roundTrigger > currentRound && (m.homeTeamId === national.userNationalTeamId || m.awayTeamId === national.userNationalTeamId)).map(m => m.roundTrigger);
+      roundsCount = Math.min(roundsCount, Math.max(1, Math.min(nextBreak, ...nextTournament) - currentRound));
+    }
     if (isSimulationRunningRef.current) {
       return { success: false, simulatedCount: 0, message: 'المحاكاة جارية حالياً' };
     }
@@ -7561,7 +7704,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       return { success: false, message: 'أنت غير مرتبط بأي نادٍ حالياً!' };
     }
 
-    if (!liveMatch || !liveMatch.matchRevenue) {
+    if (!liveMatch || liveMatch.internationalContext || !liveMatch.matchRevenue) {
       return { success: false, message: 'لا توجد بيانات إيراد للمباراة الحالية!' };
     }
 
@@ -7679,8 +7822,8 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   // Rewarded Match Replay / Rematch Feature (إعادة المباراة مقابل مشاهدة إعلان)
   const rematchLiveMatch = async (): Promise<{ success: boolean; message: string }> => {
-    if (!liveMatch) {
-      return { success: false, message: 'لا توجد مباراة نشطة لإعادتها!' };
+    if (!liveMatch || liveMatch.internationalContext) {
+      return { success: false, message: 'إعادة المباراة متاحة لمباريات النادي فقط.' };
     }
 
     const currentFixtureId = liveMatch.fixture?.id;
@@ -8366,6 +8509,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   const openSeasonModal = () => {
+    if (hasPendingUserInternationalTournament(nationalTeamsRef.current) || getDueUserInternationalMatch(nationalTeamsRef.current, currentRound, seasonFinished)) { openNationalTeamView(); return; }
     // The continental competition (if the club qualified) always comes before the season-end screen.
     const ph = continentalPhaseRef.current;
     if (ph && ph.seasonNumber === season.seasonNumber && ph.status !== 'done') return;
@@ -8860,6 +9004,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const [isStartingSeasonUi, setIsStartingSeasonUi] = useState(false);
   const seasonStartPendingRef = useRef(false);
   const startNextSeason = (chosenOfferId?: string) => {
+    if (hasPendingUserInternationalTournament(nationalTeamsRef.current) || getDueUserInternationalMatch(nationalTeamsRef.current, currentRound, seasonFinished)) { openNationalTeamView(); return; }
     if (isStartingSeasonRef.current || seasonStartPendingRef.current) return;
     crashStage('season_stage', 'queued');
     seasonStartPendingRef.current = true;
@@ -8885,6 +9030,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   const startNextSeasonNow = async (chosenOfferId?: string): Promise<void> => {
+    if (hasPendingUserInternationalTournament(nationalTeamsRef.current) || getDueUserInternationalMatch(nationalTeamsRef.current, currentRound, seasonFinished)) { openNationalTeamView(); return; }
     if (isStartingSeasonRef.current) return; // double tap while the new season is being built
     isStartingSeasonRef.current = true;
     crashStage('season_stage', 'summary');
@@ -9785,6 +9931,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   }, [calendarDate?.rawDateStr]);
 
   const advanceToNextDay = async (skipToMatch: boolean = false, forceAdvance: boolean = false) => {
+    if (getDueUserInternationalMatch(nationalTeamsRef.current, currentRound, seasonFinished)) { openNationalTeamView(); return; }
     if (isSimulationRunningRef.current) return;
     isSimulationRunningRef.current = true;
     setIsSimulationRunning(true);
@@ -12749,7 +12896,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         activeLeague,
         allLeagues: GLOBAL_LEAGUES,
         seasonEndSummary,
-        showSeasonTransitionModal,
+        showSeasonTransitionModal: showSeasonTransitionModal && !pendingInternationalTournament,
         jobOffers,
         cupTournament,
         calendarDate,
@@ -12769,6 +12916,9 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         resignFromNationalTeam,
         refreshNationalTeamCallUp,
         setNationalTeamLineup,
+        setNationalTeamTactics,
+        startNationalTeamLiveMatch,
+        pendingInternationalMatch,
         dayAdvanceSummary,
         showDaySummaryModal,
         trainingIntensity,

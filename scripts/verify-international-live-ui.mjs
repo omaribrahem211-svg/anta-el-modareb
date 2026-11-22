@@ -1,0 +1,42 @@
+import puppeteer from 'puppeteer-core';
+import { build } from 'esbuild';
+import fs from 'node:fs';import http from 'node:http';import path from 'node:path';import assert from 'node:assert/strict';
+const out=process.env.NT_VISUAL_OUT || '/tmp/international-live-ui';fs.mkdirSync(out,{recursive:true});
+const css=fs.readdirSync('dist/assets').find(f=>f.endsWith('.css'));fs.copyFileSync('dist/assets/'+css,out+'/app.css');
+await build({entryPoints:['scripts/fixtures/international-live-ui.tsx'],outfile:out+'/ui.js',bundle:true,minify:true,format:'iife',define:{'import.meta.env':'{}'},jsx:'automatic',plugins:[{name:'ui-context',setup(b){b.onResolve({filter:/GameContext$/},()=>({path:'ctx',namespace:'ui-test'}));b.onLoad({filter:/.*/,namespace:'ui-test'},()=>({contents:'export const useGame=()=>window.__ntCtx;',loader:'js'}));}}]});
+fs.writeFileSync(out+'/index.html','<!doctype html><html dir="rtl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><link rel="stylesheet" href="app.css"><style>*{transition:none!important;animation:none!important}</style></head><body style="margin:0;background:#020617;color:white;font-family:Arial;padding:10px"><div id="root"></div><script src="ui.js"></script></body></html>');
+const server=http.createServer((req,res)=>{let file=(req.url||'/').split('?')[0];if(file==='/')file='/index.html';if(!['/index.html','/ui.js','/app.css'].includes(file)){res.writeHead(404).end();return;}res.setHeader('Content-Type',file.endsWith('.css')?'text/css':file.endsWith('.js')?'application/javascript':'text/html');res.end(fs.readFileSync(out+file));});
+await new Promise(r=>server.listen(0,'127.0.0.1',r));const browser=await puppeteer.launch({executablePath:'/usr/bin/google-chrome',headless:true,args:['--no-sandbox','--disable-dev-shm-usage']});
+const page=await browser.newPage();const errors=[];page.on('pageerror',e=>errors.push(e.message));await page.setViewport({width:390,height:1100,deviceScaleFactor:1});
+const click=async(text)=>{const did=await page.evaluate(text=>{const b=[...document.querySelectorAll('button')].find(b=>b.textContent.includes(text));if(b){b.click();return true;}return false;},text);assert.ok(did,'missing button '+text);await new Promise(r=>setTimeout(r,150));};
+try{
+ await page.goto('http://127.0.0.1:'+server.address().port+'/',{waitUntil:'networkidle0'});await page.waitForSelector('#play_national_match_btn');
+ assert.ok(await page.evaluate(()=>document.body.innerText.includes('ليست أسماء لاعبين حقيقيين')));
+ await page.select('select[aria-label="الخطة"]','3-5-2');await page.select('select[aria-label="أسلوب المباراة"]','counter_attack');
+ await page.screenshot({path:out+'/national-ready.png',fullPage:true});
+ await click('التشكيلة');await page.screenshot({path:out+'/national-lineup.png',fullPage:true});
+ await page.click('#play_national_match_btn');await page.waitForSelector('#toggle_live_auto_subs_btn');
+ assert.equal(await page.$eval('select[aria-label="أسلوب المباراة"]',e=>e.value),'counter_attack');
+ assert.equal(await page.evaluate(()=>window.__ntCtx.liveMatch.homeTactics.formation),'3-5-2');
+ await page.select('select[aria-label="أسلوب المباراة"]','wing_play');assert.equal(await page.evaluate(()=>window.__ntCtx.liveMatch.homeTactics.tacticalStyle),'wing_play');
+ await page.screenshot({path:out+'/international-live.png',fullPage:true});
+ await click('تبديل يدوي');
+ const pair=await page.evaluate(()=>{const m=window.__ntCtx.liveMatch;return [m.homeTeam.players.find(p=>p.id===m.homeLineup[2]).name,m.homeTeam.players.find(p=>!m.homeLineup.includes(p.id)).name];});
+ for(const name of pair){const clicked=await page.evaluate(name=>{const p=[...document.querySelectorAll('p')].find(p=>p.textContent===name);const row=p?.closest('div.cursor-pointer');row?.click();return Boolean(row);},name);assert.ok(clicked,'missing player row '+name);await new Promise(r=>setTimeout(r,80));}
+ const btns=await page.$$eval('button',bs=>bs.map(b=>b.textContent.trim()).filter(x=>x.includes('تبديل')));
+ await click('تأكيد التبديل');
+ assert.equal(await page.evaluate(()=>window.__ntCtx.liveMatch.substitutionsCount),1);
+ await page.evaluate(()=>window.setMode('extra'));await new Promise(r=>setTimeout(r,150));
+ assert.ok(await page.evaluate(()=>document.body.innerText.includes('الإضافي الأول (91 - 105)')));
+ await page.screenshot({path:out+'/international-extra-time.png',fullPage:true});
+ await click('ابدأ الشوط الإضافي الأول');
+ assert.equal(await page.evaluate(()=>window.calls.at(-1).minute),90);
+ await page.evaluate(()=>window.setMode('finished'));await new Promise(r=>setTimeout(r,150));
+ assert.equal(await page.$('#btn_rematch_match_with_ad'),null);
+ assert.ok(await page.evaluate(()=>document.body.innerText.includes("نهاية المباراة 120'")));
+ assert.ok(!await page.evaluate(()=>document.body.innerText.includes('رصيد فريقك في جدول الدوري')));
+ await page.screenshot({path:out+'/international-result.png',fullPage:true});
+ assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false,'horizontal overflow');
+ assert.deepEqual(errors,[]);console.log('PASS actual NT/MatchesTab mobile UI: pregame tactics/style, live style, manual substitution, extra-time resume, 120-minute loss result without club rematch/revenue; no JS errors or overflow');
+ fs.writeFileSync(out+'/results.json',JSON.stringify({errors,checks:'passed',calls:await page.evaluate(()=>window.calls)},null,2));
+}catch(e){console.error('PAGE ERRORS',errors);console.error((await page.$eval('body',e=>e.innerText)).slice(-6000));await page.screenshot({path:out+'/failure.png',fullPage:true});throw e;}finally{await browser.close();server.close();}

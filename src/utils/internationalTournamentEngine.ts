@@ -424,17 +424,36 @@ export function playInternationalMatch(
     played.awayPenalties = res.awayPenalties;
     played.winnerTeamId = res.winnerTeamId;
   }
-  played.isPlayed = true;
-  if (played.stage === 'group') {
-    played.winnerTeamId =
-      (played.homeScore ?? 0) > (played.awayScore ?? 0)
-        ? played.homeTeamId
-        : (played.awayScore ?? 0) > (played.homeScore ?? 0)
-          ? played.awayTeamId
-          : undefined;
+  return recordInternationalMatchScore(match, nationalTeams, played);
+}
+
+/** Records a confirmed live/AI result exactly once, without touching any club state. */
+export function recordInternationalMatchScore(
+  match: InternationalMatch,
+  nationalTeams: NationalTeam[],
+  score: Pick<InternationalMatch, 'homeScore' | 'awayScore' | 'homePenalties' | 'awayPenalties'>
+): InternationalMatch {
+  if (match.isPlayed) return match;
+  const home = getNationalTeamById(nationalTeams, match.homeTeamId);
+  const away = getNationalTeamById(nationalTeams, match.awayTeamId);
+  if (!home || !away) throw new Error('National teams missing for result');
+  if (![score.homeScore, score.awayScore].every(n => typeof n === 'number' && Number.isInteger(n) && n >= 0)) {
+    throw new Error('Invalid international score');
   }
-  applyRankingUpdate(home, away, played.homeScore ?? 0, played.awayScore ?? 0, played.stage);
-  return played;
+  const knockout = !['group', 'friendly'].includes(match.stage);
+  const tied = score.homeScore === score.awayScore;
+  if (knockout && tied && (![score.homePenalties, score.awayPenalties].every(n => typeof n === 'number' && Number.isInteger(n) && n >= 0) || score.homePenalties === score.awayPenalties)) {
+    throw new Error('A tied international knockout needs a completed penalty shootout');
+  }
+  const result: InternationalMatch = {
+    ...match, homeScore: score.homeScore, awayScore: score.awayScore, isPlayed: true,
+    homePenalties: knockout && tied ? score.homePenalties : undefined,
+    awayPenalties: knockout && tied ? score.awayPenalties : undefined,
+    winnerTeamId: tied ? (knockout ? ((score.homePenalties ?? 0) > (score.awayPenalties ?? 0) ? match.homeTeamId : match.awayTeamId) : undefined)
+      : (score.homeScore! > score.awayScore! ? match.homeTeamId : match.awayTeamId),
+  };
+  applyRankingUpdate(home, away, result.homeScore!, result.awayScore!, match.stage);
+  return result;
 }
 
 /**
@@ -447,7 +466,8 @@ export function processInternationalRound(
   tournament: InternationalTournament,
   currentRound: number,
   nationalTeams: NationalTeam[],
-  schedule: InternationalSchedule
+  schedule: InternationalSchedule,
+  deferTeamId?: string | null
 ): { tournament: InternationalTournament; playedMatches: InternationalMatch[] } {
   let t: InternationalTournament = {
     ...tournament,
@@ -458,7 +478,8 @@ export function processInternationalRound(
 
   // 1. Play due matches of the current stage
   t.matches = t.matches.map(m => {
-    if (m.isPlayed || m.roundTrigger > currentRound) return m;
+    if (m.isPlayed || m.roundTrigger > currentRound ||
+        (deferTeamId && (m.homeTeamId === deferTeamId || m.awayTeamId === deferTeamId))) return m;
     const played = playInternationalMatch(m, nationalTeams);
     playedMatches.push(played);
     return played;

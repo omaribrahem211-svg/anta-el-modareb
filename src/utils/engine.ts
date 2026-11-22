@@ -51,6 +51,10 @@ const GENERAL_COMMENTARIES = [
 ];
 
 export interface LiveSimulationState {
+  /** Distinguishes international results from club finances and league progression. */
+  internationalContext?: import('./internationalLiveMatch').InternationalLiveContext;
+  isExtraTime?: boolean;
+  substitutedOutPlayerIds?: string[];
   fixture: Fixture;
   homeTeam: Club;
   awayTeam: Club;
@@ -1073,13 +1077,14 @@ export function simulatePenaltyShootout(
   homeTeam?: Club,
   awayTeam?: Club,
   homeTactics?: TeamTactics,
-  awayTactics?: TeamTactics
+  awayTactics?: TeamTactics,
+  activeLineups?: { home: string[]; away: string[] }
 ): PenaltyShootoutResult {
   const safeHome = homeTeam || ({ id: 'home_dummy', name: 'الفريق المضيف', shortName: 'مض', players: [], reputation: 50 } as any);
   const safeAway = awayTeam || ({ id: 'away_dummy', name: 'الفريق الضيف', shortName: 'ضف', players: [], reputation: 50 } as any);
 
-  const homePlayers: Player[] = Array.isArray(safeHome.players) ? safeHome.players.filter((p: any) => p && p.id) : [];
-  const awayPlayers: Player[] = Array.isArray(safeAway.players) ? safeAway.players.filter((p: any) => p && p.id) : [];
+  const homePlayers: Player[] = Array.isArray(safeHome.players) ? safeHome.players.filter((p: any) => p && p.id && (!activeLineups || activeLineups.home.includes(p.id))) : [];
+  const awayPlayers: Player[] = Array.isArray(safeAway.players) ? safeAway.players.filter((p: any) => p && p.id && (!activeLineups || activeLineups.away.includes(p.id))) : [];
 
   const homeGk = homePlayers.find(p => p && p.position === 'GK') || homePlayers[0] || { name: 'حارس المرمى', rating: 65, id: 'hgk' };
   const awayGk = awayPlayers.find(p => p && p.position === 'GK') || awayPlayers[0] || { name: 'حارس المرمى', rating: 65, id: 'agk' };
@@ -1093,7 +1098,7 @@ export function simulatePenaltyShootout(
   homePlayers.forEach(p => {
     if (p && p.id && !homeTakers.some(t => t && t.id === p.id)) homeTakers.push(p);
   });
-  while (homeTakers.length < 10) {
+  while (homeTakers.length < (activeLineups ? 5 : 10)) {
     homeTakers.push({ name: `لاعب ${homeTakers.length + 1}`, rating: 65, id: `hp_${homeTakers.length}` });
   }
 
@@ -1105,7 +1110,7 @@ export function simulatePenaltyShootout(
   awayPlayers.forEach(p => {
     if (p && p.id && !awayTakers.some(t => t && t.id === p.id)) awayTakers.push(p);
   });
-  while (awayTakers.length < 10) {
+  while (awayTakers.length < (activeLineups ? 5 : 10)) {
     awayTakers.push({ name: `لاعب ${awayTakers.length + 1}`, rating: 65, id: `ap_${awayTakers.length}` });
   }
 
@@ -1117,7 +1122,7 @@ export function simulatePenaltyShootout(
     minute: 120,
     type: 'commentary',
     teamId: safeHome.id,
-    description: `⚖️ صافرة نهاية الوقت الأصلي بالتعادل! الاحتكام رسمياً إلى ركلات الجزاء الترجيحية لحسم بطاقة التأهل.`
+    description: activeLineups ? "تعادل بعد الوقت الإضافي. ركلات الترجيح تحسم بطاقة التأهل." : `⚖️ صافرة نهاية الوقت الأصلي بالتعادل! الاحتكام رسمياً إلى ركلات الجزاء الترجيحية لحسم بطاقة التأهل.`
   });
 
   let homeMgrObj = safeHome.manager;
@@ -1288,22 +1293,32 @@ export function simulateMatchStep(
   }
 
   const nextMinute = prevState.currentMinute + 1;
+  const international = prevState.internationalContext;
+  const internationalKnockout = !!international && !['group', 'friendly'].includes(international.stage);
+  const finalMinute = international && prevState.isExtraTime ? 120 : 90;
 
-  // Check Halftime trigger at minute 45
-  if (nextMinute === 45 && !prevState.isHalfTime && prevState.currentMinute < 45) {
+  // Check Halftime trigger at minute 45, or between the extra-time halves.
+  if ((nextMinute === 45 && prevState.currentMinute < 45) ||
+      (international && prevState.isExtraTime && nextMinute === 105 && prevState.currentMinute < 105)) {
     return {
       ...prevState,
-      currentMinute: 45,
+      currentMinute: nextMinute,
       isHalfTime: true,
       isPlaying: false,
     };
   }
 
-  // Check Fulltime trigger at minute 90
-  if (nextMinute > 90) {
+  // International knockouts get two playable extra-time halves before penalties.
+  if (nextMinute > finalMinute) {
+    if (internationalKnockout && !prevState.isExtraTime && prevState.homeScore === prevState.awayScore) {
+      return {
+        ...prevState, currentMinute: 90, isExtraTime: true, isHalfTime: true, isPlaying: false,
+        events: [...prevState.events, { minute: 90, type: 'commentary', description: '⏱️ تعادل في الوقت الأصلي. استعد لشوطين إضافيين، ثم ركلات الترجيح إذا استمر التعادل.' } as MatchEvent],
+      };
+    }
     console.log('[MatchEndingFlow] MATCH_90_REACHED');
 
-    const isCupMatch = 
+    const isCupMatch = international ? internationalKnockout :
       prevState.fixture?.competitionType === 'cup' || 
       prevState.fixture?.competitionType === 'DOMESTIC_CUP' ||
       (prevState.fixture?.competitionType === 'CONTINENTAL_CUP' && prevState.fixture?.stage && prevState.fixture?.stage !== 'group') ||
@@ -1328,7 +1343,8 @@ export function simulateMatchStep(
           prevState.homeTeam,
           prevState.awayTeam,
           prevState.homeTactics,
-          prevState.awayTactics
+          prevState.awayTactics,
+          international ? { home: prevState.homeLineup, away: prevState.awayLineup } : undefined
         );
         finalHomePenalties = shootout.homePenalties;
         finalAwayPenalties = shootout.awayPenalties;
@@ -1407,7 +1423,7 @@ export function simulateMatchStep(
 
     return {
       ...prevState,
-      currentMinute: 90,
+      currentMinute: finalMinute,
       isFinished: true,
       isPlaying: false,
       isHalfTime: false,
@@ -1419,6 +1435,7 @@ export function simulateMatchStep(
   }
 
   const isUserTeamHome = Boolean(prevState.homeTeam?.isUserClub) || (Boolean(prevState.userClubId) && prevState.homeTeam?.id === prevState.userClubId);
+  const substitutedOutPlayerIds = [...(prevState.substitutedOutPlayerIds || [])];
   const isUserTeamAway = Boolean(prevState.awayTeam?.isUserClub) || (Boolean(prevState.userClubId) && prevState.awayTeam?.id === prevState.userClubId);
 
   // Update active tactics if user made live changes
@@ -1477,7 +1494,8 @@ export function simulateMatchStep(
 
     // AI Logical Substitution (up to 3-4 subs per game)
     if (aiSubsCount < 4 && Math.random() < 0.12) {
-      const benchPlayers = (aiTeam?.players || []).filter(p => p && p.id && !aiLineup.includes(p.id));
+      const benchPlayers = (aiTeam?.players || []).filter(p => p && p.id && !aiLineup.includes(p.id) &&
+        (!international || (!substitutedOutPlayerIds.includes(p.id) && !(isAiHome ? prevState.homeReddedPlayerIds : prevState.awayReddedPlayerIds).includes(p.id))));
       if (benchPlayers.length > 0) {
         const aiFatigueMap = (isAiHome ? prevState.homeFatigueMap : prevState.awayFatigueMap) || {};
         // Pick an active player with lowest fitness or poor position fit
@@ -1492,6 +1510,7 @@ export function simulateMatchStep(
         if (subOut && subIn) {
           aiLineup = aiLineup.map(id => id === subOut.id ? subIn.id : id);
           aiSubsCount++;
+          if (international) substitutedOutPlayerIds.push(subOut.id);
 
           newEvents.push({
             minute: nextMinute,
@@ -1523,7 +1542,8 @@ export function simulateMatchStep(
     const userLineup = isUserTeamHome ? activeHomeLineup : activeAwayLineup;
     const userFatigue = (isUserTeamHome ? prevState.homeFatigueMap : prevState.awayFatigueMap) || {};
     const userPitchPlayers = (userTeam?.players || []).filter(p => p && p.id && userLineup.includes(p.id));
-    const userBenchPlayers = (userTeam?.players || []).filter(p => p && p.id && !userLineup.includes(p.id));
+    const userBenchPlayers = (userTeam?.players || []).filter(p => p && p.id && !userLineup.includes(p.id) &&
+      (!international || (!substitutedOutPlayerIds.includes(p.id) && !(isUserTeamHome ? prevState.homeReddedPlayerIds : prevState.awayReddedPlayerIds).includes(p.id))));
 
     // Check if there is an injured player needing an urgent sub immediately
     const hasInjuredPitchPlayer = userPitchPlayers.some(p => Boolean(p && (p.injury || p.isInjured)));
@@ -1569,6 +1589,7 @@ export function simulateMatchStep(
           activeAwayLineup = activeAwayLineup.map(id => id === smartSub.outPlayer.id ? smartSub.inPlayer.id : id);
         }
         userSubsCount++;
+        if (international) substitutedOutPlayerIds.push(smartSub.outPlayer.id);
 
         newEvents.push({
           minute: nextMinute,
@@ -2421,6 +2442,7 @@ export function simulateMatchStep(
     awayFatigueMap: updatedAwayFatigue,
     aiSubstitutionsCount: aiSubsCount,
     substitutionsCount: userSubsCount,
+    substitutedOutPlayerIds,
     autoSubsEnabled: prevState.autoSubsEnabled ?? true,
     userClubId: prevState.userClubId,
     homeDayForm: prevState.homeDayForm,

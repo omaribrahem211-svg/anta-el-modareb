@@ -30,6 +30,7 @@ import {
   playInternationalMatch,
   processInternationalRound,
   recomputeNationalTeamWorldRanks,
+  recordInternationalMatchScore,
   shouldHoldAfcon,
   shouldHoldWorldCup,
 } from '../utils/internationalTournamentEngine';
@@ -243,7 +244,8 @@ export function advanceNationalTeamsToRound(
   totalRounds: number,
   seasonNumber: number,
   clubTeams: Club[],
-  jobCtx?: NtJobContext
+  jobCtx?: NtJobContext,
+  interactiveUserMatches = false
 ): NtAdvanceResult {
   if (!prev || !Array.isArray(prev.teams) || prev.teams.length === 0) return { state: prev, messages: [] };
   const lastDone = prev.lastProcessedRound ?? 0;
@@ -268,7 +270,7 @@ export function advanceNationalTeamsToRound(
       const t = state.activeTournament;
       const schedule = tournamentSchedule(t, totalRounds);
       const beforeIds = new Set(t.matches.filter(m => m.isPlayed).map(m => m.id));
-      const res = processInternationalRound(t, round, state.teams, schedule);
+      const res = processInternationalRound(t, round, state.teams, schedule, interactiveUserMatches ? state.userNationalTeamId : undefined);
       state = { ...state, activeTournament: res.tournament };
       const justPlayed = res.tournament.matches.filter(m => m.isPlayed && !beforeIds.has(m.id));
       for (const m of justPlayed) {
@@ -299,10 +301,11 @@ export function advanceNationalTeamsToRound(
       }
       const friendlies = buildFriendlyRound(state.teams, busy, round, seasonNumber);
       if (friendlies.length > 0) {
-        const played = friendlies.map(f => playInternationalMatch(f, state.teams));
         const userNtId = state.userNationalTeamId;
+        const played = friendlies.map(f => interactiveUserMatches && userNtId &&
+          (f.homeTeamId === userNtId || f.awayTeamId === userNtId) ? f : playInternationalMatch(f, state.teams));
         for (const f of played) {
-          if (userNtId && (f.homeTeamId === userNtId || f.awayTeamId === userNtId)) {
+          if (f.isPlayed && userNtId && (f.homeTeamId === userNtId || f.awayTeamId === userNtId)) {
             messages.push(...describePlayedInternational(f, state, round));
           }
         }
@@ -367,9 +370,11 @@ export function completePostSeasonTournament(
   totalRounds: number,
   seasonNumber: number,
   clubTeams: Club[],
-  jobCtx?: NtJobContext
+  jobCtx?: NtJobContext,
+  interactiveUserMatches = false
 ): NtAdvanceResult {
-  if (!prev || prev.postSeasonCompletedForSeason === seasonNumber) return { state: prev, messages: [] };
+  if (!prev || (prev.postSeasonCompletedForSeason === seasonNumber &&
+      (!prev.activeTournament || prev.activeTournament.isCompleted) && (!prev.queuedTournament || prev.queuedTournament.isCompleted))) return { state: prev, messages: [] };
   let state: NationalTeamsState = { ...prev, teams: prev.teams.map(t => ({ ...t, stats: { ...t.stats } })) };
   const messages: InboxMessage[] = [];
 
@@ -386,9 +391,10 @@ export function completePostSeasonTournament(
     let current = t;
     let guard = 0;
     while (!current.isCompleted && ++guard < 12) {
-      const res = processInternationalRound(current, farFutureRound, state.teams, schedule);
+      const res = processInternationalRound(current, farFutureRound, state.teams, schedule, interactiveUserMatches ? state.userNationalTeamId : undefined);
+      const stageChanged = res.tournament.currentStage !== current.currentStage;
       current = res.tournament;
-      if (res.playedMatches.length === 0) break;
+      if (res.playedMatches.length === 0 && !stageChanged) break;
     }
     if (current.isCompleted) {
       messages.push(championMessage(current, state.teams, totalRounds));
@@ -402,7 +408,55 @@ export function completePostSeasonTournament(
   }
 
   recomputeNationalTeamWorldRanks(state.teams);
-  state.postSeasonCompletedForSeason = seasonNumber;
+  if ((!state.activeTournament || state.activeTournament.isCompleted) && !state.queuedTournament) state.postSeasonCompletedForSeason = seasonNumber;
+  return { state, messages };
+}
+
+/** Apply the human-controlled result, then advance only AI matches and completed stages. */
+export function recordUserInternationalResult(
+  prev: NationalTeamsState,
+  matchId: string,
+  score: Pick<InternationalMatch, 'homeScore' | 'awayScore' | 'homePenalties' | 'awayPenalties'>,
+  currentRound: number,
+  totalRounds: number,
+  seasonNumber: number,
+  postSeason = false,
+  jobCtx?: NtJobContext
+): NtAdvanceResult {
+  const candidates = [...(prev.activeTournament?.matches || []), ...(prev.friendlyMatches || [])];
+  const match = candidates.find(m => m.id === matchId);
+  if (match?.isPlayed) return { state: prev, messages: [] };
+  if (!match || !prev.userNationalTeamId || prev.initializedForSeason !== seasonNumber ||
+      (match.homeTeamId !== prev.userNationalTeamId && match.awayTeamId !== prev.userNationalTeamId)) {
+    throw new Error('This international match is not pending for the current manager/season');
+  }
+  let state: NationalTeamsState = { ...prev, teams: prev.teams.map(t => ({ ...t, stats: { ...t.stats }, trophies: [...t.trophies] })) };
+  const played = recordInternationalMatchScore(match, state.teams, score);
+  const messages = describePlayedInternational(played, state, currentRound);
+  if (match.competitionId === FRIENDLY_COMPETITION_ID) {
+    state.friendlyMatches = state.friendlyMatches.map(m => m.id === matchId ? played : m);
+  } else if (state.activeTournament) {
+    let tournament = { ...state.activeTournament, matches: state.activeTournament.matches.map(m => m.id === matchId ? played : m) };
+    const wasCompleted = tournament.isCompleted;
+    const schedule = tournamentSchedule(tournament, totalRounds);
+    for (let guard = 0; guard < 12 && !tournament.isCompleted; guard++) {
+      const result = processInternationalRound(tournament, postSeason ? totalRounds + 1000 : currentRound, state.teams, schedule, state.userNationalTeamId);
+      const stageChanged = result.tournament.currentStage !== tournament.currentStage;
+      tournament = result.tournament;
+      if (!result.playedMatches.length && !stageChanged) break;
+    }
+    state.activeTournament = tournament;
+    if (tournament.isCompleted && !wasCompleted) {
+      messages.push(championMessage(tournament, state.teams, currentRound));
+      if (postSeason && !state.queuedTournament) state.postSeasonCompletedForSeason = seasonNumber;
+      if (jobCtx) {
+        const contract = applyTournamentContractOutcome(state, tournament, jobCtx, seasonNumber);
+        state = contract.state;
+        messages.push(...contract.messages);
+      }
+    }
+  }
+  recomputeNationalTeamWorldRanks(state.teams);
   return { state, messages };
 }
 

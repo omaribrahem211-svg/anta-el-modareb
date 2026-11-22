@@ -75,7 +75,9 @@ function GameApp() {
     continentalPhase,
     season,
     canClaimDailyReward,
-    dailyRewardState
+    dailyRewardState,
+    pendingInternationalMatch,
+    startNationalTeamLiveMatch,
   } = useGame() as any;
   // While the season-end / club-choice screens are up, unmount the heavy app screens underneath (they re-render on every
   // state change and keep large DOM trees in memory: the main cause of hangs and white flicker on 4GB phones).
@@ -345,6 +347,11 @@ function GameApp() {
 
       {/* Main Content Stage */}
       {!seasonFocus && <main className="flex-1 max-w-5xl w-full mx-auto p-3 sm:p-4 pb-36">
+        {pendingInternationalMatch && !liveMatch && <div className="mb-4 rounded-2xl border border-amber-500/50 bg-amber-950/40 p-3 flex flex-wrap items-center gap-3" dir="rtl">
+          <div className="flex-1 min-w-0 text-xs text-amber-200"><b>مباراة منتخبك جاهزة</b><p className="mt-1 text-slate-300">جهز التشكيلة والخطة من شاشة المنتخبات أو ادخل الملعب الآن.</p></div>
+          <button className="rounded-xl bg-slate-800 px-3 py-2 text-xs font-bold" onClick={() => { try { sessionStorage.setItem('anta_open_national_teams', 'true'); } catch (_) {} handleTabChange('league'); window.dispatchEvent(new CustomEvent('open-national-teams')); }}>التشكيلة والخطة</button>
+          <button className="rounded-xl bg-emerald-600 px-3 py-2 text-xs font-black text-white" onClick={() => startNationalTeamLiveMatch(pendingInternationalMatch.id)}>العب الآن</button>
+        </div>}
         {/* Facebook Community Banner at the top of dashboard */}
         {activeTab === 'dashboard' && <FacebookBanner />}
 

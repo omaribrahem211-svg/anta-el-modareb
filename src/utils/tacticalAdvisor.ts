@@ -344,11 +344,11 @@ export function analyzeLiveMatchSituation(
         severity: 'info',
         title: `⏱️ التعادل قائم (${userScore}-${oppScore}) في الدقيقة ${currentMinute}' - خطوة نحو خطف الفوز!`,
         badge: 'فرصة حسم اللقاء 🎯',
-        situation: `المباراة متوازنة وتدخل أمتارها الأخيرة. نقطة واحدة غير كافية، والفرصة مواتية لخطف النقاط الثلاث بهجوم مباغت.`,
+        situation: liveMatch.internationalContext ? 'التعادل قائم. يمكنك زيادة الهجوم بحذر بحثاً عن هدف، مع الحفاظ على التوازن الدفاعي.' : `المباراة متوازنة وتدخل أمتارها الأخيرة. نقطة واحدة غير كافية، والفرصة مواتية لخطف النقاط الثلاث بهجوم مباغت.`,
         problemAnalysis: `دفاع ${oppTeam.name} بدأ يظهر عليه الإرهاق. بتكثيف الهجوم والضغط في آخر 20 دقيقة، يمكننا إحراز هدف الفوز القاتل.`,
         statsHighlight: [
           { label: 'النتيجة', value: `${userScore} : ${oppScore}`, isNegative: false },
-          { label: 'الدقائق المتبقية', value: `${90 - currentMinute}'`, isNegative: false },
+          { label: 'الدقائق المتبقية', value: `${Math.max(0, (liveMatch.isExtraTime ? 120 : 90) - currentMinute)}'`, isNegative: false },
         ],
         suggestedFormation: currentTactics.formation === '4-3-3' ? '4-3-3' : '4-3-3',
         suggestedMentality: 'attacking',
@@ -366,7 +366,7 @@ export function analyzeLiveMatchSituation(
             description: 'إجبار دفاع المنافس المرهق على التشتيت العشوائي.',
           },
         ],
-        rationale: 'المنافس يلعب بحذر لخطف نقطة التعادل، وزيادة الضغط ستجبرهم على ارتكاب هفوة دفاعية حاسمة.',
+        rationale: liveMatch.internationalContext ? 'زيادة الضغط قد تصنع فرصة هدف، لكنها تترك مساحات للمرتدات.' : 'المنافس يلعب بحذر لخطف نقطة التعادل، وزيادة الضغط ستجبرهم على ارتكاب هفوة دفاعية حاسمة.',
         actionButtonText: `تكثيف الهجوم لخطف هدف الفوز ⚽`,
       };
     }

@@ -334,6 +334,11 @@ export async function saveActiveLiveMatchToDb(liveMatch: any | null): Promise<vo
       isFinished: Boolean(liveMatch.isFinished),
       speed: liveMatch.speed || 1,
       userClubId: liveMatch.userClubId,
+      // National match squads may contain transient statistical slots and cannot be rebuilt from club ids.
+      internationalContext: liveMatch.internationalContext,
+      isExtraTime: Boolean(liveMatch.isExtraTime),
+      substitutedOutPlayerIds: liveMatch.substitutedOutPlayerIds || [],
+      ...(liveMatch.internationalContext ? { homeTeam: liveMatch.homeTeam, awayTeam: liveMatch.awayTeam } : {}),
       matchRevenue: liveMatch.matchRevenue,
     };
 
@@ -393,13 +398,8 @@ export async function loadActiveLiveMatchFromDb(): Promise<any | null> {
  * Immediately clears the active live match from both Memory Fallback and IndexedDB.
  */
 export async function clearActiveLiveMatchFromDb(): Promise<void> {
-  memoryFallbackStore.delete(IDB_ACTIVE_LIVE_MATCH_KEY);
-  safeLocalStorageRemove(`${LEGACY_STORAGE_PREFIX}_active_live_match`);
-  try {
-    await del(IDB_ACTIVE_LIVE_MATCH_KEY);
-  } catch {
-    // ignore
-  }
+  // Cancel a queued idle save too, otherwise it can resurrect a committed match.
+  await saveActiveLiveMatchToDb(null);
 }
 
 /**

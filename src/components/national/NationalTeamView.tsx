@@ -3,7 +3,8 @@
 // NO transfers anywhere in this view: national teams are call-up lists only.
 // =========================================================================
 
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
+import { MatchTacticsControls } from '../MatchTacticsControls';
 import { Trophy, Users, Globe, RefreshCw, Flag, Medal, CalendarDays } from 'lucide-react';
 import { useGame } from '../../context/GameContext';
 import {
@@ -61,10 +62,17 @@ export const NationalTeamView: React.FC = () => {
     resignFromNationalTeam,
     refreshNationalTeamCallUp,
     setNationalTeamLineup,
+    setNationalTeamTactics,
+    pendingInternationalMatch,
+    startNationalTeamLiveMatch,
+    liveMatch,
   } = useGame();
 
   const [subTab, setSubTab] = useState<NtSubTab>('tournament');
   const [draftIds, setDraftIds] = useState<string[] | null>(null);
+  const [startError, setStartError] = useState('');
+  const activeNationalMatch = Boolean(liveMatch?.internationalContext);
+  useEffect(() => setDraftIds(null), [userNationalTeam?.id]);
 
   const state = nationalTeamsState;
   const tournament = state?.activeTournament || state?.queuedTournament || null;
@@ -120,12 +128,14 @@ export const NationalTeamView: React.FC = () => {
           )}
           <div className="mt-3 flex gap-2">
             <button
+              disabled={activeNationalMatch}
               onClick={refreshNationalTeamCallUp}
               className="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold py-2 rounded-xl transition-colors flex items-center justify-center gap-1.5"
             >
               <RefreshCw className="w-3.5 h-3.5" /> تحديث قائمة الاستدعاء
             </button>
             <button
+              disabled={activeNationalMatch}
               onClick={resignFromNationalTeam}
               className="px-3 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold py-2 rounded-xl transition-colors"
             >
@@ -166,6 +176,20 @@ export const NationalTeamView: React.FC = () => {
           <div className="text-slate-500 text-[10px] mt-1">تبدأ بعروض من منتخبات ناشئة، وكلما ربحت البطولات وصلتك عروض من منتخبات أقوى</div>
         </div>
       )}
+
+      {userNationalTeam && <div className="bg-slate-900 border border-amber-500/40 rounded-2xl p-4 space-y-3">
+        <div className="text-sm font-black text-amber-300">إدارة المباراة الدولية</div>
+        <p className="text-xs text-slate-300 leading-6">نفس ملعب ومحرك مباريات الدوري: اختر التشكيلة والخطة وأسلوب اللعب، وتحكم في التبديلات أثناء المباراة. نتائج المنتخب منفصلة عن جدول وأموال النادي.</p>
+        {userNationalTeam.isStatistical && <p className="text-xs text-sky-300 leading-6">هذا المنتخب إحصائي. المراكز المعروضة للمباراة فقط، وليست أسماء لاعبين حقيقيين ولا تدخل الأندية أو سوق الانتقالات.</p>}
+        {pendingInternationalMatch ? <>
+          <MatchRow m={pendingInternationalMatch} teams={state.teams} highlightId={userNtId} />
+          <button id="play_national_match_btn" onClick={() => { setStartError(''); if (!startNationalTeamLiveMatch(pendingInternationalMatch.id)) setStartError('أكمل المباراة النشطة أولاً، ثم حاول مجدداً.'); }} className="w-full rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-black py-3 text-sm">
+            {activeNationalMatch ? 'العودة إلى المباراة الدولية' : 'العب مباراة المنتخب الآن'}
+          </button>
+          {startError && <p className="text-xs text-rose-300">{startError}</p>}
+        </> : <p className="text-xs text-slate-400">لا توجد مباراة دولية مستحقة الآن. يمكنك تجهيز المنتخب للمباراة القادمة.</p>}
+        {!activeNationalMatch && userNationalTeam.tactics && <MatchTacticsControls tactics={userNationalTeam.tactics} onChange={setNationalTeamTactics} />}
+      </div>}
 
       {/* Sub tabs */}
       <div className="grid grid-cols-4 gap-1.5 bg-slate-950/80 p-1.5 rounded-2xl border border-slate-800">
@@ -302,8 +326,6 @@ export const NationalTeamView: React.FC = () => {
           <div className="bg-slate-800/60 px-3 py-1.5 text-xs font-black text-amber-400">إدارة تشكيلة المنتخب</div>
           {!userNationalTeam ? (
             <div className="p-5 text-center text-slate-400 text-xs">درّب منتخباً أولاً لإدارة التشكيلة.</div>
-          ) : userNationalTeam.isStatistical ? (
-            <div className="p-5 text-center text-slate-400 text-xs">هذا المنتخب يشارك بقوة إحصائية، لا توجد تشكيلة لإدارتها.</div>
           ) : (() => {
             const squad = [...userNationalTeam.players].sort((a, b) => b.overallRating - a.overallRating);
             const valid = (userNationalTeam.userStartingIds || []).filter(id => squad.some(p => p.id === id));
@@ -325,7 +347,7 @@ export const NationalTeamView: React.FC = () => {
                 <div className="px-3 py-2 flex items-center justify-between text-[11px] text-slate-300">
                   <span>المختارون: <b className={shown.length === 11 ? 'text-emerald-400' : 'text-rose-400'}>{shown.length}/11</b> {shown.length !== 11 && '(سيُستخدم التشكيل التلقائي حتى تكتمل 11)'}</span>
                   <button
-                    onClick={() => { setDraftIds(null); setNationalTeamLineup(null); }}
+                    disabled={activeNationalMatch} onClick={() => { setDraftIds(null); setNationalTeamLineup(null); }}
                     className="bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold px-2.5 py-1 rounded-lg"
                   >
                     تشكيل تلقائي
@@ -333,7 +355,7 @@ export const NationalTeamView: React.FC = () => {
                 </div>
                 <div className="divide-y divide-slate-800/60">
                   {squad.map(p => (
-                    <button key={p.id} onClick={() => toggle(p.id)} className={`w-full flex items-center gap-2 px-3 py-2 text-xs text-right ${shownSet.has(p.id) ? 'bg-emerald-900/30' : ''}`}>
+                    <button key={p.id} disabled={activeNationalMatch} onClick={() => toggle(p.id)} className={`w-full flex items-center gap-2 px-3 py-2 text-xs text-right ${shownSet.has(p.id) ? 'bg-emerald-900/30' : ''}`}>
                       <span className="w-5">{shownSet.has(p.id) ? '✅' : '⬜'}</span>
                       <span className="w-9 text-center font-black text-sky-400">{p.position}</span>
                       <span className="flex-1 text-white font-semibold">{p.name}{isGk(p) ? ' 🧤' : ''}</span>
@@ -341,7 +363,7 @@ export const NationalTeamView: React.FC = () => {
                     </button>
                   ))}
                 </div>
-                <div className="px-3 py-2 text-[10px] text-slate-500 text-center">اختر 11 لاعباً. مباريات المنتخب تُحسم بقوة هذه التشكيلة وتظهر نتائجها في صندوق الوارد وتبويب البطولة.</div>
+                <div className="px-3 py-2 text-[10px] text-slate-500 text-center">اختر 11 لاعباً. هذه التشكيلة تبدأ المباراة الدولية، ويمكنك التحكم في الخطة والتبديلات داخل الملعب.</div>
               </div>
             );
           })()}

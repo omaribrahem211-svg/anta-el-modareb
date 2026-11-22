@@ -1,6 +1,8 @@
 import { forceRepaintNow } from '../utils/perfMode';
 import React, { useEffect, useRef, useState, useMemo } from 'react';
 import { useGame } from '../context/GameContext';
+import { controlledLiveClub } from '../utils/internationalLiveMatch';
+import { MatchTacticsControls } from './MatchTacticsControls';
 import { TacticalPitch2D } from './TacticalPitch2D';
 import { StadiumSponsorBanner } from './StadiumSponsorBanner';
 import { FormationType, TacticalMentality, PressingIntensity, Club, MatchEvent, TeamTactics } from '../types/game';
@@ -72,7 +74,7 @@ import {
 
 export const MatchesTab: React.FC = () => {
   const {
-    userClub,
+    userClub: careerClub,
     manager,
     cupTournament,
     teams,
@@ -113,6 +115,7 @@ export const MatchesTab: React.FC = () => {
     recordUserMatchAction,
   } = useGame();
 
+  const userClub = controlledLiveClub(liveMatch, careerClub);
   const { t, language } = useLanguage();
   const commentaryScrollRef = useRef<HTMLDivElement>(null);
   const [showSubModal, setShowSubModal] = useState(false);
@@ -232,6 +235,7 @@ export const MatchesTab: React.FC = () => {
   // Compute live smart tactical advisory alert
   const activeTacticalAlert = useMemo(() => {
     if (!liveMatch || !userClub || liveMatch.isFinished) return null;
+    if (liveMatch.internationalContext && liveMatch.isHalfTime) return null;
     return analyzeLiveMatchSituation(liveMatch, userClub, snoozedTacticalAlerts);
   }, [liveMatch, userClub, snoozedTacticalAlerts]);
 
@@ -422,7 +426,7 @@ export const MatchesTab: React.FC = () => {
     const activeUserLineup = isUserHome ? (liveMatch.homeLineup || []) : (liveMatch.awayLineup || []);
     const userTeamObj = isUserHome ? liveMatch.homeTeam : liveMatch.awayTeam;
     const startingPlayers = (userTeamObj?.players || []).filter(p => p && p.id && activeUserLineup.includes(p.id));
-    const benchPlayers = (userTeamObj?.players || []).filter(p => p && p.id && !activeUserLineup.includes(p.id));
+    const benchPlayers = (userTeamObj?.players || []).filter(p => p && p.id && !activeUserLineup.includes(p.id) && (!liveMatch.internationalContext || (!(liveMatch.substitutedOutPlayerIds || []).includes(p.id) && !(isUserHome ? liveMatch.homeReddedPlayerIds : liveMatch.awayReddedPlayerIds).includes(p.id))));
 
     const handleExecuteSub = () => {
       if (!selectedOutPlayerId || !selectedInPlayerId) return;
@@ -444,6 +448,7 @@ export const MatchesTab: React.FC = () => {
     return (
       <div className="space-y-4 pb-20 animate-fade-in">
         
+        {liveMatch.internationalContext && userClub.players.some(p => (p as any).isNationalMatchPlaceholder) && <p className="text-[10px] text-sky-300 text-center px-2">مراكز المنتخب الإحصائي للمباراة فقط، وليست أسماء لاعبين حقيقيين.</p>}
         {/* Sticky-style Compact Scoreboard Header */}
         <div className="bg-slate-900 border border-slate-800 rounded-3xl p-4 shadow-2xl relative overflow-hidden">
           
@@ -482,9 +487,9 @@ export const MatchesTab: React.FC = () => {
                   : 'text-red-400'
               }`}>
                 {liveMatch.isFinished 
-                  ? 'نهاية المباراة 90\'' 
+                  ? `نهاية المباراة ${liveMatch.currentMinute}'`
                   : liveMatch.isHalfTime 
-                  ? 'استراحة الشوطين (45\')' 
+                  ? `استراحة (${liveMatch.currentMinute}')`
                   : `${liveMatch.currentMinute}' دقيقة`}
               </span>
             </div>
@@ -522,12 +527,12 @@ export const MatchesTab: React.FC = () => {
                 <span className={liveMatch.awayScore > liveMatch.homeScore ? 'text-emerald-400' : ''}>{liveMatch.awayScore}</span>
               </div>
               {hasPenalties && (
-                <div className="mt-1 px-2 py-0.5 rounded-full bg-amber-500/20 border border-amber-500/40 text-[11px] font-mono font-black text-amber-300 shadow-sm animate-pulse">
+                <div className="mt-1 px-2 py-0.5 rounded-full bg-amber-500/20 border border-amber-500/40 text-[11px] font-mono font-black text-amber-300 shadow-sm animate-pulse whitespace-nowrap">
                   ركلات ({liveMatch.homePenalties} - {liveMatch.awayPenalties})
                 </div>
               )}
               <span className="text-[10px] text-slate-400 mt-1 font-medium">
-                {liveMatch.isFinished ? (hasPenalties ? 'حسم بركلات الترجيح' : 'النتيجة النهائية') : liveMatch.isHalfTime ? 'الشوط الأول' : 'مباشر'}
+                {liveMatch.isFinished ? (hasPenalties ? 'حسم بركلات الترجيح' : 'النتيجة النهائية') : liveMatch.isHalfTime ? (liveMatch.isExtraTime ? 'وقت إضافي' : 'استراحة الشوطين') : 'مباشر'}
               </span>
             </div>
 
@@ -633,11 +638,11 @@ export const MatchesTab: React.FC = () => {
                 type="button"
                 onClick={skipLiveMatchToEnd}
                 className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all bg-rose-950/80 hover:bg-rose-900 border border-rose-800/80 text-rose-300 hover:text-rose-100 cursor-pointer shadow-sm active:scale-95"
-                title="تخطي ما تبقى من دقائق المباراة حتى النهاية (تحصل على 50% فقط من الإيراد)"
+                title={liveMatch.internationalContext ? "تخطي دقائق المباراة الدولية المتبقية" : "تخطي ما تبقى من دقائق المباراة حتى النهاية (تحصل على 50% فقط من الإيراد)"}
               >
                 <FastForward className="w-3.5 h-3.5 text-rose-400" />
-                <span className="hidden sm:inline">تخطي للنهاية (خصم 50% من الإيراد)</span>
-                <span className="sm:hidden">تخطي (50%)</span>
+                <span className="hidden sm:inline">{liveMatch.internationalContext ? "تخطي للنهاية" : "تخطي للنهاية (خصم 50% من الإيراد)"}</span>
+                <span className="sm:hidden">{liveMatch.internationalContext ? "تخطي للنهاية" : "تخطي (50%)"}</span>
               </button>
             </div>
           ) : liveMatch.isFinished ? (
@@ -652,7 +657,7 @@ export const MatchesTab: React.FC = () => {
               }`}>
                 <Trophy className="w-4 h-4" />
                 <span>
-                  {isUserWin
+                  {liveMatch.internationalContext ? (isUserWin ? 'فوز لمنتخبك! اضغط المتابعة لتسجيل النتيجة الدولية.' : isUserDraw ? 'انتهت المباراة الدولية بالتعادل. اضغط المتابعة لتسجيل النتيجة.' : 'انتهت المباراة الدولية. اضغط المتابعة لتسجيل النتيجة.') : isUserWin
                     ? '🎉 فوز رائع ومستحق! مكافأة الفوز ونقاط الخبرة أضيفت لرصيدك في جدول الدوري.'
                     : isUserDraw
                     ? '🤝 تعادل ونقطة إضافية تضاف إلى رصيد فريقك في جدول الدوري.'
@@ -661,7 +666,7 @@ export const MatchesTab: React.FC = () => {
               </div>
 
               {/* Rewarded Rematch Feature (إعادة المباراة عند الهزيمة أو التعادل مقابل مشاهدة إعلان) */}
-              {!isUserWin && (
+              {!isUserWin && !liveMatch.internationalContext && (
                 <div className="bg-gradient-to-r from-purple-950/80 via-slate-900 to-indigo-950/80 border-2 border-indigo-500/50 rounded-2xl p-4 shadow-xl space-y-3 text-right">
                   <div className="flex items-center justify-between border-b border-indigo-500/30 pb-2">
                     <div className="flex items-center gap-2">
@@ -705,7 +710,7 @@ export const MatchesTab: React.FC = () => {
               )}
 
               {/* Match Revenue & Double with Ad Card */}
-              {liveMatch.matchRevenue && (
+              {!liveMatch.internationalContext && liveMatch.matchRevenue && (
                 <div className="bg-slate-950/80 border border-amber-500/40 rounded-2xl p-4 shadow-xl space-y-3 text-right">
                   <div className="flex items-center justify-between border-b border-slate-800 pb-2.5">
                     <div className="flex items-center gap-2">
@@ -842,7 +847,7 @@ export const MatchesTab: React.FC = () => {
                 }}
                 className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-black text-sm py-3.5 px-4 rounded-2xl shadow-xl shadow-emerald-950/60 transition-all active:scale-95 cursor-pointer disabled:opacity-50 disabled:pointer-events-none"
               >
-                <span>{isSimulationRunning ? 'جارٍ حفظ النتيجة والانتقال...' : 'تأكيد النتيجة والانتقال للجولة التالية'}</span>
+                <span>{isSimulationRunning ? 'جارٍ حفظ النتيجة والانتقال...' : liveMatch.internationalContext ? 'تأكيد النتيجة والعودة للمنتخبات' : 'تأكيد النتيجة والانتقال للجولة التالية'}</span>
                 <ArrowRight className="w-4 h-4" />
               </button>
             </div>
@@ -914,7 +919,8 @@ export const MatchesTab: React.FC = () => {
             homePenalties={liveMatch.homePenalties}
             awayPenalties={liveMatch.awayPenalties}
             isCupMatch={isCupMatch}
-            finishButtonLabel="تأكيد النتيجة والانتقال للجولة التالية"
+            isInternational={Boolean(liveMatch.internationalContext)}
+            finishButtonLabel={liveMatch.internationalContext ? "تأكيد النتيجة والعودة للمنتخبات" : "تأكيد النتيجة والانتقال للجولة التالية"}
             onTacticChange={(tacticKey) => {
               if (tacticKey === 'attack') changeLiveMentality('attacking');
               else if (tacticKey === 'defend') changeLiveMentality('defensive');
@@ -1093,6 +1099,8 @@ export const MatchesTab: React.FC = () => {
           </div>
         )}
 
+        {!liveMatch.isFinished && userClub?.tactics && <div className="bg-slate-900 border border-slate-800 rounded-2xl p-3"><MatchTacticsControls tactics={userClub.tactics} onChange={updateTactics} styleOnly /></div>}
+
         {/* Live Substitution Drawer / Modal */}
         {showSubModal && (
           <div className="bg-slate-900 border-2 border-amber-500/60 rounded-3xl p-4 space-y-4 shadow-2xl animate-fade-in">
@@ -1251,7 +1259,7 @@ export const MatchesTab: React.FC = () => {
           <div className="bg-slate-900 border-2 border-amber-400 rounded-3xl p-5 space-y-4 shadow-2xl animate-fade-in relative overflow-hidden">
             <div className="absolute top-0 left-0 right-0 h-1.5 bg-amber-400" />
             <div className="text-center space-y-1">
-              <h3 className="font-black text-lg text-white">استراحة الشوطين - غرفة تبديل الملابس 🚪</h3>
+              <h3 className="font-black text-lg text-white">{liveMatch.isExtraTime ? (liveMatch.currentMinute === 90 ? 'استعد للوقت الإضافي' : 'استراحة الوقت الإضافي') : 'استراحة الشوطين - غرفة تبديل الملابس 🚪'}</h3>
               <p className="text-xs text-slate-400">
                 النتيجة الحالية: <span className="text-amber-300 font-bold font-mono">{liveMatch.homeScore} : {liveMatch.awayScore}</span>
               </p>
@@ -1365,7 +1373,7 @@ export const MatchesTab: React.FC = () => {
                 className="w-full py-3.5 px-4 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-black text-sm rounded-2xl shadow-xl shadow-emerald-950/60 transition-all active:scale-95 flex items-center justify-center gap-2 cursor-pointer"
               >
                 <Play className="w-4 h-4 fill-white" />
-                <span>استئناف الشوط الثاني (الدقائق 46 - 90)</span>
+                <span>{liveMatch.isExtraTime ? (liveMatch.currentMinute === 90 ? 'ابدأ الشوط الإضافي الأول (91 - 105)' : 'ابدأ الشوط الإضافي الثاني (106 - 120)') : 'استئناف الشوط الثاني (الدقائق 46 - 90)'}</span>
               </button>
             </div>
           </div>

@@ -27,6 +27,7 @@ export interface TacticalPitch2DProps {
   homePenalties?: number;
   awayPenalties?: number;
   isCupMatch?: boolean;
+  isInternational?: boolean;
   /** Active player ids on the field (reflects substitutions) */
   homeLineupIds?: string[];
   awayLineupIds?: string[];
@@ -87,6 +88,7 @@ export const TacticalPitch2D: React.FC<TacticalPitch2DProps> = ({
   homePenalties,
   awayPenalties,
   isCupMatch,
+  isInternational,
   homeLineupIds,
   awayLineupIds,
   homeFormation: homeFormationProp,
@@ -242,6 +244,7 @@ export const TacticalPitch2D: React.FC<TacticalPitch2DProps> = ({
       homePenalties={homePenalties}
       awayPenalties={awayPenalties}
       isCupMatch={isCupMatch}
+      isInternational={isInternational}
     />
   );
 };

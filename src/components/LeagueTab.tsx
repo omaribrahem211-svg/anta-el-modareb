@@ -48,6 +48,12 @@ export const LeagueTab: React.FC = () => {
   const [activeSubTab, setActiveSubTab] = useState<
     'standings' | 'domestic_cup' | 'continental' | 'daily_managers' | 'scorers' | 'assists' | 'national_teams'
   >('standings');
+  useEffect(() => {
+    const open = () => { setActiveSubTab('national_teams'); try { sessionStorage.removeItem('anta_open_national_teams'); } catch (_) {} };
+    try { if (sessionStorage.getItem('anta_open_national_teams') === 'true') open(); } catch (_) {}
+    window.addEventListener('open-national-teams', open);
+    return () => window.removeEventListener('open-national-teams', open);
+  }, []);
   const [dailyLeaders, setDailyLeaders] = useState<DailyManagerLeaderboardEntry[]>([]);
   const [loadingDaily, setLoadingDaily] = useState(false);
   const [rankPeriod, setRankPeriod] = useState<'weekly' | 'daily'>('weekly');

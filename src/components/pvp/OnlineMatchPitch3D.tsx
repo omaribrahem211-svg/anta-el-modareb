@@ -78,6 +78,7 @@ export interface OnlineMatchPitch3DProps {
   homePenalties?: number;
   awayPenalties?: number;
   isCupMatch?: boolean;
+  isInternational?: boolean;
   /** Recent match events (newest first) shown in the live commentary strip */
   recentEvents?: PitchFeedItem[];
   homeShots?: number;
@@ -422,6 +423,7 @@ export const OnlineMatchPitch3D: React.FC<OnlineMatchPitch3DProps> = ({
   homePenalties,
   awayPenalties,
   isCupMatch,
+  isInternational,
   recentEvents,
   homeShots,
   awayShots,
@@ -593,10 +595,10 @@ export const OnlineMatchPitch3D: React.FC<OnlineMatchPitch3DProps> = ({
         id: 'halftime',
         type: 'halftime',
         icon: '⏸️',
-        title: 'صافرة نهاية الشوط الأول',
-        subtitle: 'استراحة ما بين الشوطين - توجه اللاعبين لغرف الملابس',
+        title: minute >= 90 ? 'استراحة الوقت الإضافي' : 'صافرة نهاية الشوط الأول',
+        subtitle: minute >= 90 ? 'جهز تعليماتك للشوط الإضافي' : 'استراحة ما بين الشوطين - توجه اللاعبين لغرف الملابس',
         details: `النتيجة الحالية: ${homeClubName} ${homeScore} - ${awayScore} ${awayClubName}`,
-        badge: "استراحة HT 45'",
+        badge: `استراحة ${minute}'`,
         badgeBg: 'bg-sky-400 text-slate-950 font-black',
         borderClass: 'border-sky-400/80 shadow-[0_0_20px_rgba(56,189,248,0.35)]',
         bgGradient: 'from-sky-950/95 via-slate-900/95 to-slate-950/95',
@@ -1269,7 +1271,7 @@ export const OnlineMatchPitch3D: React.FC<OnlineMatchPitch3DProps> = ({
             {!isFullTimeFinished && !isHalfTimeBreak && <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />}
             <span dir="ltr" className="font-mono">{isFullTimeFinished ? 'FT' : isHalfTimeBreak ? 'HT' : `${minute}'`}</span>
             <span className="text-[#7d8ea8]">
-              {isFullTimeFinished ? 'انتهت' : isHalfTimeBreak ? 'استراحة' : minute <= 45 ? 'الشوط الأول' : 'الشوط الثاني'}
+              {isFullTimeFinished ? 'انتهت' : isHalfTimeBreak ? 'استراحة' : minute > 90 ? 'وقت إضافي' : minute <= 45 ? 'الشوط الأول' : 'الشوط الثاني'}
             </span>
           </div>
           {homePenalties !== undefined && awayPenalties !== undefined && (
@@ -1634,9 +1636,9 @@ export const OnlineMatchPitch3D: React.FC<OnlineMatchPitch3DProps> = ({
               {/* Top Badge: انتهاء الشوط الأول */}
               <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-400 text-slate-950 text-[11px] font-black shadow">
                 <span>⏸️</span>
-                <span>صافرة نهاية الشوط الأول</span>
+                <span>{minute >= 90 ? 'استراحة الوقت الإضافي' : 'صافرة نهاية الشوط الأول'}</span>
                 <span className="font-mono bg-slate-950 text-amber-300 px-1.5 py-0.2 rounded text-[10px]">
-                  HT 45'
+                  {minute >= 90 ? 'ET' : 'HT'} {minute}'
                 </span>
               </div>
 
@@ -1658,7 +1660,7 @@ export const OnlineMatchPitch3D: React.FC<OnlineMatchPitch3DProps> = ({
               {/* Match Stats / Possession Strip */}
               <div className="w-full flex items-center justify-between text-[10px] text-slate-400 px-1">
                 <span>الاستحواذ: <strong className="text-emerald-400 font-mono">%{homePossession}</strong></span>
-                <span className="text-slate-500 font-bold">استراحة ما بين الشوطين</span>
+                <span className="text-slate-500 font-bold">{minute >= 90 ? "وقت إضافي" : "استراحة ما بين الشوطين"}</span>
                 <span>الاستحواذ: <strong className="text-blue-400 font-mono">%{awayPossession}</strong></span>
               </div>
 
@@ -1732,7 +1734,7 @@ export const OnlineMatchPitch3D: React.FC<OnlineMatchPitch3DProps> = ({
                   className="w-full py-2.5 px-4 rounded-2xl bg-gradient-to-r from-emerald-500 via-teal-500 to-emerald-600 hover:from-emerald-400 hover:to-teal-400 text-slate-950 font-black text-xs sm:text-sm shadow-xl shadow-emerald-950/60 transition-all active:scale-95 flex items-center justify-center gap-2 cursor-pointer border border-emerald-300/40"
                 >
                   <Play className="w-4 h-4 fill-slate-950 text-slate-950" />
-                  <span>بدء الشوط الثاني ▶</span>
+                  <span>{minute >= 105 ? 'بدء الشوط الإضافي الثاني' : minute >= 90 ? 'بدء الشوط الإضافي الأول' : 'بدء الشوط الثاني'} ▶</span>
                 </button>
               </div>
             </div>
@@ -1748,7 +1750,7 @@ export const OnlineMatchPitch3D: React.FC<OnlineMatchPitch3DProps> = ({
                 <CheckCircle2 className="w-3.5 h-3.5" />
                 <span>صافرة نهاية المباراة</span>
                 <span className="font-mono bg-slate-950 text-emerald-300 px-1.5 py-0.2 rounded text-[10px]">
-                  FT 90'
+                  FT {minute}'
                 </span>
               </div>
 
@@ -1756,7 +1758,7 @@ export const OnlineMatchPitch3D: React.FC<OnlineMatchPitch3DProps> = ({
               {userResultType && (() => {
                 const effectiveIsCup = isCupMatch || (homePenalties !== undefined && awayPenalties !== undefined);
                 const hasShootout = homePenalties !== undefined && awayPenalties !== undefined;
-                const isShootoutWin = hasShootout ? (userResultType === 'win' || (homePenalties !== awayPenalties && (homePenalties > awayPenalties))) : userResultType === 'win';
+                const isShootoutWin = hasShootout ? (userResultType ? userResultType === 'win' : homePenalties > awayPenalties) : userResultType === 'win';
                 const isEffectiveWin = effectiveIsCup ? (hasShootout ? (userResultType === 'win' || isShootoutWin) : userResultType === 'win') : userResultType === 'win';
                 const isEffectiveDraw = !effectiveIsCup && userResultType === 'draw';
                 return (
@@ -1772,12 +1774,12 @@ export const OnlineMatchPitch3D: React.FC<OnlineMatchPitch3DProps> = ({
                     {userResultType === 'win' ? (
                       <>
                         <Trophy className="w-4 h-4 text-amber-400" />
-                        <span>🎉 فوز رائع ومستحق! نقاط الانتصار أضيفت لرصيدك</span>
+                        <span>{isInternational ? "فوز لمنتخبك! أكد النتيجة لتسجيلها في البطولة الدولية." : "🎉 فوز رائع ومستحق! نقاط الانتصار أضيفت لرصيدك"}</span>
                       </>
                     ) : userResultType === 'draw' ? (
                       <>
                         <Award className="w-4 h-4 text-amber-300" />
-                        <span>🤝 تعادل ونقطة إضافية في رصيد الدوري بعد مواجهة حماسية!</span>
+                        <span>{isInternational ? "انتهت المباراة الدولية بالتعادل." : "🤝 تعادل ونقطة إضافية في رصيد الدوري بعد مواجهة حماسية!"}</span>
                       </>
                     ) : (
                       <>

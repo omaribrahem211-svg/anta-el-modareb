@@ -312,10 +312,11 @@ export function refreshCallUpSquad(nationalTeam: NationalTeam, teams: Club[]): N
     };
   }
   const squad = snapshotSquad(selectCallUpSquad(nationals));
+  const autoTactics = buildNationalTeamTactics(squad);
   return {
     ...nationalTeam,
     players: squad,
-    tactics: buildNationalTeamTactics(squad),
+    tactics: { ...autoTactics, ...nationalTeam.tactics, startingPlayerIds: autoTactics?.startingPlayerIds || [], benchPlayerIds: autoTactics?.benchPlayerIds || [] },
     reputation: reputationFromSquad(squad),
   };
 }
