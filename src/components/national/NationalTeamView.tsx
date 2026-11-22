@@ -308,10 +308,9 @@ export const NationalTeamView: React.FC = () => {
             const squad = [...userNationalTeam.players].sort((a, b) => b.overallRating - a.overallRating);
             const valid = (userNationalTeam.userStartingIds || []).filter(id => squad.some(p => p.id === id));
             const current = valid.length === 11 ? valid : (userNationalTeam.tactics?.startingPlayerIds || []);
-            const selected = new Set(current);
             const isGk = (p: any) => String(p.position || '').toUpperCase() === 'GK';
             const toggle = (id: string) => {
-              const next = new Set(selected);
+              const next = new Set(draftIds ?? current);
               if (next.has(id)) next.delete(id); else next.add(id);
               const arr = [...next];
               // Keep the draft while it is not yet 11: only a full XI is applied.
