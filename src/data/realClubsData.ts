@@ -109,6 +109,8 @@ export function resolveCountryContinent(
     return 'SOUTH_AMERICA';
   }
 
+  if (['USA', 'CAN'].includes(code) || lg.startsWith('usa_') || id.startsWith('mls_')) return 'NORTH_AMERICA';
+
   // 4. AFRICA (Egypt, Morocco, Tunisia, Algeria, etc.)
   return 'AFRICA';
 }
@@ -136,6 +138,11 @@ function topUpRealSquad(real: Player[], clubId: string, countryCode: string, lea
     const pool = filler.filter(p => p.positionCategory === t.cat);
     for (let i = 0; i < Math.max(0, t.min - have) && i < pool.length; i++) {
       const p = { ...pool[i], id: `${clubId}_depth_${++n}`, currentClubId: clubId };
+      if (leagueId === 'usa_tier_1') {
+        p.name = `${p.name} (لاعب افتراضي)`;
+        p.isGameFiller = true;
+        p.gameDataNote = 'لاعب افتراضي أضافته اللعبة لاستكمال العمق، وليس لاعباً حقيقياً من قائمة النادي.';
+      }
       let num = p.positionCategory === 'GK' ? 30 : 40;
       while (usedNumbers.has(num)) num++;
       p.number = num;

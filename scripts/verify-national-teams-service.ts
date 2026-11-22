@@ -41,7 +41,10 @@ const TOTAL_ROUNDS = 34;
 const t0 = Date.now();
 let res = initNationalTeamsForSeason(createEmptyNationalTeamsState(), 4, TOTAL_ROUNDS, clubs, null);
 let state = res.state;
-if (state.teams.length !== 40) fail(`universe size ${state.teams.length} != 40`);
+// Canada joins with MLS; USA replaces its former statistical entry, never duplicates it.
+if (state.teams.length !== 41) fail(`universe size ${state.teams.length} != 41`);
+if(new Set(state.teams.map(t=>t.countryCode)).size!==state.teams.length) fail('duplicate national country');
+for(const code of ['USA','CAN']) if(state.teams.filter(t=>t.countryCode===code).length!==1) fail('expected one '+code+' team');
 if (!state.activeTournament || state.activeTournament.competitionId !== 'afcon') fail('AFCON should be active in season 4');
 if (!state.queuedTournament || state.queuedTournament.competitionId !== 'worldcup') fail('World Cup should be queued in season 4');
 ok('season 4 init: AFCON active, World Cup queued');

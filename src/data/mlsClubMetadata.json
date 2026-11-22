@@ -1,0 +1,310 @@
+{
+  "sources": [
+    "https://en.wikipedia.org/wiki/2026_Major_League_Soccer_season",
+    "https://en.wikipedia.org/wiki/List_of_Major_League_Soccer_stadiums",
+    "https://www.trucolor.net/portfolio/major-league-soccer-official-colors-1996-through-present/"
+  ],
+  "asOf": "2026-11-22",
+  "clubs": {
+    "mls_atlanta_united": {
+      "stadiumName": "Mercedes-Benz Stadium",
+      "city": "Atlanta",
+      "countryCode": "USA",
+      "stadiumCapacity": 42500,
+      "colors": [
+        "#9D2235",
+        "#010101"
+      ]
+    },
+    "mls_austin_fc": {
+      "stadiumName": "Q2 Stadium",
+      "city": "Austin",
+      "countryCode": "USA",
+      "stadiumCapacity": 20738,
+      "colors": [
+        "#010101",
+        "#00B140"
+      ]
+    },
+    "mls_cf_montreal": {
+      "stadiumName": "Saputo Stadium",
+      "city": "Montreal",
+      "countryCode": "CAN",
+      "stadiumCapacity": 19619,
+      "colors": [
+        "#003DA5",
+        "#010101"
+      ]
+    },
+    "mls_charlotte_fc": {
+      "stadiumName": "Bank of America Stadium",
+      "city": "Charlotte",
+      "countryCode": "USA",
+      "stadiumCapacity": 38000,
+      "colors": [
+        "#0085CA",
+        "#010101"
+      ]
+    },
+    "mls_chicago_fire_fc": {
+      "stadiumName": "Soldier Field",
+      "city": "Chicago",
+      "countryCode": "USA",
+      "stadiumCapacity": 24955,
+      "colors": [
+        "#141B4D",
+        "#71C5E8"
+      ]
+    },
+    "mls_colorado_rapids": {
+      "stadiumName": "Dick's Sporting Goods Park",
+      "city": "Commerce City",
+      "countryCode": "USA",
+      "stadiumCapacity": 18061,
+      "colors": [
+        "#862633",
+        "#8BB8E8"
+      ]
+    },
+    "mls_columbus_crew": {
+      "stadiumName": "ScottsMiracle-Gro Field",
+      "city": "Columbus",
+      "countryCode": "USA",
+      "stadiumCapacity": 20011,
+      "colors": [
+        "#010101",
+        "#FEDD00"
+      ]
+    },
+    "mls_d_c_united": {
+      "stadiumName": "Audi Field",
+      "city": "Washington",
+      "countryCode": "USA",
+      "stadiumCapacity": 20000,
+      "colors": [
+        "#010101",
+        "#E4002B"
+      ]
+    },
+    "mls_fc_cincinnati": {
+      "stadiumName": "TQL Stadium",
+      "city": "Cincinnati",
+      "countryCode": "USA",
+      "stadiumCapacity": 26000,
+      "colors": [
+        "#FE5000",
+        "#003087"
+      ]
+    },
+    "mls_fc_dallas": {
+      "stadiumName": "Toyota Stadium",
+      "city": "Frisco",
+      "countryCode": "USA",
+      "stadiumCapacity": 20500,
+      "colors": [
+        "#BF0D3E",
+        "#00205B"
+      ]
+    },
+    "mls_houston_dynamo_fc": {
+      "stadiumName": "Shell Energy Stadium",
+      "city": "Houston",
+      "countryCode": "USA",
+      "stadiumCapacity": 22039,
+      "colors": [
+        "#101820",
+        "#FF6900"
+      ]
+    },
+    "mls_inter_miami_cf": {
+      "stadiumName": "Nu Stadium",
+      "city": "Miami",
+      "countryCode": "USA",
+      "stadiumCapacity": 26700,
+      "colors": [
+        "#F5B6CD",
+        "#010101"
+      ]
+    },
+    "mls_la_galaxy": {
+      "stadiumName": "Dignity Health Sports Park",
+      "city": "Carson",
+      "countryCode": "USA",
+      "stadiumCapacity": 27000,
+      "colors": [
+        "#13294B",
+        "#004B87"
+      ]
+    },
+    "mls_los_angeles_football_club": {
+      "stadiumName": "BMO Stadium",
+      "city": "Los Angeles",
+      "countryCode": "USA",
+      "stadiumCapacity": 22000,
+      "colors": [
+        "#101820",
+        "#C6AA76"
+      ]
+    },
+    "mls_minnesota_united_fc": {
+      "stadiumName": "Allianz Field",
+      "city": "Saint Paul",
+      "countryCode": "USA",
+      "stadiumCapacity": 19400,
+      "colors": [
+        "#8DC8E8",
+        "#010101"
+      ]
+    },
+    "mls_nashville_sc": {
+      "stadiumName": "Geodis Park",
+      "city": "Nashville",
+      "countryCode": "USA",
+      "stadiumCapacity": 30000,
+      "colors": [
+        "#EDE939",
+        "#201547"
+      ]
+    },
+    "mls_new_england_revolution": {
+      "stadiumName": "Gillette Stadium",
+      "city": "Foxborough",
+      "countryCode": "USA",
+      "stadiumCapacity": 20000,
+      "colors": [
+        "#0C2340",
+        "#C8102E"
+      ]
+    },
+    "mls_new_york_city_football_club": {
+      "stadiumName": "Yankee Stadium",
+      "city": "New York City",
+      "countryCode": "USA",
+      "stadiumCapacity": 28743,
+      "colors": [
+        "#9FD2FF",
+        "#000229"
+      ]
+    },
+    "mls_orlando_city": {
+      "stadiumName": "Inter.co Stadium",
+      "city": "Orlando",
+      "countryCode": "USA",
+      "stadiumCapacity": 25500,
+      "colors": [
+        "#5F249F",
+        "#EED484"
+      ]
+    },
+    "mls_philadelphia_union": {
+      "stadiumName": "Subaru Park",
+      "city": "Chester",
+      "countryCode": "USA",
+      "stadiumCapacity": 18500,
+      "colors": [
+        "#051C2C",
+        "#DFD1A7"
+      ]
+    },
+    "mls_portland_timbers": {
+      "stadiumName": "Providence Park",
+      "city": "Portland",
+      "countryCode": "USA",
+      "stadiumCapacity": 25218,
+      "colors": [
+        "#2C5234",
+        "#C99700"
+      ]
+    },
+    "mls_real_salt_lake": {
+      "stadiumName": "America First Field",
+      "city": "Sandy",
+      "countryCode": "USA",
+      "stadiumCapacity": 20213,
+      "colors": [
+        "#9D2235",
+        "#001E62"
+      ]
+    },
+    "mls_red_bull_new_york": {
+      "stadiumName": "Sports Illustrated Stadium",
+      "city": "Harrison",
+      "countryCode": "USA",
+      "stadiumCapacity": 25000,
+      "colors": [
+        "#C8102E",
+        "#010101"
+      ]
+    },
+    "mls_san_diego_fc": {
+      "stadiumName": "Snapdragon Stadium",
+      "city": "San Diego",
+      "countryCode": "USA",
+      "stadiumCapacity": 35000,
+      "colors": [
+        "#687C7B",
+        "#252A36"
+      ]
+    },
+    "mls_san_jose_earthquakes": {
+      "stadiumName": "PayPal Park",
+      "city": "San Jose",
+      "countryCode": "USA",
+      "stadiumCapacity": 18000,
+      "colors": [
+        "#003DA5",
+        "#010101"
+      ]
+    },
+    "mls_seattle_sounders_fc": {
+      "stadiumName": "Lumen Field",
+      "city": "Seattle",
+      "countryCode": "USA",
+      "stadiumCapacity": 37722,
+      "colors": [
+        "#2CC84D",
+        "#0032A0"
+      ]
+    },
+    "mls_sporting_kansas_city": {
+      "stadiumName": "Sporting Park",
+      "city": "Kansas City",
+      "countryCode": "USA",
+      "stadiumCapacity": 18467,
+      "colors": [
+        "#A7BCD6",
+        "#0C2340"
+      ]
+    },
+    "mls_st_louis_city_sc": {
+      "stadiumName": "Energizer Park",
+      "city": "St. Louis",
+      "countryCode": "USA",
+      "stadiumCapacity": 22423,
+      "colors": [
+        "#E0004D",
+        "#0C2340"
+      ]
+    },
+    "mls_toronto_fc": {
+      "stadiumName": "BMO Field",
+      "city": "Toronto",
+      "countryCode": "CAN",
+      "stadiumCapacity": 28351,
+      "colors": [
+        "#A6192E",
+        "#333F48"
+      ]
+    },
+    "mls_vancouver_whitecaps_fc": {
+      "stadiumName": "BC Place",
+      "city": "Vancouver",
+      "countryCode": "CAN",
+      "stadiumCapacity": 22120,
+      "colors": [
+        "#13294B",
+        "#8BB8E8"
+      ]
+    }
+  }
+}

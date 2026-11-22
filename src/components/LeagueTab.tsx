@@ -1,3 +1,4 @@
+import { MLSCompetitionPanel } from './MLSCompetitionPanel';
 import React, { useState, useEffect, useMemo } from 'react';
 import { useGame } from '../context/GameContext';
 import { useAuth } from '../context/AuthContext';
@@ -173,13 +174,13 @@ export const LeagueTab: React.FC = () => {
             </div>
           </div>
           <span className="text-xs bg-slate-800 px-3 py-1 rounded-full border border-slate-700 font-bold text-emerald-400">
-            الجولة {Math.min(currentRound, totalRounds)} / {totalRounds}
+            {activeLeague.id === 'usa_tier_1' ? currentRound > 34 ? 'ملحق MLS' : `الجولة ${currentRound} / 34` : `الجولة ${Math.min(currentRound, totalRounds)} / ${totalRounds}`}
           </span>
         </div>
 
         {/* Championship & Promotion/Relegation Rules */}
         <div className="flex flex-wrap gap-2 text-xs">
-          {activeLeague.tier === 1 ? (
+          {activeLeague.id === 'usa_tier_1' ? <p className="text-xs text-sky-200">34 مباراة ثم ملحق كأس MLS • منطقتان • لا صعود أو هبوط</p> : activeLeague.tier === 1 ? (
             <div className="bg-amber-950/50 border border-amber-700/70 px-3 py-1.5 rounded-xl flex items-center gap-1.5 text-amber-300">
               <Trophy className="w-3.5 h-3.5 text-amber-400 shrink-0" />
               <span>المركز الأول: التتويج بدرع {activeLeague.name} الرسمي 🏆</span>
@@ -248,8 +249,9 @@ export const LeagueTab: React.FC = () => {
         </div>
       </div>
 
+      {activeSubTab === 'standings' && activeLeague.id === 'usa_tier_1' && <MLSCompetitionPanel standings={effectiveStandings} fixtures={fixtures} teams={teams} userClubId={userClub?.id} />}
       {/* VIEW 1: League Table */}
-      {activeSubTab === 'standings' && (
+      {activeSubTab === 'standings' && activeLeague.id !== 'usa_tier_1' && (
         <div className="bg-slate-900 border border-slate-800 rounded-3xl overflow-hidden shadow-xl">
           <div className="overflow-x-auto">
             <table className="w-full text-right text-xs">

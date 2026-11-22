@@ -1,6 +1,11 @@
 import { Country } from '../types/game';
 
 export const GLOBAL_COUNTRIES: Record<string, Country> = {
+  // Name pools and football levels are game parameters, not roster facts.
+  USA: { id: 'USA', name: 'الولايات المتحدة', code: 'USA', flag: '🇺🇸', continent: 'North America', footballLevel: 78, foreignPlayerRate: 0.5,
+    playerNamePool: { firstNames: ['جون', 'مايكل', 'ديفيد', 'جيمس', 'تايلر', 'كريستيان', 'أليكس', 'ريان'], lastNames: ['سميث', 'ميلر', 'جونسون', 'براون', 'ديفيس', 'ويلسون', 'مور', 'تايلور'] } },
+  CAN: { id: 'CAN', name: 'كندا', code: 'CAN', flag: '🇨🇦', continent: 'North America', footballLevel: 76, foreignPlayerRate: 0.5,
+    playerNamePool: { firstNames: ['جوناثان', 'ليام', 'ديفيد', 'سام', 'جاك', 'ماثيو', 'أليكس', 'لوكاس'], lastNames: ['ميلر', 'جونسون', 'كلارك', 'براون', 'ديفيس', 'مارتن', 'ويلسون', 'تومسون'] } },
   // 1. Egypt
   EGY: {
     id: 'EGY',

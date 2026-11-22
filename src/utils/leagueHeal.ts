@@ -5,6 +5,7 @@ import type { Club, Fixture, LeagueStanding } from '../types/game';
 import { updateLeagueStandings } from './engine';
 
 const isLeague = (f: any): boolean => {
+  if (f?.mlsPlayoff) return false;
   const t = String(f?.competitionType || f?.tournamentId || 'LEAGUE').toUpperCase();
   return t === 'LEAGUE' || t === 'DOMESTIC_LEAGUE' || t === 'DEFAULT';
 };

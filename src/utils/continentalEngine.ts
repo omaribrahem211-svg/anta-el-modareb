@@ -142,6 +142,9 @@ export function getContinentClubPool(targetContinent: ContinentCode): Club[] {
         ...(GLOBAL_LEAGUES['arg_tier_1']?.teams || ARGENTINA_PRIMERA_CLUBS),
       ];
       break;
+    case 'NORTH_AMERICA':
+      rawPool = GLOBAL_LEAGUES['usa_tier_1']?.teams || [];
+      break;
     case 'AFRICA':
     default:
       rawPool = [

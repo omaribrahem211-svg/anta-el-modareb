@@ -22,6 +22,7 @@ interface CountryGroup {
 }
 
 const COUNTRY_FLAGS: Record<string, string> = {
+  'الولايات المتحدة': '🇺🇸',
   'مصر': '🇪🇬',
   'المملكة العربية السعودية': '🇸🇦',
   'إنجلترا': '🏴󠁧󠁢󠁥󠁮󠁧󠁿',

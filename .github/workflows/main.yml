@@ -27,6 +27,9 @@ jobs:
           npx tsx scripts/verify-international-live.ts
           npx tsx scripts/verify-international-storage.ts
           npx tsx scripts/verify-international-context.ts
+          npx tsx scripts/verify-mls-rosters.ts
+          npx tsx scripts/verify-mls-competition.ts
+          npx tsx scripts/verify-mls-playoffs.ts
           node scripts/verify-nt-lineup-selection.mjs
           npm run build
 

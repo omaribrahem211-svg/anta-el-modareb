@@ -28,6 +28,7 @@ export interface TacticalPitch2DProps {
   awayPenalties?: number;
   isCupMatch?: boolean;
   isInternational?: boolean;
+  isMLSPlayoff?: boolean;
   /** Active player ids on the field (reflects substitutions) */
   homeLineupIds?: string[];
   awayLineupIds?: string[];
@@ -89,6 +90,7 @@ export const TacticalPitch2D: React.FC<TacticalPitch2DProps> = ({
   awayPenalties,
   isCupMatch,
   isInternational,
+  isMLSPlayoff,
   homeLineupIds,
   awayLineupIds,
   homeFormation: homeFormationProp,
@@ -245,6 +247,7 @@ export const TacticalPitch2D: React.FC<TacticalPitch2DProps> = ({
       awayPenalties={awayPenalties}
       isCupMatch={isCupMatch}
       isInternational={isInternational}
+      isMLSPlayoff={isMLSPlayoff}
     />
   );
 };

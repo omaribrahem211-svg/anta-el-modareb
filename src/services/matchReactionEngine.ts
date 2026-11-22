@@ -29,7 +29,7 @@ type Item = Omit<DailyNewsItem, 'id' | 'dateStr' | 'source' | 'author' | 'likes'
 
 function topScorer(events: MatchEvent[], teamId: string): { name: string; goals: number } | null {
   const m = new Map<string, number>();
-  for (const e of events || []) if (e && e.type === 'goal' && e.teamId === teamId && e.playerName) m.set(e.playerName, (m.get(e.playerName) || 0) + 1);
+  for (const e of events || []) if (e && !e.isPenaltyShootout && e.type === 'goal' && e.teamId === teamId && e.playerName) m.set(e.playerName, (m.get(e.playerName) || 0) + 1);
   let best: { name: string; goals: number } | null = null;
   m.forEach((g, name) => { if (!best || g > best.goals) best = { name, goals: g }; });
   return best;
@@ -196,7 +196,7 @@ export function generateMatchReactions(ctx: MatchReactionContext, max: number = 
   });
   for (const m of others) {
     const cnt = new Map<string, number>();
-    for (const e of m.events || []) if (e && e.type === 'goal' && e.playerName) cnt.set(e.playerName, (cnt.get(e.playerName) || 0) + 1);
+    for (const e of m.events || []) if (e && !e.isPenaltyShootout && e.type === 'goal' && e.playerName) cnt.set(e.playerName, (cnt.get(e.playerName) || 0) + 1);
     let hat: string | null = null; cnt.forEach((g, n) => { if (g >= 3 && !hat) hat = n; });
     if (hat) { add(5, () => ({ title: `هاتريك لـ${hat} في مباراة ${nameOf(m.homeId)} و${nameOf(m.awayId)}`, content: pick([`خطف ${hat} الأضواء بثلاثية رائعة جعلته حديث الشارع الكروي بعد الجولة.`, `لاعب واحد قلب مباراة كاملة رأساً على عقب، والأنظار تتجه إليه في سباق الهدافين.`]), category: 'milestone', importance: 'medium', icon: '🎩', tags: ['#هاتريك'] })); break; }
   }

@@ -79,6 +79,7 @@ export interface OnlineMatchPitch3DProps {
   awayPenalties?: number;
   isCupMatch?: boolean;
   isInternational?: boolean;
+  isMLSPlayoff?: boolean;
   /** Recent match events (newest first) shown in the live commentary strip */
   recentEvents?: PitchFeedItem[];
   homeShots?: number;
@@ -424,6 +425,7 @@ export const OnlineMatchPitch3D: React.FC<OnlineMatchPitch3DProps> = ({
   awayPenalties,
   isCupMatch,
   isInternational,
+  isMLSPlayoff,
   recentEvents,
   homeShots,
   awayShots,
@@ -1774,12 +1776,12 @@ export const OnlineMatchPitch3D: React.FC<OnlineMatchPitch3DProps> = ({
                     {userResultType === 'win' ? (
                       <>
                         <Trophy className="w-4 h-4 text-amber-400" />
-                        <span>{isInternational ? "فوز لمنتخبك! أكد النتيجة لتسجيلها في البطولة الدولية." : "🎉 فوز رائع ومستحق! نقاط الانتصار أضيفت لرصيدك"}</span>
+                        <span>{isInternational ? "فوز لمنتخبك! أكد النتيجة لتسجيلها في البطولة الدولية." : isMLSPlayoff ? "فوز في ملحق MLS! أكد النتيجة لتحديث السلسلة ومسار التأهل." : "🎉 فوز رائع ومستحق! نقاط الانتصار أضيفت لرصيدك"}</span>
                       </>
                     ) : userResultType === 'draw' ? (
                       <>
                         <Award className="w-4 h-4 text-amber-300" />
-                        <span>{isInternational ? "انتهت المباراة الدولية بالتعادل." : "🤝 تعادل ونقطة إضافية في رصيد الدوري بعد مواجهة حماسية!"}</span>
+                        <span>{isInternational ? "انتهت المباراة الدولية بالتعادل." : isMLSPlayoff ? "ملحق MLS يحسم بركلات الترجيح، ولا يضيف نقاطاً للدوري." : "🤝 تعادل ونقطة إضافية في رصيد الدوري بعد مواجهة حماسية!"}</span>
                       </>
                     ) : (
                       <>

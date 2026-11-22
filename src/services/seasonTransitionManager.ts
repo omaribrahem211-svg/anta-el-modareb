@@ -1,5 +1,6 @@
 import {
   Club,
+  Fixture,
   CupTournament,
   ContinentalTournament,
   LeagueDefinition,
@@ -116,6 +117,8 @@ export class SeasonTransitionManager {
     const qualificationNotes: string[] = [];
     const primarySet = new Set<string>();
     const secondarySet = new Set<string>();
+
+    if (continent === 'NORTH_AMERICA') return { primaryContinentalCode, secondaryContinentalCode, cclQualifiedClubIds, cccQualifiedClubIds, qualificationNotes: ['البطولات القارية لأمريكا الشمالية غير مفعلة في هذه النسخة. لا يتأهل MLS إلى بطولات إفريقيا أو أوروبا أو آسيا.'] };
 
     // Determine Domestic National Cup Winner & Runner-Up
     let cupWinnerId = cupTournament?.winnerClubId;
@@ -281,6 +284,7 @@ export class SeasonTransitionManager {
    */
   static executeSeasonTransition(params: {
     currentSeason: SeasonInfo;
+    fixtures?: Fixture[];
     standings: LeagueStanding[];
     activeLeague: LeagueDefinition;
     teams: Club[];
@@ -322,7 +326,8 @@ export class SeasonTransitionManager {
       activeLeague,
       null,
       manager,
-      null
+      null,
+      params.fixtures || []
     );
 
     const nextCupTournament = null as any;
@@ -354,9 +359,10 @@ export class SeasonTransitionManager {
     }));
 
     // 5. Update Manager Records
-    const isUserChampion = standings[0]?.teamId === userClub?.id;
+    const isUserChampion = seasonEndSummary.resultStatus === 'champion';
 
     const newTrophiesForManager = [...(manager.trophies || [])];
+    if (seasonEndSummary.supportersShieldAwarded && !newTrophiesForManager.includes(seasonEndSummary.supportersShieldAwarded)) newTrophiesForManager.push(seasonEndSummary.supportersShieldAwarded);
     if (isUserChampion && seasonEndSummary.leagueTrophyAwarded && !newTrophiesForManager.includes(seasonEndSummary.leagueTrophyAwarded)) {
       newTrophiesForManager.push(seasonEndSummary.leagueTrophyAwarded);
     }
@@ -377,7 +383,7 @@ export class SeasonTransitionManager {
       startDate: startDateStr,
       endDate: CalendarManager.getSeasonDateRange(nextSeasonNum).endDateStr,
       currentRound: 1,
-      totalRounds: Math.max(...nextMasterSchedule.map(f => f.round || 1), 34),
+      totalRounds: activeLeague.id === 'usa_tier_1' ? 41 : Math.max(...nextMasterSchedule.map(f => f.round || 1), 34),
       status: 'active',
       leagueId: activeLeague.id,
       leagueName: activeLeague.name,

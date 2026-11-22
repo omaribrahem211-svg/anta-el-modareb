@@ -1,3 +1,4 @@
+import { isMLSPlayoff, mlsUsesExtraTime, sortMLSStandings } from './mlsPlayoffs';
 import { Club, Fixture, LeagueStanding, MatchEvent, MatchStats, Player, TeamTactics, ClubManager, ManagerProfile, ActiveTrainingBoost, TacticalMatchReport } from '../types/game';
 import { AdManager } from '../services/adManager';
 import { getClubStaffBonuses, executeSmartAutoSub } from './staffEngine';
@@ -1078,8 +1079,10 @@ export function simulatePenaltyShootout(
   awayTeam?: Club,
   homeTactics?: TeamTactics,
   awayTactics?: TeamTactics,
-  activeLineups?: { home: string[]; away: string[] }
+  activeLineups?: { home: string[]; away: string[] },
+  options?: { minute?: number; isSeriesMatch?: boolean }
 ): PenaltyShootoutResult {
+  const shootoutMinute = options?.minute ?? 120;
   const safeHome = homeTeam || ({ id: 'home_dummy', name: 'الفريق المضيف', shortName: 'مض', players: [], reputation: 50 } as any);
   const safeAway = awayTeam || ({ id: 'away_dummy', name: 'الفريق الضيف', shortName: 'ضف', players: [], reputation: 50 } as any);
 
@@ -1119,10 +1122,10 @@ export function simulatePenaltyShootout(
   const penaltyEvents: MatchEvent[] = [];
 
   penaltyEvents.push({
-    minute: 120,
+    minute: shootoutMinute,
     type: 'commentary',
     teamId: safeHome.id,
-    description: activeLineups ? "تعادل بعد الوقت الإضافي. ركلات الترجيح تحسم بطاقة التأهل." : `⚖️ صافرة نهاية الوقت الأصلي بالتعادل! الاحتكام رسمياً إلى ركلات الجزاء الترجيحية لحسم بطاقة التأهل.`
+    description: shootoutMinute > 90 ? "تعادل بعد الوقت الإضافي. ركلات الترجيح تحسم الفائز بالمباراة." : `⚖️ صافرة نهاية الوقت الأصلي بالتعادل! الاحتكام رسمياً إلى ركلات الجزاء الترجيحية لحسم الفائز بالمباراة.`
   });
 
   let homeMgrObj = safeHome.manager;
@@ -1158,7 +1161,7 @@ export function simulatePenaltyShootout(
     if (hScored) {
       homeScore++;
       penaltyEvents.push({
-        minute: 120,
+        minute: shootoutMinute,
         type: 'goal',
         teamId: safeHome.id,
         playerName: hTaker.name,
@@ -1166,7 +1169,7 @@ export function simulatePenaltyShootout(
       });
     } else {
       penaltyEvents.push({
-        minute: 120,
+        minute: shootoutMinute,
         type: 'save',
         teamId: safeAway.id,
         description: `🧤 ركلة ترجيح (${round}): الحارس ${awayGk.name} يتألق ببراعة ويحرم ${hTaker.name} من التسجيل!`
@@ -1182,7 +1185,7 @@ export function simulatePenaltyShootout(
     if (aScored) {
       awayScore++;
       penaltyEvents.push({
-        minute: 120,
+        minute: shootoutMinute,
         type: 'goal',
         teamId: safeAway.id,
         playerName: aTaker.name,
@@ -1190,7 +1193,7 @@ export function simulatePenaltyShootout(
       });
     } else {
       penaltyEvents.push({
-        minute: 120,
+        minute: shootoutMinute,
         type: 'save',
         teamId: safeHome.id,
         description: `🧤 ركلة ترجيح (${round}): الحارس ${homeGk.name} يتوقع الزاوية ويصد تسديدة ${aTaker.name}!`
@@ -1217,7 +1220,7 @@ export function simulatePenaltyShootout(
     if (hScored) {
       homeScore++;
       penaltyEvents.push({
-        minute: 120,
+        minute: shootoutMinute,
         type: 'goal',
         teamId: safeHome.id,
         playerName: hTaker.name,
@@ -1225,7 +1228,7 @@ export function simulatePenaltyShootout(
       });
     } else {
       penaltyEvents.push({
-        minute: 120,
+        minute: shootoutMinute,
         type: 'save',
         teamId: safeAway.id,
         description: `❌ ركلة إضافية (${suddenDeathRound}): ${hTaker.name} يهدر الركلة وسط تصدي ممتاز!`
@@ -1235,7 +1238,7 @@ export function simulatePenaltyShootout(
     if (aScored) {
       awayScore++;
       penaltyEvents.push({
-        minute: 120,
+        minute: shootoutMinute,
         type: 'goal',
         teamId: safeAway.id,
         playerName: aTaker.name,
@@ -1243,7 +1246,7 @@ export function simulatePenaltyShootout(
       });
     } else {
       penaltyEvents.push({
-        minute: 120,
+        minute: shootoutMinute,
         type: 'save',
         teamId: safeHome.id,
         description: `❌ ركلة إضافية (${suddenDeathRound}): ${aTaker.name} يهدر الركلة بعد تألق الحارس!`
@@ -1266,17 +1269,17 @@ export function simulatePenaltyShootout(
   const winnerTeam = homeScore > awayScore ? safeHome : safeAway;
 
   penaltyEvents.push({
-    minute: 120,
+    minute: shootoutMinute,
     type: 'commentary',
     teamId: winnerTeamId,
-    description: `🏆 نهاية ماراثون ركلات الترجيح: تأهل وفوز (${winnerTeam.shortName || winnerTeam.name}) بنتيجة (${homeScore} - ${awayScore})!`
+    description: `🏆 نهاية ركلات الترجيح: ${options?.isSeriesMatch ? 'فوز بالمباراة' : 'تأهل وفوز'} (${winnerTeam.shortName || winnerTeam.name}) بنتيجة (${homeScore} - ${awayScore})!`
   });
 
   return {
     homePenalties: homeScore,
     awayPenalties: awayScore,
     winnerTeamId,
-    penaltyEvents,
+    penaltyEvents: penaltyEvents.map(e => ({ ...e, isPenaltyShootout: true })),
   };
 }
 
@@ -1295,11 +1298,13 @@ export function simulateMatchStep(
   const nextMinute = prevState.currentMinute + 1;
   const international = prevState.internationalContext;
   const internationalKnockout = !!international && !['group', 'friendly'].includes(international.stage);
-  const finalMinute = international && prevState.isExtraTime ? 120 : 90;
+  const mlsKnockout = isMLSPlayoff(prevState.fixture);
+  const extendedKnockout = internationalKnockout || mlsUsesExtraTime(prevState.fixture);
+  const finalMinute = prevState.isExtraTime ? 120 : 90;
 
   // Check Halftime trigger at minute 45, or between the extra-time halves.
   if ((nextMinute === 45 && prevState.currentMinute < 45) ||
-      (international && prevState.isExtraTime && nextMinute === 105 && prevState.currentMinute < 105)) {
+      ((international || mlsKnockout) && prevState.isExtraTime && nextMinute === 105 && prevState.currentMinute < 105)) {
     return {
       ...prevState,
       currentMinute: nextMinute,
@@ -1310,7 +1315,7 @@ export function simulateMatchStep(
 
   // International knockouts get two playable extra-time halves before penalties.
   if (nextMinute > finalMinute) {
-    if (internationalKnockout && !prevState.isExtraTime && prevState.homeScore === prevState.awayScore) {
+    if (extendedKnockout && !prevState.isExtraTime && prevState.homeScore === prevState.awayScore) {
       return {
         ...prevState, currentMinute: 90, isExtraTime: true, isHalfTime: true, isPlaying: false,
         events: [...prevState.events, { minute: 90, type: 'commentary', description: '⏱️ تعادل في الوقت الأصلي. استعد لشوطين إضافيين، ثم ركلات الترجيح إذا استمر التعادل.' } as MatchEvent],
@@ -1318,7 +1323,7 @@ export function simulateMatchStep(
     }
     console.log('[MatchEndingFlow] MATCH_90_REACHED');
 
-    const isCupMatch = international ? internationalKnockout :
+    const isCupMatch = international ? internationalKnockout : mlsKnockout ||
       prevState.fixture?.competitionType === 'cup' || 
       prevState.fixture?.competitionType === 'DOMESTIC_CUP' ||
       (prevState.fixture?.competitionType === 'CONTINENTAL_CUP' && prevState.fixture?.stage && prevState.fixture?.stage !== 'group') ||
@@ -1344,7 +1349,8 @@ export function simulateMatchStep(
           prevState.awayTeam,
           prevState.homeTactics,
           prevState.awayTactics,
-          international ? { home: prevState.homeLineup, away: prevState.awayLineup } : undefined
+          (international || mlsKnockout) ? { home: prevState.homeLineup, away: prevState.awayLineup } : undefined,
+          { minute: finalMinute, isSeriesMatch: prevState.fixture?.mlsPlayoff?.stage === 'round_one' }
         );
         finalHomePenalties = shootout.homePenalties;
         finalAwayPenalties = shootout.awayPenalties;
@@ -1361,10 +1367,10 @@ export function simulateMatchStep(
     const oppGoals = isUserHome ? prevState.awayScore : prevState.homeScore;
 
     const hadRedCard = (isUserHome ? prevState.homeReddedPlayerIds : prevState.awayReddedPlayerIds).length > 0;
-    const concededAfter70 = prevState.events.some(e => e.type === 'goal' && e.minute >= 70 && e.teamId === oppClub.id);
-    const scoredFromCounter = prevState.events.some(e => e.type === 'goal' && e.teamId === userClub.id && (e.description?.includes('مرتد') || userTactics.tacticalStyle === 'counter_attack'));
-    const scoredFromCross = prevState.events.some(e => e.type === 'goal' && e.teamId === userClub.id && (e.description?.includes('عرض') || userTactics.tacticalStyle === 'wing_play'));
-    const concededFromCross = prevState.events.some(e => e.type === 'goal' && e.teamId === oppClub.id && (e.description?.includes('عرض') || oppTactics.tacticalStyle === 'wing_play'));
+    const concededAfter70 = prevState.events.some(e => !e.isPenaltyShootout && e.type === 'goal' && e.minute >= 70 && e.teamId === oppClub.id);
+    const scoredFromCounter = prevState.events.some(e => !e.isPenaltyShootout && e.type === 'goal' && e.teamId === userClub.id && (e.description?.includes('مرتد') || userTactics.tacticalStyle === 'counter_attack'));
+    const scoredFromCross = prevState.events.some(e => !e.isPenaltyShootout && e.type === 'goal' && e.teamId === userClub.id && (e.description?.includes('عرض') || userTactics.tacticalStyle === 'wing_play'));
+    const concededFromCross = prevState.events.some(e => !e.isPenaltyShootout && e.type === 'goal' && e.teamId === oppClub.id && (e.description?.includes('عرض') || oppTactics.tacticalStyle === 'wing_play'));
 
     const mockManager: ManagerProfile = {
       name: userClub.manager?.name || 'المدير الفني',
@@ -3056,6 +3062,7 @@ export function recalculateStandingsFromFixtures(
     if (!f || !(f.isPlayed || (f as any).played) || typeof f.homeScore !== 'number' || typeof f.awayScore !== 'number') {
       return false;
     }
+    if (f.mlsPlayoff || f.competitionType === 'playoff') return false;
     const fid = String(f.id || '');
     if (fid.startsWith('cont_') || fid.startsWith('cup_') || fid.startsWith('wc_')) return false;
     if (!f.competitionType) return (f.round ?? 1) > 0;
@@ -3111,6 +3118,7 @@ export function recalculateStandingsFromFixtures(
     }
   });
 
+  if (teamMap.size === 30 && [...teamMap.keys()].every(id => id.startsWith('mls_'))) return sortMLSStandings([...teamMap.values()], fixtures);
   return Array.from(teamMap.values()).sort((a, b) => {
     if (b.points !== a.points) return b.points - a.points;
     if (b.goalDifference !== a.goalDifference) return b.goalDifference - a.goalDifference;
@@ -3170,8 +3178,8 @@ export function updatePlayersForCompletedMatch(
       minutesPlayed = subbedInEvt ? Math.max(1, 90 - subbedInEvt.minute) : 25;
     }
 
-    const playerGoals = matchInfo.events.filter(e => e.type === 'goal' && (e.playerId === p.id || e.playerName === p.name)).length;
-    const playerAssists = matchInfo.events.filter(e => e.type === 'goal' && (e.assistPlayerId === p.id || e.assistPlayerName === p.name)).length;
+    const playerGoals = matchInfo.events.filter(e => !e.isPenaltyShootout && e.type === 'goal' && (e.playerId === p.id || e.playerName === p.name)).length;
+    const playerAssists = matchInfo.events.filter(e => !e.isPenaltyShootout && e.type === 'goal' && (e.assistPlayerId === p.id || e.assistPlayerName === p.name)).length;
     const playerYellows = matchInfo.events.filter(e => e.type === 'yellow_card' && (e.playerId === p.id || e.playerName === p.name)).length;
     const playerReds = matchInfo.events.filter(e => e.type === 'red_card' && (e.playerId === p.id || e.playerName === p.name)).length;
 
@@ -3236,8 +3244,8 @@ export function updatePlayersForCompletedMatch(
     const minutesPlayed = matchData.minutes;
     const matchRating = matchData.rating;
 
-    const playerGoals = matchInfo.events.filter(e => e.type === 'goal' && (e.playerId === p.id || e.playerName === p.name)).length;
-    const playerAssists = matchInfo.events.filter(e => e.type === 'goal' && (e.assistPlayerId === p.id || e.assistPlayerName === p.name)).length;
+    const playerGoals = matchInfo.events.filter(e => !e.isPenaltyShootout && e.type === 'goal' && (e.playerId === p.id || e.playerName === p.name)).length;
+    const playerAssists = matchInfo.events.filter(e => !e.isPenaltyShootout && e.type === 'goal' && (e.assistPlayerId === p.id || e.assistPlayerName === p.name)).length;
     const playerYellows = matchInfo.events.filter(e => e.type === 'yellow_card' && (e.playerId === p.id || e.playerName === p.name)).length;
     const playerReds = matchInfo.events.filter(e => e.type === 'red_card' && (e.playerId === p.id || e.playerName === p.name)).length;
 

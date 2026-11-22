@@ -560,7 +560,7 @@ export const MatchesTab: React.FC = () => {
 
           {/* Goal Scorers & Minutes Row (Live & Post-Match) */}
           {(() => {
-            const goalEvents = (liveMatch.events || []).filter(e => e && e.type === 'goal');
+            const goalEvents = (liveMatch.events || []).filter(e => e && !e.isPenaltyShootout && e.type === 'goal');
             if (goalEvents.length === 0) return null;
             const homeScorers = goalEvents
               .filter(e => e.teamId === liveMatch.homeTeam.id)
@@ -657,7 +657,7 @@ export const MatchesTab: React.FC = () => {
               }`}>
                 <Trophy className="w-4 h-4" />
                 <span>
-                  {liveMatch.internationalContext ? (isUserWin ? 'فوز لمنتخبك! اضغط المتابعة لتسجيل النتيجة الدولية.' : isUserDraw ? 'انتهت المباراة الدولية بالتعادل. اضغط المتابعة لتسجيل النتيجة.' : 'انتهت المباراة الدولية. اضغط المتابعة لتسجيل النتيجة.') : isUserWin
+                  {liveMatch.internationalContext ? (isUserWin ? 'فوز لمنتخبك! اضغط المتابعة لتسجيل النتيجة الدولية.' : isUserDraw ? 'انتهت المباراة الدولية بالتعادل. اضغط المتابعة لتسجيل النتيجة.' : 'انتهت المباراة الدولية. اضغط المتابعة لتسجيل النتيجة.') : liveMatch.fixture?.mlsPlayoff ? 'مباراة ملحق MLS، بدون نقاط للدوري. أكد النتيجة لتحديث السلسلة ومسار التأهل.' : isUserWin
                     ? '🎉 فوز رائع ومستحق! مكافأة الفوز ونقاط الخبرة أضيفت لرصيدك في جدول الدوري.'
                     : isUserDraw
                     ? '🤝 تعادل ونقطة إضافية تضاف إلى رصيد فريقك في جدول الدوري.'
@@ -666,7 +666,7 @@ export const MatchesTab: React.FC = () => {
               </div>
 
               {/* Rewarded Rematch Feature (إعادة المباراة عند الهزيمة أو التعادل مقابل مشاهدة إعلان) */}
-              {!isUserWin && !liveMatch.internationalContext && (
+              {!isUserWin && !liveMatch.internationalContext && !liveMatch.fixture?.mlsPlayoff && (
                 <div className="bg-gradient-to-r from-purple-950/80 via-slate-900 to-indigo-950/80 border-2 border-indigo-500/50 rounded-2xl p-4 shadow-xl space-y-3 text-right">
                   <div className="flex items-center justify-between border-b border-indigo-500/30 pb-2">
                     <div className="flex items-center gap-2">
@@ -920,6 +920,7 @@ export const MatchesTab: React.FC = () => {
             awayPenalties={liveMatch.awayPenalties}
             isCupMatch={isCupMatch}
             isInternational={Boolean(liveMatch.internationalContext)}
+            isMLSPlayoff={Boolean(liveMatch.fixture?.mlsPlayoff)}
             finishButtonLabel={liveMatch.internationalContext ? "تأكيد النتيجة والعودة للمنتخبات" : "تأكيد النتيجة والانتقال للجولة التالية"}
             onTacticChange={(tacticKey) => {
               if (tacticKey === 'attack') changeLiveMentality('attacking');
@@ -1409,7 +1410,7 @@ export const MatchesTab: React.FC = () => {
                   <div 
                     key={idx}
                     className={`p-2 rounded-xl border text-xs flex items-start gap-2.5 transition-all ${
-                      evt.type === 'goal'
+                      !evt.isPenaltyShootout && evt.type === 'goal'
                         ? 'bg-emerald-950/80 border-emerald-500 text-emerald-200 font-bold'
                         : evt.type === 'yellow_card'
                         ? 'bg-amber-950/70 border-amber-500/80 text-amber-200'
@@ -1637,7 +1638,7 @@ export const MatchesTab: React.FC = () => {
               const awayName = awayClub?.name || getClubDisplayName(userFixture.awayTeamId, teams);
               const compLabel = userFixture.tournamentBadge || 'الدوري الممتاز';
               const stageLabel = userFixture.stageName || `الجولة ${userFixture.round || currentRound}`;
-              const goalEvents = (userFixture.events || []).filter(e => e && e.type === 'goal');
+              const goalEvents = (userFixture.events || []).filter(e => e && !e.isPenaltyShootout && e.type === 'goal');
               const homeGoals = goalEvents
                 .filter(e => e.teamId === userFixture.homeTeamId)
                 .map(e => `${e.playerName || 'لاعب'} '${e.minute}`);
@@ -2401,10 +2402,10 @@ export const MatchesTab: React.FC = () => {
                           </div>
                         </div>
 
-                        {fixture.isPlayed && Array.isArray(fixture.events) && fixture.events.some((ev: any) => ev && ev.type === 'goal') && (
+                        {fixture.isPlayed && Array.isArray(fixture.events) && fixture.events.some((ev: any) => ev && !ev.isPenaltyShootout && ev.type === 'goal') && (
                           <div className="text-[10px] text-slate-300 text-center leading-relaxed">
                             ⚽ {fixture.events
-                              .filter((ev: any) => ev && ev.type === 'goal')
+                              .filter((ev: any) => ev && !ev.isPenaltyShootout && ev.type === 'goal')
                               .map((ev: any) => `${ev.playerName || 'لاعب'} '${ev.minute}`)
                               .join('، ')}
                           </div>
@@ -2499,10 +2500,10 @@ export const MatchesTab: React.FC = () => {
                       </div>
                     </div>
 
-                    {fixture.isPlayed && Array.isArray(fixture.events) && fixture.events.some(ev => ev && ev.type === 'goal') && (
+                    {fixture.isPlayed && Array.isArray(fixture.events) && fixture.events.some(ev => ev && !ev.isPenaltyShootout && ev.type === 'goal') && (
                       <div className="pt-1 border-t border-slate-800/60 text-[10px] text-slate-300 text-center">
                         ⚽ {fixture.events
-                          .filter(ev => ev && ev.type === 'goal')
+                          .filter(ev => ev && !ev.isPenaltyShootout && ev.type === 'goal')
                           .map(ev => `${ev.playerName || 'لاعب'} '${ev.minute}`)
                           .join('، ')}
                       </div>

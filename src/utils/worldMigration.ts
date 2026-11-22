@@ -23,6 +23,10 @@ export function inferClubCountry(club: Partial<Club>): { countryCode: string; co
   const name = club.name || '';
   const shortName = club.shortName || '';
   const text = `${id} ${name} ${shortName}`;
+  if (id.startsWith('mls_') || club.leagueId === 'usa_tier_1') {
+    const canadian = club.countryCode === 'CAN' || ['mls_cf_montreal', 'mls_toronto_fc', 'mls_vancouver_whitecaps_fc'].includes(id);
+    return canadian ? { countryCode: 'CAN', countryName: 'كندا' } : { countryCode: 'USA', countryName: 'الولايات المتحدة' };
+  }
 
   if (id.startsWith('sdn') || text.includes('سودان')) {
     return { countryCode: 'SDN', countryName: 'السودان' };
@@ -83,7 +87,7 @@ export function inferClubCountry(club: Partial<Club>): { countryCode: string; co
 export function normalizePlayer(player: Player, clubId: string, leagueId: string, defaultCountry = 'مصر', defaultCode = 'EGY'): Player {
   const nationality = player.nationality || defaultCountry;
   const nationalityCode = player.nationalityCode || defaultCode;
-  const countryOfBirth = player.countryOfBirth || nationality;
+  const countryOfBirth = leagueId === 'usa_tier_1' ? player.countryOfBirth : player.countryOfBirth || nationality;
 
   return {
     ...player,

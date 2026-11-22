@@ -254,6 +254,7 @@ export const PlayerModal: React.FC<PlayerModalProps> = ({ player, onClose, onSta
                   </span>
                 )}
               </div>
+              {player.gameDataNote && <p className="text-[10px] leading-5 text-slate-400 mt-2 max-w-lg">{player.gameDataNote}{player.isPositionAdapted ? ' المركز الظاهر تكييف للمحاكاة.' : ''}</p>}
               {player.nickname && (
                 <div className="text-xs text-amber-400 font-bold mt-0.5">"{player.nickname}"</div>
               )}
@@ -266,7 +267,7 @@ export const PlayerModal: React.FC<PlayerModalProps> = ({ player, onClose, onSta
                 </span>
                 {player.preferredFoot && (
                   <span className="text-[11px] text-slate-400 bg-slate-800/60 px-1.5 py-0.5 rounded-md">
-                    {player.preferredFoot === 'left' ? 'القدم اليسرى' : player.preferredFoot === 'both' ? 'كلتا القدمين' : 'القدم اليمنى'}
+                    {player.preferredFoot === 'left' ? 'القدم اليسرى' : player.preferredFoot === 'both' ? 'كلتا القدمين' : 'القدم اليمنى'}{player.isPreferredFootEstimated ? ' (تقديري للعبة)' : ''}
                   </span>
                 )}
                 {player.personality && (

@@ -2,6 +2,16 @@ import { Player, Position, PositionCategory, PreferredFoot, PlayerPersonality } 
 import { COMPACT_REAL_SQUADS } from './squads';
 
 export interface RealPlayerTemplate {
+  birthDate?: string;
+  rosterSourceUrls?: string[];
+  rosterSnapshotDate?: string;
+  isGameFiller?: boolean;
+  gameDataNote?: string;
+  originalPosition?: string;
+  isPositionAdapted?: boolean;
+  isPreferredFootEstimated?: boolean;
+  sourceShirtNumber?: number | null;
+
   id: string;
   name: string;
   firstName: string;
@@ -3197,7 +3207,15 @@ export function loadRealClubSquad(clubId: string): Player[] {
       lastName: tmpl.lastName,
       nationality: tmpl.nationality,
       nationalityCode: tmpl.nationalityCode,
-      countryOfBirth: tmpl.nationality,
+      countryOfBirth: tmpl.leagueId === 'usa_tier_1' ? undefined : tmpl.nationality,
+      ...(tmpl.rosterSnapshotDate ? {
+        birthDate: tmpl.birthDate, rosterSourceUrls: tmpl.rosterSourceUrls,
+        rosterSnapshotDate: tmpl.rosterSnapshotDate, isGameFiller: tmpl.isGameFiller,
+        gameDataNote: tmpl.gameDataNote, originalPosition: tmpl.originalPosition,
+        isPositionAdapted: tmpl.isPositionAdapted,
+        isPreferredFootEstimated: tmpl.isPreferredFootEstimated,
+        sourceShirtNumber: tmpl.sourceShirtNumber,
+      } : {}),
       currentClubId: clubId,
       currentLeagueId: tmpl.leagueId,
       position: tmpl.position,

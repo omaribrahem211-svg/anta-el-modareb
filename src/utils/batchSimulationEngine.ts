@@ -1,3 +1,5 @@
+import { resolveMLSPlayoffScore } from './mlsMatch';
+import { ensureMLSPlayoffs, sortMLSStandings, mlsChampionId } from './mlsPlayoffs';
 import { Club, Fixture, LeagueDefinition, LeagueStanding, ManagerProfile, TeamTactics } from '../types/game';
 import { simulateMatch, updateLeagueStandings } from './engine';
 import { processPostMatchPlayerUpdates } from './playerFatigueEngine';
@@ -68,7 +70,7 @@ export function simulateMultipleLeagueRounds(
 
         if (!homeTeam || !awayTeam) return;
 
-        const matchRes = simulateMatch(homeTeam, awayTeam, homeTeam.tactics, awayTeam.tactics);
+        const matchRes = resolveMLSPlayoffScore(fix, simulateMatch(homeTeam, awayTeam, homeTeam.tactics, awayTeam.tactics), homeTeam, awayTeam);
 
       // Update fixture
       simFixtures = simFixtures.map(f => {
@@ -77,6 +79,7 @@ export function simulateMultipleLeagueRounds(
             ...f,
             homeScore: matchRes.homeScore,
             awayScore: matchRes.awayScore,
+            homePenalties: matchRes.homePenalties, awayPenalties: matchRes.awayPenalties, winnerTeamId: matchRes.winnerTeamId,
             isPlayed: true,
             events: matchRes.events,
             stats: matchRes.stats,
@@ -93,7 +96,7 @@ export function simulateMultipleLeagueRounds(
       });
 
       // Update league standings
-      simStandings = updateLeagueStandings(simStandings, homeTeam.id, awayTeam.id, matchRes.homeScore, matchRes.awayScore);
+      if (!fix.mlsPlayoff) simStandings = updateLeagueStandings(simStandings, homeTeam.id, awayTeam.id, matchRes.homeScore, matchRes.awayScore);
 
       // Track user stats
       if (userClubId && (homeTeam.id === userClubId || awayTeam.id === userClubId)) {
@@ -160,11 +163,15 @@ export function simulateMultipleLeagueRounds(
       };
     });
 
+    if (activeLeague.id === 'usa_tier_1') {
+      simStandings = sortMLSStandings(simStandings, simFixtures);
+      simFixtures = ensureMLSPlayoffs(simFixtures, simStandings);
+    }
     simulatedCount++;
     roundPtr++;
   }
 
-  const isSeasonOver = roundPtr > totalRounds;
+  const isSeasonOver = roundPtr > totalRounds && (activeLeague.id !== 'usa_tier_1' || !!mlsChampionId(simFixtures));
 
   return {
     nextTeams: simTeams,

@@ -1,3 +1,5 @@
+import { resolveMLSPlayoffScore } from '../utils/mlsMatch';
+import { isFullMLSField, generateMLSRegularSeason } from '../utils/mlsCompetition';
 import {
   Club,
   Fixture,
@@ -345,6 +347,12 @@ export class CalendarManager {
       roundRobinRounds.push(reverseMatches);
     }
 
+    if (isFullMLSField(leagueTeams)) {
+      roundRobinRounds.length = 0;
+      const mls = generateMLSRegularSeason(leagueTeams, seasonNumber);
+      for (let round = 1; round <= 34; round++) roundRobinRounds.push(mls.filter(f => f.round === round).map(f => ({ homeId: f.homeTeamId, awayId: f.awayTeamId })));
+    }
+
     // Map each league round to weekly Saturdays starting Aug 15
     const leagueStartDate = new Date(startYear, 7, 15); // August 15
     roundRobinRounds.forEach((roundMatches, roundIdx) => {
@@ -547,7 +555,7 @@ export class CalendarManager {
 
     const pruneAiEvents = (evs: any[] = []) =>
       (Array.isArray(evs) ? evs : [])
-        .filter(e => e && (e.type === 'goal' || e.type === 'red_card'))
+        .filter(e => e && (!e.isPenaltyShootout && e.type === 'goal' || e.type === 'red_card'))
         .slice(0, 8);
 
     [...overdueAiMatches, ...matchesOnDate].forEach(fix => {
@@ -561,9 +569,10 @@ export class CalendarManager {
       const home = getClubObj(fix.homeTeamId) || ({ id: fix.homeTeamId, name: 'فريق', shortName: 'فريق', players: [], reputation: 50, tactics: { formation: '4-4-2' } } as any);
       const away = getClubObj(fix.awayTeamId) || ({ id: fix.awayTeamId, name: 'فريق', shortName: 'فريق', players: [], reputation: 50, tactics: { formation: '4-4-2' } } as any);
 
-      const res = simulateMatch(home, away, home.tactics || { formation: '4-4-2' }, away.tactics || { formation: '4-4-2' });
+      const res = resolveMLSPlayoffScore(fix, simulateMatch(home, away, home.tactics || { formation: '4-4-2' }, away.tactics || { formation: '4-4-2' }), home, away);
       fix.homeScore = res.homeScore;
       fix.awayScore = res.awayScore;
+      fix.homePenalties = res.homePenalties; fix.awayPenalties = res.awayPenalties; fix.winnerTeamId = res.winnerTeamId;
       fix.isPlayed = true;
       fix.events = pruneAiEvents(res.events);
       fix.stats = res.stats;

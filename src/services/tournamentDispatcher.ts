@@ -1,3 +1,5 @@
+import { ensureMLSPlayoffs, sortMLSStandings } from '../utils/mlsPlayoffs';
+import { resolveMLSPlayoffScore } from '../utils/mlsMatch';
 import {
   Club,
   CompetitionType,
@@ -227,6 +229,14 @@ export async function processMatchResult(
     userClubId = opts.userClubId ?? opts.userClub?.id;
   }
 
+  if (fixture.mlsPlayoff) {
+    const home = teams.find(t => t.id === fixture.homeTeamId) || findClubInWorld(fixture.homeTeamId);
+    const away = teams.find(t => t.id === fixture.awayTeamId) || findClubInWorld(fixture.awayTeamId);
+    if (!home || !away) throw new Error('Missing MLS playoff club');
+    const resolved = resolveMLSPlayoffScore(fixture, { homeScore, awayScore, homePenalties, awayPenalties, events, stats }, home, away);
+    ({ homeScore, awayScore, homePenalties, awayPenalties, events, stats, winnerTeamId } = resolved);
+  }
+
   const branding = getCompetitionBranding(fixture);
   const normType = branding.type;
 
@@ -310,7 +320,7 @@ export async function processMatchResult(
   // --------------------------------------------------------------------------
   // 1. LEAGUE PROCESSING
   // --------------------------------------------------------------------------
-  if (normType === 'LEAGUE') {
+  if (normType === 'LEAGUE' && !fixture.mlsPlayoff) {
     updatedStandings = updateLeagueStandings(
       updatedStandings,
       updatedFixture.homeTeamId,
@@ -318,6 +328,11 @@ export async function processMatchResult(
       homeScore,
       awayScore
     );
+  }
+
+  if (currentStandings.length === 30 && currentStandings.every(s => s.teamId.startsWith('mls_'))) {
+    updatedStandings = sortMLSStandings(updatedStandings, updatedFixtures);
+    updatedFixtures = ensureMLSPlayoffs(updatedFixtures, updatedStandings);
   }
 
   // Domestic Cup and Continental Tournaments are disabled for streamlined League-only gameplay
@@ -334,7 +349,7 @@ export async function processMatchResult(
 
   events.forEach(evt => {
     if (!evt) return;
-    if (evt.type === 'goal' && evt.playerId) {
+    if (!evt.isPenaltyShootout && evt.type === 'goal' && evt.playerId) {
       scorerCounts.set(evt.playerId, (scorerCounts.get(evt.playerId) || 0) + 1);
     }
     if (evt.assistPlayerId) {

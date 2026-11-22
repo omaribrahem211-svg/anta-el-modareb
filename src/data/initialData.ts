@@ -1,3 +1,4 @@
+import { isFullMLSField, generateMLSRegularSeason } from '../utils/mlsCompetition';
 import { Club, Player, LeagueStanding, Fixture, ManagerProfile, InboxMessage } from '../types/game';
 import { generateClubSquad } from '../utils/playerGenerator';
 
@@ -1300,6 +1301,7 @@ export const INITIAL_INBOX: InboxMessage[] = [
 ];
 
 export function generateLeagueSchedule(teams: Club[]): Fixture[] {
+  if (isFullMLSField(teams)) return generateMLSRegularSeason(teams);
   const fixtures: Fixture[] = [];
   const teamIds = teams.map(t => t.id);
   const n = teamIds.length;

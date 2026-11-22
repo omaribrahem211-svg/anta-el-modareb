@@ -1,3 +1,5 @@
+import { ensureMLSPlayoffs, sortMLSStandings, mlsChampionId, MLS_MAX_ROUNDS } from '../utils/mlsPlayoffs';
+import { resolveMLSPlayoffScore } from '../utils/mlsMatch';
 import { App as CapacitorApp } from '@capacitor/app';
 import { getLiveTopFlightPool, getLiveTopFlightPoolsByContinent } from '../services/worldClubPools';
 import { healStaleLeagueFixtures, dedupeClubsById, repairLeagueFixtures } from '../utils/leagueHeal';
@@ -124,7 +126,7 @@ import {
   CAREER_CONFIG,
   getLicenseTitleArabic,
 } from '../utils/careerProgressionEngine';
-import { 
+import {
   simulateKnockoutMatch,
   initAfricanChampionsLeague,
   initCafConfederationCup,
@@ -373,7 +375,7 @@ interface GameContextType {
   swapPlayers: (sourcePlayerId: string, targetPlayerId: string) => void;
   setCaptainAndSetPieces: (roles: { captainId?: string; penaltyTakerId?: string; freeKickTakerId?: string; cornerTakerId?: string }) => void;
   setPlayerTrainingFocus: (playerId: string, focus: Player['trainingFocus']) => void;
-  
+
   // Day Progression & Calendar Simulation
   advanceToNextDay: (skipToMatch?: boolean, forceAdvance?: boolean) => void | Promise<void>;
   advanceDay?: (skipToMatch?: boolean, forceAdvance?: boolean) => void | Promise<void>;
@@ -456,7 +458,7 @@ interface GameContextType {
   setClubTicketPrice: (price: number) => { success: boolean; message: string };
   transferBudgetToWageBudget: (cashAmount: number) => { success: boolean; message: string };
   transferWageToCashBudget: (monthlyAmount: number) => { success: boolean; message: string };
-  
+
   // Youth Academy System
   promoteYouthProspect: (prospectId: string) => { success: boolean; message: string };
   sellYouthProspect: (prospectId: string) => { success: boolean; message: string };
@@ -1354,8 +1356,8 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const restoreMatchFromCandidate = (candidate: any): any | null => {
       try {
         if (!candidate || !candidate.fixture) return null;
-        if (typeof candidate.currentMinute !== 'number' || candidate.currentMinute < 0 || candidate.currentMinute > (candidate.internationalContext ? 120 : 89)) return null;
-        if (candidate.fixture.isPlayed === true || (candidate.isFinished === true && !candidate.internationalContext)) return null;
+        if (typeof candidate.currentMinute !== 'number' || candidate.currentMinute < 0 || candidate.currentMinute > ((candidate.internationalContext || candidate.fixture?.mlsPlayoff) ? 120 : 89)) return null;
+        if (candidate.fixture.isPlayed === true || (candidate.isFinished === true && !candidate.internationalContext && !candidate.fixture?.mlsPlayoff)) return null;
 
         // Backward compatibility: legacy saves with complete team squad objects
         if (
@@ -1546,7 +1548,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   }, []);
 
   const saveLiveMatchToStorage = useCallback((matchToSave: LiveMatchState | null) => {
-    if (matchToSave && (!matchToSave.isFinished || matchToSave.internationalContext)) {
+    if (matchToSave && (!matchToSave.isFinished || matchToSave.internationalContext || matchToSave.fixture?.mlsPlayoff)) {
       saveActiveLiveMatchToDb(matchToSave);
     } else {
       clearActiveLiveMatchFromDb();
@@ -1876,12 +1878,13 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   }, [canClaimDailyReward]);
 
   const totalRounds = useMemo(() => {
+    if (activeLeague.id === 'usa_tier_1') return MLS_MAX_ROUNDS;
     if (fixtures && fixtures.length > 0) {
       const maxR = Math.max(...fixtures.map(f => f.round || 0));
       if (maxR > 0) return maxR;
     }
     return season.totalRounds || 34;
-  }, [fixtures, season.totalRounds]);
+  }, [fixtures, season.totalRounds, activeLeague.id]);
 
   const leagueFixtures = useMemo(() => {
     return fixtures.filter(f => f && normalizeCompetitionType(f.competitionType || f.tournamentId) === 'LEAGUE');
@@ -1919,6 +1922,13 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
   }, [leagueFixtures, userClub?.id, activeLeague?.id, season?.seasonNumber, season?.status]);
 
+  useEffect(() => {
+    if (activeLeague.id !== 'usa_tier_1' || liveMatch) return;
+    const repaired = ensureMLSPlayoffs(fixtures, standings);
+    if (repaired !== fixtures) setFixtures(repaired);
+    if (season.totalRounds !== MLS_MAX_ROUNDS) setSeason(prev => ({ ...prev, totalRounds: MLS_MAX_ROUNDS }));
+  }, [activeLeague.id, fixtures, standings, liveMatch, season.totalRounds]);
+
   const allLeagueFixturesPlayed = useMemo(() => {
     return leagueFixtures.length > 0 && leagueFixtures.every(f => f && (f.isPlayed || (f as any).played));
   }, [leagueFixtures]);
@@ -1947,11 +1957,11 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   // Complete Season Integrity: Season is completed only when all league fixtures are played, cup & continental are concluded, and no pending user matches remain!
   const seasonFinished = useMemo(() => {
     if (season.status === 'completed') return true;
-    if (allLeagueFixturesPlayed && leagueFixtures.length > 0 && cupCompleted && continentalCompleted && !userHasUnplayedMatches) {
+    if ((activeLeague.id !== 'usa_tier_1' || mlsChampionId(fixtures)) && allLeagueFixturesPlayed && leagueFixtures.length > 0 && cupCompleted && continentalCompleted && !userHasUnplayedMatches) {
       return true;
     }
     return false;
-  }, [season.status, allLeagueFixturesPlayed, leagueFixtures.length, cupCompleted, continentalCompleted, userHasUnplayedMatches]);
+  }, [season.status, allLeagueFixturesPlayed, leagueFixtures.length, cupCompleted, continentalCompleted, userHasUnplayedMatches, activeLeague.id, fixtures]);
   const unreadMessagesCount = inbox.filter(m => !m.read).length;
 
   // Fixture watchdog: repairs saves/seasons that would otherwise freeze ("stuck at round N", season never ends).
@@ -2333,12 +2343,12 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
 
     const unwrapSource = rawSave?.payload || rawSave?.current_save || rawSave?.data || rawSave?.save || rawSave;
-    const detectedSchemaVersion = typeof unwrapSource?.schemaVersion === 'number' 
-      ? unwrapSource.schemaVersion 
+    const detectedSchemaVersion = typeof unwrapSource?.schemaVersion === 'number'
+      ? unwrapSource.schemaVersion
       : 1;
 
     // Check if structure requires upgrade
-    const needsStructuralUpgrade = 
+    const needsStructuralUpgrade =
       detectedSchemaVersion < CURRENT_SAVE_FORMAT_VERSION ||
       !unwrapSource?.calendarDate ||
       !unwrapSource?.clubEconomy ||
@@ -2352,7 +2362,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const migratedPayload = migrateSavePayload(rawSave);
 
     const upgraded = Boolean(
-      needsStructuralUpgrade || 
+      needsStructuralUpgrade ||
       detectedSchemaVersion !== CURRENT_SAVE_FORMAT_VERSION ||
       migratedPayload.schemaVersion !== detectedSchemaVersion
     );
@@ -2437,11 +2447,12 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           hasUnplayedPastFixtures = true;
           const hTeam = leagueClubs.find(t => t.id === f.homeTeamId) || findClubInWorld(f.homeTeamId) || leagueClubs[0];
           const aTeam = leagueClubs.find(t => t.id === f.awayTeamId) || findClubInWorld(f.awayTeamId) || leagueClubs[1];
-          const simRes = simulateMatch(hTeam, aTeam, hTeam?.tactics, aTeam?.tactics);
+          const simRes = resolveMLSPlayoffScore(f, simulateMatch(hTeam, aTeam, hTeam?.tactics, aTeam?.tactics), hTeam, aTeam);
           return {
             ...f,
             homeScore: simRes.homeScore,
             awayScore: simRes.awayScore,
+            homePenalties: simRes.homePenalties, awayPenalties: simRes.awayPenalties, winnerTeamId: simRes.winnerTeamId,
             isPlayed: true,
             stats: simRes.stats,
             events: (simRes.events || []).filter(e => e && e.type !== 'commentary').slice(0, 10),
@@ -3224,7 +3235,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           next = simulateMatchStep(prev, prev.internationalContext ? controlledLiveClub(prev, userClubRef.current).tactics : userTacticsRef.current);
         } catch (simErr) {
           console.error('[simulateMatchStep Graceful Recovery]', simErr);
-          next = prev.internationalContext ? { ...prev, isPlaying: false } : {
+          next = (prev.internationalContext || prev.fixture?.mlsPlayoff) ? { ...prev, isPlaying: false } : {
             ...prev,
             currentMinute: prev.currentMinute + 1,
             isFinished: prev.currentMinute + 1 >= 90,
@@ -3238,7 +3249,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           liveMatchWatchdogRef.current.lastMinuteChangeTs = Date.now();
         }
 
-        if (next.isFinished || (!next.internationalContext && next.currentMinute >= 90)) {
+        if (next.isFinished || (!next.internationalContext && !next.fixture?.mlsPlayoff && next.currentMinute >= 90)) {
           const currentClub = userClubRef.current;
           const currentLeague = activeLeagueRef.current;
           const userIsInFixture = currentClub && (next.fixture?.homeTeamId === currentClub.id || next.fixture?.awayTeamId === currentClub.id);
@@ -3254,13 +3265,15 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             userScore,
             opponentScore: oppScore,
             leagueTier: currentLeague?.tier || 1,
-            isCupMatch: next.fixture?.competitionType === 'cup',
+            isCupMatch: !!next.fixture?.mlsPlayoff || next.fixture?.competitionType === 'cup',
+            userPenalties: isUserHome ? next.homePenalties : next.awayPenalties,
+            opponentPenalties: isUserHome ? next.awayPenalties : next.homePenalties,
             customTicketPrice: currentClub.facilities?.ticketPrice,
           }) : undefined;
 
           const finishedNext = {
             ...next,
-            currentMinute: next.internationalContext ? next.currentMinute : 90,
+            currentMinute: (next.internationalContext || next.fixture?.mlsPlayoff) ? next.currentMinute : 90,
             isFinished: true,
             isPlaying: false,
             isHalfTime: false,
@@ -3828,7 +3841,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         ...prev,
         isHalfTime: false,
         isPlaying: true,
-        currentMinute: prev.internationalContext ? prev.currentMinute : 45,
+        currentMinute: (prev.internationalContext || prev.fixture?.mlsPlayoff) ? prev.currentMinute : 45,
         ...(teamTalkMoraleBoost && prev.internationalContext ? {
           homeTeam: { ...prev.homeTeam, players: prev.homeTeam.players.map(p => prev.homeTeam.id === prev.internationalContext!.userTeamId ? { ...p, morale: Math.min(100, (p.morale || 50) + 5) } : p) },
           awayTeam: { ...prev.awayTeam, players: prev.awayTeam.players.map(p => prev.awayTeam.id === prev.internationalContext!.userTeamId ? { ...p, morale: Math.min(100, (p.morale || 50) + 5) } : p) },
@@ -3995,13 +4008,20 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     setLiveMatch(prev => {
       if (!prev || prev.isFinished) return prev;
-      if (prev.internationalContext) {
+      if (prev.internationalContext || prev.fixture?.mlsPlayoff) {
         try {
           let international = { ...prev, isHalfTime: false, isPlaying: true };
           for (let step = 0; step < 160 && !international.isFinished; step++) {
             international = simulateMatchStep({ ...international, isHalfTime: false, isPlaying: true }, controlledLiveClub(international, userClub).tactics);
           }
           isMatchFinishedRef.current = international.isFinished;
+          if (prev.fixture?.mlsPlayoff && userClub) {
+            const isHome = international.homeTeam.id === userClub.id;
+            international.matchRevenue = calculateMatchRevenue({ userClub, opponentClub: isHome ? international.awayTeam : international.homeTeam, isHome,
+              userScore: isHome ? international.homeScore : international.awayScore, opponentScore: isHome ? international.awayScore : international.homeScore,
+              leagueTier: 1, isCupMatch: true, userPenalties: isHome ? international.homePenalties : international.awayPenalties,
+              opponentPenalties: isHome ? international.awayPenalties : international.homePenalties, customTicketPrice: userClub.facilities?.ticketPrice, isSkipped: true });
+          }
           return international;
         } catch (err) { console.error('[NationalLiveMatch] Skip paused safely', err); return { ...prev, isPlaying: false }; }
       }
@@ -4023,9 +4043,9 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         const userScore = isUserHome ? state.homeScore : state.awayScore;
         const oppScore = isUserHome ? state.awayScore : state.homeScore;
 
-        const isCup = 
-          state.fixture?.competitionType === 'cup' || 
-          Boolean(state.fixture?.cupStage) || 
+        const isCup =
+          state.fixture?.competitionType === 'cup' ||
+          Boolean(state.fixture?.cupStage) ||
           Boolean(state.fixture?.stageName?.includes('نهائي')) ||
           Boolean(state.fixture?.stageName?.includes('كأس')) ||
           Boolean(state.fixture?.stageName?.includes('الكأس')) ||
@@ -4236,15 +4256,15 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       (fixture?.stage && fixture.stage !== 'group' && !fixture.stage.toLowerCase().includes('group')) ||
       (fixture?.stageName && !fixture.stageName.includes('المجموعات'))
     );
-    const isCup = 
+    const isCup = !fixture?.mlsPlayoff && (
       fixtureCompType === 'DOMESTIC_COP' ||
-      Boolean(fixture?.cupStage) || 
+      Boolean(fixture?.cupStage) ||
       Boolean(fixture?.competitionName?.includes('كأس')) ||
       Boolean(fixture?.competitionName?.includes('الكأس')) ||
       Boolean(fixture?.competitionName?.toLowerCase()?.includes('cup')) ||
       Boolean(fixture?.id?.toLowerCase()?.includes('cup')) ||
-      Boolean(cupTournament?.matches?.some(m => m.id === fixture?.id));
-    const requiresKnockoutResolution = isCup || isContinentalKnockout;
+      Boolean(cupTournament?.matches?.some(m => m.id === fixture?.id)));
+    const requiresKnockoutResolution = isCup || isContinentalKnockout || !!fixture?.mlsPlayoff;
 
     const resolvedCupStage = fixture?.cupStage || (
       fixture?.stageName?.includes('64') ? 'round_of_64' :
@@ -4293,7 +4313,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       userScore,
       opponentScore: oppScore,
       leagueTier: activeLeague?.tier || 1,
-      isCupMatch: isCup || isContinental,
+      isCupMatch: isCup || isContinental || !!fixture?.mlsPlayoff,
       userPenalties: requiresKnockoutResolution ? userPenalties : undefined,
       opponentPenalties: requiresKnockoutResolution ? oppPenalties : undefined,
       customTicketPrice: userClub.facilities?.ticketPrice,
@@ -4450,13 +4470,14 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         try {
           const otherHome = (teams.find(t => t && t.id === otherFix.homeTeamId) || (otherFix.homeTeamId ? findClubInWorld(otherFix.homeTeamId) : undefined) || teams[0]) || ({ id: otherFix.homeTeamId || 'home_dummy', name: 'الفريق المضيف', shortName: 'مض', players: [], tactics: { startingPlayerIds: [], benchPlayerIds: [] } } as any);
           const otherAway = (teams.find(t => t && t.id === otherFix.awayTeamId) || (otherFix.awayTeamId ? findClubInWorld(otherFix.awayTeamId) : undefined) || teams[1]) || ({ id: otherFix.awayTeamId || 'away_dummy', name: 'الفريق الضيف', shortName: 'ضف', players: [], tactics: { startingPlayerIds: [], benchPlayerIds: [] } } as any);
-          const otherResult = simulateMatch(otherHome, otherAway, otherHome.tactics, otherAway.tactics);
+          const otherResult = resolveMLSPlayoffScore(otherFix, simulateMatch(otherHome, otherAway, otherHome.tactics, otherAway.tactics), otherHome, otherAway);
           const prunedOtherEvents = pruneCpuEvents(otherResult.events);
 
           const finishedOtherFix: Fixture = {
             ...otherFix,
             homeScore: otherResult.homeScore,
             awayScore: otherResult.awayScore,
+            homePenalties: otherResult.homePenalties, awayPenalties: otherResult.awayPenalties, winnerTeamId: otherResult.winnerTeamId,
             isPlayed: true,
             events: prunedOtherEvents,
             stats: otherResult.stats,
@@ -4513,6 +4534,8 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     } catch (healErr) {
       console.warn('[LeagueHeal] failed', healErr);
     }
+
+    if (activeLeague.id === 'usa_tier_1') updatedFixtures = ensureMLSPlayoffs(updatedFixtures, updatedStandings);
 
     // Advance domestic league currentRound and align calendar date with next round
     const unplayedLeagueRounds = updatedFixtures
@@ -5015,7 +5038,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     const remainingLeagueFixtures = updatedFixtures.filter(f => normalizeCompetitionType(f.competitionType || f.tournamentId) === 'LEAGUE' && !f.isPlayed);
     const hasRemainingRounds = nextRoundNumber <= totalRounds && updatedFixtures.some(f => normalizeCompetitionType(f.competitionType || f.tournamentId) === 'LEAGUE' && f.round >= nextRoundNumber);
-    const isNowFinished = !hasRemainingRounds && remainingLeagueFixtures.length === 0;
+    const isNowFinished = !hasRemainingRounds && remainingLeagueFixtures.length === 0 && (activeLeague.id !== 'usa_tier_1' || !!mlsChampionId(updatedFixtures));
 
     // 7. Check if Season Concluded
     if (isNowFinished) {
@@ -5073,12 +5096,14 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         activeLeague,
         updatedCupTournament,
         updatedManager,
-        africanChampionsLeague
+        africanChampionsLeague,
+        updatedFixtures
       );
 
       // Immediately record League Trophy & Promotion in manager.trophies so Trophy Cabinet updates right away
       if ((updatedManager as any).lastTrophyAwardedSeasonNumber !== season.seasonNumber) {
         const newTrophiesList = [...(updatedManager.trophies || [])];
+        if (summary.supportersShieldAwarded && !newTrophiesList.includes(summary.supportersShieldAwarded)) newTrophiesList.push(summary.supportersShieldAwarded);
         if (summary.leagueTrophyAwarded && !newTrophiesList.includes(summary.leagueTrophyAwarded)) {
           newTrophiesList.push(summary.leagueTrophyAwarded);
         }
@@ -5394,6 +5419,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         awayScore: number;
         events: MatchEvent[];
         isCup?: boolean;
+        isMLSPlayoff?: boolean;
         homePenalties?: number;
         awayPenalties?: number;
         winnerTeamId?: string;
@@ -5414,7 +5440,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             ? { ...baseAwayTeam, isUserClub: true, manager: (manager as any) }
             : baseAwayTeam;
 
-          const matchResult = simulateMatch(homeTeam, awayTeam, homeTeam?.tactics, awayTeam?.tactics);
+          const matchResult = resolveMLSPlayoffScore(fix, simulateMatch(homeTeam, awayTeam, homeTeam?.tactics, awayTeam?.tactics), homeTeam, awayTeam);
 
           const isUserMatch = !!userClub && (fix.homeTeamId === userClub.id || fix.awayTeamId === userClub.id);
           let fixtureUserRevenue: MatchRevenueBreakdown | undefined = undefined;
@@ -5432,7 +5458,9 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
               userScore,
               opponentScore: oppScore,
               leagueTier: activeLeague?.tier || 1,
-              isCupMatch: false,
+              isCupMatch: !!fix.mlsPlayoff,
+              userPenalties: isUserHome ? matchResult.homePenalties : matchResult.awayPenalties,
+              opponentPenalties: isUserHome ? matchResult.awayPenalties : matchResult.homePenalties,
               customTicketPrice: userClub.facilities?.ticketPrice,
               isSkipped: true,
             });
@@ -5458,6 +5486,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             ...fix,
             homeScore: matchResult.homeScore,
             awayScore: matchResult.awayScore,
+            homePenalties: matchResult.homePenalties, awayPenalties: matchResult.awayPenalties, winnerTeamId: matchResult.winnerTeamId,
             isPlayed: true,
             events: matchEvents,
             stats: isUserMatch ? matchResult.stats : undefined,
@@ -5490,6 +5519,8 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             awayScore: matchResult.awayScore,
             events: matchEvents,
             isCup: false,
+            isMLSPlayoff: !!fix.mlsPlayoff,
+            homePenalties: matchResult.homePenalties, awayPenalties: matchResult.awayPenalties,
           });
         } catch (err) {
           console.warn('[MatchEndingFlow] Error during instant fixture simulation:', fix?.id, err);
@@ -5674,14 +5705,15 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         const userScore = isUserHome ? userMatch.homeScore : userMatch.awayScore;
         const oppScore = isUserHome ? userMatch.awayScore : userMatch.homeScore;
         const isCup = Boolean((userMatch as any).isCup);
+        const isKnockout = isCup || Boolean((userMatch as any).isMLSPlayoff);
         const userPenalties = isUserHome ? (userMatch as any).homePenalties : (userMatch as any).awayPenalties;
         const oppPenalties = isUserHome ? (userMatch as any).awayPenalties : (userMatch as any).homePenalties;
-        const hasPenalties = isCup && userPenalties !== undefined && oppPenalties !== undefined;
+        const hasPenalties = isKnockout && userPenalties !== undefined && oppPenalties !== undefined;
 
-        const isUserWin = isCup
+        const isUserWin = isKnockout
           ? (hasPenalties ? userPenalties > oppPenalties : userScore > oppScore)
           : userScore > oppScore;
-        const isUserDraw = isCup
+        const isUserDraw = isKnockout
           ? false
           : userScore === oppScore;
 
@@ -5691,7 +5723,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         isSimUserDraw = isUserDraw;
         isSimAway = !isUserHome;
         hasSimUserMatch = true;
-        const isUserLoss = isCup
+        const isUserLoss = isKnockout
           ? (hasPenalties ? userPenalties < oppPenalties : userScore < oppScore)
           : userScore < oppScore;
 
@@ -5805,7 +5837,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         };
 
         const oppClub = teams.find(t => t.id === (isUserHome ? userMatch.awayTeamId : userMatch.homeTeamId));
-        
+
         let simEval: ReturnType<typeof evaluateMatchImpactOnConfidence> | null = null;
         if (boardSystem && userClub && oppClub) {
           simEval = evaluateMatchImpactOnConfidence(
@@ -5849,11 +5881,11 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           }
         } else {
           roundInboxTitle = `نتيجة الجولة ${currentRound}: ${userClub.shortName} (${userScore}-${oppScore}) ${oppClub?.shortName || ''}`;
-          roundInboxContent = simEval 
+          roundInboxContent = simEval
             ? `أحداث الجولة ${currentRound}:\n\n👔 ${simEval.boardFeedback}\n\n📣 ${simEval.fanFeedback}\n\nالهدف المطلوب: ${simEval.updatedBoardSystem.targetLeaguePositionText} | المركز الحالي: ${simEval.updatedBoardSystem.currentStandingPosition || 1} | نسبة ثقة الإدارة: ${simEval.updatedBoardSystem.confidence}% | نسبة رضا الجمهور: ${simEval.updatedBoardSystem.fanConfidence || 80}%`
-            : isUserWin 
+            : isUserWin
             ? `فوز مستحق لفريقنا بنتيجة (${userScore}-${oppScore})! واصلوا الأداء القوي في المباريات المقبلة.`
-            : isUserDraw 
+            : isUserDraw
             ? `انتهت المباراة بالتعادل (${userScore}-${oppScore}). حصدنا نقطة واحدة ونستعد للجولة القادمة.`
             : `هزيمة مؤسفة بنتيجة (${userScore}-${oppScore}). الإدارة تأمل في تعديل المسار والتعويض سريعاً.`;
         }
@@ -5870,7 +5902,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
         if (userSimMatchRevenue) {
           const simRoundWages = Math.round((userClub.players || []).reduce((sum, p) => sum + (p.salary || 1000), 0) / 4);
-          
+
           // Club economy tracking
           if (DIAGNOSTIC_CONFIG.ENABLE_BOARD_AND_ECONOMY) {
             setClubEconomy(prev => ({
@@ -5991,13 +6023,14 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       console.warn('[LeagueHeal] failed', healErr);
     }
 
+    if (activeLeague.id === 'usa_tier_1') updatedFixtures = ensureMLSPlayoffs(updatedFixtures, updatedStandings);
     const unplayedLeagueInRound = updatedFixtures.some(
       f => f && normalizeCompetitionType(f.competitionType || f.tournamentId) === 'LEAGUE' && f.round === currentRound && !f.isPlayed
     );
     const nextRoundNumber = !unplayedLeagueInRound ? currentRound + 1 : currentRound;
     const remainingLeagueFixtures = updatedFixtures.filter(f => normalizeCompetitionType(f.competitionType || f.tournamentId) === 'LEAGUE' && !f.isPlayed);
     const hasRemainingRounds = nextRoundNumber <= totalRounds && updatedFixtures.some(f => normalizeCompetitionType(f.competitionType || f.tournamentId) === 'LEAGUE' && f.round >= nextRoundNumber);
-    const isNowFinished = !hasRemainingRounds && remainingLeagueFixtures.length === 0;
+    const isNowFinished = !hasRemainingRounds && remainingLeagueFixtures.length === 0 && (activeLeague.id !== 'usa_tier_1' || !!mlsChampionId(updatedFixtures));
 
     // 6. Check if Season Concluded
     if (isNowFinished) {
@@ -6009,11 +6042,13 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         activeLeague,
         updatedCupTournament,
         updatedManager,
-        africanChampionsLeague
+        africanChampionsLeague,
+        updatedFixtures
       );
 
       if ((updatedManager as any).lastTrophyAwardedSeasonNumber !== season.seasonNumber) {
         const newTrophiesList = [...(updatedManager.trophies || [])];
+        if (summary.supportersShieldAwarded && !newTrophiesList.includes(summary.supportersShieldAwarded)) newTrophiesList.push(summary.supportersShieldAwarded);
         if (summary.leagueTrophyAwarded && !newTrophiesList.includes(summary.leagueTrophyAwarded)) {
           newTrophiesList.push(summary.leagueTrophyAwarded);
         }
@@ -6438,7 +6473,8 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           activeLeague,
           cupTournament,
           activeMgr,
-          africanChampionsLeague
+          africanChampionsLeague,
+        res.nextFixtures
         );
         if (activeMgr.lastSettledSeasonNumber !== season.seasonNumber) {
           const endOfSeasonManagerBonus = calculateManagerSeasonBonus(summary, activeMgr);
@@ -6938,7 +6974,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       const alreadyNegotiating = activeNegotiations.some(
         n => n.playerId === playerId && n.type === 'sell' && n.stage !== 'completed' && n.stage !== 'rejected' && n.stage !== 'cancelled'
       );
-      
+
       if (!alreadyNegotiating) {
         // Pick an interested buyer club from available clubs with REAL budgets and appropriate reputation/tier
         const eligibleBuyers = findEligibleBuyerClubs(targetPlayer, teams, userClub.id);
@@ -8509,6 +8545,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   const openSeasonModal = () => {
+    if (activeLeague.id === 'usa_tier_1' && !mlsChampionId(fixtures)) return;
     if (hasPendingUserInternationalTournament(nationalTeamsRef.current) || getDueUserInternationalMatch(nationalTeamsRef.current, currentRound, seasonFinished)) { openNationalTeamView(); return; }
     // The continental competition (if the club qualified) always comes before the season-end screen.
     const ph = continentalPhaseRef.current;
@@ -8528,7 +8565,8 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         activeLeague,
         cupTournament,
         activeMgr,
-        africanChampionsLeague
+        africanChampionsLeague,
+        fixtures
       );
       if (activeMgr.lastSettledSeasonNumber !== season.seasonNumber) {
         const endOfSeasonManagerBonus = calculateManagerSeasonBonus(summary, activeMgr);
@@ -9030,6 +9068,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   const startNextSeasonNow = async (chosenOfferId?: string): Promise<void> => {
+    if (activeLeague.id === 'usa_tier_1' && !mlsChampionId(fixtures)) return;
     if (hasPendingUserInternationalTournament(nationalTeamsRef.current) || getDueUserInternationalMatch(nationalTeamsRef.current, currentRound, seasonFinished)) { openNationalTeamView(); return; }
     if (isStartingSeasonRef.current) return; // double tap while the new season is being built
     isStartingSeasonRef.current = true;
@@ -9046,7 +9085,8 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         activeLeague,
         cupTournament,
         manager,
-        africanChampionsLeague
+        africanChampionsLeague,
+        fixtures
       );
       const cachedOk = !!seasonEndSummary && seasonEndSummary.resultStatus === freshSummary.resultStatus && seasonEndSummary.nextDivisionTier === freshSummary.nextDivisionTier;
       let summary = cachedOk
@@ -9085,7 +9125,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       setContinentalPhase(null);
 
       const safeJobOffers = Array.isArray(jobOffers) ? jobOffers : [];
-      const acceptedOffer = chosenOfferId 
+      const acceptedOffer = chosenOfferId
         ? safeJobOffers.find(o => o.id === chosenOfferId)
         : safeJobOffers.find(o => o.status === 'accepted');
 
@@ -9389,13 +9429,13 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       // Failsafe recovery: bump season number, reset round and regenerate fresh fixtures and standings so game never locks
       const safeNextSeasonNum = season.seasonNumber + 1;
       const safeJobOffers = Array.isArray(jobOffers) ? jobOffers : [];
-      const acceptedOffer = chosenOfferId 
+      const acceptedOffer = chosenOfferId
         ? safeJobOffers.find(o => o.id === chosenOfferId)
         : safeJobOffers.find(o => o.status === 'accepted');
 
       const safeNextLeague = (acceptedOffer ? getLeagueById(acceptedOffer.leagueId) : null) || activeLeague;
-      let safeTeams = acceptedOffer && Array.isArray(safeNextLeague.teams) && safeNextLeague.teams.length > 0 
-        ? [...safeNextLeague.teams] 
+      let safeTeams = acceptedOffer && Array.isArray(safeNextLeague.teams) && safeNextLeague.teams.length > 0
+        ? [...safeNextLeague.teams]
         : teams;
 
       const targetClubId = acceptedOffer ? acceptedOffer.clubId : (userClub?.id || teams[0]?.id);
@@ -10037,7 +10077,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
       // Check for Season End (May 30 or after) -> Trigger Automatic SeasonTransitionManager only when all league fixtures have completed
       const seasonDateRange = CalendarManager.getSeasonDateRange(season?.seasonNumber || 1);
-      const isSeasonEndReached = (simResult.seasonFinished || newDate.rawDateStr >= seasonDateRange.endDateStr) && allLeagueFixturesPlayed && !userHasUnplayedMatches;
+      const isSeasonEndReached = (simResult.seasonFinished || newDate.rawDateStr >= seasonDateRange.endDateStr) && allLeagueFixturesPlayed && !userHasUnplayedMatches && (activeLeague.id !== 'usa_tier_1' || !!mlsChampionId(nextFixtures));
 
       if (isSeasonEndReached && !seasonFinished) {
         const summaryClub = userClub || teams.find(t => t.isUserClub) || teams[0];
@@ -10049,11 +10089,13 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           activeLeague,
           null,
           activeMgr,
-          null
+          null,
+        nextFixtures
         );
 
         if ((activeMgr as any).lastTrophyAwardedSeasonNumber !== season.seasonNumber) {
           const newTrophiesList = [...(activeMgr.trophies || [])];
+          if (summary.supportersShieldAwarded && !newTrophiesList.includes(summary.supportersShieldAwarded)) newTrophiesList.push(summary.supportersShieldAwarded);
           if (summary.leagueTrophyAwarded && !newTrophiesList.includes(summary.leagueTrophyAwarded)) {
             newTrophiesList.push(summary.leagueTrophyAwarded);
           }
@@ -12003,9 +12045,9 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     onAdStarting?: (info: { code: string; rewardAmount: number; rewardCoins: number }) => void
   ): Promise<{ success: boolean; message: string; rewardAmount?: number; rewardCoins?: number }> => {
     if (!userClub) {
-      return { 
-        success: false, 
-        message: 'يجب أن تكون مرتبطاً بنادٍ أولاً لتتمكن من استرداد الكود وإيداع المكافأة المالية في ميزانيته!' 
+      return {
+        success: false,
+        message: 'يجب أن تكون مرتبطاً بنادٍ أولاً لتتمكن من استرداد الكود وإيداع المكافأة المالية في ميزانيته!'
       };
     }
 

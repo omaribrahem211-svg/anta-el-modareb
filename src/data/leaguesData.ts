@@ -42,6 +42,7 @@ import {
   ITALY_SERIE_B_CLUBS,
   FRANCE_LIGUE_2_CLUBS
 } from './lowerTiersData';
+import { MLS_CLUBS } from './mlsClubsData';
 import { applySeason2627 } from './season2627';
 import { get as idbGet, set as idbSet } from 'idb-keyval';
 
@@ -165,6 +166,7 @@ export const ARGENTINA_TIER_1_TEAMS = ARGENTINA_PRIMERA_CLUBS;
 // ----------------------------------------------------
 
 export const GLOBAL_LEAGUES: Record<string, LeagueDefinition> = {
+  usa_tier_1: { id: 'usa_tier_1', name: 'الدوري الأمريكي MLS', shortName: 'MLS', country: 'الولايات المتحدة', continent: 'NORTH_AMERICA', region: 'north_america', tier: 1, divisionTier: 1, reputation: 79, promotionSpots: 0, relegationSpots: 0, playoffSpots: 18, teams: MLS_CLUBS },
   // Egypt (4 tiers) - AFRICA
   'egy_tier_4': EGYPT_TIER_4_LEAGUE,
   'egy_tier_3': { id: 'egy_tier_3', name: 'دوري الدرجة الثالثة المصري', shortName: 'الدرجة الثالثة', country: 'مصر', continent: 'AFRICA', region: 'africa', tier: 3, reputation: 35, promotionSpots: 2, relegationSpots: 2, playoffSpots: 0, teams: EGYPT_TIER_3_TEAMS },

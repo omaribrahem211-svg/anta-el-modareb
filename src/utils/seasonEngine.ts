@@ -1,3 +1,4 @@
+import { mlsChampionId } from './mlsPlayoffs';
 import {
   Club,
   CupMatch,
@@ -61,7 +62,8 @@ export function calculateSeasonEndSummary(
   activeLeague: LeagueDefinition,
   cupTournament: CupTournament | null,
   manager: ManagerProfile,
-  continentalTournament?: ContinentalTournament | null
+  continentalTournament?: ContinentalTournament | null,
+  completedFixtures: Fixture[] = []
 ): SeasonEndSummary {
   // Locate the user's row. Never fall back to "last place" / "the leader's row" if the id lookup fails (that used to
   // relegate champions and show someone else's points): try the club name, and as a last resort assume a safe mid-table
@@ -78,15 +80,17 @@ export function calculateSeasonEndSummary(
   const finalPosition = !userRowMissing ? userRankIndex + 1 : (standings.length > 0 ? safeMidIndex + 1 : 1);
   const userStanding = (!userRowMissing && standings[userRankIndex]) ? standings[userRankIndex] : (standings[safeMidIndex] || standings[0] || null);
   const totalTeams = standings.length > 0 ? standings.length : 20;
-  const expectedLeagueMatches = totalTeams > 1 ? (totalTeams - 1) * 2 : (season.totalRounds || 38);
+  const isMLS = activeLeague.id === 'usa_tier_1';
+  const mlsChampion = isMLS ? mlsChampionId(completedFixtures) : undefined;
+  const expectedLeagueMatches = isMLS ? 34 : totalTeams > 1 ? (totalTeams - 1) * 2 : (season.totalRounds || 38);
 
   const maxStandingPlayed = standings.length > 0 ? Math.max(...standings.map(s => s.played || 0)) : 0;
   const allStandingsPlayedFull = standings.length > 0 && standings.every(s => s.played >= expectedLeagueMatches);
-  const isSeasonFullyCompleted = 
+  const isSeasonFullyCompleted = (!isMLS || !!mlsChampion) && (
     season.status === 'completed' || 
     season.currentRound > season.totalRounds || 
     allStandingsPlayedFull ||
-    (maxStandingPlayed > 0 && standings.every(s => s.played === maxStandingPlayed) && (season.currentRound > maxStandingPlayed || season.currentRound >= (season.totalRounds || 38)));
+    (maxStandingPlayed > 0 && standings.every(s => s.played === maxStandingPlayed) && (season.currentRound > maxStandingPlayed || season.currentRound >= (season.totalRounds || 38))));
 
   let resultStatus: 'champion' | 'promoted' | 'playoffs' | 'stayed' | 'relegated' = 'stayed';
   let resultTitle = '';
@@ -98,7 +102,17 @@ export function calculateSeasonEndSummary(
 
   // STRICT RULE: Championship and promotion can ONLY be awarded when the season is fully completed (all fixtures played)
   if (isSeasonFullyCompleted) {
-    if (finalPosition === 1) {
+    if (isMLS) {
+      if (mlsChampion === userClub?.id) {
+        resultStatus = 'champion';
+        leagueTrophyAwarded = 'كأس MLS';
+        resultTitle = '🏆 بطل كأس MLS!';
+        resultDescription = `فاز الفريق بالملحق وتوج بكأس MLS. مركز الموسم المنتظم: ${finalPosition} من 30 بعد 34 مباراة. لا يوجد صعود أو هبوط في MLS.`;
+      } else {
+        resultTitle = 'نهاية موسم MLS';
+        resultDescription = `أنهى الفريق الموسم المنتظم في المركز ${finalPosition} من 30. كأس MLS يحسمه الملحق، ودرع الجماهير مستقل لمتصدر الموسم المنتظم. لا يوجد صعود أو هبوط.`;
+      }
+    } else if (finalPosition === 1) {
       resultStatus = 'champion';
       leagueTrophyAwarded = `درع ${activeLeague.name}`;
       if (activeLeague.tier > 1) {
@@ -215,6 +229,7 @@ export function calculateSeasonEndSummary(
   }
 
   const trophiesWonList: string[] = [];
+  if (isMLS && isSeasonFullyCompleted && finalPosition === 1) trophiesWonList.push('درع الجماهير MLS');
   if (leagueTrophyAwarded) trophiesWonList.push(leagueTrophyAwarded);
   if (cupTrophyAwarded) trophiesWonList.push(cupTrophyAwarded);
   if (continentalTrophyAwarded) trophiesWonList.push(continentalTrophyAwarded);
@@ -335,6 +350,7 @@ export function calculateSeasonEndSummary(
 
   return {
     seasonNumber: season.seasonNumber,
+    supportersShieldAwarded: isMLS && isSeasonFullyCompleted && finalPosition === 1 ? 'درع الجماهير MLS' : undefined,
     leagueId: activeLeague.id,
     leagueName: activeLeague.name,
     divisionTier: activeLeague.tier,
@@ -2821,7 +2837,7 @@ export async function processNewSeasonAdvancement(
     startDate: `الموسم ${nextSeasonNumber}`,
     endDate: `نهاية الموسم ${nextSeasonNumber}`,
     currentRound: 1,
-    totalRounds: nextFixtures.length > 0 ? Math.max(...nextFixtures.map(f => f.round)) : Math.max(10, (updatedLeagueTeams.length - 1) * 2),
+    totalRounds: nextActiveLeague.id === 'usa_tier_1' ? 41 : nextFixtures.length > 0 ? Math.max(...nextFixtures.map(f => f.round)) : Math.max(10, (updatedLeagueTeams.length - 1) * 2),
     status: 'active',
     leagueId: nextActiveLeague.id,
     leagueName: nextActiveLeague.name,

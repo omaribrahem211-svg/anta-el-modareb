@@ -152,6 +152,8 @@ export function initNationalTeamsForSeason(
   } else {
     // Refresh call-up squads from CURRENT club rosters (call-ups only).
     teams = state.teams.map(nt => refreshCallUpSquad(nt, clubTeams));
+    const existingCountries = new Set(teams.map(nt => nt.countryCode));
+    teams.push(...buildNationalTeams(clubTeams).filter(nt => !existingCountries.has(nt.countryCode)));
   }
   recomputeNationalTeamWorldRanks(teams);
 

@@ -86,7 +86,7 @@ export function collectNationalPool(teams: Club[]): Map<string, Player[]> {
   for (const club of teams || []) {
     for (const player of club?.players || []) {
       if (!player || !player.id) continue;
-      if (player.isGuestStar) continue;
+      if (player.isGuestStar || player.isGameFiller) continue;
       if (player.announcedRetirement) continue;
       const code = (player.nationalityCode || '').trim().toUpperCase();
       if (!code) continue;
@@ -278,6 +278,7 @@ export function buildNationalTeams(teams: Club[]): NationalTeam[] {
   }
 
   for (const nation of Object.values(SUPPLEMENTARY_NATIONS)) {
+    if (GLOBAL_COUNTRIES[nation.code]) continue;
     result.push(emptyTeam(nation.code, nation.name, nation.flag, nation.continent, nation.footballLevel, true));
   }
 
@@ -297,10 +298,11 @@ export function buildNationalTeams(teams: Club[]): NationalTeam[] {
  * returned unchanged.
  */
 export function refreshCallUpSquad(nationalTeam: NationalTeam, teams: Club[]): NationalTeam {
-  if (!nationalTeam || nationalTeam.isStatistical) return nationalTeam;
+  if (!nationalTeam) return nationalTeam;
   const pool = collectNationalPool(teams);
   const nationals = pool.get(nationalTeam.countryCode) || [];
   if (nationals.length < MIN_REAL_PLAYERS_FOR_FULL_SQUAD) {
+    if (nationalTeam.isStatistical) return nationalTeam;
     // The country can no longer field a full squad of real players: it keeps
     // its identity but becomes statistical.
     return {
@@ -315,6 +317,7 @@ export function refreshCallUpSquad(nationalTeam: NationalTeam, teams: Club[]): N
   const autoTactics = buildNationalTeamTactics(squad);
   return {
     ...nationalTeam,
+    isStatistical: false,
     players: squad,
     tactics: { ...autoTactics, ...nationalTeam.tactics, startingPlayerIds: autoTactics?.startingPlayerIds || [], benchPlayerIds: autoTactics?.benchPlayerIds || [] },
     reputation: reputationFromSquad(squad),

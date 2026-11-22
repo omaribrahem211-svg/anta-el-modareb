@@ -168,7 +168,7 @@ export function pruneMatchEventsForStorage(
   const compact: MatchEvent[] = [];
   for (let i = 0; i < events.length; i++) {
     const e = events[i];
-    if (!e) continue;
+    if (!e || e.isPenaltyShootout) continue;
     if (e.type === 'goal' || e.type === 'red_card') {
       compact.push({
         minute: e.minute,

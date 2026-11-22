@@ -80,6 +80,16 @@ export interface PlayerInjury {
 }
 
 export interface Player {
+  birthDate?: string;
+  rosterSourceUrls?: string[];
+  rosterSnapshotDate?: string;
+  isGameFiller?: boolean;
+  gameDataNote?: string;
+  originalPosition?: string;
+  isPositionAdapted?: boolean;
+  isPreferredFootEstimated?: boolean;
+  sourceShirtNumber?: number | null;
+
   id: string;
   firstName?: string;
   lastName?: string;
@@ -439,6 +449,7 @@ export interface LeagueStanding {
 
 export interface MatchEvent {
   minute: number;
+  isPenaltyShootout?: boolean;
   type: 'goal' | 'yellow_card' | 'red_card' | 'substitution' | 'chance' | 'save' | 'injury' | 'commentary';
   teamId: string;
   playerId?: string;
@@ -478,6 +489,7 @@ export type CompetitionType =
   | 'playoff';
 
 export interface Fixture {
+  mlsPlayoff?: import('../utils/mlsPlayoffs').MLSPlayoffMetadata;
   id: string;
   round: number;
   homeTeamId: string;
@@ -553,6 +565,7 @@ export interface SeasonHistoryEntry {
 }
 
 export interface SeasonEndSummary {
+  supportersShieldAwarded?: string;
   seasonNumber: number;
   leagueId: string;
   leagueName: string;

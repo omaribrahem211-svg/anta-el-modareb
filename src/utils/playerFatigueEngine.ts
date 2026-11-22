@@ -282,7 +282,7 @@ export function buildMatchStatsMap(events: MatchEvent[] = []): MatchStatsMap {
   for (const e of events) {
     if (!e) continue;
 
-    if (e.type === 'goal') {
+    if (!e.isPenaltyShootout && e.type === 'goal') {
       if (e.playerId || e.playerName) {
         const s = getOrCreate(e.playerId, e.playerName);
         s.goals += 1;

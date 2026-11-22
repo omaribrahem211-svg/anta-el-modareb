@@ -67,7 +67,7 @@ export const SocialTab: React.FC = () => {
       const opp = tname(home ? f.awayTeamId : f.homeTeamId);
       const res = my > op ? 'w' : my === op ? 'd' : 'l';
       const pool = res === 'w' ? COMMENTS_WIN : res === 'l' ? COMMENTS_LOSS : COMMENTS_DRAW;
-      const scorers = (f.events || []).filter(e => e.type === 'goal' && e.teamId === club.id && e.playerName).map(e => e.playerName as string);
+      const scorers = (f.events || []).filter(e => !e.isPenaltyShootout && e.type === 'goal' && e.teamId === club.id && e.playerName).map(e => e.playerName as string);
       const star = scorers[0];
       const o = 1000 - idx * 10;
       const mkComments = (seed: string, n: number): Comment[] => pickN(FANS, seed, n).map((nm, i) => ({ n: nm, t: pool[hash(seed + nm + i) % pool.length] }));

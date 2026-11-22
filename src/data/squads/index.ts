@@ -1,5 +1,6 @@
 import { buildCompactSquads } from '../compactSquadBuilder';
 import type { RealPlayerTemplate } from '../realPlayersData';
+import { buildMLSRealSquads } from '../mlsSquads';
 import { ENGLAND_SQUADS } from './england';
 import { SPAIN_SQUADS } from './spain';
 import { GERMANY_SQUADS } from './germany';
@@ -18,6 +19,7 @@ const SOURCES: { leagueId: string; squads: Record<string, string[]> }[] = [
 export const COMPACT_REAL_SQUADS: Record<string, RealPlayerTemplate[]> = (() => {
   const out: Record<string, RealPlayerTemplate[]> = {};
   SOURCES.forEach(s => Object.assign(out, buildCompactSquads(s.leagueId, s.squads)));
+  Object.assign(out, buildMLSRealSquads());
   return out;
 })();
 
