@@ -327,6 +327,18 @@ export function refreshCallUpSquad(nationalTeam: NationalTeam, teams: Club[]): N
  * produces their strength.
  */
 export function nationalTeamToClub(nt: NationalTeam): Club {
+  let tactics = nt.tactics;
+  try {
+    const ids = nt.userStartingIds;
+    if (nt.isUserManaged && tactics && Array.isArray(ids) && ids.length === 11) {
+      const have = new Set((nt.players || []).map(p => p.id));
+      if (ids.every(id => have.has(id))) {
+        const idSet = new Set(ids);
+        const bench = (nt.players || []).filter(p => !idSet.has(p.id)).sort((a, b) => (b.overallRating || 0) - (a.overallRating || 0)).slice(0, 7).map(p => p.id);
+        tactics = { ...tactics, startingPlayerIds: [...ids], benchPlayerIds: bench };
+      }
+    }
+  } catch (_) { /* fall back to the auto XI */ }
   return {
     id: nt.id,
     name: nt.name,
@@ -346,7 +358,7 @@ export function nationalTeamToClub(nt: NationalTeam): Club {
     sponsors: [],
     isUserClub: !!nt.isUserManaged,
     players: nt.players,
-    tactics: nt.tactics,
+    tactics,
   } as unknown as Club;
 }
 

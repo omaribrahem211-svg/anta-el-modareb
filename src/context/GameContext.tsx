@@ -198,7 +198,7 @@ import { isRealClub, loadRealClubSquad } from '../data/realPlayersData';
 import { ensureClubSquadIntegrity, calibrateRealisticPlayerRating } from '../utils/playerGenerator';
 import { useAuth } from './AuthContext';
 import { getLocalTrainerProfile, saveLocalTrainerProfile, generateTrainerId } from '../services/trainerProfileService';
-import { gameStateRepository } from '../services/gameStateRepository';
+import { gameStateRepository, setLatestNationalTeamsSnapshot } from '../services/gameStateRepository';
 import { timed, runWhenIdle } from '../utils/perfLog';
 import { migrateSavePayload, CURRENT_SAVE_FORMAT_VERSION } from '../services/saveBackupService';
 import { smartSyncManager, SmartSyncInput } from '../services/smartSyncManager';
@@ -324,6 +324,7 @@ interface GameContextType {
   declineNationalTeamJob: () => void;
   resignFromNationalTeam: () => void;
   refreshNationalTeamCallUp: () => void;
+  setNationalTeamLineup: (startingIds: string[] | null) => void;
   deletedMessageIds?: string[];
   switchUserClubToAlAhly: () => { success: boolean; message: string };
   switchContinentalCompetition?: (compCode: 'ccl' | 'ccc' | 'ucl' | 'uel' | 'acl' | 'acl2') => void;
@@ -2737,6 +2738,10 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const ntRoundRef = useRef<number>(0);
   const ntPostSeasonRef = useRef<number>(0);
 
+  useEffect(() => {
+    try { setLatestNationalTeamsSnapshot(stripNationalTeamsForSave(nationalTeamsState)); } catch (_) { /* optional */ }
+  }, [nationalTeamsState]);
+
   const userNationalTeam = useMemo<NationalTeam | null>(() => {
     const st = nationalTeamsState;
     if (!st || !st.userNationalTeamId) return null;
@@ -2892,6 +2897,16 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const resignFromNationalTeam = useCallback(() => {
     const st = nationalTeamsRef.current;
     if (st) setNationalTeamsState(ntResign(st));
+  }, []);
+
+  const setNationalTeamLineup = useCallback((startingIds: string[] | null) => {
+    const st = nationalTeamsRef.current;
+    if (!st || !st.userNationalTeamId) return;
+    const ids = startingIds && startingIds.length === 11 ? [...startingIds] : undefined;
+    setNationalTeamsState({
+      ...st,
+      teams: st.teams.map(t => t.id === st.userNationalTeamId ? { ...t, userStartingIds: ids } : t),
+    });
   }, []);
 
   const refreshNationalTeamCallUp = useCallback(() => {
@@ -12720,6 +12735,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         declineNationalTeamJob,
         resignFromNationalTeam,
         refreshNationalTeamCallUp,
+        setNationalTeamLineup,
         dayAdvanceSummary,
         showDaySummaryModal,
         trainingIntensity,

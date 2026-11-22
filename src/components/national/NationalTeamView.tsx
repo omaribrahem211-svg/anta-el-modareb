@@ -13,7 +13,7 @@ import {
 } from '../../types/nationalTeams';
 import { getNationalTeamById } from '../../utils/nationalTeamsEngine';
 
-type NtSubTab = 'tournament' | 'ranking' | 'squad';
+type NtSubTab = 'tournament' | 'ranking' | 'squad' | 'lineup';
 
 const STAGE_ORDER: Record<string, number> = {
   group: 0,
@@ -60,9 +60,11 @@ export const NationalTeamView: React.FC = () => {
     declineNationalTeamJob,
     resignFromNationalTeam,
     refreshNationalTeamCallUp,
+    setNationalTeamLineup,
   } = useGame();
 
   const [subTab, setSubTab] = useState<NtSubTab>('tournament');
+  const [draftIds, setDraftIds] = useState<string[] | null>(null);
 
   const state = nationalTeamsState;
   const tournament = state?.activeTournament || state?.queuedTournament || null;
@@ -166,7 +168,7 @@ export const NationalTeamView: React.FC = () => {
       )}
 
       {/* Sub tabs */}
-      <div className="grid grid-cols-3 gap-1.5 bg-slate-950/80 p-1.5 rounded-2xl border border-slate-800">
+      <div className="grid grid-cols-4 gap-1.5 bg-slate-950/80 p-1.5 rounded-2xl border border-slate-800">
         <button
           onClick={() => setSubTab('tournament')}
           className={`py-2 text-xs font-bold rounded-xl transition-all ${subTab === 'tournament' ? 'bg-amber-500 text-slate-950 shadow-md' : 'text-slate-400 hover:text-white'}`}
@@ -184,6 +186,12 @@ export const NationalTeamView: React.FC = () => {
           className={`py-2 text-xs font-bold rounded-xl transition-all ${subTab === 'squad' ? 'bg-amber-500 text-slate-950 shadow-md' : 'text-slate-400 hover:text-white'}`}
         >
           <Users className="w-3.5 h-3.5 inline ml-1" />القائمة
+        </button>
+        <button
+          onClick={() => setSubTab('lineup')}
+          className={`py-2 text-xs font-bold rounded-xl transition-all ${subTab === 'lineup' ? 'bg-amber-500 text-slate-950 shadow-md' : 'text-slate-400 hover:text-white'}`}
+        >
+          ⚽ التشكيلة
         </button>
       </div>
 
@@ -285,6 +293,59 @@ export const NationalTeamView: React.FC = () => {
               </div>
             ))}
           </div>
+        </div>
+      )}
+
+      {/* Lineup management */}
+      {subTab === 'lineup' && (
+        <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden">
+          <div className="bg-slate-800/60 px-3 py-1.5 text-xs font-black text-amber-400">إدارة تشكيلة المنتخب</div>
+          {!userNationalTeam ? (
+            <div className="p-5 text-center text-slate-400 text-xs">درّب منتخباً أولاً لإدارة التشكيلة.</div>
+          ) : userNationalTeam.isStatistical ? (
+            <div className="p-5 text-center text-slate-400 text-xs">هذا المنتخب يشارك بقوة إحصائية، لا توجد تشكيلة لإدارتها.</div>
+          ) : (() => {
+            const squad = [...userNationalTeam.players].sort((a, b) => b.overallRating - a.overallRating);
+            const valid = (userNationalTeam.userStartingIds || []).filter(id => squad.some(p => p.id === id));
+            const current = valid.length === 11 ? valid : (userNationalTeam.tactics?.startingPlayerIds || []);
+            const selected = new Set(current);
+            const isGk = (p: any) => String(p.position || '').toUpperCase() === 'GK';
+            const toggle = (id: string) => {
+              const next = new Set(selected);
+              if (next.has(id)) next.delete(id); else next.add(id);
+              const arr = [...next];
+              // Keep the draft while it is not yet 11: only a full XI is applied.
+              if (arr.length === 11) setNationalTeamLineup(arr);
+              else setNationalTeamLineup(null);
+              setDraftIds(arr);
+            };
+            const shown = draftIds ?? current;
+            const shownSet = new Set(shown);
+            return (
+              <div>
+                <div className="px-3 py-2 flex items-center justify-between text-[11px] text-slate-300">
+                  <span>المختارون: <b className={shown.length === 11 ? 'text-emerald-400' : 'text-rose-400'}>{shown.length}/11</b> {shown.length !== 11 && '(سيُستخدم التشكيل التلقائي حتى تكتمل 11)'}</span>
+                  <button
+                    onClick={() => { setDraftIds(null); setNationalTeamLineup(null); }}
+                    className="bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold px-2.5 py-1 rounded-lg"
+                  >
+                    تشكيل تلقائي
+                  </button>
+                </div>
+                <div className="divide-y divide-slate-800/60">
+                  {squad.map(p => (
+                    <button key={p.id} onClick={() => toggle(p.id)} className={`w-full flex items-center gap-2 px-3 py-2 text-xs text-right ${shownSet.has(p.id) ? 'bg-emerald-900/30' : ''}`}>
+                      <span className="w-5">{shownSet.has(p.id) ? '✅' : '⬜'}</span>
+                      <span className="w-9 text-center font-black text-sky-400">{p.position}</span>
+                      <span className="flex-1 text-white font-semibold">{p.name}{isGk(p) ? ' 🧤' : ''}</span>
+                      <span className="font-black text-slate-300">{p.overallRating}</span>
+                    </button>
+                  ))}
+                </div>
+                <div className="px-3 py-2 text-[10px] text-slate-500 text-center">اختر 11 لاعباً. مباريات المنتخب تُحسم بقوة هذه التشكيلة وتظهر نتائجها في صندوق الوارد وتبويب البطولة.</div>
+              </div>
+            );
+          })()}
         </div>
       )}
 

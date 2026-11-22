@@ -46,6 +46,8 @@ export interface NationalTeam {
   stats: NationalTeamStats;
   /** True when the user is the current NT manager (dual club+NT job allowed). */
   isUserManaged?: boolean;
+  /** User-picked starting XI (player ids) for NT matches; falls back to the auto XI when invalid. */
+  userStartingIds?: string[];
 }
 
 export interface NationalTeamTrophy {

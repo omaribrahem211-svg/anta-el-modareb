@@ -237,7 +237,18 @@ function pruneSavePayload(payload: LocalGameSavePayload): LocalGameSavePayload {
   };
 }
 
-async function executeSave(payload: LocalGameSavePayload): Promise<void> {
+// Latest national-teams snapshot (set by GameContext whenever it changes). Several save call sites (after a match,
+// at season start...) build their payload without nationalTeams; without this they erased the accepted job / declined
+// offers and the offer popped up again on the next launch.
+let latestNationalTeamsSnapshot: any = null;
+export function setLatestNationalTeamsSnapshot(snapshot: any): void {
+  latestNationalTeamsSnapshot = snapshot || null;
+}
+
+async function executeSave(rawPayload: LocalGameSavePayload): Promise<void> {
+  const payload: LocalGameSavePayload = (rawPayload && !rawPayload.nationalTeams && latestNationalTeamsSnapshot)
+    ? { ...rawPayload, nationalTeams: latestNationalTeamsSnapshot }
+    : rawPayload;
   if (writesBlockedBySuspectRead) {
     console.warn('[GameStateRepo] Save skipped: the stored career could not be read, refusing to overwrite it.');
     return;
