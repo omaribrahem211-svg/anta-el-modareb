@@ -8,6 +8,7 @@
  *    so game updates never wipe or corrupt player progress.
  */
 
+import { refreshLegendNicknames } from '../data/legendsData';
 import { LocalGameSavePayload } from './gameStateRepository';
 import { INITIAL_TEAMS, INITIAL_MANAGER, INITIAL_TRANSFER_MARKET } from '../data/initialData';
 import { normalizeClub, normalizeStanding, normalizeManagerProfile } from '../utils/dataNormalizer';
@@ -89,6 +90,7 @@ export function migrateSavePayload(rawPayload: any): LocalGameSavePayload {
   const normalizedTeams = rawTeams.map((t: any) => ({
     ...t,
     isUserClub: Boolean(targetClubId && t.id === targetClubId),
+    players: Array.isArray(t.players) ? refreshLegendNicknames(t.players) : t.players,
   }));
 
   const migrated: LocalGameSavePayload = {
@@ -111,7 +113,7 @@ export function migrateSavePayload(rawPayload: any): LocalGameSavePayload {
     },
 
     // Transfers and economy
-    transferMarket: Array.isArray(src?.transferMarket) ? src.transferMarket : INITIAL_TRANSFER_MARKET,
+    transferMarket: Array.isArray(src?.transferMarket) ? refreshLegendNicknames(src.transferMarket) : INITIAL_TRANSFER_MARKET,
     incomingBids: Array.isArray(src?.incomingBids) ? src.incomingBids : [],
     inbox: Array.isArray(src?.inbox) ? src.inbox : [],
     cupTournament: src?.cupTournament || null,

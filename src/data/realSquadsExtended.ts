@@ -772,7 +772,7 @@ export const BAYERN_SQUAD: RealPlayerTemplate[] = [
   },
   {
     id: 'bay_ulreich',
-    name: 'سفين أولرايش الحارس المخلص',
+    name: 'سفين أولرايش الحارس الوفي',
     firstName: 'سفين',
     lastName: 'أولرايش',
     nationality: 'ألمانيا',

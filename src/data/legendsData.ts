@@ -34,7 +34,7 @@ export const LEGENDS: LegendDef[] = [
   L('mahmoud_alkhateeb', 'محمود الخطيب', 'مصر', 'EGY', 'RW', 30, 88, 38_000_000, [86, 87, 88, 90, 48, 72], 10, 'بيبو'),
   L('saeed_oweiran', 'سعيد العويران', 'السعودية', 'KSA', 'ST', 30, 85, 28_000_000, [86, 88, 78, 86, 40, 76], 9, 'صقر الدوري'),
   // World legends
-  L('maradona', 'دييجو مارادونا', 'الأرجنتين', 'ARG', 'CAM', 27, 95, 120_000_000, [86, 90, 92, 98, 45, 78], 10, 'الإله الأرجنتيني'),
+  L('maradona', 'دييجو مارادونا', 'الأرجنتين', 'ARG', 'CAM', 27, 95, 120_000_000, [86, 90, 92, 98, 45, 78], 10, 'الفتى الذهبي'),
   L('pele', 'بيليه', 'البرازيل', 'BRA', 'ST', 27, 96, 125_000_000, [90, 94, 90, 95, 52, 80], 10, 'ملك الكرة'),
   L('cruyff', 'يوهان كرويف', 'هولندا', 'NED', 'CAM', 28, 93, 100_000_000, [87, 88, 94, 93, 55, 72], 14, 'الطائر الهولندي'),
   L('zidane', 'زين الدين زيدان', 'فرنسا', 'FRA', 'CAM', 30, 94, 110_000_000, [78, 88, 95, 96, 62, 82], 5, 'زيزو'),
@@ -46,11 +46,11 @@ export const LEGENDS: LegendDef[] = [
   L('roberto_carlos', 'روبيرتو كارلوس', 'البرازيل', 'BRA', 'LB', 29, 89, 55_000_000, [91, 85, 80, 84, 82, 80], 3, 'صاروخ الجناح'),
   L('cafu', 'كافو', 'البرازيل', 'BRA', 'RB', 29, 89, 52_000_000, [88, 66, 80, 82, 85, 84], 2, 'الظهير الأسطوري'),
   L('buffon', 'جيانلويجي بوفون', 'إيطاليا', 'ITA', 'GK', 30, 92, 60_000_000, [58, 32, 60, 42, 34, 86], 1, 'جيجي'),
-  L('casillas', 'إيكر كاسياس', 'إسبانيا', 'ESP', 'GK', 28, 91, 58_000_000, [60, 30, 58, 42, 32, 84], 1, 'القديس'),
+  L('casillas', 'إيكر كاسياس', 'إسبانيا', 'ESP', 'GK', 28, 91, 58_000_000, [60, 30, 58, 42, 32, 84], 1, 'حارس إسبانيا'),
   L('pirlo', 'أندريا بيرلو', 'إيطاليا', 'ITA', 'CDM', 32, 90, 60_000_000, [60, 82, 96, 86, 74, 70], 21, 'المايسترو'),
   L('xavi', 'تشافي هيرنانديز', 'إسبانيا', 'ESP', 'CM', 29, 90, 65_000_000, [70, 74, 96, 90, 72, 68], 6, 'مدير الأوركسترا'),
   L('iniesta', 'أندريس إنييستا', 'إسبانيا', 'ESP', 'CM', 28, 91, 75_000_000, [76, 78, 93, 94, 62, 70], 8, 'الساحر'),
-  L('kaka', 'ريكاردو كاكا', 'البرازيل', 'BRA', 'CAM', 26, 91, 80_000_000, [90, 86, 88, 92, 48, 76], 22, 'الملاك'),
+  L('kaka', 'ريكاردو كاكا', 'البرازيل', 'BRA', 'CAM', 26, 91, 80_000_000, [90, 86, 88, 92, 48, 76], 22, 'الأنيق'),
   L('beckham', 'ديفيد بيكهام', 'إنجلترا', 'ENG', 'RW', 29, 88, 50_000_000, [76, 82, 93, 82, 62, 74], 7, 'الركلات الحرة'),
   L('gerrard', 'ستيفن جيرارد', 'إنجلترا', 'ENG', 'CM', 29, 90, 62_000_000, [78, 88, 90, 82, 80, 88], 8, 'قلب ليفربول'),
   L('lampard', 'فرانك لامبارد', 'إنجلترا', 'ENG', 'CM', 29, 89, 55_000_000, [70, 90, 86, 78, 70, 82], 8, 'الهداف الوسط'),
@@ -58,7 +58,7 @@ export const LEGENDS: LegendDef[] = [
   L('eto', 'صامويل إيتو', 'الكاميرون', 'CMR', 'ST', 28, 90, 60_000_000, [90, 90, 76, 86, 42, 82], 9, 'الأسد غير المروّض'),
   L('totti', 'فرانشيسكو توتي', 'إيطاليا', 'ITA', 'CAM', 30, 89, 55_000_000, [72, 88, 91, 90, 48, 72], 10, 'ملك روما'),
   L('shevchenko', 'أندريه شيفتشينكو', 'أوكرانيا', 'UKR', 'ST', 28, 90, 65_000_000, [88, 91, 78, 86, 40, 80], 7, 'سيبيليو'),
-  L('baggio', 'روبرتو باجيو', 'إيطاليا', 'ITA', 'CAM', 28, 91, 72_000_000, [78, 89, 92, 94, 40, 70], 10, 'الذيل الإلهي'),
+  L('baggio', 'روبرتو باجيو', 'إيطاليا', 'ITA', 'CAM', 28, 91, 72_000_000, [78, 89, 92, 94, 40, 70], 10, 'الذيل الذهبي'),
   L('batistuta', 'جابرييل باتيستوتا', 'الأرجنتين', 'ARG', 'ST', 28, 90, 58_000_000, [82, 94, 70, 80, 36, 88], 9, 'باتيجول'),
   L('vanbasten', 'ماركو فان باستن', 'هولندا', 'NED', 'ST', 27, 93, 85_000_000, [84, 95, 82, 90, 40, 82], 9, 'البجعة'),
 ];
@@ -158,4 +158,22 @@ export function ensureLegendsInMarket(market: Player[], teams: Club[], retiredId
   const missing = LEGENDS.filter(l => !present.has(l.id) && !owned.has(l.id) && !retiredIds.has(l.id));
   if (missing.length === 0) return base;
   return [...base, ...missing.map(createLegendPlayer)];
+}
+
+/**
+ * Keeps the nickname of every saved legend equal to the current definition, so a corrected nickname reaches
+ * players who already have that legend in their save (market or squad). Returns the same array when nothing changed.
+ */
+export function refreshLegendNicknames<T extends { id?: string; isLegend?: boolean; nickname?: string }>(players: T[] | undefined | null): T[] {
+  if (!Array.isArray(players)) return players as any;
+  const byId = new Map(LEGENDS.map(l => [l.id, l.title] as const));
+  let changed = false;
+  const out = players.map(p => {
+    if (p && p.isLegend && p.id && byId.has(p.id) && p.nickname !== byId.get(p.id)) {
+      changed = true;
+      return { ...p, nickname: byId.get(p.id) } as T;
+    }
+    return p;
+  });
+  return changed ? out : players;
 }
