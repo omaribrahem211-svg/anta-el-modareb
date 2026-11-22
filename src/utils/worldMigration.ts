@@ -1,6 +1,5 @@
-import { Club, LeagueDefinition, Player } from '../types/game';
-import { generateClubSquad, ensureClubSquadIntegrity } from './playerGenerator';
-import { isRealClub, loadRealClubSquad } from '../data/realPlayersData';
+import { Club, Player } from '../types/game';
+import { repairSavedClubSquad } from './savedSquadRepair';
 import { GLOBAL_COUNTRIES } from '../data/countriesData';
 
 export const MIGRATION_STORAGE_KEY = 'anta_el_modareb_world_migration_v4';
@@ -79,19 +78,6 @@ export function inferClubCountry(club: Partial<Club>): { countryCode: string; co
 }
 
 /**
- * Determines appropriate base squad level based on division, reputation, and league.
- */
-function inferSquadLevel(club: Club): number {
-  if (club.reputation >= 90) return 87;
-  if (club.reputation >= 80) return 80;
-  if (club.reputation >= 70) return 74;
-  if (club.reputation >= 55) return 68;
-  if (club.reputation >= 40) return 60;
-  if (club.reputation >= 25) return 56;
-  return 50;
-}
-
-/**
  * Migrates and normalizes a player object, ensuring complete identity and nationality fields.
  */
 export function normalizePlayer(player: Player, clubId: string, leagueId: string, defaultCountry = 'مصر', defaultCode = 'EGY'): Player {
@@ -109,33 +95,31 @@ export function normalizePlayer(player: Player, clubId: string, leagueId: string
     preferredFoot: player.preferredFoot || 'right',
     personality: player.personality || 'professional',
     stats: {
-      appearances: player.stats?.appearances || 0,
-      starts: player.stats?.starts || 0,
-      minutes: player.stats?.minutes || 0,
-      goals: player.stats?.goals || 0,
-      assists: player.stats?.assists || 0,
-      cleanSheets: player.stats?.cleanSheets || 0,
-      yellowCards: player.stats?.yellowCards || 0,
-      redCards: player.stats?.redCards || 0,
-      shots: player.stats?.shots || 0,
-      shotsOnTarget: player.stats?.shotsOnTarget || 0,
-      passes: player.stats?.passes || 0,
-      tackles: player.stats?.tackles || 0,
-      saves: player.stats?.saves || 0,
-      averageRating: player.stats?.averageRating || 6.5,
-      motm: player.stats?.motm || 0,
+      ...player.stats,
+      appearances: player.stats?.appearances ?? 0,
+      starts: player.stats?.starts ?? 0,
+      minutes: player.stats?.minutes ?? 0,
+      goals: player.stats?.goals ?? 0,
+      assists: player.stats?.assists ?? 0,
+      cleanSheets: player.stats?.cleanSheets ?? 0,
+      yellowCards: player.stats?.yellowCards ?? 0,
+      redCards: player.stats?.redCards ?? 0,
+      shots: player.stats?.shots ?? 0,
+      shotsOnTarget: player.stats?.shotsOnTarget ?? 0,
+      passes: player.stats?.passes ?? 0,
+      tackles: player.stats?.tackles ?? 0,
+      saves: player.stats?.saves ?? 0,
+      averageRating: player.stats?.averageRating ?? 6.5,
+      motm: player.stats?.motm ?? 0,
     },
     attributes: player.attributes || { pace: 60, shooting: 60, passing: 60, dribbling: 60, defending: 60, physical: 60 },
   };
 }
 
 /**
- * Executes a migration of existing saved clubs and players to the authentic Real Club Squads world model.
- * 
- * Rules:
- * 1. Real clubs (Real Madrid, Barcelona, Man City, Liverpool, Bayern, Al Hilal, Al Ahly, etc.) are ALWAYS given their official squads.
- * 2. If the user is currently managing a real club that was previously populated with generated/fake players, replace the squad with authentic real stars while preserving user's manager record, season progress, budget, and tactics structure.
- * 3. Fictional / Tier 4 clubs preserve their squad players.
+ * Upgrades saved metadata without ever replacing an evolved squad with seed data.
+ * Generated ids, transfers, nationality and a small squad are valid career history.
+ * Missing depth/positions are repaired additively, including for non-real clubs.
  */
 export function migrateWorldData(
   savedTeams: Club[],
@@ -165,9 +149,9 @@ export function migrateWorldData(
       city: club.city || (countryCode === 'ESP' ? 'مدريد' : countryCode === 'ENG' ? 'لندن' : countryCode === 'SAU' ? 'الرياض' : 'القاهرة'),
       division: club.division || 1,
       reputation: club.reputation || 50,
-      budget: club.budget || 500000,
-      transferBudget: club.transferBudget || 200000,
-      wageBudgetMonthly: club.wageBudgetMonthly || 150000,
+      budget: club.budget ?? 500000,
+      transferBudget: club.transferBudget ?? 200000,
+      wageBudgetMonthly: club.wageBudgetMonthly ?? 150000,
       facilities: club.facilities || {
         stadiumName: `${club.name || 'استاد النادي'}`,
         stadiumCapacity: 10000,
@@ -181,95 +165,16 @@ export function migrateWorldData(
       players: [],
     };
 
-    // Check if this is a Real Club
-    if (isRealClub(club.id)) {
-      const existingPlayers = Array.isArray(club.players) ? club.players : [];
-      // Check if squad currently has fictional players
-      const hasGeneratedPlayers = existingPlayers.length === 0 || existingPlayers.some(p => p.id.startsWith('player_') || p.id.startsWith('p_gen_'));
-      const isSpanishWithEgyptian = (countryCode === 'ESP' || countryCode === 'ENG') && existingPlayers.some(p => p.nationalityCode === 'EGY');
-
-      if (hasGeneratedPlayers || isSpanishWithEgyptian || existingPlayers.length < 15) {
-        // Load official real squad
-        const realSquad = loadRealClubSquad(club.id);
-        normalizedClub.players = realSquad;
-        realClubSquadsAssigned++;
-        playersMigratedCount += realSquad.length;
-
-        // Update tactics starting player IDs if needed
-        if (!normalizedClub.tactics || !normalizedClub.tactics.startingPlayerIds || normalizedClub.tactics.startingPlayerIds.length === 0) {
-          normalizedClub.tactics = {
-            formation: '4-3-3',
-            mentality: 'balanced',
-            passingStyle: 'short',
-            pressingIntensity: 'balanced',
-            tempo: 'balanced',
-            startingPlayerIds: realSquad.slice(0, 11).map(p => p.id),
-            benchPlayerIds: realSquad.slice(11, 18).map(p => p.id),
-            captainId: realSquad[0]?.id || '',
-            penaltyTakerId: realSquad[0]?.id || '',
-            freeKickTakerId: realSquad[0]?.id || '',
-            cornerTakerId: realSquad[0]?.id || '',
-          };
-        }
-      } else {
-        // Already authentic real squad, just normalize
-        normalizedClub.players = existingPlayers.map(p => {
-          playersMigratedCount++;
-          return normalizePlayer(p, club.id, leagueId, countryName, countryCode);
-        });
-      }
-
-      if (club.isUserClub) {
-        userClubPreserved = true;
-      }
-      return normalizedClub;
-    }
-
-    // Case: User managing a custom / lower-tier club -> PRESERVE SQUAD FULLY
-    if (club.isUserClub) {
-      userClubPreserved = true;
-      const currentPlayers = Array.isArray(club.players) ? club.players : [];
-      normalizedClub.players = currentPlayers.map(p => {
-        playersMigratedCount++;
-        return normalizePlayer(p, club.id, leagueId, countryName, countryCode);
-      });
-      return normalizedClub;
-    }
-
-    // Case: Non-real International Club
-    if (countryCode !== 'EGY') {
-      const existingPlayers = Array.isArray(club.players) ? club.players : [];
-      const isEgyptianOnly = existingPlayers.length === 0 || existingPlayers.every(p => !p.nationalityCode || p.nationalityCode === 'EGY' || p.nationality === 'مصر');
-      const isTooSmall = existingPlayers.length < 18;
-
-      if (isEgyptianOnly || isTooSmall) {
-        const baseLevel = inferSquadLevel(normalizedClub);
-        normalizedClub.players = generateClubSquad(club.id, countryCode, leagueId, normalizedClub.reputation, baseLevel);
-        internationalClubsRegenerated++;
-        playersMigratedCount += normalizedClub.players.length;
-      } else {
-        normalizedClub.players = existingPlayers.map(p => {
-          playersMigratedCount++;
-          return normalizePlayer(p, club.id, leagueId, countryName, countryCode);
-        });
-      }
-      return normalizedClub;
-    }
-
-    // Case: Non-real Egyptian Club
-    const existingPlayers = Array.isArray(club.players) ? club.players : [];
-    if (existingPlayers.length < 18) {
-      const baseLevel = inferSquadLevel(normalizedClub);
-      normalizedClub.players = generateClubSquad(club.id, 'EGY', leagueId, normalizedClub.reputation, baseLevel);
-      playersMigratedCount += normalizedClub.players.length;
-    } else {
-      normalizedClub.players = existingPlayers.map(p => {
-        playersMigratedCount++;
-        return normalizePlayer(p, club.id, leagueId, 'مصر', 'EGY');
-      });
-    }
-
-    return ensureClubSquadIntegrity(normalizedClub);
+    const existingPlayers = (Array.isArray(club.players) ? club.players : [])
+      .filter(p => p && typeof p === 'object' && p.id);
+    normalizedClub.players = existingPlayers.map(p => {
+      playersMigratedCount++;
+      return normalizePlayer(p, club.id, leagueId, countryName, countryCode);
+    });
+    if (club.isUserClub) userClubPreserved = true;
+    const repaired = repairSavedClubSquad(normalizedClub);
+    playersMigratedCount += Math.max(0, repaired.players.length - existingPlayers.length);
+    return repaired;
   });
 
   // Migrate Transfer Market
@@ -309,20 +214,9 @@ export function runOneTimeWorldMigration(
 
     const safeTeamsList = (Array.isArray(savedTeams) ? savedTeams : []).filter(t => t && t.id);
 
-    // Check if any real club has generated/fake squad
-    const hasRealClubWithFakeSquad = safeTeamsList.some(t => {
-      if (isRealClub(t.id)) {
-        return !Array.isArray(t.players) || t.players.length === 0 || t.players.some(p => p && p.id && p.id.startsWith('player_'));
-      }
-      return false;
-    });
-
-    const hasSpanishWithEgyptian = safeTeamsList.some(t => {
-      const { countryCode } = inferClubCountry(t);
-      return (countryCode === 'ESP' || countryCode === 'ENG') && Array.isArray(t.players) && t.players.length > 0 && t.players.every(p => p && (p.nationalityCode === 'EGY' || p.nationality === 'مصر'));
-    });
-
-    if (isAlreadyMigrated && !hasRealClubWithFakeSquad && !hasSpanishWithEgyptian) {
+    // Never treat a legitimate transfer or legacy generated id as evidence to reseed.
+    // Saved-load normalization repairs missing depth separately on every read.
+    if (isAlreadyMigrated) {
       return { teams: safeTeamsList, transferMarket: savedTransferMarket, wasMigratedNow: false };
     }
 

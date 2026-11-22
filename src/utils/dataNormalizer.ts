@@ -1,22 +1,15 @@
 import { Club, LeagueStanding, ManagerProfile } from '../types/game';
 import { INITIAL_MANAGER } from '../data/initialData';
 import { generateTrainerId } from '../services/trainerProfileService';
-import { calibrateRealisticPlayerRating, ensureClubSquadIntegrity } from './playerGenerator';
-import { isRealClub, loadRealClubSquad } from '../data/realPlayersData';
+import { calibrateRealisticPlayerRating } from './playerGenerator';
+import { repairSavedClubSquad } from './savedSquadRepair';
 
 export function normalizeClub(t: any): Club {
   if (!t || typeof t !== 'object') {
     return {} as Club;
   }
 
-  let rawPlayers = Array.isArray(t.players) ? t.players : [];
-  if (rawPlayers.length === 0 && t.id && isRealClub(t.id)) {
-    try {
-      rawPlayers = loadRealClubSquad(t.id);
-    } catch {
-      rawPlayers = [];
-    }
-  }
+  const rawPlayers = Array.isArray(t.players) ? t.players : [];
 
   let players = rawPlayers
     .filter((p: any) => p && typeof p === 'object' && p.id)
@@ -66,8 +59,8 @@ export function normalizeClub(t: any): Club {
     });
 
   // Fallback: If any club has fewer than 20 players, auto-generate balanced fallback players up to 22
-  if (t.id && players.length < 20) {
-    const integrityResult = ensureClubSquadIntegrity({
+  if (t.id) {
+    const integrityResult = repairSavedClubSquad({
       ...t,
       players,
     });

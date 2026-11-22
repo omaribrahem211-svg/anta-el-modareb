@@ -194,8 +194,9 @@ import { ensureLegendsInMarket } from '../data/legendsData';
 import { refreshFreeAgentPool } from '../utils/marketRefresh';
 import { MIGRATION_STORAGE_KEY, runOneTimeWorldMigration, inferClubCountry } from '../utils/worldMigration';
 import { validateWorldDatabase, sanitizeWorldPlayerOwnership } from '../utils/worldValidation';
-import { isRealClub, loadRealClubSquad } from '../data/realPlayersData';
-import { ensureClubSquadIntegrity, calibrateRealisticPlayerRating } from '../utils/playerGenerator';
+import { loadRealClubSquad } from '../data/realPlayersData';
+import { calibrateRealisticPlayerRating } from '../utils/playerGenerator';
+import { repairSavedClubSquad } from '../utils/savedSquadRepair';
 import { useAuth } from './AuthContext';
 import { getLocalTrainerProfile, saveLocalTrainerProfile, generateTrainerId } from '../services/trainerProfileService';
 import { crashStage } from '../services/crashReporting';
@@ -668,18 +669,15 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const country = t.country || countryName || 'مصر';
     const leagueId = t.leagueId || (resolvedCountryCode === 'EGY' ? 'egy_tier_4' : `${resolvedCountryCode.toLowerCase()}_tier_${t.division || 1}`);
 
-    // If club is a real club, check if squad is completely empty
+    // Saved squads are never reconstructed from first-season real-player templates.
     let players = (Array.isArray(t.players) ? t.players : []).filter(Boolean);
-    if (isRealClub(t.id) && players.length === 0) {
-      players = loadRealClubSquad(t.id).filter(Boolean);
-    }
 
     // Filter out players permanently deleted in admin editor
     players = players.filter(p => p && p.id && !isPlayerDeletedInOverrides(p.id));
 
     // Ensure every club has a complete, balanced squad of at least 20-22 players
-    if (t.id && players.length < 20) {
-      const integrityClub = ensureClubSquadIntegrity({
+    if (t.id) {
+      const integrityClub = repairSavedClubSquad({
         ...t,
         country,
         countryCode: resolvedCountryCode,

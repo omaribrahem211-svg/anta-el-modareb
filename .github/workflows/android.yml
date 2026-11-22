@@ -2,9 +2,6 @@ name: Build Android APK (Test)
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - main
 
 jobs:
   build:
@@ -26,7 +23,9 @@ jobs:
         run: npm install
 
       - name: Verify rewarded consent and lifecycle regressions
-        run: node scripts/verify-rewarded-flow-208.mjs
+        run: |
+          node scripts/verify-rewarded-flow-208.mjs
+          node scripts/verify-saved-squad-repair.mjs
 
       - name: Build Web Assets
         run: npm run build
