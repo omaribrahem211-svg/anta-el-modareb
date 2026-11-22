@@ -1,3 +1,5 @@
+import { isCrashlyticsBridgeFailure } from '../services/crashReporting';
+
 /**
  * Diagnostic In-App Logger for isolating crashes/white screen
  * Captures all [DIAG] logs with precise timestamps (HH:MM:SS.mmm)
@@ -121,6 +123,7 @@ console.error = function (...args: any[]) {
 if (typeof window !== 'undefined') {
   window.addEventListener('error', (event) => {
     try {
+      if (isCrashlyticsBridgeFailure(event.error || event.message)) return;
       const errorMsg = event.error?.message || event.message || 'Unknown window error';
       addDiagnosticLog(`[DIAG] CRITICAL_WINDOW_ERROR: ${errorMsg}`, true);
     } catch {
@@ -130,6 +133,7 @@ if (typeof window !== 'undefined') {
 
   window.addEventListener('unhandledrejection', (event) => {
     try {
+      if (isCrashlyticsBridgeFailure(event.reason)) return;
       const reason = event.reason?.message || String(event.reason) || 'Unknown promise rejection';
       addDiagnosticLog(`[DIAG] UNHANDLED_REJECTION: ${reason}`, true);
     } catch {
