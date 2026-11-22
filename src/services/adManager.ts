@@ -450,9 +450,17 @@ class AdManagerService {
   }
 
   /**
-   * Loads a Rewarded Video Ad with automatic fallback to test unit if production is unfilled.
+   * Loads a rewarded video ad after consent and SDK initialization, with a bounded load timeout.
    */
   public async loadRewarded(timeoutMs: number = 15000): Promise<boolean> {
+    if (this.isNative) {
+      const consent = await gatherConsent();
+      if (!consent.canRequestAds) {
+        crashStage('ad_stage', 'reward_consent_blocked');
+        this.isRewardedLoaded = false;
+        return false;
+      }
+    }
     if (this.isRewardedLoaded) return true;
     if (this.isRewardedLoading && this.rewardedLoadPromise) {
       return this.rewardedLoadPromise;
@@ -492,10 +500,15 @@ class AdManagerService {
 
       try {
         if (!this.isInitialized) {
-          await this.initialize();
+          const initialized = await this.initialize();
+          if (!initialized || settled) {
+            await finish(false);
+            return;
+          }
         }
 
         await this.cleanupRewardedListeners();
+        if (settled) return;
 
         const rewardedAdId = ADMOB_CONFIG.IS_TEST_MODE ? TEST_AD_IDS.REWARDED_ID : ADMOB_CONFIG.REWARDED_ID;
 
@@ -506,6 +519,7 @@ class AdManagerService {
           finish(true);
         });
         this.rewardedListenerHandles.push(loadedHandle);
+        if (settled) { await this.cleanupRewardedListeners(); return; }
 
         // 2. Listen for FailedToLoad event
         const failedHandle = await AdMob.addListener(RewardAdPluginEvents.FailedToLoad, async (err: any) => {
@@ -516,6 +530,7 @@ class AdManagerService {
           finish(false);
         });
         this.rewardedListenerHandles.push(failedHandle);
+        if (settled) { await this.cleanupRewardedListeners(); return; }
 
         const options: RewardAdOptions = {
           adId: rewardedAdId,
@@ -569,15 +584,6 @@ class AdManagerService {
       return true;
     }
 
-    // Auto-clear stale state if trapped for more than 12 seconds
-    if (this.isRewardedShowing && this.lastRewardedShowStart && (Date.now() - this.lastRewardedShowStart > 12000)) {
-      console.warn('[REWARDED] Stale rewarded show detected (>12s), force resetting show state');
-      this.isRewardedShowing = false;
-      this.isRewardedLoading = false;
-      this.lastRewardedShowStart = 0;
-      this.cleanupRewardedListeners().catch(() => {});
-    }
-
     if (this.isRewardedShowing) {
       console.warn('[REWARDED] Busy: Rewarded Ad is already showing');
       if (params.onFailure) {
@@ -596,6 +602,15 @@ class AdManagerService {
       this.log(`Starting Rewarded Ad for: ${params.rewardTypeLabel}`);
 
       if (this.isNative) {
+        const consent = await gatherConsent();
+        if (!consent.canRequestAds) {
+          crashStage('ad_stage', 'reward_consent_blocked');
+          this.isRewardedShowing = false;
+          this.isRewardedLoaded = false;
+          this.lastRewardedShowStart = 0;
+          try { params.onFailure?.(new Error('الإعلانات غير متاحة قبل اكتمال إعداد الخصوصية')); } catch (_) {}
+          return false;
+        }
         // 1. Ensure ad is loaded on demand with safe timeout (6 seconds)
         if (!this.isRewardedLoaded) {
           const loaded = await this.loadRewarded(6000);
@@ -617,6 +632,7 @@ class AdManagerService {
         let safetyTimer: NodeJS.Timeout | null = null;
         let adHasShown = false;
         let isCleanedUp = false;
+        let dismissalPending = false;
 
         const cleanup = async () => {
           if (isCleanedUp) return;
@@ -662,39 +678,12 @@ class AdManagerService {
           }
         }, 4000);
 
-        // =========================================================================
-        // Safeguard 2: 35-Second Master Safety Timer (صمام أمان ضد تجمد العداد)
-        // If the ad freezes, the timer stalls, or the close (X) button fails to appear,
-        // this timer immediately forces reward granting, tears down listeners, and
-        // resumes the game and its audio smoothly without requiring app restart.
-        // =========================================================================
-        safetyTimer = setTimeout(async () => {
-          if (this.isRewardedShowing) {
-            console.warn('[ADMOB_REWARDED_SAFETY_TIMER] 35s safety timer triggered! Ad timer frozen or close button not rendered. Force-granting reward and resuming game.');
-
-            // 1. Force grant the reward if not already earned
-            if (!rewardEarned) {
-              rewardEarned = true;
-              this.recordRewardedAdSuccess();
-              try {
-                params.onRewardEarned();
-              } catch (cbErr) {
-                console.error('Error in safety timer onRewardEarned callback:', cbErr);
-              }
-            }
-
-            // 2. Perform complete cleanup
-            await cleanup();
-
-            // 3. Force audio & game resumption
-            this.resumeGameAudioAndState();
-
-            // 4. Trigger dismiss callback with rewardEarned = true
-            if (params.onDismiss) {
-              try {
-                params.onDismiss(true);
-              } catch (_) {}
-            }
+        // Diagnostic only: long ads and slow mediation callbacks are valid. A clock never earns a reward,
+        // closes a native ad, removes its listeners, or unlocks a second show over it.
+        safetyTimer = setTimeout(() => {
+          if (!isCleanedUp && this.isRewardedShowing) {
+            crashStage('ad_stage', 'reward_long_wait');
+            console.warn('[ADMOB_REWARDED_WAIT] Still waiting for native reward/dismissal; no automatic reward');
           }
         }, 35000);
 
@@ -710,27 +699,32 @@ class AdManagerService {
         });
         this.rewardedListenerHandles.push(showedHandle);
 
-        // B. Event 1: onUserEarnedReward (Strict separation - ONLY sets reward and fires callback, does NOT close UI)
-        const rewardHandle = await AdMob.addListener(RewardAdPluginEvents.Rewarded, (reward: AdMobRewardItem) => {
-          console.log('[ADMOB_REWARDED] onUserEarnedReward event received:', reward);
+        // Both native delivery paths originate in onUserEarnedReward. Apply once, even if the bridge
+        // delivers both the event and show-promise result, or repeats an event.
+        const confirmReward = (reward: AdMobRewardItem) => {
+          if (isCleanedUp || rewardEarned || !reward || typeof reward.type !== 'string' ||
+              !Number.isFinite(reward.amount) || reward.amount < 0) return;
+          adHasShown = true;
+          if (presentationTimer) { clearTimeout(presentationTimer); presentationTimer = null; }
           rewardEarned = true;
+          crashStage('ad_stage', 'reward_confirmed');
           this.recordRewardedAdSuccess();
-          try {
-            params.onRewardEarned();
-          } catch (err) {
-            console.error('Error in onRewardEarned callback:', err);
-          }
-        });
+          try { params.onRewardEarned(); } catch (err) { console.error('Error in onRewardEarned callback:', err); }
+        };
+        const rewardHandle = await AdMob.addListener(RewardAdPluginEvents.Rewarded, confirmReward);
         this.rewardedListenerHandles.push(rewardHandle);
 
         // C. Event 2: onAdDismissedFullScreenContent (Strict separation - handles teardown and audio/game resumption)
         const dismissHandle = await AdMob.addListener(RewardAdPluginEvents.Dismissed, async () => {
+          if (isCleanedUp || dismissalPending) return;
+          dismissalPending = true;
           crashStage('ad_stage', 'reward_dismissed');
           console.log(`[ADMOB_REWARDED] Dismissed event received (pre-reward: ${rewardEarned})`);
           if (!rewardEarned) {
-            // Allow 350ms grace period for Android native bridge to deliver Rewarded event before teardown
-            await new Promise(res => setTimeout(res, 350));
+            // Keep the original session locked for delayed bridge callbacks. No timer grants a reward.
+            await new Promise(res => setTimeout(res, 5000));
           }
+          if (isCleanedUp) return;
           console.log(`[ADMOB_REWARDED] Dismissed finalized (final rewardEarned: ${rewardEarned})`);
           await cleanup();
 
@@ -749,6 +743,7 @@ class AdManagerService {
 
         // D. Listen for FailedToShow
         const failHandle = await AdMob.addListener(RewardAdPluginEvents.FailedToShow, async (err: any) => {
+          if (isCleanedUp || dismissalPending) return;
           crashStage('ad_stage', 'reward_show_failed');
           const errCode = (err && (err.code ?? err.errorCode)) ?? 'UNKNOWN';
           const errMsg = (err && (err.message ?? err.errorMessage)) ?? (typeof err === 'object' ? JSON.stringify(err) : String(err));
@@ -767,7 +762,8 @@ class AdManagerService {
 
         // Trigger show in native SDK
         crashStage('ad_stage', 'reward_show');
-        AdMob.showRewardVideoAd().catch(async (showError: any) => {
+        AdMob.showRewardVideoAd().then(confirmReward).catch(async (showError: any) => {
+          if (isCleanedUp || dismissalPending) return;
           crashStage('ad_stage', 'reward_show_failed');
           const errCode = (showError && (showError.code ?? showError.errorCode)) ?? 'UNKNOWN';
           const errMsg = (showError && (showError.message ?? showError.errorMessage)) ?? (typeof showError === 'object' ? JSON.stringify(showError) : String(showError));
@@ -933,7 +929,7 @@ class AdManagerService {
   }
 
   /**
-   * Resumes game animations, sounds, and active timers cleanly upon ad dismissal or safety timeout
+   * Resumes game animations, sounds, and active timers after ad dismissal.
    */
   public resumeGameAudioAndState(): void {
     try {

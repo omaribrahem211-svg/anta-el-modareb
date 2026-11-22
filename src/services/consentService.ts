@@ -48,5 +48,8 @@ export async function showPrivacyOptions(): Promise<void> {
     await (AdMob as any).showPrivacyOptionsForm();
   } catch (e) {
     console.warn('[UMP] privacy options unavailable', e);
+  } finally {
+    // Re-read consent on the next ad request instead of reusing pre-change permission.
+    consentPromise = null;
   }
 }
