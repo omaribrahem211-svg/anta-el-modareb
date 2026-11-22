@@ -71,7 +71,7 @@ jobs:
           for attempt in 1 2 3; do
             echo "Gradle build attempt $attempt"
             if ./gradlew bundleRelease \
-              -PautoVersionCode=201 \
+              -PautoVersionCode=${{ github.run_number }} \
               -Pandroid.injected.signing.store.file="${{ github.workspace }}/release.p12" \
               -Pandroid.injected.signing.store.password="$KS_PASS" \
               -Pandroid.injected.signing.key.alias="$ALIAS" \
