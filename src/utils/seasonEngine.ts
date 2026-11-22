@@ -2183,6 +2183,9 @@ export async function processNewSeasonAdvancement(
     // 2c. Every league must have an even club count (no bye rounds for the user).
     try {
       evenUpWorldLeagues();
+      // Final size lock: promoted count must equal relegated count, so league sizes never grow after the season roll.
+      const lockedLeagues = normalizeLeagueSizes(userClub?.id);
+      if (lockedLeagues.length) console.warn('[Pyramid] size lock re-balanced', lockedLeagues);
       nextActiveLeague = getLeagueById(nextActiveLeague.id);
     } catch (e) {
       console.warn('[Season] could not even-up leagues', e);

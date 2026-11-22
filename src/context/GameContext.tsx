@@ -1876,6 +1876,38 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     return fixtures.filter(f => f && normalizeCompetitionType(f.competitionType || f.tournamentId) === 'LEAGUE');
   }, [fixtures]);
 
+  // Self-heal for the "empty schedule / 0 matches / timeline 0/0" bug: if the user's club has NO league fixture at all
+  // (fixtures dropped or generated without the club) rebuild the league calendar once per season. Only runs when no
+  // league match was played yet, so no result is ever overwritten.
+  const emptyScheduleHealRef = useRef<string>('');
+  useEffect(() => {
+    try {
+      const uid = userClub?.id;
+      if (!uid || !activeLeague || !season || season.status === 'completed') return;
+      const hasUserLeagueFixture = leagueFixtures.some(f => f && (f.homeTeamId === uid || f.awayTeamId === uid));
+      if (hasUserLeagueFixture) return;
+      if (leagueFixtures.some(f => f && (f.isPlayed || (f as any).played))) return;
+      const key = `${season.seasonNumber}:${uid}:${activeLeague.id}`;
+      if (emptyScheduleHealRef.current === key) return;
+      let leagueTeams = (teams || []).filter(t => t && (t.leagueId === activeLeague.id));
+      if (!leagueTeams.some(t => t.id === uid)) {
+        const mine = (teams || []).find(t => t && t.id === uid) || userClub;
+        leagueTeams = [...leagueTeams.slice(0, Math.max(0, (leagueTeams.length || 1) - 1)), mine as any];
+      }
+      if (leagueTeams.length < 4) return;
+      emptyScheduleHealRef.current = key;
+      const rebuilt = generateMasterSeasonAgenda(season.seasonNumber, activeLeague, leagueTeams, null, null, userClub);
+      if (rebuilt.length === 0) return;
+      console.warn('[ScheduleHeal] rebuilt an empty league schedule', rebuilt.length);
+      const others = fixtures.filter(f => f && normalizeCompetitionType(f.competitionType || f.tournamentId) !== 'LEAGUE');
+      setFixtures([...others, ...rebuilt]);
+      setCurrentRound(1);
+      setSeason(prev => ({ ...prev, currentRound: 1, totalRounds: Math.max(...rebuilt.map(f => f.round || 0)) }));
+    } catch (e) {
+      console.warn('[ScheduleHeal] failed', e);
+    }
+  }, [leagueFixtures, userClub?.id, activeLeague?.id, season?.seasonNumber, season?.status]);
+
   const allLeagueFixturesPlayed = useMemo(() => {
     return leagueFixtures.length > 0 && leagueFixtures.every(f => f && (f.isPlayed || (f as any).played));
   }, [leagueFixtures]);
