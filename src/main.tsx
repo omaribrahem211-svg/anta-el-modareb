@@ -6,7 +6,7 @@ import { ErrorBoundary } from './components/ErrorBoundary';
 import './index.css';
 import { installGlobalErrorLogging } from './utils/errorLog';
 import { installPerfMode } from './utils/perfMode';
-import { initCrashReporting } from './services/crashReporting';
+import { initCrashReporting, isCrashlyticsBridgeFailure } from './services/crashReporting';
 
 installGlobalErrorLogging();
 installPerfMode();
@@ -14,7 +14,9 @@ initCrashReporting();
 
 // Prevent uncaught async promise rejections or bridge errors from crashing the WebView thread
 window.addEventListener('unhandledrejection', (event) => {
-  console.warn('[SystemGuard] Handled uncaught promise rejection:', event.reason);
+  if (!isCrashlyticsBridgeFailure(event.reason)) {
+    console.warn('[SystemGuard] Handled uncaught promise rejection:', event.reason);
+  }
   event.preventDefault();
 });
 

@@ -1,4 +1,4 @@
-import { recordJsException, crashLog } from '../services/crashReporting';
+import { recordJsException, crashLog, isCrashlyticsBridgeFailure } from '../services/crashReporting';
 /**
  * Tiny persistent debug log (last 30 entries) so testers can copy what went wrong
  * after a white screen / freeze. Stored as a small JSON string only.
@@ -40,15 +40,32 @@ export function clearDebugLog(): void {
 }
 
 let installed = false;
+let crashlyticsBridgeWarningLogged = false;
+
+function shouldIgnoreCrashlyticsBridgeFailure(error: unknown): boolean {
+  if (!isCrashlyticsBridgeFailure(error)) return false;
+  if (!crashlyticsBridgeWarningLogged) {
+    crashlyticsBridgeWarningLogged = true;
+    try {
+      console.warn('[Crashlytics] Ignoring its own unimplemented bridge error in the global error logger.');
+    } catch {
+      // Ignore console failures.
+    }
+  }
+  return true;
+}
+
 export function installGlobalErrorLogging(): void {
   if (installed || typeof window === 'undefined') return;
   installed = true;
   window.addEventListener('error', (ev: ErrorEvent) => {
+    if (shouldIgnoreCrashlyticsBridgeFailure(ev.error || ev.message)) return;
     pushDebugLog('error', `${ev.message || 'error'} @ ${ev.filename || ''}:${ev.lineno || 0}`);
     reportAppError('error', ev.message || 'error', (ev.error && ev.error.stack) || `${ev.filename || ''}:${ev.lineno || 0}:${ev.colno || 0}`);
   });
   window.addEventListener('unhandledrejection', (ev: PromiseRejectionEvent) => {
     const reason: any = ev.reason;
+    if (shouldIgnoreCrashlyticsBridgeFailure(reason)) return;
     pushDebugLog('rejection', reason?.message || String(reason));
     reportAppError('rejection', reason?.message || String(reason), reason?.stack || '');
   });
