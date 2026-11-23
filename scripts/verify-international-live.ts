@@ -22,11 +22,18 @@ const liveFixture=(stage:InternationalMatch['stage']='group')=>{
  return live;
 };
 {
- const state=managedState(2),before=JSON.stringify(state);const nt=state.teams.find(t=>t.id===state.userNationalTeamId)!;
+ const state=managedState(2),before=JSON.stringify(state);const nt={...state.teams.find(t=>t.id===state.userNationalTeamId)!,isStatistical:true,players:[]};
  const a=nationalTeamForLivePlay(nt),b=nationalTeamForLivePlay(nt);
  assert.ok(a.players.length>=18);assert.deepEqual(a.players.map(p=>p.id),b.players.map(p=>p.id));assert.ok(a.players.every(p=>(p as any).isNationalMatchPlaceholder));
  assert.equal(JSON.stringify(state),before);assert.ok(a.players.every(p=>!p.currentClubId));
  console.log('PASS statistical NT: deterministic labelled match slots; original NT/club data untouched');
+}
+{
+ // World-pool call-ups: countries built from the world database get real players, never generic "لاعب <country> N" names.
+ const state=managedState(2);const nt=state.teams.find(t=>t.id===state.userNationalTeamId)!;
+ const a=nationalTeamForLivePlay(nt);
+ assert.ok(a.players.length>=18);assert.ok(a.players.every(p=>!/^(لاعب|حارس) /.test(p.name)),'no generic placeholder names');
+ console.log('PASS world-pool NT: live squad keeps real call-up names');
 }
 {
  const state=managedState(2),before=JSON.stringify(state);const advanced=advanceNationalTeamsToRound(state,30,38,2,[],undefined,true).state;
