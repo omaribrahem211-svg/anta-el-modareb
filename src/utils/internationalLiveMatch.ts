@@ -25,8 +25,7 @@ export function nationalTeamForLivePlay(nt: NationalTeam): NationalTeam {
       const adjust = (value: number) => Math.max(1, Math.min(99, value + delta));
       return ({
       ...p, id: `${nt.id}_match_slot_${index + 1}`,
-      name: `${p.position === 'GK' ? 'حارس' : 'لاعب'} ${nt.name} ${index + 1}`,
-      firstName: p.position === 'GK' ? 'حارس' : 'لاعب', lastName: `${nt.name} ${index + 1}`,
+      // Keep the generated regional name (not a real player); only the id marks it as a match-only slot.
       nationality: nt.name, nationalityCode: nt.countryCode,
       currentClubId: undefined, currentLeagueId: undefined,
       isNationalMatchPlaceholder: true,

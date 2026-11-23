@@ -8,6 +8,7 @@
 // =========================================================================
 
 import { Club, InboxMessage } from '../types/game';
+import { GLOBAL_LEAGUES } from '../data/leaguesData';
 import {
   FRIENDLY_COMPETITION_ID,
   InternationalMatch,
@@ -100,6 +101,26 @@ function msg(id: string, title: string, content: string, date: string): InboxMes
   } as InboxMessage;
 }
 
+/**
+ * National squads are called up from ALL clubs in the game world, not only the user's league: the live league
+ * (current rosters) plus every other league of the world database. Without this, a country whose players play abroad
+ * from the user's point of view (e.g. Egypt in a Saudi career) looked "player-less" and got generic placeholder names.
+ */
+export function worldClubsForNationalPool(liveTeams: Club[]): Club[] {
+  const live = Array.isArray(liveTeams) ? liveTeams : [];
+  const seen = new Set<string>();
+  const out: Club[] = [];
+  for (const c of live) { if (c && c.id) { seen.add(c.id); out.push(c); } }
+  try {
+    for (const league of Object.values(GLOBAL_LEAGUES || {})) {
+      for (const c of (league?.teams || [])) {
+        if (c && c.id && !seen.has(c.id)) { seen.add(c.id); out.push(c); }
+      }
+    }
+  } catch { /* world data unavailable: fall back to the live league only */ }
+  return out;
+}
+
 export function createEmptyNationalTeamsState(): NationalTeamsState {
   return {
     teams: [],
@@ -136,7 +157,7 @@ export function initNationalTeamsForSeason(
   const messages: InboxMessage[] = [];
   let teams: NationalTeam[];
   if (state.teams.length === 0) {
-    teams = buildNationalTeams(clubTeams);
+    teams = buildNationalTeams(worldClubsForNationalPool(clubTeams));
     messages.push(msg(
       `nt_init_${seasonNumber}`,
       '🌍 نظام المنتخبات الوطنية متاح الآن!',
@@ -151,9 +172,10 @@ export function initNationalTeamsForSeason(
     ));
   } else {
     // Refresh call-up squads from CURRENT club rosters (call-ups only).
-    teams = state.teams.map(nt => refreshCallUpSquad(nt, clubTeams));
+    const worldClubs = worldClubsForNationalPool(clubTeams);
+    teams = state.teams.map(nt => refreshCallUpSquad(nt, worldClubs));
     const existingCountries = new Set(teams.map(nt => nt.countryCode));
-    teams.push(...buildNationalTeams(clubTeams).filter(nt => !existingCountries.has(nt.countryCode)));
+    teams.push(...buildNationalTeams(worldClubs).filter(nt => !existingCountries.has(nt.countryCode)));
   }
   recomputeNationalTeamWorldRanks(teams);
 
@@ -479,7 +501,7 @@ export function rehydrateNationalTeams(state: NationalTeamsState | null | undefi
   if (!state || !Array.isArray(state.teams) || state.teams.length === 0) return null;
   return {
     ...state,
-    teams: state.teams.map(nt => refreshCallUpSquad(nt, clubTeams)),
+    teams: (() => { const worldClubs = worldClubsForNationalPool(clubTeams); return state.teams.map(nt => refreshCallUpSquad(nt, worldClubs)); })(),
   };
 }
 
@@ -634,7 +656,7 @@ export function refreshUserCallUp(state: NationalTeamsState, clubTeams: Club[]):
   if (!state.userNationalTeamId) return state;
   return {
     ...state,
-    teams: state.teams.map(t => (t.id === state.userNationalTeamId ? refreshCallUpSquad(t, clubTeams) : t)),
+    teams: (() => { const worldClubs = worldClubsForNationalPool(clubTeams); return state.teams.map(t => (t.id === state.userNationalTeamId ? refreshCallUpSquad(t, worldClubs) : t)); })(),
   };
 }
 
